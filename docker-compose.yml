@@ -213,8 +213,8 @@ services:
         state.backend: rocksdb
         state.backend.incremental: true
     volumes:
-      - ./data/flink/checkpoints:/tmp/flink-checkpoints
-      - ./data/flink/savepoints:/tmp/flink-savepoints
+      - ./data/flink/tmp/checkpoints:/tmp/flink-checkpoints
+      - ./data/flink/tmp/savepoints:/tmp/flink-savepoints
       - ./data/flink/jars:/opt/flink/usrlib
     scale: 1
 

@@ -36,7 +36,6 @@ This project provides a real-time data pipeline for monitoring and analyzing **L
 
 Ensure you have **Docker** and **Docker Compose** installed.
 
-
 ### 2. Create Required Directory Structure
 
 Ensure the following directories exist in your project root:
@@ -54,6 +53,7 @@ mkdir -p data/gateway
 mkdir -p data/clickhouse
 mkdir -p data/grafana
 
+chmod -Rf 777 data/flink/tmp/
 ```
 
 ### 3. Environment Setup
