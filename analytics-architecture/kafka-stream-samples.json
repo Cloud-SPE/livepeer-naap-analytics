@@ -1,0 +1,184 @@
+[
+  {
+    "id": "f6e8cf18-d450-47a1-8545-e58e62478950",
+    "type": "discovery_results",
+    "timestamp": "1768483782392",
+    "gateway": "",
+    "data": [
+      {
+        "address": "0x52cf2968b3dc6016778742d3539449a6597d5954",
+        "latency_ms": "79",
+        "url": "https://rtav-orch2.xodeapp.xyz:28935"
+      }
+    ]
+  },
+  {
+    "id": "63ff1bc9-acca-4808-97d3-066f8d210cbd",
+    "type": "ai_stream_events",
+    "timestamp": "1768483619196",
+    "gateway": "",
+    "data": {
+      "capability": "",
+      "message": "whip disconnected",
+      "pipeline": "streamdiffusion-sdxl-faceid",
+      "pipeline_id": "",
+      "request_id": "5291f1cf",
+      "stream_id": "stream-3hc4ok-mkfh9jxs",
+      "type": "error"
+    }
+  },
+  {
+    "id": "29c7f69a-d8d5-4ba4-9bbe-e52d4b53ccea",
+    "type": "stream_ingest_metrics",
+    "timestamp": "1768483618943",
+    "gateway": "",
+    "data": {
+      "pipeline_id": "",
+      "request_id": "5291f1cf",
+      "stats": {
+        "peer_conn_stats": {
+          "ID": "iceTransport",
+          "BytesReceived": 66040673,
+          "BytesSent": 272347
+        },
+        "track_stats": [
+          {
+            "type": "video",
+            "jitter": 8.667245625521273,
+            "packets_lost": 0,
+            "packets_received": 56264,
+            "packet_loss_pct": 0,
+            "rtt": 0,
+            "last_input_ts": 369.708,
+            "last_output_ts": 0,
+            "latency": 0
+          },
+          {
+            "type": "audio",
+            "jitter": 20.265048454883754,
+            "packets_lost": 0,
+            "packets_received": 18496,
+            "packet_loss_pct": 0,
+            "rtt": 0,
+            "last_input_ts": 369.7200555555556,
+            "last_output_ts": 0,
+            "latency": 0
+          }
+        ],
+        "conn_quality": "good"
+      },
+      "stream_id": "stream-3hc4ok-mkfh9jxs",
+      "timestamp": 1768483618943
+    }
+  },
+  {
+    "id": "f5e2cd7a-bca1-4745-b6a6-3d7f17037916",
+    "type": "ai_stream_status",
+    "timestamp": "1768483618951",
+    "gateway": "",
+    "data": {
+      "inference_status": {
+        "fps": 15.089916320451984,
+        "last_error": null,
+        "last_error_time": null,
+        "last_output_time": 1768483618914,
+        "last_params": {
+          "height": 512,
+          "width": 512
+        },
+        "last_params_hash": "f2f41bce75e30de92f8c308a6722859b",
+        "last_params_update_time": 1768483248931,
+        "last_restart_logs": null,
+        "last_restart_time": null,
+        "restart_count": 0
+      },
+      "input_status": {
+        "fps": 14.98998309978674,
+        "last_input_time": 1768483618896
+      },
+      "last_state_update_time": 1768483602872,
+      "last_status_timestamp": 1768483608933,
+      "orchestrator_info": {
+        "address": "0x52cf2968b3dc6016778742d3539449a6597d5954",
+        "url": "https://rtav-orch2.xodeapp.xyz:28935"
+      },
+      "pipeline": "streamdiffusion-sdxl-faceid",
+      "pipeline_id": "",
+      "request_id": "5291f1cf",
+      "start_time": 1768483248931,
+      "state": "DEGRADED_INPUT",
+      "stream_id": "stream-3hc4ok-mkfh9jxs",
+      "timestamp": 1768483618933,
+      "type": "status"
+    }
+  },
+  {
+    "id": "9198f8ef-8800-49b5-b432-8faa7ff2e948",
+    "type": "stream_trace",
+    "timestamp": "1768483619196",
+    "gateway": "",
+    "data": {
+      "orchestrator_info": {
+        "address": "",
+        "url": ""
+      },
+      "pipeline_id": "",
+      "request_id": "5291f1cf",
+      "stream_id": "stream-3hc4ok-mkfh9jxs",
+      "timestamp": 1768483619196,
+      "type": "gateway_ingest_stream_closed"
+    }
+  },
+  {
+    "id": "a3361e98-29b7-4f0e-8caa-34bd0c23c386",
+    "type": "create_new_payment",
+    "timestamp": "1768483061892",
+    "gateway": "",
+    "data": {
+      "capability": "",
+      "clientIP": "",
+      "faceValue": "2416800000000000 WEI",
+      "manifestID": "35_streamdiffusion-sdxl-faceid",
+      "numTickets": "2",
+      "orchestrator": "https://rtav-orch2.xodeapp.xyz:28935",
+      "price": "1505.712 wei/pixel",
+      "recipient": "0xd00354656922168815Fcd1e51CBddB9e359e3C7F",
+      "requestID": "499ae98f",
+      "sender": "0x5aE4E42dB3671370a0c25AfF451E7482aAEc3D0B",
+      "sessionID": "223403ff",
+      "winProb": "0.0009930487"
+    }
+  },
+  {
+    "id": "eb636139-31b6-4caa-bd8e-42a402772a09",
+    "type": "stream_trace",
+    "timestamp": "1768483063894",
+    "gateway": "",
+    "data": {
+      "orchestrator_info": {
+        "address": "",
+        "url": ""
+      },
+      "pipeline_id": "",
+      "request_id": "499ae98f",
+      "stream_id": "stream-z24wz2-mkfh5j30",
+      "timestamp": 1768483063894,
+      "type": "gateway_ingest_stream_closed"
+    }
+  },
+  {
+    "id": "e96b2a9c-f405-465c-918e-6b8b193d0dc9",
+    "type": "ai_stream_events",
+    "timestamp": "1768483063894",
+    "gateway": "",
+    "data": {
+      "capability": "",
+      "message": "whip disconnected",
+      "pipeline": "streamdiffusion-sdxl-faceid",
+      "pipeline_id": "",
+      "request_id": "499ae98f",
+      "stream_id": "stream-z24wz2-mkfh5j30",
+      "type": "error"
+    }
+  }
+]

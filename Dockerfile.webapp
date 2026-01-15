@@ -1,0 +1,29 @@
+# --- Stage 1: Build the JS App ---
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Copy package files and install dependencies
+COPY webapp/package*.json ./
+RUN npm install
+
+# Copy source code and build
+COPY ./webapp/ .
+RUN npm run build
+
+# --- Stage 2: Final Production Image ---
+FROM caddy:2-alpine
+
+# Set working directory for Caddy
+WORKDIR /srv
+
+# Copy the Caddyfile configuration
+COPY webserver/Caddyfile /etc/caddy/Caddyfile
+
+# Copy the static build files from the builder stage
+COPY --from=builder /app/dist /var/www/html/app
+
+# Expose HTTP and HTTPS ports
+EXPOSE 80 443
+
+# Caddy starts automatically in the official image
