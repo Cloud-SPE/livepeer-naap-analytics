@@ -136,8 +136,8 @@ services:
       - -c
       - |
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic streaming-events --partitions 3 --replication-factor 1
-#        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic streaming-events-cleansed --partitions 3 --replication-factor 1
-#        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic calculated-metrics --partitions 3 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic streaming-events-dlq --partitions 1 --replication-factor 1
+
     depends_on:
       kafka:
         condition: service_healthy
@@ -165,12 +165,20 @@ services:
     init: true
 
   flink-jobmanager:
-    image: flink:1.18-java11
+    image: flink:2.1.1-scala_2.12-java21
     container_name: livepeer-analytics-flink-jobmanager
     ports:
       - "8081:8081"  # Flink Web UI
     command: jobmanager
+#    command: >
+#      /bin/bash -c "
+#      mkdir -p /opt/flink/plugins/flink-s3-fs-hadoop &&
+#      cp /opt/flink/opt/flink-s3-fs-hadoop-*.jar /opt/flink/plugins/flink-s3-fs-hadoop/ &&
+#      chmod 777  /opt/flink/plugins/flink-s3-fs-hadoop/* &&
+#      /docker-entrypoint.sh jobmanager
+#      "
     environment:
+      - ENABLE_BUILT_IN_PLUGINS=flink-s3-fs-hadoop-2.1.1.jar
       - |
         FLINK_PROPERTIES=
         jobmanager.rpc.address: flink-jobmanager
@@ -182,9 +190,14 @@ services:
         execution.checkpointing.interval: 60000
         execution.checkpointing.min-pause: 30000
         execution.checkpointing.timeout: 600000
+        s3.endpoint: http://minio:9000
+        s3.path.style.access: true
+        s3.access-key: minioadmin
+        s3.secret-key: minioadmin
+
     volumes:
       - ./data/flink/tmp:/flink-tmp
-      - ./data/flink/jars:/opt/flink/usrlib  # Shared volume with builder
+      - ./data/flink/jars:/opt/flink/usrlib
     depends_on:
       flink-builder:
         condition: service_completed_successfully
@@ -199,12 +212,20 @@ services:
       retries: 5
 
   flink-taskmanager:
-    image: flink:1.18-java11
+    image: flink:2.1.1-scala_2.12-java21
     container_name: livepeer-analytics-flink-taskmanager
     depends_on:
       - flink-jobmanager
     command: taskmanager
+#    command: >
+#      /bin/bash -c "
+#      mkdir -p /opt/flink/plugins/flink-s3-fs-hadoop &&
+#      cp /opt/flink/opt/flink-s3-fs-hadoop-*.jar /opt/flink/plugins/flink-s3-fs-hadoop/ &&
+#      chmod 777  /opt/flink/plugins/flink-s3-fs-hadoop/* &&
+#      /docker-entrypoint.sh taskmanager
+#      "
     environment:
+      - ENABLE_BUILT_IN_PLUGINS=flink-s3-fs-hadoop-2.1.1.jar
       - |
         FLINK_PROPERTIES=
         jobmanager.rpc.address: flink-jobmanager
@@ -212,6 +233,10 @@ services:
         parallelism.default: 2
         state.backend: rocksdb
         state.backend.incremental: true
+        s3.endpoint: http://minio:9000
+        s3.path.style.access: true
+        s3.access-key: minioadmin
+        s3.secret-key: minioadmin
     volumes:
       - ./data/flink/tmp/checkpoints:/tmp/flink-checkpoints
       - ./data/flink/tmp/savepoints:/tmp/flink-savepoints
@@ -219,7 +244,7 @@ services:
     scale: 1
 
   flink-job-submitter:
-    image: flink:1.18-java11
+    image: flink:2.1.1-scala_2.12-java21
     container_name: livepeer-analytics-flink-job-submitter
     depends_on:
       flink-jobmanager:

@@ -45,8 +45,7 @@ Ensure the following directories exist in your project root:
 mkdir -p data/kafka
 
 # Create Flink checkpoint and savepoint directories
-mkdir -p data/flink/tmp/checkpoints
-mkdir -p data/flink/tmp/savepoints
+mkdir -p data/flink/tmp/
 
 # Ensure other data directories exist
 mkdir -p data/gateway
