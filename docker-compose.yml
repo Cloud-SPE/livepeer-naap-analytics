@@ -147,7 +147,7 @@ services:
   ### STREAM PROCESSING ###
   # Build the Flink job JAR
   flink-builder:
-    image: maven:3.9-eclipse-temurin-21
+    image: maven:3.9-eclipse-temurin-11
     container_name: livepeer-analytics-flink-builder
     working_dir: /build
     volumes:
@@ -165,13 +165,13 @@ services:
     init: true
 
   flink-jobmanager:
-    image: flink:2.1.1-scala_2.12-java21
+    image: flink:1.20.3-java11
     container_name: livepeer-analytics-flink-jobmanager
     ports:
       - "8081:8081"
     command: jobmanager
     environment:
-      - ENABLE_BUILT_IN_PLUGINS=flink-s3-fs-hadoop-2.1.1.jar
+#      - ENABLE_BUILT_IN_PLUGINS=flink-s3-fs-hadoop-1.20.3.jar
       - |
         FLINK_PROPERTIES=
         jobmanager.rpc.address: flink-jobmanager
@@ -204,13 +204,13 @@ services:
       retries: 5
 
   flink-taskmanager:
-    image: flink:2.1.1-scala_2.12-java21
+    image: flink:1.20.3-java11
     container_name: livepeer-analytics-flink-taskmanager
     depends_on:
       - flink-jobmanager
     command: taskmanager
     environment:
-      - ENABLE_BUILT_IN_PLUGINS=flink-s3-fs-hadoop-2.1.1.jar
+#      - ENABLE_BUILT_IN_PLUGINS=flink-s3-fs-hadoop-1.20.3.jar
       - |
         FLINK_PROPERTIES=
         jobmanager.rpc.address: flink-jobmanager
@@ -229,7 +229,7 @@ services:
     scale: 1
 
   flink-job-submitter:
-    image: flink:2.1.1-scala_2.12-java21
+    image: flink:1.20.3-java11
     container_name: livepeer-analytics-flink-job-submitter
     depends_on:
       flink-jobmanager:
@@ -254,6 +254,7 @@ services:
         echo 'Job submission complete.';
       "
     init: true
+
   ### ANALYTICS STORAGE ###
   clickhouse:
     image: clickhouse/clickhouse-server:24.11

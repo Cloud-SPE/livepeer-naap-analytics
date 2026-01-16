@@ -13,10 +13,10 @@
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <flink.version>2.0.0</flink.version>
-        <kafka.connector.version>4.0.1-2.0</kafka.connector.version>
+        <flink.version>1.20.3</flink.version>
+        <kafka.connector.version>3.3.0-1.20</kafka.connector.version>
         <clickhouse.jdbc.version>0.7.1</clickhouse.jdbc.version>
-        <jackson.version>2.18.2</jackson.version>
+        <jackson.version>2.17.2</jackson.version>
         <java.version>11</java.version>
         <maven.compiler.source>${java.version}</maven.compiler.source>
         <maven.compiler.target>${java.version}</maven.compiler.target>
@@ -37,11 +37,17 @@
             <version>${flink.version}</version>
             <scope>provided</scope>
         </dependency>
+
         <dependency>
             <groupId>org.apache.flink</groupId>
             <artifactId>flink-connector-base</artifactId>
             <version>${flink.version}</version>
             <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-connector-files</artifactId>
+            <version>${flink.version}</version>
         </dependency>
         <!-- Flink Kafka Connector (compile scope - must be packaged) -->
         <dependency>
@@ -53,17 +59,50 @@
         <!-- Flink JDBC Connector -->
         <dependency>
             <groupId>org.apache.flink</groupId>
-            <artifactId>flink-connector-jdbc-core</artifactId>
-            <version>4.0.0-2.0</version>
+            <artifactId>flink-connector-jdbc</artifactId>
+            <version>3.2.0-1.19</version>
         </dependency>
 
+        <!-- Flink S3 FileSystem (Hadoop)
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-s3-fs-hadoop</artifactId>
+            <version>${flink.version}</version>
+        </dependency>
+-->
+        <!-- Flink Parquet Support -->
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-parquet</artifactId>
+            <version>${flink.version}</version>
+        </dependency>
 
+        <!-- Apache Avro -->
+        <dependency>
+            <groupId>org.apache.avro</groupId>
+            <artifactId>avro</artifactId>
+            <version>1.11.3</version>
+        </dependency>
+
+        <!-- Hadoop AWS
+        <dependency>
+            <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-aws</artifactId>
+            <version>3.3.6</version>
+        </dependency>
+-->
+        <!-- AWS SDK for S3
+        <dependency>
+            <groupId>com.amazonaws</groupId>
+            <artifactId>aws-java-sdk-s3</artifactId>
+            <version>1.12.565</version>
+        </dependency>
+-->
         <!-- ClickHouse JDBC Driver (compile scope) -->
         <dependency>
             <groupId>com.clickhouse</groupId>
             <artifactId>clickhouse-jdbc</artifactId>
             <version>${clickhouse.jdbc.version}</version>
-            <classifier>all</classifier>
         </dependency>
 
         <!-- Jackson for JSON processing -->
@@ -79,18 +118,24 @@
             <version>${jackson.version}</version>
         </dependency>
 
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-annotations</artifactId>
+            <version>${jackson.version}</version>
+        </dependency>
+
         <!-- Logging -->
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
-            <version>2.0.16</version>
+            <version>1.7.36</version>
             <scope>provided</scope>
         </dependency>
 
         <dependency>
             <groupId>org.apache.logging.log4j</groupId>
-            <artifactId>log4j-slf4j2-impl</artifactId>
-            <version>2.24.3</version>
+            <artifactId>log4j-slf4j-impl</artifactId>
+            <version>2.17.2</version>
             <scope>provided</scope>
         </dependency>
     </dependencies>
@@ -123,7 +168,10 @@
                             <artifactSet>
                                 <excludes>
                                     <!-- Exclude Flink core (provided by runtime) -->
-                                    <exclude>org.apache.flink:flink-*</exclude>
+                                    <exclude>org.apache.flink:flink-streaming-java</exclude>
+                                    <exclude>org.apache.flink:flink-clients</exclude>
+                                    <exclude>org.apache.flink:flink-connector-base</exclude>
+                                    <exclude>org.apache.flink:flink-runtime</exclude>
                                     <!-- Exclude logging (provided by runtime) -->
                                     <exclude>org.slf4j:*</exclude>
                                     <exclude>org.apache.logging.log4j:*</exclude>
@@ -136,7 +184,6 @@
                                         <exclude>META-INF/*.SF</exclude>
                                         <exclude>META-INF/*.DSA</exclude>
                                         <exclude>META-INF/*.RSA</exclude>
-                                        <exclude>META-INF/MANIFEST.MF</exclude>
                                     </excludes>
                                 </filter>
                             </filters>
@@ -145,6 +192,7 @@
                                     <mainClass>com.livepeer.analytics.StreamingEventsToClickHouse</mainClass>
                                 </transformer>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ApacheLicenseResourceTransformer"/>
                             </transformers>
                         </configuration>
                     </execution>

@@ -3,25 +3,40 @@ set -e
 
 echo "==================================="
 echo "Livepeer Analytics - Flink Job Submission"
+echo "Flink Version: 1.20.3"
 echo "==================================="
 
-JAR_PATH="./flink-jobs/target/livepeer-analytics-flink-0.1.0.jar"
+# If running from a separate 'submitter' container, define the JobManager host
+JOB_MANAGER_RPC_ADDRESS="flink-jobmanager"
+
+JAR_PATH="/opt/flink/usrlib/livepeer-analytics-flink-0.1.0.jar"
 
 if [ ! -f "$JAR_PATH" ]; then
     echo "ERROR: JAR file not found at $JAR_PATH"
-    echo "Please build the project first:"
-    echo "  cd flink-jobs && mvn clean package"
     exit 1
 fi
 
 echo "JAR file found: $JAR_PATH"
-echo "Submitting job to Flink cluster..."
+echo "Submitting job to Flink cluster ($JOB_MANAGER_RPC_ADDRESS)..."
+echo ""
 
-docker exec flink-jobmanager /opt/flink/bin/flink run \
+# Submit the job
+# -m: specifies the target JobManager
+# -d: detached mode
+# -c: the entry point class (same for your Java or Scala version)
+/opt/flink/bin/flink run \
+    -m $JOB_MANAGER_RPC_ADDRESS:8081 \
     -d \
     -c com.livepeer.analytics.StreamingEventsToClickHouse \
-    /opt/flink/usrlib/livepeer-analytics-flink-0.1.0.jar
+    "$JAR_PATH"
+
+EXIT_CODE=$?
 
 echo ""
-echo "Job submitted successfully!"
-echo "View jobs at: http://localhost:8081"
+if [ $EXIT_CODE -eq 0 ]; then
+    echo "Job submitted successfully!"
+    echo "View the Flink UI at: http://localhost:8081"
+else
+    echo "Job submission failed with exit code: $EXIT_CODE"
+    exit $EXIT_CODE
+fi
