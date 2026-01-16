@@ -147,20 +147,20 @@ services:
   ### STREAM PROCESSING ###
   # Build the Flink job JAR
   flink-builder:
-    image: sbtscala/scala-sbt:eclipse-temurin-jammy-11.0.20.1_1_1.9.7_2.12.18
+    image: maven:3.9-eclipse-temurin-21
     container_name: livepeer-analytics-flink-builder
     working_dir: /build
     volumes:
       - ./flink-jobs:/build
-      - ./data/flink/jars:/build/target/scala-2.12  # Output JAR here
-      - flink-ivy-cache:/root/.ivy2
-      - flink-sbt-cache:/root/.sbt
+      - flink-maven-cache:/root/.m2
     command: >
       sh -c "
         echo 'Building Flink jobs...';
-        sbt clean assembly;
-        echo 'Build complete. JAR available at target/scala-2.12/';
-        ls -lh target/scala-2.12/*.jar;
+        mvn clean package;
+        echo 'Build complete. Copying JAR to output directory...';
+        mkdir -p /build/output;
+        cp target/*.jar /build/output/ 2>/dev/null || echo 'Warning: No JAR files found in target/';
+        ls -lh /build/output/;
       "
     init: true
 
@@ -168,15 +168,8 @@ services:
     image: flink:2.1.1-scala_2.12-java21
     container_name: livepeer-analytics-flink-jobmanager
     ports:
-      - "8081:8081"  # Flink Web UI
+      - "8081:8081"
     command: jobmanager
-#    command: >
-#      /bin/bash -c "
-#      mkdir -p /opt/flink/plugins/flink-s3-fs-hadoop &&
-#      cp /opt/flink/opt/flink-s3-fs-hadoop-*.jar /opt/flink/plugins/flink-s3-fs-hadoop/ &&
-#      chmod 777  /opt/flink/plugins/flink-s3-fs-hadoop/* &&
-#      /docker-entrypoint.sh jobmanager
-#      "
     environment:
       - ENABLE_BUILT_IN_PLUGINS=flink-s3-fs-hadoop-2.1.1.jar
       - |
@@ -194,10 +187,9 @@ services:
         s3.path.style.access: true
         s3.access-key: minioadmin
         s3.secret-key: minioadmin
-
     volumes:
       - ./data/flink/tmp:/flink-tmp
-      - ./data/flink/jars:/opt/flink/usrlib
+      - ./flink-jobs/output:/opt/flink/usrlib  # Changed from ./data/flink/jars
     depends_on:
       flink-builder:
         condition: service_completed_successfully
@@ -206,7 +198,7 @@ services:
       clickhouse:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8081/overview"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8081/overview" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -217,13 +209,6 @@ services:
     depends_on:
       - flink-jobmanager
     command: taskmanager
-#    command: >
-#      /bin/bash -c "
-#      mkdir -p /opt/flink/plugins/flink-s3-fs-hadoop &&
-#      cp /opt/flink/opt/flink-s3-fs-hadoop-*.jar /opt/flink/plugins/flink-s3-fs-hadoop/ &&
-#      chmod 777  /opt/flink/plugins/flink-s3-fs-hadoop/* &&
-#      /docker-entrypoint.sh taskmanager
-#      "
     environment:
       - ENABLE_BUILT_IN_PLUGINS=flink-s3-fs-hadoop-2.1.1.jar
       - |
@@ -240,7 +225,7 @@ services:
     volumes:
       - ./data/flink/tmp/checkpoints:/tmp/flink-checkpoints
       - ./data/flink/tmp/savepoints:/tmp/flink-savepoints
-      - ./data/flink/jars:/opt/flink/usrlib
+      - ./flink-jobs/output:/opt/flink/usrlib  # Changed from ./data/flink/jars
     scale: 1
 
   flink-job-submitter:
@@ -252,9 +237,11 @@ services:
       flink-taskmanager:
         condition: service_started
     environment:
-      -| FLINK_PROPERTIES=jobmanager.rpc.address: flink-jobmanager
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager
     volumes:
-      - ./data/flink/jars:/opt/flink/usrlib
+      - ./flink-jobs/output:/opt/flink/usrlib  # Changed from ./data/flink/jars
       - ./flink-jobs/:/jobs/
     command: >
       sh -c "
@@ -267,7 +254,6 @@ services:
         echo 'Job submission complete.';
       "
     init: true
-
   ### ANALYTICS STORAGE ###
   clickhouse:
     image: clickhouse/clickhouse-server:24.11
@@ -355,8 +341,7 @@ services:
 
 # Add volumes for caching dependencies (speeds up builds)
 volumes:
-  flink-ivy-cache:
-  flink-sbt-cache:
+  flink-maven-cache:
 
 networks:
   default:
