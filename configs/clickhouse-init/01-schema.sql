@@ -1,12 +1,66 @@
 -- ============================================
--- LIVEPEER ANALYTICS - COMPLETE SCHEMA
+-- LIVEPEER ANALYTICS - COMPLETE SCHEMA (UPDATED)
 -- ============================================
 
 CREATE DATABASE IF NOT EXISTS livepeer_analytics;
 USE livepeer_analytics;
 
 -- ============================================
--- CORE TABLES (Existing)
+-- RAW EVENTS TABLE (Staging/Archive)
+-- ============================================
+
+-- Raw streaming events table (all events as-is from Kafka)
+-- Schema designed to work with ClickHouse Kafka Connect sink
+CREATE TABLE IF NOT EXISTS streaming_events
+(
+    -- These field names MUST match the JSON keys from Kafka exactly
+    id String,              -- Maps to "id" in JSON
+    type LowCardinality(String),  -- Maps to "type" in JSON
+    timestamp UInt64,       -- Maps to "timestamp" in JSON (as milliseconds)
+    gateway String,         -- Maps to "gateway" in JSON
+    data String,            -- Maps to "data" in JSON (stored as JSON string)
+
+    -- Computed/materialized columns for easier querying
+    event_timestamp DateTime64(3, 'UTC') MATERIALIZED fromUnixTimestamp64Milli(timestamp),
+    event_date Date MATERIALIZED toDate(event_timestamp),
+
+    -- Metadata
+    ingestion_timestamp DateTime DEFAULT now()
+)
+    ENGINE = MergeTree()
+        PARTITION BY toYYYYMM(event_date)
+        ORDER BY (event_date, type, event_timestamp)
+        TTL event_date + INTERVAL 90 DAY DELETE
+        SETTINGS index_granularity = 8192;
+
+-- Index for fast event type lookups
+ALTER TABLE streaming_events
+    ADD INDEX IF NOT EXISTS idx_event_type type TYPE bloom_filter GRANULARITY 1;
+
+-- ============================================
+-- DEAD LETTER QUEUE (Failed Processing)
+-- ============================================
+
+CREATE TABLE IF NOT EXISTS streaming_events_dlq
+(
+    event_id String,
+    event_type Nullable(String),
+    event_timestamp DateTime64(3, 'UTC'),
+    event_date Date MATERIALIZED toDate(event_timestamp),
+    raw_json String,
+    error_message String,
+    error_type LowCardinality(String),
+
+    ingestion_timestamp DateTime DEFAULT now()
+)
+    ENGINE = MergeTree()
+        PARTITION BY toYYYYMM(event_date)
+        ORDER BY (event_date, error_type, event_timestamp)
+        TTL event_date + INTERVAL 30 DAY DELETE
+        SETTINGS index_granularity = 8192;
+
+-- ============================================
+-- TYPED TABLES (Flattened Events)
 -- ============================================
 
 -- Table 1: AI Stream Status (core performance metrics)
@@ -21,11 +75,9 @@ CREATE TABLE IF NOT EXISTS ai_stream_status
     request_id String,
     gateway String,
 
-    -- Orchestrator info (WILL BE ENRICHED by Flink)
+    -- Orchestrator info
     orchestrator_address String,
     orchestrator_url String,
-    gpu_id Nullable(String),
-    region LowCardinality(Nullable(String)),
 
     -- Workflow info
     pipeline LowCardinality(String),
@@ -46,6 +98,12 @@ CREATE TABLE IF NOT EXISTS ai_stream_status
     prompt_height UInt16,
     params_hash String,
 
+    -- Start time
+    start_time DateTime64(3, 'UTC'),
+
+    -- Raw JSON for debugging
+    raw_json String,
+
     -- Metadata
     ingestion_timestamp DateTime DEFAULT now()
 )
@@ -64,8 +122,6 @@ CREATE TABLE IF NOT EXISTS stream_ingest_metrics
     -- Identifiers
     stream_id String,
     request_id String,
-    gateway String,
-    orchestrator_address Nullable(String),
     pipeline_id String,
 
     -- Connection quality
@@ -76,16 +132,25 @@ CREATE TABLE IF NOT EXISTS stream_ingest_metrics
     video_packets_received UInt32,
     video_packets_lost UInt32,
     video_packet_loss_pct Float32,
+    video_rtt Float32,
+    video_last_input_ts Float32,
+    video_latency Float32,
 
     -- Audio metrics
     audio_jitter Float32,
     audio_packets_received UInt32,
     audio_packets_lost UInt32,
     audio_packet_loss_pct Float32,
+    audio_rtt Float32,
+    audio_last_input_ts Float32,
+    audio_latency Float32,
 
     -- Peer connection stats
     bytes_received UInt64,
     bytes_sent UInt64,
+
+    -- Raw JSON for debugging
+    raw_json String,
 
     -- Metadata
     ingestion_timestamp DateTime DEFAULT now()
@@ -105,16 +170,18 @@ CREATE TABLE IF NOT EXISTS stream_trace_events
     -- Identifiers
     stream_id String,
     request_id String,
-    gateway String,
+    pipeline_id String,
     orchestrator_address String,
     orchestrator_url String,
-    pipeline_id String,
 
     -- Trace type
     trace_type LowCardinality(String),
 
     -- Data timestamp
     data_timestamp DateTime64(3, 'UTC'),
+
+    -- Raw JSON for debugging
+    raw_json String,
 
     -- Metadata
     ingestion_timestamp DateTime DEFAULT now()
@@ -125,54 +192,7 @@ CREATE TABLE IF NOT EXISTS stream_trace_events
         TTL event_date + INTERVAL 90 DAY DELETE
         SETTINGS index_granularity = 8192;
 
--- Table 4: Calculated Metrics (Flink output)
-CREATE TABLE IF NOT EXISTS calculated_metrics
-(
-    metric_timestamp DateTime64(3, 'UTC'),
-    metric_date Date MATERIALIZED toDate(metric_timestamp),
-    window_start DateTime64(3, 'UTC'),
-    window_end DateTime64(3, 'UTC'),
-
-    -- Identifiers
-    stream_id String,
-    request_id Nullable(String),
-    gateway String,
-    orchestrator_address String,
-    gpu_id Nullable(String),
-    region LowCardinality(Nullable(String)),
-
-    -- Workflow info
-    pipeline LowCardinality(String),
-    model_id String,
-
-    -- Metric info
-    metric_name LowCardinality(String),
-    metric_category LowCardinality(String),
-
-    -- Metric value
-    metric_value Float64,
-    metric_unit LowCardinality(String),
-
-    -- Context
-    metric_metadata String,
-
-    -- Metadata
-    ingestion_timestamp DateTime DEFAULT now()
-)
-    ENGINE = MergeTree()
-        PARTITION BY toYYYYMM(metric_date)
-        ORDER BY (metric_date, metric_name, orchestrator_address, pipeline, metric_timestamp)
-        TTL metric_date + INTERVAL 90 DAY DELETE
-        SETTINGS index_granularity = 8192;
-
--- ============================================
--- NEW TABLES (Missing Event Types)
--- ============================================
-
--- Table 5: Network Capabilities (orchestrator metadata + GPU info)
--- This is the SOURCE for gpu_id and region enrichment
--- CRITICAL: One row per (orchestrator_address, orch_uri, model_id)
---           because each URI = different GPU
+-- Table 4: Network Capabilities (orchestrator metadata + GPU info)
 CREATE TABLE IF NOT EXISTS network_capabilities
 (
     event_timestamp DateTime64(3, 'UTC'),
@@ -181,7 +201,7 @@ CREATE TABLE IF NOT EXISTS network_capabilities
     -- Orchestrator info
     orchestrator_address String,
     local_address String,
-    orch_uri String,  -- CRITICAL: Part of unique key (each URI = different GPU)
+    orch_uri String,
 
     -- GPU info (flattened from first GPU in hardware array)
     gpu_id Nullable(String),
@@ -189,6 +209,7 @@ CREATE TABLE IF NOT EXISTS network_capabilities
     gpu_memory_total Nullable(UInt64),
     gpu_memory_free Nullable(UInt64),
     gpu_major Nullable(UInt8),
+    gpu_minor Nullable(UInt8),
 
     -- Model/Pipeline info
     pipeline String,
@@ -196,14 +217,16 @@ CREATE TABLE IF NOT EXISTS network_capabilities
     runner_version Nullable(String),
     capacity Nullable(UInt8),
     capacity_in_use Nullable(UInt8),
+    warm Nullable(UInt8),
 
     -- Pricing
     price_per_unit Nullable(UInt32),
+    pixels_per_unit Nullable(UInt32),
 
     -- Version
     orchestrator_version String,
 
-    -- Raw JSON for full hardware array
+    -- Raw JSON for full hardware array and debugging
     raw_json String,
 
     -- Metadata
@@ -211,11 +234,11 @@ CREATE TABLE IF NOT EXISTS network_capabilities
 )
     ENGINE = ReplacingMergeTree(event_timestamp)
         PARTITION BY toYYYYMM(event_date)
-        ORDER BY (orchestrator_address, orch_uri, model_id, event_timestamp)  -- UPDATED: orch_uri now in key
+        ORDER BY (orchestrator_address, orch_uri, model_id, event_timestamp)
         TTL event_date + INTERVAL 90 DAY DELETE
         SETTINGS index_granularity = 8192;
 
--- Table 6: AI Stream Events (errors and lifecycle events)
+-- Table 5: AI Stream Events (errors and lifecycle events)
 CREATE TABLE IF NOT EXISTS ai_stream_events
 (
     event_timestamp DateTime64(3, 'UTC'),
@@ -224,7 +247,6 @@ CREATE TABLE IF NOT EXISTS ai_stream_events
     -- Identifiers
     stream_id String,
     request_id String,
-    gateway String,
     pipeline String,
     pipeline_id String,
 
@@ -232,6 +254,9 @@ CREATE TABLE IF NOT EXISTS ai_stream_events
     event_type LowCardinality(String),  -- 'error', 'warning', 'info'
     message String,
     capability String,
+
+    -- Raw JSON for debugging
+    raw_json String,
 
     -- Metadata
     ingestion_timestamp DateTime DEFAULT now()
@@ -242,7 +267,7 @@ CREATE TABLE IF NOT EXISTS ai_stream_events
         TTL event_date + INTERVAL 90 DAY DELETE
         SETTINGS index_granularity = 8192;
 
--- Table 7: Discovery Results (orchestrator discovery latency)
+-- Table 6: Discovery Results (orchestrator discovery latency)
 CREATE TABLE IF NOT EXISTS discovery_results
 (
     event_timestamp DateTime64(3, 'UTC'),
@@ -253,8 +278,10 @@ CREATE TABLE IF NOT EXISTS discovery_results
     orchestrator_url String,
     latency_ms UInt32,
 
+    -- Raw JSON for debugging
+    raw_json String,
+
     -- Metadata
-    gateway String,
     ingestion_timestamp DateTime DEFAULT now()
 )
     ENGINE = MergeTree()
@@ -263,7 +290,7 @@ CREATE TABLE IF NOT EXISTS discovery_results
         TTL event_date + INTERVAL 30 DAY DELETE
         SETTINGS index_granularity = 8192;
 
--- Table 8: Payment Events (economics tracking)
+-- Table 7: Payment Events (economics tracking)
 CREATE TABLE IF NOT EXISTS payment_events
 (
     event_timestamp DateTime64(3, 'UTC'),
@@ -286,10 +313,13 @@ CREATE TABLE IF NOT EXISTS payment_events
     win_prob String,
 
     -- Metadata
-    gateway String,
     client_ip String,
     capability String,
 
+    -- Raw JSON for debugging
+    raw_json String,
+
+    -- Metadata
     ingestion_timestamp DateTime DEFAULT now()
 )
     ENGINE = MergeTree()
@@ -297,50 +327,6 @@ CREATE TABLE IF NOT EXISTS payment_events
         ORDER BY (event_date, recipient, orchestrator, event_timestamp)
         TTL event_date + INTERVAL 90 DAY DELETE
         SETTINGS index_granularity = 8192;
-
--- ============================================
--- MATERIALIZED VIEWS
--- ============================================
-
--- MV 1: 5-minute FPS aggregates
-CREATE MATERIALIZED VIEW IF NOT EXISTS ai_stream_status_5min_mv
-            ENGINE = SummingMergeTree()
-                PARTITION BY toYYYYMM(metric_date)
-                ORDER BY (metric_date, orchestrator_address, pipeline, time_bucket)
-AS
-SELECT
-    toStartOfInterval(event_timestamp, INTERVAL 5 MINUTE) as time_bucket,
-    toDate(time_bucket) as metric_date,
-    orchestrator_address,
-    pipeline,
-    gpu_id,
-    region,
-    avg(output_fps) as avg_output_fps,
-    quantile(0.5)(output_fps) as median_output_fps,
-    quantile(0.95)(output_fps) as p95_output_fps,
-    avg(input_fps) as avg_input_fps,
-    count() as sample_count,
-    sum(restart_count) as total_restarts
-FROM ai_stream_status
-GROUP BY time_bucket, metric_date, orchestrator_address, pipeline, gpu_id, region;
-
--- MV 2: Latest Orchestrator Metadata (for lookups)
--- CRITICAL: Now includes orch_uri since each URI = different GPU
-CREATE MATERIALIZED VIEW IF NOT EXISTS orchestrator_latest_metadata_mv
-            ENGINE = ReplacingMergeTree(event_timestamp)
-                ORDER BY (orchestrator_address, orch_uri, model_id)
-AS
-SELECT
-    orchestrator_address,
-    orch_uri,  -- ADDED: Essential for multi-URI orchestrators
-    model_id,
-    gpu_id,
-    gpu_name,
-    event_timestamp,
-    argMax(orchestrator_version, event_timestamp) as latest_version,
-    argMax(capacity, event_timestamp) as latest_capacity
-FROM network_capabilities
-GROUP BY orchestrator_address, orch_uri, model_id, gpu_id, gpu_name, event_timestamp;
 
 -- ============================================
 -- INDEXES FOR COMMON QUERIES

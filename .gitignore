@@ -13,7 +13,7 @@ flink-jobs/target/
 /data/grafana/pdf
 /data/grafana/plugins
 /data/grafana/png
-/data/kafka/__*/
+/data/kafka/_*/
 /data/kafka/*-0*/
 /data/kafka/*-1*/
 /data/kafka/*-2*/
