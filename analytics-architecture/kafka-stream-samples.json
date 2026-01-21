@@ -180,5 +180,373 @@
       "stream_id": "stream-z24wz2-mkfh5j30",
       "type": "error"
     }
+  },
+  {
+    "id": "070293f5-89a5-4381-be9e-a27680b0f7f8",
+    "type": "discovery_results",
+    "timestamp": "1768493916361",
+    "gateway": "",
+    "data": [
+      {
+        "address": "0xcdf93b13efcf63f84f2affb01bec48a5c096c69e",
+        "latency_ms": "215",
+        "url": "https://rtv.nullworks.xyz:9924"
+      },
+      {
+        "address": "0xedd45674825cd5a27c4c645014f37b9e402fdcbe",
+        "latency_ms": "251",
+        "url": "https://ai.nightnode.net:8888"
+      }
+    ]
+  },
+  {
+    "id": "2460bda7-64d7-468f-a814-6ec986dfe3c8",
+    "type": "network_capabilities",
+    "timestamp": "1768526280181",
+    "gateway": "",
+    "data": [
+      {
+        "address": "0xd00354656922168815Fcd1e51CBddB9e359e3C7F",
+        "local_address": "0x52CF2968b3DC6016778742D3539449a6597D5954",
+        "orch_uri": "https://rtav-orch2.xodeapp.xyz:28935",
+        "capabilities": {
+          "bitstring": [
+            34426871807
+          ],
+          "capacities": {
+            "0": 1,
+            "1": 1,
+            "2": 1,
+            "3": 1,
+            "4": 1,
+            "5": 1,
+            "6": 1,
+            "7": 1,
+            "8": 1,
+            "9": 1,
+            "10": 1,
+            "11": 1,
+            "12": 1,
+            "14": 1,
+            "26": 1,
+            "35": 1
+          },
+          "version": "0.8.8-3a5678ec-dirty",
+          "constraints": {
+            "PerCapability": {
+              "35": {
+                "models": {
+                  "streamdiffusion-sdxl-faceid": {
+                    "warm": true,
+                    "capacity": 1,
+                    "runnerVersion": "0.14.0"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "capabilities_prices": [
+          {
+            "pricePerUnit": 1514,
+            "pixelsPerUnit": 1,
+            "capability": 35,
+            "constraint": "streamdiffusion-sdxl-faceid"
+          }
+        ],
+        "hardware": [
+          {
+            "pipeline": "live-video-to-video",
+            "model_id": "streamdiffusion-sdxl-faceid",
+            "gpu_info": {
+              "0": {
+                "id": "GPU-a8d13655-197b-2226-d09f-b4b81e07504b",
+                "name": "NVIDIA GeForce RTX 5090",
+                "major": 12,
+                "memory_free": 33664860160,
+                "memory_total": 34190917632
+              }
+            }
+          }
+        ]
+      },
+      {
+        "address": "0x9D61ae5875E89036FBf6059f3116d01a22ACe3C8",
+        "local_address": "0xcdF93B13EFCf63f84f2afFB01BeC48A5c096C69E",
+        "orch_uri": "https://rtv.nullworks.xyz:9924",
+        "capabilities": {
+          "bitstring": [
+            34426871807
+          ],
+          "capacities": {
+            "0": 1,
+            "1": 1,
+            "2": 1,
+            "3": 1,
+            "4": 1,
+            "5": 1,
+            "6": 1,
+            "7": 1,
+            "8": 1,
+            "9": 1,
+            "10": 1,
+            "11": 1,
+            "12": 1,
+            "14": 1,
+            "26": 1,
+            "35": 1
+          },
+          "version": "0.8.8",
+          "constraints": {
+            "PerCapability": {
+              "35": {
+                "models": {
+                  "streamdiffusion-sdxl": {
+                    "warm": true,
+                    "runnerVersion": "0.14.1",
+                    "capacityInUse": 2
+                  }
+                }
+              }
+            }
+          }
+        },
+        "capabilities_prices": [
+          {
+            "pricePerUnit": 1514,
+            "pixelsPerUnit": 1,
+            "capability": 35,
+            "constraint": "streamdiffusion-sdxl"
+          }
+        ],
+        "hardware": [
+          {
+            "pipeline": "live-video-to-video",
+            "model_id": "streamdiffusion-sdxl",
+            "gpu_info": {
+              "0": {
+                "id": "GPU-1e7025d4-a3dd-5371-daec-b666af6ec29c",
+                "name": "NVIDIA GeForce RTX 4090",
+                "major": 8,
+                "minor": 9,
+                "memory_free": 25177620480,
+                "memory_total": 25757220864
+              }
+            }
+          },
+          {
+            "pipeline": "live-video-to-video",
+            "model_id": "streamdiffusion-sdxl",
+            "gpu_info": {
+              "0": {
+                "id": "GPU-c391d107-0999-d9be-45a4-b494d6da1ccf",
+                "name": "NVIDIA GeForce RTX 4090",
+                "major": 8,
+                "minor": 9,
+                "memory_free": 25243746304,
+                "memory_total": 25757220864
+              }
+            }
+          }
+        ]
+      },
+      {
+        "address": "0x47A907a0BD1627D71cD14430A721D1550d6D6f58",
+        "local_address": "0xEdD45674825Cd5A27c4C645014f37b9e402fDcBe",
+        "orch_uri": "https://ai.nightnode.net:8888",
+        "capabilities": {
+          "bitstring": [
+            34426871807
+          ],
+          "capacities": {
+            "0": 1,
+            "1": 1,
+            "2": 1,
+            "3": 1,
+            "4": 1,
+            "5": 1,
+            "6": 1,
+            "7": 1,
+            "8": 1,
+            "9": 1,
+            "10": 1,
+            "11": 1,
+            "12": 1,
+            "14": 1,
+            "26": 1,
+            "35": 1
+          },
+          "version": "0.8.9",
+          "constraints": {
+            "PerCapability": {
+              "35": {
+                "models": {
+                  "streamdiffusion-sdxl": {
+                    "warm": true,
+                    "capacity": 1,
+                    "runnerVersion": "0.14.1"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "capabilities_prices": [
+          {
+            "pricePerUnit": 1514,
+            "pixelsPerUnit": 1,
+            "capability": 35,
+            "constraint": "streamdiffusion-sdxl"
+          }
+        ],
+        "hardware": [
+          {
+            "pipeline": "live-video-to-video",
+            "model_id": "streamdiffusion-sdxl",
+            "gpu_info": {
+              "0": {
+                "id": "GPU-c3fdd24a-6e6c-ca6a-b6fe-1309cc257b93",
+                "name": "NVIDIA GeForce RTX 5090",
+                "major": 12,
+                "memory_free": 33567080448,
+                "memory_total": 34190917632
+              }
+            }
+          }
+        ]
+      },
+      {
+        "address": "0xDef1C70578B2B5e8589a42e26980687fc5153079",
+        "local_address": "0xA2868A9e9C0f880a4c3eF1930764D54e645aE389",
+        "orch_uri": "https://stream.speedybird.xyz:18936",
+        "capabilities": {
+          "bitstring": [
+            34426871807
+          ],
+          "capacities": {
+            "0": 1,
+            "1": 1,
+            "2": 1,
+            "3": 1,
+            "4": 1,
+            "5": 1,
+            "6": 1,
+            "7": 1,
+            "8": 1,
+            "9": 1,
+            "10": 1,
+            "11": 1,
+            "12": 1,
+            "14": 1,
+            "26": 1,
+            "35": 1
+          },
+          "version": "0.8.8",
+          "constraints": {
+            "PerCapability": {
+              "35": {
+                "models": {
+                  "streamdiffusion-sdxl": {
+                    "warm": true,
+                    "runnerVersion": "0.13.11-a201f99d",
+                    "capacityInUse": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "capabilities_prices": [
+          {
+            "pricePerUnit": 1211,
+            "pixelsPerUnit": 1,
+            "capability": 35,
+            "constraint": "streamdiffusion-sdxl"
+          }
+        ],
+        "hardware": [
+          {
+            "pipeline": "live-video-to-video",
+            "model_id": "streamdiffusion-sdxl",
+            "gpu_info": {
+              "0": {
+                "id": "GPU-a5c8f42f-5bff-f2f4-969c-e06bbf42563c",
+                "name": "NVIDIA GeForce RTX 4090",
+                "major": 8,
+                "minor": 9,
+                "memory_free": 25246564352,
+                "memory_total": 25757220864
+              }
+            }
+          }
+        ]
+      },
+      {
+        "address": "0xd00354656922168815Fcd1e51CBddB9e359e3C7F",
+        "local_address": "0x52CF2968b3DC6016778742D3539449a6597D5954",
+        "orch_uri": "https://rtav-orch.xodeapp.xyz:28935",
+        "capabilities": {
+          "bitstring": [
+            34426871807
+          ],
+          "capacities": {
+            "0": 1,
+            "1": 1,
+            "2": 1,
+            "3": 1,
+            "4": 1,
+            "5": 1,
+            "6": 1,
+            "7": 1,
+            "8": 1,
+            "9": 1,
+            "10": 1,
+            "11": 1,
+            "12": 1,
+            "14": 1,
+            "26": 1,
+            "35": 1
+          },
+          "version": "0.8.8",
+          "constraints": {
+            "PerCapability": {
+              "35": {
+                "models": {
+                  "streamdiffusion-sdxl-faceid": {
+                    "warm": true,
+                    "runnerVersion": "0.13.11-a201f99d",
+                    "capacityInUse": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "capabilities_prices": [
+          {
+            "pricePerUnit": 1514,
+            "pixelsPerUnit": 1,
+            "capability": 35,
+            "constraint": "streamdiffusion-sdxl-faceid"
+          }
+        ],
+        "hardware": [
+          {
+            "pipeline": "live-video-to-video",
+            "model_id": "streamdiffusion-sdxl-faceid",
+            "gpu_info": {
+              "0": {
+                "id": "GPU-6f1bacf5-d5be-9cad-aa38-e35f905daebe",
+                "name": "NVIDIA GeForce RTX 4090",
+                "major": 8,
+                "minor": 9,
+                "memory_free": 25258098688,
+                "memory_total": 25757220864
+              }
+            }
+          }
+        ]
+      }
+    ]
   }
 ]
