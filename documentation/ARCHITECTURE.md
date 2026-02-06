@@ -1,7 +1,7 @@
 # Livepeer Analytics v2.0 - Architecture Documentation
 
 **Version:** 2.0  
-**Last Updated:** January 20, 2026  
+**Last Updated:** February 5, 2026  
 
 ---
 
@@ -239,7 +239,7 @@ offsets.topic.replication.factor=1
 
 ```
 Kafka Connect Worker
-├── ClickHouse JDBC Sink
+├── ClickHouse Async Sink (HTTP)
 │   ├── Connector: clickhouse-raw-events-sink
 │   ├── Tasks: 2
 │   ├── Buffer: 250 records OR 10 seconds
@@ -295,15 +295,22 @@ streaming-events/
 
 **Role:** Stream processing engine - parse events and route to typed tables
 
+**Java 17 Note:** Flink's Kryo/Chill serializers may require JVM module opens for `java.util` on Java 17+.
+If you see `InaccessibleObjectException` during serialization, add:
+`--add-opens java.base/java.util=ALL-UNNAMED` to the JobManager/TaskManager JVM options.
+
 **Architecture:**
 
 ```
-Flink Job: "Livepeer Analytics v2.0"
+Flink Job: "Livepeer Analytics Quality Gate"
 │
 ├── Source: Kafka (streaming-events)
 │   └── Parallelism: 3 (matches partitions)
 │
-├── Deserialization: JSON → ParsedEvent POJO
+├── Quality Gate (deserialize → validate → dedup)
+│   ├── Accept → typed parsing
+│   ├── Quarantine → Kafka events.quarantine.streaming_events.v1
+│   └── DLQ → Kafka events.dlq.streaming_events.v1
 │
 ├── Type-based Routing (7 streams)
 │   ├── Filter by event type
@@ -312,7 +319,6 @@ Flink Job: "Livepeer Analytics v2.0"
 │       └── Side output: DLQ (on error)
 │
 └── Sinks (8 total)
-    ├── ClickHouse: streaming_events (raw archive)
     ├── ClickHouse: ai_stream_status
     ├── ClickHouse: stream_ingest_metrics
     ├── ClickHouse: stream_trace_events
@@ -320,7 +326,8 @@ Flink Job: "Livepeer Analytics v2.0"
     ├── ClickHouse: ai_stream_events
     ├── ClickHouse: discovery_results
     ├── ClickHouse: payment_events
-    └── ClickHouse: streaming_events_dlq (errors)
+    ├── ClickHouse: streaming_events_dlq (unexpected rejects)
+    └── ClickHouse: streaming_events_quarantine (duplicates)
 ```
 
 **Event Type Mapping:**
@@ -337,15 +344,24 @@ Flink Job: "Livepeer Analytics v2.0"
 
 **Error Handling Strategy:**
 
-```java
-SafeParser<T> ProcessFunction:
-  try {
-    T parsed = parseEvent(rawJson);
-    ctx.collect(parsed);  // → Main output
-  } catch (Exception e) {
-    DLQEvent dlq = new DLQEvent(rawJson, e);
-    ctx.output(dlqTag, dlq);  // → Side output (DLQ)
-  }
+```
+Quality Gate:
+  DESERIALIZATION_FAILED → DLQ envelope
+  SCHEMA_INVALID → DLQ envelope
+  UNSUPPORTED_VERSION → DLQ envelope
+  DUPLICATE → Quarantine envelope
+
+ClickHouse sinks:
+  Async sink with batch retries (connector-managed)
+  JSONEachRow payloads to avoid CSV escaping issues
+  Persistent failures surface as job failures (no per-record DLQ)
+
+Schema sync:
+  A unit test parses configs/clickhouse-init/01-schema.sql and asserts JSONEachRow keys
+  match the ClickHouse table columns (excluding materialized/default columns).
+
+Sink guard:
+  RECORD_TOO_LARGE → DLQ envelope (SINK_GUARD)
 ```
 
 **Checkpointing:**
@@ -354,8 +370,8 @@ SafeParser<T> ProcessFunction:
 execution.checkpointing.interval=60000        # Every 60 seconds
 execution.checkpointing.min-pause=30000       # 30 seconds between checkpoints
 execution.checkpointing.timeout=600000        # 10 minute timeout
-state.backend=rocksdb
-state.backend.incremental=true
+state.backend.type=rocksdb
+execution.checkpointing.incremental=true
 ```
 
 **Why RocksDB?**
@@ -385,10 +401,11 @@ ClickHouse Server (Single Node)
 │
 ├── Database: livepeer_analytics
 │
-├── Tables (10 total)
+├── Tables (11 total)
 │   ├── Raw Data
 │   │   ├── streaming_events (MergeTree)
-│   │   └── streaming_events_dlq (MergeTree)
+│   │   ├── streaming_events_dlq (MergeTree)
+│   │   └── streaming_events_quarantine (MergeTree)
 │   │
 │   └── Typed Tables
 │       ├── ai_stream_status (MergeTree)
@@ -597,7 +614,7 @@ Event → Kafka Topic: streaming-events
 Kafka Connect Worker
   ├─> Buffer: 250 records OR 10 seconds
   │
-  ├─> ClickHouse JDBC Sink
+  ├─> ClickHouse Async Sink (HTTP)
   │     └─> INSERT INTO streaming_events 
   │         (id, type, timestamp, gateway, data)
   │         VALUES (?, ?, ?, ?, ?)
@@ -612,7 +629,13 @@ Kafka Connect Worker
 Flink Stream Processing
   ├─> Read from Kafka (offset: 12345)
   │
-  ├─> Deserialize JSON → ParsedEvent
+  ├─> Quality Gate (deserialize → schema validate → dedup key)
+  │   ├─> Invalid schema → DLQ side output
+  │   └─> Valid → continue
+  │
+  ├─> Deduplicate (TTL state)
+  │   ├─> Duplicate → Quarantine side output
+  │   └─> Unique → continue
   │
   ├─> Filter by type == "ai_stream_status"
   │
@@ -620,10 +643,12 @@ Flink Stream Processing
   │     ├─> Success: Parse data.orchestrator_info, data.inference_status
   │     └─> Error: Emit to DLQ side output
   │
-  └─> ClickHouse JDBC Sink
-        └─> INSERT INTO ai_stream_status 
-            (stream_id, orchestrator_address, output_fps, ...)
-            VALUES (?, ?, ?, ...)
+  ├─> Row guard (max record bytes)
+  │     ├─> Oversize → DLQ side output
+  │     └─> OK → continue
+  │
+  └─> ClickHouse Async Sink (HTTP)
+        └─> INSERT INTO ai_stream_status (JSONEachRow)
 ```
 
 #### 4. Storage
@@ -645,7 +670,7 @@ Compressed storage (LZ4)
 **Write Latency:**
 
 - Kafka Connect: ~50ms (buffered)
-- Flink: ~30ms (direct JDBC)
+- Flink: ~30ms (ClickHouse async sink over HTTP)
 - ClickHouse async_insert: ~100ms (background)
 
 **Total E2E Latency:** ~3 seconds (p95)
@@ -918,19 +943,71 @@ Background merge process:
 ```sql
 CREATE TABLE streaming_events_dlq
 (
+    schema_version LowCardinality(String),
+    source_topic String,
+    source_partition UInt32,
+    source_offset UInt64,
+    source_record_timestamp DateTime64(3, 'UTC'),
     event_id String,
-    event_type Nullable(String),
-    event_timestamp DateTime64(3, 'UTC'),
-    event_date Date MATERIALIZED toDate(event_timestamp),
-    raw_json String,
-    error_message String,
-    error_type LowCardinality(String),
+    event_type LowCardinality(String),
+    event_version Nullable(String),
+    event_timestamp Nullable(DateTime64(3, 'UTC')),
+    event_date Date MATERIALIZED toDate(ifNull(event_timestamp, source_record_timestamp)),
+    dedup_key Nullable(String),
+    dedup_strategy Nullable(String),
+    replay UInt8,
+    failure_stage LowCardinality(String),
+    failure_class LowCardinality(String),
+    failure_reason String,
+    failure_details String,
+    orchestrator Nullable(String),
+    broadcaster Nullable(String),
+    region Nullable(String),
+    payload_encoding LowCardinality(String),
+    payload_body String,
+    payload_canonical_json Nullable(String),
     ingestion_timestamp DateTime DEFAULT now()
 )
 ENGINE = MergeTree()
 PARTITION BY toYYYYMM(event_date)
-ORDER BY (event_date, error_type, event_timestamp)
-TTL event_date + INTERVAL 30 DAY DELETE;  -- Shorter retention!
+ORDER BY (event_date, failure_class, event_type, source_topic, source_offset)
+TTL event_date + INTERVAL 30 DAY DELETE;
+```
+
+### Quarantine Table
+
+```sql
+CREATE TABLE streaming_events_quarantine
+(
+    schema_version LowCardinality(String),
+    source_topic String,
+    source_partition UInt32,
+    source_offset UInt64,
+    source_record_timestamp DateTime64(3, 'UTC'),
+    event_id String,
+    event_type LowCardinality(String),
+    event_version Nullable(String),
+    event_timestamp Nullable(DateTime64(3, 'UTC')),
+    event_date Date MATERIALIZED toDate(ifNull(event_timestamp, source_record_timestamp)),
+    dedup_key Nullable(String),
+    dedup_strategy Nullable(String),
+    replay UInt8,
+    failure_stage LowCardinality(String),
+    failure_class LowCardinality(String),
+    failure_reason String,
+    failure_details String,
+    orchestrator Nullable(String),
+    broadcaster Nullable(String),
+    region Nullable(String),
+    payload_encoding LowCardinality(String),
+    payload_body String,
+    payload_canonical_json Nullable(String),
+    ingestion_timestamp DateTime DEFAULT now()
+)
+ENGINE = MergeTree()
+PARTITION BY toYYYYMM(event_date)
+ORDER BY (event_date, failure_class, event_type, source_topic, source_offset)
+TTL event_date + INTERVAL 7 DAY DELETE;
 ```
 
 **Purpose:**
@@ -939,12 +1016,13 @@ TTL event_date + INTERVAL 30 DAY DELETE;  -- Shorter retention!
 - Monitor data quality issues
 - Debug schema mismatches
 
-**Error Types:**
+**Failure Classes (examples):**
 
-- `JSON_PARSE_ERROR`: Invalid JSON
-- `MISSING_FIELD`: Required field not present
-- `TYPE_MISMATCH`: Field has wrong type (e.g., string instead of number)
-- `UNKNOWN_EVENT_TYPE`: Event type not recognized
+- `DESERIALIZATION_FAILED`
+- `SCHEMA_INVALID`
+- `UNSUPPORTED_VERSION`
+- `DUPLICATE` (quarantine)
+- `RECORD_TOO_LARGE` (sink guard)
 
 ---
 
@@ -1328,6 +1406,60 @@ volumes:
   - ./configs/clickhouse-init:/docker-entrypoint-initdb.d:ro
 ```
 
+**Runtime Environment Variables (Flink Job):**
+
+- `QUALITY_KAFKA_BOOTSTRAP`, `QUALITY_INPUT_TOPIC`, `QUALITY_DLQ_TOPIC`, `QUALITY_QUARANTINE_TOPIC`
+- `QUALITY_DEDUP_TTL_MINUTES`, `QUALITY_SUPPORTED_VERSIONS`, `QUALITY_METRICS_RATE_WINDOW_SEC`
+- `CLICKHOUSE_URL`, `CLICKHOUSE_DATABASE`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`
+- `CLICKHOUSE_SINK_MAX_BATCH_SIZE`, `CLICKHOUSE_SINK_MAX_IN_FLIGHT`, `CLICKHOUSE_SINK_MAX_BUFFERED`
+- `CLICKHOUSE_SINK_MAX_BATCH_BYTES`, `CLICKHOUSE_SINK_MAX_TIME_MS`, `CLICKHOUSE_SINK_MAX_RECORD_BYTES`
+
+### Runtime Properties Reference
+
+**Kafka (Broker) Properties**
+
+| Property | Description | Suggested Default |
+|---------|-------------|-------------------|
+| `KAFKA_NODE_ID` | Broker node ID. | `1` |
+| `KAFKA_PROCESS_ROLES` | Roles for KRaft mode. | `broker,controller` |
+| `KAFKA_CONTROLLER_QUORUM_VOTERS` | Controller quorum voters. | `1@127.0.0.1:9093` |
+| `KAFKA_LISTENERS` | Listener endpoints. | `PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093` |
+| `KAFKA_ADVERTISED_LISTENERS` | Advertised listeners for clients. | `PLAINTEXT://kafka:9092,CONTROLLER://127.0.0.1:9093` |
+| `KAFKA_CONTROLLER_LISTENER_NAMES` | Controller listener name. | `CONTROLLER` |
+| `KAFKA_LISTENER_SECURITY_PROTOCOL_MAP` | Listener protocol map. | `CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT` |
+| `KAFKA_INTER_BROKER_LISTENER_NAME` | Listener for inter-broker traffic. | `PLAINTEXT` |
+| `KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR` | Replication for offsets topic. | `1` |
+| `KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS` | Delay before group rebalances. | `0` |
+| `KAFKA_TRANSACTION_STATE_LOG_MIN_ISR` | Min ISR for transaction state. | `1` |
+| `KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR` | Replication for txn state. | `1` |
+| `KAFKA_AUTO_CREATE_TOPICS_ENABLE` | Auto-create topics. | `true` |
+| `KAFKA_LOG_RETENTION_HOURS` | Retention in hours. | `168` |
+| `KAFKA_LOG_SEGMENT_BYTES` | Segment size. | `1073741824` |
+| `KAFKA_LOG_DIRS` | Log storage path. | `/var/lib/kafka/data` |
+
+**Flink Job Properties**
+
+| Property | Description | Suggested Default |
+|---------|-------------|-------------------|
+| `QUALITY_KAFKA_BOOTSTRAP` | Kafka bootstrap servers for ingestion. | `kafka:9092` |
+| `QUALITY_INPUT_TOPIC` | Input topic for streaming events. | `streaming_events` |
+| `QUALITY_DLQ_TOPIC` | DLQ topic for invalid events. | `events.dlq.streaming_events.v1` |
+| `QUALITY_QUARANTINE_TOPIC` | Quarantine topic for duplicates. | `events.quarantine.streaming_events.v1` |
+| `QUALITY_GROUP_ID` | Consumer group for Flink job. | `flink-quality-gate-v1` |
+| `QUALITY_DEDUP_TTL_MINUTES` | Dedup state TTL in minutes. | `1440` |
+| `QUALITY_SUPPORTED_VERSIONS` | Supported schema versions (CSV list). | `1,v1` |
+| `QUALITY_METRICS_RATE_WINDOW_SEC` | Metrics rate window in seconds. | `60` |
+| `CLICKHOUSE_URL` | ClickHouse HTTP endpoint. | `http://clickhouse:8123` |
+| `CLICKHOUSE_DATABASE` | ClickHouse database name. | `livepeer_analytics` |
+| `CLICKHOUSE_USER` | ClickHouse user. | `analytics_user` |
+| `CLICKHOUSE_PASSWORD` | ClickHouse password. | `analytics_password` |
+| `CLICKHOUSE_SINK_MAX_BATCH_SIZE` | Max records per batch. | `1000` |
+| `CLICKHOUSE_SINK_MAX_IN_FLIGHT` | Max in-flight requests. | `2` |
+| `CLICKHOUSE_SINK_MAX_BUFFERED` | Max buffered requests. | `10000` |
+| `CLICKHOUSE_SINK_MAX_BATCH_BYTES` | Max batch size in bytes. | `5000000` |
+| `CLICKHOUSE_SINK_MAX_TIME_MS` | Max time in buffer (ms). | `1000` |
+| `CLICKHOUSE_SINK_MAX_RECORD_BYTES` | Max record size in bytes. | `1000000` |
+
 ### Network Architecture
 
 **Docker Network:**
@@ -1425,11 +1557,11 @@ ORDER BY minute DESC;
 
 -- Check DLQ
 SELECT 
-    error_type,
+    failure_class,
     count() as error_count
 FROM streaming_events_dlq
 WHERE event_date = today()
-GROUP BY error_type;
+GROUP BY failure_class;
 ```
 
 #### 2. Performance Metrics
@@ -1511,13 +1643,13 @@ ORDER BY minute DESC;
 ```sql
 -- Top errors
 SELECT 
-    error_type,
-    error_message,
+    failure_class,
+    failure_reason,
     count() as occurrences,
-    any(raw_json) as example
+    any(payload_body) as example
 FROM streaming_events_dlq
 WHERE event_date = today()
-GROUP BY error_type, error_message
+GROUP BY failure_class, failure_reason
 ORDER BY occurrences DESC
 LIMIT 10;
 ```

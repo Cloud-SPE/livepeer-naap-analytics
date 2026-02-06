@@ -43,20 +43,86 @@ ALTER TABLE streaming_events
 
 CREATE TABLE IF NOT EXISTS streaming_events_dlq
 (
+    schema_version LowCardinality(String),
+
+    source_topic String,
+    source_partition UInt32,
+    source_offset UInt64,
+    source_record_timestamp DateTime64(3, 'UTC'),
+
     event_id String,
-    event_type Nullable(String),
-    event_timestamp DateTime64(3, 'UTC'),
-    event_date Date MATERIALIZED toDate(event_timestamp),
-    raw_json String,
-    error_message String,
-    error_type LowCardinality(String),
+    event_type LowCardinality(String),
+    event_version Nullable(String),
+    event_timestamp Nullable(DateTime64(3, 'UTC')),
+    event_date Date MATERIALIZED toDate(ifNull(event_timestamp, source_record_timestamp)),
+
+    dedup_key Nullable(String),
+    dedup_strategy Nullable(String),
+    replay UInt8,
+
+    failure_stage LowCardinality(String),
+    failure_class LowCardinality(String),
+    failure_reason String,
+    failure_details String,
+
+    orchestrator Nullable(String),
+    broadcaster Nullable(String),
+    region Nullable(String),
+
+    payload_encoding LowCardinality(String),
+    payload_body String,
+    payload_canonical_json Nullable(String),
 
     ingestion_timestamp DateTime DEFAULT now()
 )
     ENGINE = MergeTree()
         PARTITION BY toYYYYMM(event_date)
-        ORDER BY (event_date, error_type, event_timestamp)
+        ORDER BY (event_date, failure_class, event_type, source_topic, source_offset)
         TTL event_date + INTERVAL 30 DAY DELETE
+        SETTINGS index_granularity = 8192;
+
+-- ============================================
+-- QUARANTINE (Expected Rejects / Duplicates)
+-- ============================================
+
+CREATE TABLE IF NOT EXISTS streaming_events_quarantine
+(
+    schema_version LowCardinality(String),
+
+    source_topic String,
+    source_partition UInt32,
+    source_offset UInt64,
+    source_record_timestamp DateTime64(3, 'UTC'),
+
+    event_id String,
+    event_type LowCardinality(String),
+    event_version Nullable(String),
+    event_timestamp Nullable(DateTime64(3, 'UTC')),
+    event_date Date MATERIALIZED toDate(ifNull(event_timestamp, source_record_timestamp)),
+
+    dedup_key Nullable(String),
+    dedup_strategy Nullable(String),
+    replay UInt8,
+
+    failure_stage LowCardinality(String),
+    failure_class LowCardinality(String),
+    failure_reason String,
+    failure_details String,
+
+    orchestrator Nullable(String),
+    broadcaster Nullable(String),
+    region Nullable(String),
+
+    payload_encoding LowCardinality(String),
+    payload_body String,
+    payload_canonical_json Nullable(String),
+
+    ingestion_timestamp DateTime DEFAULT now()
+)
+    ENGINE = MergeTree()
+        PARTITION BY toYYYYMM(event_date)
+        ORDER BY (event_date, failure_class, event_type, source_topic, source_offset)
+        TTL event_date + INTERVAL 7 DAY DELETE
         SETTINGS index_granularity = 8192;
 
 -- ============================================

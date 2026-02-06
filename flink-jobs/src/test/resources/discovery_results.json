@@ -1,0 +1,18 @@
+{
+  "id": "8e1a4b12-57e5-41aa-bcf3-20ec51353656",
+  "type": "discovery_results",
+  "timestamp": "1770062024627",
+  "gateway": "",
+  "data": [
+    {
+      "address": "0xcdf93b13efcf63f84f2affb01bec48a5c096c69e",
+      "latency_ms": "84",
+      "url": "https://rtv.nullworks.xyz:9924"
+    },
+    {
+      "address": "0xedd45674825cd5a27c4c645014f37b9e402fdcbe",
+      "latency_ms": "119",
+      "url": "https://ai.nightnode.net:8888"
+    }
+  ]
+}

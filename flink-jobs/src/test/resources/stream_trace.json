@@ -1,0 +1,17 @@
+{
+  "id": "fb543250-7376-4de4-9541-42319b83e109",
+  "type": "stream_trace",
+  "timestamp": "1770062787846",
+  "gateway": "",
+  "data": {
+    "orchestrator_info": {
+      "address": "",
+      "url": ""
+    },
+    "pipeline_id": "",
+    "request_id": "56bc6b29",
+    "stream_id": "stream-qkqf2m-ml5lojrb",
+    "timestamp": 1770062787846,
+    "type": "gateway_receive_stream_request"
+  }
+}

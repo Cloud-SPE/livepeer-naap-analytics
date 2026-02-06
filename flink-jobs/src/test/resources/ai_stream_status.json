@@ -1,0 +1,41 @@
+{
+  "id": "ae6f98da-5418-43cd-80d5-8d9a9521bb22",
+  "type": "ai_stream_status",
+  "timestamp": "1770062064713",
+  "gateway": "",
+  "data": {
+    "inference_status": {
+      "fps": 23.584042845918553,
+      "last_error": "Error updating params: Cannot change output resolution mid-stream (Current resolution: (512, 512) requested resolution: (1024, 1024)). Output resolution (e.g. upscalers) can only be configured when starting a new stream.",
+      "last_error_time": 1770057341425,
+      "last_output_time": 1770062064689,
+      "last_params": {
+        "height": 512,
+        "width": 512
+      },
+      "last_params_hash": "f2f41bce75e30de92f8c308a6722859b",
+      "last_params_update_time": 1770062024704,
+      "last_restart_logs": null,
+      "last_restart_time": 1770056142812,
+      "restart_count": 3
+    },
+    "input_status": {
+      "fps": 24.083704770620216,
+      "last_input_time": 1770062064697
+    },
+    "last_state_update_time": 1770062033873,
+    "last_status_timestamp": 1770062054705,
+    "orchestrator_info": {
+      "address": "0xcdf93b13efcf63f84f2affb01bec48a5c096c69e",
+      "url": "https://rtv.nullworks.xyz:9924"
+    },
+    "pipeline": "streamdiffusion-sdxl",
+    "pipeline_id": "",
+    "request_id": "e66dd3fd",
+    "start_time": 1770062024704,
+    "state": "ONLINE",
+    "stream_id": "stream-0h8yoh-ml5l86hk",
+    "timestamp": 1770062064705,
+    "type": "status"
+  }
+}
