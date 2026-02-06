@@ -15,7 +15,6 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <flink.version>1.20.3</flink.version>
         <kafka.connector.version>3.3.0-1.20</kafka.connector.version>
-        <clickhouse.jdbc.version>0.7.1</clickhouse.jdbc.version>
         <jackson.version>2.17.2</jackson.version>
         <java.version>11</java.version>
         <maven.compiler.source>${java.version}</maven.compiler.source>
@@ -56,12 +55,14 @@
             <version>${kafka.connector.version}</version>
         </dependency>
 
-        <!-- Flink JDBC Connector -->
+        <!-- ClickHouse Flink Connector -->
         <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-connector-jdbc</artifactId>
-            <version>3.2.0-1.19</version>
+            <groupId>com.clickhouse.flink</groupId>
+            <artifactId>flink-connector-clickhouse-1.17</artifactId>
+            <version>0.1.3</version>
+            <classifier>all</classifier>
         </dependency>
+        
 
         <!-- Flink S3 FileSystem (Hadoop)
         <dependency>
@@ -98,13 +99,6 @@
             <version>1.12.565</version>
         </dependency>
 -->
-        <!-- ClickHouse JDBC Driver (compile scope) -->
-        <dependency>
-            <groupId>com.clickhouse</groupId>
-            <artifactId>clickhouse-jdbc</artifactId>
-            <version>${clickhouse.jdbc.version}</version>
-        </dependency>
-
         <!-- Jackson for JSON processing -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
@@ -137,6 +131,29 @@
             <artifactId>log4j-slf4j-impl</artifactId>
             <version>2.17.2</version>
             <scope>provided</scope>
+        </dependency>
+
+        <!-- Tests -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>5.11.0</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-streaming-java</artifactId>
+            <version>${flink.version}</version>
+            <classifier>tests</classifier>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-test-utils</artifactId>
+            <version>${flink.version}</version>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 
@@ -189,7 +206,7 @@
                             </filters>
                             <transformers>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <mainClass>com.livepeer.analytics.StreamingEventsToClickHouse</mainClass>
+                                    <mainClass>com.livepeer.analytics.pipeline.StreamingEventsToClickHouse</mainClass>
                                 </transformer>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ApacheLicenseResourceTransformer"/>
@@ -197,6 +214,17 @@
                         </configuration>
                     </execution>
                 </executions>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
+                <configuration>
+                    <useSystemClassLoader>false</useSystemClassLoader>
+                    <!-- Required on Java 17+ for Flink/Kryo/Chill serializers (Arrays.asList reflection). -->
+                    <argLine>--add-opens java.base/java.util=ALL-UNNAMED</argLine>
+                </configuration>
             </plugin>
         </plugins>
     </build>

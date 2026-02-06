@@ -39,6 +39,7 @@ flink-jobs/target/
 /data/minio/.minio.sys
 /data/minio/livepeer-events
 /data/minio/livepeer-metrics
+data/minio/streaming-events/topics/streaming_events/partition=**
 /data/flink/jars/classes/
 /data/flink/jars/sync/
 /data/flink/jars/update/
@@ -48,3 +49,6 @@ flink-jobs/target/
 /data/kafka/.lock
 /flink-jobs/output/
 /flink-jobs/dependency-reduced-pom.xml
+data/flink/tmp/checkpoints/.gitkeep
+data/flink/tmp/savepoints/.gitkeep
+data/kafka/.gitkeep

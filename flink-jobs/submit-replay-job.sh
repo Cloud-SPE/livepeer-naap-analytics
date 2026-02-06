@@ -2,13 +2,11 @@
 set -e
 
 echo "==================================="
-echo "Livepeer Analytics - Flink Job Submission"
+echo "Livepeer Analytics - DLQ Replay Job Submission"
 echo "Flink Version: 1.20.3"
 echo "==================================="
 
-# If running from a separate 'submitter' container, define the JobManager host
 JOB_MANAGER_RPC_ADDRESS="flink-jobmanager"
-
 JAR_PATH="/opt/flink/usrlib/livepeer-analytics-flink-0.1.0.jar"
 
 if [ ! -f "$JAR_PATH" ]; then
@@ -17,26 +15,21 @@ if [ ! -f "$JAR_PATH" ]; then
 fi
 
 echo "JAR file found: $JAR_PATH"
-echo "Submitting job to Flink cluster ($JOB_MANAGER_RPC_ADDRESS)..."
-echo ""
+echo "Submitting replay job to Flink cluster ($JOB_MANAGER_RPC_ADDRESS)..."
 
-# Submit the job
-# -m: specifies the target JobManager
-# -d: detached mode
-# -c: the entry point class (same for your Java or Scala version)
 /opt/flink/bin/flink run \
     -m $JOB_MANAGER_RPC_ADDRESS:8081 \
     -d \
-    -c com.livepeer.analytics.pipeline.StreamingEventsToClickHouse \
+    -c com.livepeer.analytics.pipeline.DlqReplayJob \
     "$JAR_PATH"
 
 EXIT_CODE=$?
 
 echo ""
 if [ $EXIT_CODE -eq 0 ]; then
-    echo "Job submitted successfully!"
+    echo "Replay job submitted successfully!"
     echo "View the Flink UI at: http://localhost:8081"
 else
-    echo "Job submission failed with exit code: $EXIT_CODE"
+    echo "Replay job submission failed with exit code: $EXIT_CODE"
     exit $EXIT_CODE
 fi

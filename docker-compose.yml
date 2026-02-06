@@ -120,7 +120,8 @@ services:
       - -c
       - |
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic streaming_events --partitions 1 --replication-factor 1
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic streaming_events_dlq --partitions 1 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic events.dlq.streaming_events.v1 --partitions 1 --replication-factor 1 --config retention.ms=2592000000
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic events.quarantine.streaming_events.v1 --partitions 1 --replication-factor 1 --config retention.ms=604800000
     depends_on:
       kafka:
         condition: service_healthy
@@ -160,7 +161,7 @@ services:
       - /bin/bash
       - -c
       - |
-        # Install ClickHouse JDBC connector
+        # Install ClickHouse sink connector
         confluent-hub install --no-prompt clickhouse/clickhouse-kafka-connect:latest
         # Install S3 connector for MinIO
         confluent-hub install --no-prompt confluentinc/kafka-connect-s3:latest
@@ -196,18 +197,32 @@ services:
     ports:
       - "8081:8081"
     command: jobmanager
+    # Java 17+ needs module opens for Flink/Kryo/Chill serializers.
+    # env.java.opts: "--add-opens java.base/java.util=ALL-UNNAMED"
     environment:
-      - |
-        FLINK_PROPERTIES=
+      QUALITY_KAFKA_BOOTSTRAP: kafka:9092
+      QUALITY_INPUT_TOPIC: streaming_events
+      QUALITY_DLQ_TOPIC: events.dlq.streaming_events.v1
+      QUALITY_QUARANTINE_TOPIC: events.quarantine.streaming_events.v1
+      QUALITY_DEDUP_TTL_MINUTES: "1440"
+      QUALITY_SUPPORTED_VERSIONS: 1,v1
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_DATABASE: livepeer_analytics
+      CLICKHOUSE_USER: analytics_user
+      CLICKHOUSE_PASSWORD: analytics_password
+      FLINK_PROPERTIES: |
         jobmanager.rpc.address: flink-jobmanager
         parallelism.default: 2
-        state.backend: rocksdb
-        state.checkpoints.dir: file:////flink-tmp/checkpoints
-        state.savepoints.dir: file:////flink-tmp/savepoints
-        state.backend.incremental: true
+        state.backend.type: rocksdb
+        execution.checkpointing.dir: file:////flink-tmp/checkpoints
+        execution.checkpointing.savepoint-dir: file:////flink-tmp/savepoints
+        execution.checkpointing.incremental: true
         execution.checkpointing.interval: 60000
         execution.checkpointing.min-pause: 30000
         execution.checkpointing.timeout: 600000
+        restart-strategy: fixed-delay
+        restart-strategy.fixed-delay.attempts: 3
+        restart-strategy.fixed-delay.delay: 10 s
     volumes:
       - ./data/flink/tmp:/flink-tmp
       - ./flink-jobs/output:/opt/flink/usrlib
@@ -230,14 +245,28 @@ services:
     depends_on:
       - flink-jobmanager
     command: taskmanager
+    # Java 17+ needs module opens for Flink/Kryo/Chill serializers.
+    # env.java.opts: "--add-opens java.base/java.util=ALL-UNNAMED"
     environment:
-      - |
-        FLINK_PROPERTIES=
+      QUALITY_KAFKA_BOOTSTRAP: kafka:9092
+      QUALITY_INPUT_TOPIC: streaming_events
+      QUALITY_DLQ_TOPIC: events.dlq.streaming_events.v1
+      QUALITY_QUARANTINE_TOPIC: events.quarantine.streaming_events.v1
+      QUALITY_DEDUP_TTL_MINUTES: "1440"
+      QUALITY_SUPPORTED_VERSIONS: 1,v1
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_DATABASE: livepeer_analytics
+      CLICKHOUSE_USER: analytics_user
+      CLICKHOUSE_PASSWORD: analytics_password
+      FLINK_PROPERTIES: |
         jobmanager.rpc.address: flink-jobmanager
         taskmanager.numberOfTaskSlots: 4
         parallelism.default: 2
-        state.backend: rocksdb
-        state.backend.incremental: true
+        state.backend.type: rocksdb
+        execution.checkpointing.incremental: true
+        restart-strategy: fixed-delay
+        restart-strategy.fixed-delay.attempts: 3
+        restart-strategy.fixed-delay.delay: 10 s
     volumes:
       - ./data/flink/tmp/checkpoints:/tmp/flink-checkpoints
       - ./data/flink/tmp/savepoints:/tmp/flink-savepoints
@@ -254,9 +283,20 @@ services:
         condition: service_started
       connect-init:
         condition: service_completed_successfully
+    # Java 17+ needs module opens for Flink/Kryo/Chill serializers.
+    # env.java.opts: "--add-opens java.base/java.util=ALL-UNNAMED"
     environment:
-      - |
-        FLINK_PROPERTIES=
+      QUALITY_KAFKA_BOOTSTRAP: kafka:9092
+      QUALITY_INPUT_TOPIC: streaming_events
+      QUALITY_DLQ_TOPIC: events.dlq.streaming_events.v1
+      QUALITY_QUARANTINE_TOPIC: events.quarantine.streaming_events.v1
+      QUALITY_DEDUP_TTL_MINUTES: "1440"
+      QUALITY_SUPPORTED_VERSIONS: 1,v1
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_DATABASE: livepeer_analytics
+      CLICKHOUSE_USER: analytics_user
+      CLICKHOUSE_PASSWORD: analytics_password
+      FLINK_PROPERTIES: |
         jobmanager.rpc.address: flink-jobmanager
     volumes:
       - ./flink-jobs/output:/opt/flink/usrlib
@@ -270,6 +310,35 @@ services:
         echo 'Job submission complete.';
       "
     init: true
+
+  # flink-replay-submitter:
+  #   image: flink:1.20.3-java11
+  #   container_name: livepeer-analytics-flink-replay-submitter
+  #   profiles: [\"replay\"]
+  #   depends_on:
+  #     flink-jobmanager:
+  #       condition: service_started
+  #     flink-taskmanager:
+  #       condition: service_started
+  #   # Java 17+ needs module opens for Flink/Kryo/Chill serializers.
+  #   # env.java.opts: "--add-opens java.base/java.util=ALL-UNNAMED"
+  #   environment:
+  #     REPLAY_KAFKA_BOOTSTRAP: kafka:9092
+  #     REPLAY_DLQ_TOPIC: events.dlq.streaming_events.v1
+  #     REPLAY_OUTPUT_TOPIC: streaming_events
+  #     REPLAY_START_EPOCH_MS: ${REPLAY_START_EPOCH_MS}
+  #     REPLAY_END_EPOCH_MS: ${REPLAY_END_EPOCH_MS}
+  #     FLINK_PROPERTIES: |
+  #       jobmanager.rpc.address: flink-jobmanager
+  #   volumes:
+  #     - ./flink-jobs/output:/opt/flink/usrlib
+  #     - ./flink-jobs/:/jobs/
+  #   command: >
+  #     sh -c "
+  #       echo 'Submitting DLQ replay job...';
+  #       /bin/bash /jobs/submit-replay-job.sh;
+  #     "
+  #   init: true
 
   ### ANALYTICS STORAGE ###
   clickhouse:
