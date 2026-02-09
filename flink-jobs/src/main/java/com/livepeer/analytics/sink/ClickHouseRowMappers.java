@@ -1,0 +1,175 @@
+package com.livepeer.analytics.sink;
+
+import com.livepeer.analytics.model.EventPayloads;
+import com.livepeer.analytics.model.RejectedEventEnvelope;
+
+/**
+ * Maps parsed event payloads into ClickHouse CSV rows that match the table schemas.
+ */
+public final class ClickHouseRowMappers {
+    private ClickHouseRowMappers() {}
+
+    public static String aiStreamStatusRow(EventPayloads.AiStreamStatus s) {
+        return ClickHouseJsonRow.create()
+                .addTimestampMillis("event_timestamp", s.eventTimestamp)
+                .addString("stream_id", s.streamId)
+                .addString("request_id", s.requestId)
+                .addString("gateway", s.gateway)
+                .addString("orchestrator_address", s.orchestratorAddress)
+                .addString("orchestrator_url", s.orchestratorUrl)
+                .addString("pipeline", s.pipeline)
+                .addString("pipeline_id", s.pipelineId)
+                .addFloat("output_fps", s.outputFps)
+                .addFloat("input_fps", s.inputFps)
+                .addString("state", s.state)
+                .addInt("restart_count", s.restartCount)
+                .addNullableString("last_error", s.lastError)
+                .addNullableString("prompt_text", s.promptText)
+                .addInt("prompt_width", s.promptWidth)
+                .addInt("prompt_height", s.promptHeight)
+                .addString("params_hash", s.paramsHash)
+                .addNullableTimestampMillis("start_time", s.startTime)
+                .addString("raw_json", s.rawJson)
+                .build();
+    }
+
+    public static String streamIngestMetricsRow(EventPayloads.StreamIngestMetrics m) {
+        return ClickHouseJsonRow.create()
+                .addTimestampMillis("event_timestamp", m.eventTimestamp)
+                .addString("stream_id", m.streamId)
+                .addString("request_id", m.requestId)
+                .addString("pipeline_id", m.pipelineId)
+                .addString("connection_quality", m.connectionQuality)
+                .addFloat("video_jitter", m.videoJitter)
+                .addInt("video_packets_received", m.videoPacketsReceived)
+                .addInt("video_packets_lost", m.videoPacketsLost)
+                .addFloat("video_packet_loss_pct", m.videoPacketLossPct)
+                .addFloat("video_rtt", m.videoRtt)
+                .addFloat("video_last_input_ts", m.videoLastInputTs)
+                .addFloat("video_latency", m.videoLatency)
+                .addFloat("audio_jitter", m.audioJitter)
+                .addInt("audio_packets_received", m.audioPacketsReceived)
+                .addInt("audio_packets_lost", m.audioPacketsLost)
+                .addFloat("audio_packet_loss_pct", m.audioPacketLossPct)
+                .addFloat("audio_rtt", m.audioRtt)
+                .addFloat("audio_last_input_ts", m.audioLastInputTs)
+                .addFloat("audio_latency", m.audioLatency)
+                .addLong("bytes_received", m.bytesReceived)
+                .addLong("bytes_sent", m.bytesSent)
+                .addString("raw_json", m.rawJson)
+                .build();
+    }
+
+    public static String streamTraceRow(EventPayloads.StreamTraceEvent t) {
+        return ClickHouseJsonRow.create()
+                .addTimestampMillis("event_timestamp", t.eventTimestamp)
+                .addString("stream_id", t.streamId)
+                .addString("request_id", t.requestId)
+                .addString("pipeline_id", t.pipelineId)
+                .addString("orchestrator_address", t.orchestratorAddress)
+                .addString("orchestrator_url", t.orchestratorUrl)
+                .addString("trace_type", t.traceType)
+                .addTimestampMillis("data_timestamp", t.dataTimestamp)
+                .addString("raw_json", t.rawJson)
+                .build();
+    }
+
+    public static String networkCapabilitiesRow(EventPayloads.NetworkCapability n) {
+        return ClickHouseJsonRow.create()
+                .addTimestampMillis("event_timestamp", n.eventTimestamp)
+                .addString("orchestrator_address", n.orchestratorAddress)
+                .addString("local_address", n.localAddress)
+                .addString("orch_uri", n.orchUri)
+                .addNullableString("gpu_id", n.gpuId)
+                .addNullableString("gpu_name", n.gpuName)
+                .addNullableLong("gpu_memory_total", n.gpuMemoryTotal)
+                .addNullableLong("gpu_memory_free", n.gpuMemoryFree)
+                .addNullableInt("gpu_major", n.gpuMajor)
+                .addNullableInt("gpu_minor", n.gpuMinor)
+                .addString("pipeline", n.pipeline)
+                .addString("model_id", n.modelId)
+                .addNullableString("runner_version", n.runnerVersion)
+                .addNullableInt("capacity", n.capacity)
+                .addNullableInt("capacity_in_use", n.capacityInUse)
+                .addNullableInt("warm", n.warm)
+                .addNullableInt("price_per_unit", n.pricePerUnit)
+                .addNullableInt("pixels_per_unit", n.pixelsPerUnit)
+                .addString("orchestrator_version", n.orchestratorVersion)
+                .addString("raw_json", n.rawJson)
+                .build();
+    }
+
+    public static String aiStreamEventsRow(EventPayloads.AiStreamEvent e) {
+        return ClickHouseJsonRow.create()
+                .addTimestampMillis("event_timestamp", e.eventTimestamp)
+                .addString("stream_id", e.streamId)
+                .addString("request_id", e.requestId)
+                .addString("pipeline", e.pipeline)
+                .addString("pipeline_id", e.pipelineId)
+                .addString("event_type", e.eventType)
+                .addString("message", e.message)
+                .addString("capability", e.capability)
+                .addString("raw_json", e.rawJson)
+                .build();
+    }
+
+    public static String discoveryResultsRow(EventPayloads.DiscoveryResult d) {
+        return ClickHouseJsonRow.create()
+                .addTimestampMillis("event_timestamp", d.eventTimestamp)
+                .addString("orchestrator_address", d.orchestratorAddress)
+                .addString("orchestrator_url", d.orchestratorUrl)
+                .addInt("latency_ms", d.latencyMs)
+                .addString("raw_json", d.rawJson)
+                .build();
+    }
+
+    public static String paymentEventsRow(EventPayloads.PaymentEvent p) {
+        return ClickHouseJsonRow.create()
+                .addTimestampMillis("event_timestamp", p.eventTimestamp)
+                .addString("request_id", p.requestId)
+                .addString("session_id", p.sessionId)
+                .addString("manifest_id", p.manifestId)
+                .addString("sender", p.sender)
+                .addString("recipient", p.recipient)
+                .addString("orchestrator", p.orchestrator)
+                .addString("face_value", p.faceValue)
+                .addString("price", p.price)
+                .addString("num_tickets", p.numTickets)
+                .addString("win_prob", p.winProb)
+                .addString("client_ip", p.clientIp)
+                .addString("capability", p.capability)
+                .addString("raw_json", p.rawJson)
+                .build();
+    }
+
+    public static String dlqRow(RejectedEventEnvelope envelope) {
+        long sourceRecordTimestamp = envelope.source == null
+                ? envelope.ingestionTimestamp
+                : envelope.source.recordTimestamp;
+        return ClickHouseJsonRow.create()
+                .addString("schema_version", envelope.schemaVersion)
+                .addString("source_topic", envelope.source == null ? null : envelope.source.topic)
+                .addInt("source_partition", envelope.source == null ? 0 : envelope.source.partition)
+                .addLong("source_offset", envelope.source == null ? 0L : envelope.source.offset)
+                .addTimestampMillis("source_record_timestamp", sourceRecordTimestamp)
+                .addString("event_id", envelope.identity == null ? null : envelope.identity.eventId)
+                .addString("event_type", envelope.identity == null ? null : envelope.identity.eventType)
+                .addNullableString("event_version", envelope.identity == null ? null : envelope.identity.eventVersion)
+                .addNullableTimestampMillis("event_timestamp", envelope.eventTimestamp)
+                .addNullableString("dedup_key", envelope.dedupKey)
+                .addNullableString("dedup_strategy", envelope.dedupStrategy)
+                .addBoolean("replay", envelope.replay)
+                .addString("failure_stage", envelope.failure == null ? null : envelope.failure.stage)
+                .addString("failure_class", envelope.failure == null ? null : envelope.failure.failureClass)
+                .addString("failure_reason", envelope.failure == null ? null : envelope.failure.reason)
+                .addString("failure_details", envelope.failure == null ? null : envelope.failure.details)
+                .addNullableString("orchestrator", envelope.dimensions == null ? null : envelope.dimensions.orchestrator)
+                .addNullableString("broadcaster", envelope.dimensions == null ? null : envelope.dimensions.broadcaster)
+                .addNullableString("region", envelope.dimensions == null ? null : envelope.dimensions.region)
+                .addString("payload_encoding", envelope.payload == null ? null : envelope.payload.encoding)
+                .addString("payload_body", envelope.payload == null ? null : envelope.payload.body)
+                .addNullableString("payload_canonical_json", envelope.payload == null ? null : envelope.payload.canonicalJson)
+                .addTimestampMillis("ingestion_timestamp", envelope.ingestionTimestamp)
+                .build();
+    }
+}

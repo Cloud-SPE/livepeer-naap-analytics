@@ -53,7 +53,7 @@ bindings:
       - when:
           - path: /events
         with:
-          topic: streaming-events
+          topic: streaming_events
         exit: north_kafka_cache_client
 
   # Kafka sync layer

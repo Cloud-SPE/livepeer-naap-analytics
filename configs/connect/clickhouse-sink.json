@@ -1,0 +1,30 @@
+{
+  "name": "clickhouse-raw-events-sink",
+  "config": {
+    "connector.class": "com.clickhouse.kafka.connect.ClickHouseSinkConnector",
+    "tasks.max": "2",
+    "topics": "streaming_events",
+    "hostname": "clickhouse",
+    "port": "8123",
+    "database": "livepeer_analytics",
+    "username": "analytics_user",
+    "password": "analytics_password",
+    "ssl": "false",
+
+    "bufferCount": "250",
+    "timeoutSeconds": "10",
+    "batchSize": "250",
+
+    "insertSettings": "async_insert=1,wait_for_async_insert=0",
+
+    "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "false",
+    "exactlyOnce": "false",
+    "errors.tolerance": "all",
+    "errors.log.enable": "true",
+    "errors.log.include.messages": "true",
+    "maxRetries": "3",
+    "retryBackoffMs": "3000"
+  }
+}
