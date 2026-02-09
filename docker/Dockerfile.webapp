@@ -8,7 +8,7 @@ COPY webapp/package*.json ./
 RUN npm install
 
 # Copy source code and build
-COPY ./webapp/ .
+COPY ../webapp/ .
 RUN npm run build
 
 # --- Stage 2: Final Production Image ---
@@ -18,7 +18,7 @@ FROM caddy:2-alpine
 WORKDIR /srv
 
 # Copy the Caddyfile configuration
-COPY webserver/Caddyfile /etc/caddy/Caddyfile
+COPY ../configs/webserver/Caddyfile /etc/caddy/Caddyfile
 
 # Copy the static build files from the builder stage
 COPY --from=builder /app/dist /var/www/html/app

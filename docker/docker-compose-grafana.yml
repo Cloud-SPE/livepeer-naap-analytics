@@ -1,0 +1,29 @@
+services:
+  grafana:
+    image: grafana/grafana:latest
+    container_name: livepeer-analytics-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_INSTALL_PLUGINS=grafana-clickhouse-datasource
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/etc/grafana/provisioning/dashboards/naap-overview.json
+    volumes:
+      - naap_grafana_data:/var/lib/grafana
+      - naap_grafana_config:/etc/grafana/provisioning
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://livepeer-analytics-grafana:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+volumes:
+  naap_grafana_config:
+    external: true
+  naap_grafana_data:
+    external: true
+networks:
+  default:
+    name: livepeer-tester-network
+    external: true

@@ -1,13 +1,25 @@
 {
   "annotations": {
-    "list": []
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
   },
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": null,
+  "id": 1,
   "links": [],
-  "liveNow": false,
   "panels": [
     {
       "datasource": {
@@ -20,26 +32,30 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
+            "barWidthFactor": 0.6,
             "drawStyle": "line",
-            "fillOpacity": 10,
+            "fillOpacity": 0,
             "gradientMode": "none",
             "hideFrom": {
+              "legend": false,
               "tooltip": false,
-              "viz": false,
-              "legend": false
+              "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
             "scaleDistribution": {
               "type": "linear"
             },
-            "showPoints": "never",
+            "showPoints": "auto",
+            "showValues": false,
             "spanNulls": false,
             "stacking": {
               "group": "A",
@@ -55,11 +71,14 @@
             "steps": [
               {
                 "color": "green",
-                "value": null
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
               }
             ]
-          },
-          "unit": "fps"
+          }
         },
         "overrides": []
       },
@@ -69,7 +88,7 @@
         "x": 0,
         "y": 0
       },
-      "id": 1,
+      "id": 8,
       "options": {
         "legend": {
           "calcs": [],
@@ -78,32 +97,243 @@
           "showLegend": true
         },
         "tooltip": {
+          "hideZeros": false,
           "mode": "single",
           "sort": "none"
         }
       },
-      "pluginVersion": "10.0.0",
+      "pluginVersion": "12.3.1",
       "targets": [
         {
-          "datasource": {
-            "type": "grafana-clickhouse-datasource",
-            "uid": "clickhouse"
-          },
           "editorType": "sql",
           "format": 1,
           "meta": {
             "builderOptions": {
-              "fields": [],
-              "limit": 100,
-              "mode": "list"
+              "columns": [],
+              "database": "",
+              "limit": 1000,
+              "mode": "list",
+              "queryType": "table",
+              "table": ""
             }
           },
-          "queryType": "sql",
-          "rawSql": "SELECT\n  toStartOfInterval(event_timestamp, INTERVAL 1 MINUTE) as time,\n  orchestrator_address,\n  avg(output_fps) as avg_fps\nFROM livepeer_analytics.ai_stream_status\nWHERE $__timeFilter(event_timestamp)\nGROUP BY time, orchestrator_address\nORDER BY time",
+          "pluginVersion": "4.12.0",
+          "queryType": "table",
+          "rawSql": "SELECT\n    toStartOfInterval(event_timestamp, INTERVAL 1 HOUR) AS t,\n    orchestrator,\n    capability,\n    -- Extract only digits, then convert to Decimal\n    sum(toDecimal128(extract(face_value, '^(\\d+)'), 0)) / 1e18 AS total_revenue_eth\nFROM livepeer_analytics.payment_events\nWHERE $__timeFilter(event_timestamp)\nGROUP BY t, orchestrator, capability\nORDER BY t ASC",
           "refId": "A"
         }
       ],
-      "title": "Average Output FPS by Orchestrator",
+      "title": "Revenue Analysis (Gateway Tickets)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "showValues": false,
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "id": 10,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.3.1",
+      "targets": [
+        {
+          "editorType": "sql",
+          "format": 1,
+          "meta": {
+            "builderOptions": {
+              "columns": [],
+              "database": "",
+              "limit": 1000,
+              "mode": "list",
+              "queryType": "table",
+              "table": ""
+            }
+          },
+          "pluginVersion": "4.12.0",
+          "queryType": "table",
+          "rawSql": "SELECT\n    toStartOfInterval(event_timestamp, INTERVAL 1 HOUR) AS t,\n    orchestrator,\n    capability,\n    -- Extract only digits, then convert to Decimal\n    avg(toDecimal128(extract(price, '^(\\d+)'), 0)) AS avg_price_per_pixel\nFROM livepeer_analytics.payment_events\nWHERE $__timeFilter(event_timestamp)\nGROUP BY t, orchestrator, capability\nORDER BY t ASC",
+          "refId": "A"
+        }
+      ],
+      "title": "Pricing Analysis(Gateway Tickets)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "showValues": false,
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "id": 9,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.3.1",
+      "targets": [
+        {
+          "editorType": "sql",
+          "format": 1,
+          "meta": {
+            "builderOptions": {
+              "columns": [],
+              "database": "",
+              "limit": 1000,
+              "mode": "list",
+              "queryType": "table",
+              "table": ""
+            }
+          },
+          "pluginVersion": "4.12.0",
+          "queryType": "table",
+          "rawSql": "WITH request_latencies AS (\n    SELECT\n        request_id,\n        orchestrator_address,\n        min(event_timestamp) as start_time,\n        -- Calculate ms diff between first and last trace for this ID\n        dateDiff('millisecond', min(data_timestamp), max(data_timestamp)) AS latency_ms\n    FROM livepeer_analytics.stream_trace_events\n    WHERE $__timeFilter(event_timestamp)\n    GROUP BY request_id, orchestrator_address\n)\nSELECT\n    toStartOfInterval(start_time, INTERVAL 5 MINUTE) AS t,\n    orchestrator_address,\n    avg(latency_ms) AS avg_e2e_latency_ms\nFROM request_latencies\nGROUP BY t, orchestrator_address\nORDER BY t ASC",
+          "refId": "A"
+        }
+      ],
+      "title": "End-to-End (e2e) Stream Latency",
       "type": "timeseries"
     },
     {
@@ -122,7 +352,7 @@
             "steps": [
               {
                 "color": "green",
-                "value": null
+                "value": 0
               },
               {
                 "color": "red",
@@ -138,22 +368,25 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 0
+        "y": 8
       },
       "id": 2,
       "options": {
+        "minVizHeight": 75,
+        "minVizWidth": 75,
         "orientation": "auto",
         "reduceOptions": {
-          "values": false,
           "calcs": [
             "lastNotNull"
           ],
-          "fields": ""
+          "fields": "",
+          "values": false
         },
         "showThresholdLabels": false,
-        "showThresholdMarkers": true
+        "showThresholdMarkers": true,
+        "sizing": "auto"
       },
-      "pluginVersion": "10.0.0",
+      "pluginVersion": "12.3.1",
       "targets": [
         {
           "datasource": {
@@ -188,13 +421,154 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "fillOpacity": 80,
+            "gradientMode": "none",
             "hideFrom": {
+              "legend": false,
               "tooltip": false,
-              "viz": false,
-              "legend": false
+              "viz": false
+            },
+            "lineWidth": 1,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
             }
           },
-          "mappings": []
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "id": 7,
+      "options": {
+        "barRadius": 0,
+        "barWidth": 0.97,
+        "fullHighlight": false,
+        "groupWidth": 0.7,
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "orientation": "horizontal",
+        "showValue": "auto",
+        "stacking": "none",
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        },
+        "xTickLabelRotation": 0,
+        "xTickLabelSpacing": 0
+      },
+      "pluginVersion": "12.3.1",
+      "targets": [
+        {
+          "editorType": "sql",
+          "format": 1,
+          "meta": {
+            "builderOptions": {
+              "columns": [],
+              "database": "",
+              "limit": 1000,
+              "mode": "list",
+              "queryType": "table",
+              "table": ""
+            }
+          },
+          "pluginVersion": "4.12.0",
+          "queryType": "table",
+          "rawSql": "SELECT\n    orchestrator_address,\n    avg(output_fps) as mean_fps\nFROM livepeer_analytics.ai_stream_status\nWHERE $__timeFilter(event_timestamp)\nGROUP BY orchestrator_address\nORDER BY mean_fps DESC\nLIMIT 10",
+          "refId": "A"
+        }
+      ],
+      "title": "Top 10 Orchestrators by Avg FPS (Bar Chart)",
+      "type": "barchart"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "showValues": false,
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
         },
         "overrides": []
       },
@@ -202,43 +576,150 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 8
+        "y": 26
       },
-      "id": 3,
+      "id": 5,
       "options": {
         "legend": {
+          "calcs": [],
           "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
         },
-        "pieType": "pie",
         "tooltip": {
+          "hideZeros": false,
           "mode": "single",
           "sort": "none"
         }
       },
+      "pluginVersion": "12.3.1",
       "targets": [
         {
-          "datasource": {
-            "type": "grafana-clickhouse-datasource",
-            "uid": "clickhouse"
-          },
           "editorType": "sql",
           "format": 1,
           "meta": {
             "builderOptions": {
-              "fields": [],
-              "limit": 100,
-              "mode": "list"
+              "columns": [],
+              "database": "",
+              "limit": 1000,
+              "mode": "list",
+              "queryType": "table",
+              "table": ""
             }
           },
-          "queryType": "sql",
-          "rawSql": "SELECT\n  pipeline,\n  count(*) as stream_count\nFROM livepeer_analytics.ai_stream_status\nWHERE event_timestamp >= now() - INTERVAL 1 HOUR\nGROUP BY pipeline",
+          "pluginVersion": "4.12.0",
+          "queryType": "table",
+          "rawSql": "SELECT\n    window_start as t,\n    orchestrator_address,\n    stddevPopMerge(stddev_fps_state) / avgMerge(avg_fps_state) as jitter_coeff\nFROM livepeer_analytics.mv_jitter_stats\nWHERE $__timeFilter(window_start)\nGROUP BY t, orchestrator_address",
           "refId": "A"
         }
       ],
-      "title": "Streams by Pipeline (Last Hour)",
-      "type": "piechart"
+      "title": "Jitter Coefficient by Orchestrator",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "showValues": false,
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 26
+      },
+      "id": 6,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.3.1",
+      "targets": [
+        {
+          "editorType": "sql",
+          "format": 1,
+          "meta": {
+            "builderOptions": {
+              "columns": [],
+              "database": "",
+              "limit": 1000,
+              "mode": "list",
+              "queryType": "table",
+              "table": ""
+            }
+          },
+          "pluginVersion": "4.12.0",
+          "queryType": "table",
+          "rawSql": "SELECT\n    toStartOfInterval(event_timestamp, INTERVAL 5 MINUTE) AS t,\n    orchestrator_address,\n    avg(output_fps) AS avg_fps\nFROM livepeer_analytics.ai_stream_status\nWHERE $__timeFilter(event_timestamp)\nGROUP BY t, orchestrator_address\nORDER BY t ASC",
+          "refId": "A"
+        }
+      ],
+      "title": "FPS Average by Orchestrator (5-min intervals)",
+      "type": "timeseries"
     },
     {
       "datasource": {
@@ -252,6 +733,9 @@
             "cellOptions": {
               "type": "auto"
             },
+            "footer": {
+              "reducers": []
+            },
             "inspect": false
           },
           "mappings": [],
@@ -260,24 +744,56 @@
             "steps": [
               {
                 "color": "green",
-                "value": null
+                "value": 0
               }
             ]
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "real_orch_address"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 392
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "display_name"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 378
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 8
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 34
       },
       "id": 4,
       "options": {
-        "showHeader": true
+        "cellHeight": "sm",
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": false,
+            "displayName": "active_streams"
+          }
+        ]
       },
-      "pluginVersion": "10.0.0",
+      "pluginVersion": "12.3.1",
       "targets": [
         {
           "datasource": {
@@ -288,35 +804,41 @@
           "format": 1,
           "meta": {
             "builderOptions": {
-              "fields": [],
+              "columns": [],
+              "database": "",
               "limit": 100,
-              "mode": "list"
+              "mode": "list",
+              "queryType": "table",
+              "table": ""
             }
           },
-          "queryType": "sql",
-          "rawSql": "SELECT\n  orchestrator_address,\n  count(DISTINCT stream_id) as active_streams,\n  avg(output_fps) as avg_fps,\n  quantile(0.95)(output_fps) as p95_fps,\n  sum(restart_count) as total_restarts\nFROM livepeer_analytics.ai_stream_status\nWHERE event_timestamp >= now() - INTERVAL 1 HOUR\nGROUP BY orchestrator_address\nORDER BY active_streams DESC\nLIMIT 10",
+          "pluginVersion": "4.12.0",
+          "queryType": "table",
+          "rawSql": "SELECT\n    -- Use the official URI from capabilities, fallback to the event URL\n    coalesce(nullIf(nc.orch_uri, ''), s.orchestrator_url) AS display_uri,\n    count(DISTINCT s.stream_id) AS active_streams,\n    avg(s.output_fps) AS avg_fps,\n    quantile(0.95)(s.output_fps) AS p95_fps,\n    sum(s.restart_count) AS total_restarts\nFROM livepeer_analytics.ai_stream_status AS s\n         LEFT JOIN livepeer_analytics.network_capabilities AS nc\n                   ON s.orchestrator_url = nc.orch_uri\nWHERE s.event_timestamp >= now() - INTERVAL 24 HOUR\nGROUP BY display_uri\nORDER BY active_streams DESC\nLIMIT 10",
           "refId": "A"
         }
       ],
-      "title": "Top Orchestrators (Last Hour)",
+      "title": "Top Orchestrators (Last Day)",
       "type": "table"
     }
   ],
+  "preload": false,
   "refresh": "5s",
-  "schemaVersion": 38,
-  "style": "dark",
-  "tags": ["naap", "livepeer"],
+  "schemaVersion": 42,
+  "tags": [
+    "naap",
+    "livepeer"
+  ],
   "templating": {
     "list": []
   },
   "time": {
-    "from": "now-6h",
-    "to": "now"
+    "from": "2026-01-23T02:01:50.608Z",
+    "to": "2026-01-25T02:01:50.608Z"
   },
   "timepicker": {},
-  "timezone": "",
-  "title": "NaaP Overview",
+  "timezone": "utc",
+  "title": "Naap: Orchestrator Performance Overview",
   "uid": "naap-overview",
-  "version": 0,
-  "weekStart": ""
+  "version": 1
 }

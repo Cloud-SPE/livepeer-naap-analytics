@@ -409,3 +409,43 @@ ALTER TABLE stream_trace_events
 
 ALTER TABLE network_capabilities
     ADD INDEX IF NOT EXISTS idx_orch_address orchestrator_address TYPE bloom_filter GRANULARITY 1;
+
+
+
+--jitter coefficient data
+CREATE MATERIALIZED VIEW IF NOT EXISTS livepeer_analytics.mv_jitter_stats
+            ENGINE = SummingMergeTree()
+                ORDER BY (orchestrator_address, window_start)
+AS SELECT
+       toStartOfInterval(event_timestamp, INTERVAL 5 MINUTE) as window_start,
+       orchestrator_address,
+       avgState(output_fps) as avg_fps_state,
+       stddevPopState(output_fps) as stddev_fps_state
+   FROM livepeer_analytics.ai_stream_status
+   GROUP BY window_start, orchestrator_address;
+
+--back fill the jitter data
+INSERT INTO livepeer_analytics.mv_jitter_stats
+SELECT
+    toStartOfInterval(event_timestamp, INTERVAL 5 MINUTE) as window_start,
+    orchestrator_address,
+    avgState(output_fps) as avg_fps_state,
+    stddevPopState(output_fps) as stddev_fps_state
+FROM livepeer_analytics.ai_stream_status
+GROUP BY window_start, orchestrator_address;
+
+
+SELECT
+    -- Use the official URI from capabilities, fallback to the event URL
+    coalesce(nullIf(nc.orch_uri, ''), s.orchestrator_url) AS display_uri,
+    count(DISTINCT s.stream_id) AS active_streams,
+    avg(s.output_fps) AS avg_fps,
+    quantile(0.95)(s.output_fps) AS p95_fps,
+    sum(s.restart_count) AS total_restarts
+FROM livepeer_analytics.ai_stream_status AS s
+         LEFT JOIN livepeer_analytics.network_capabilities AS nc
+                   ON s.orchestrator_url = nc.orch_uri
+WHERE s.event_timestamp >= now() - INTERVAL 24 HOUR
+GROUP BY display_uri
+ORDER BY active_streams DESC
+LIMIT 10

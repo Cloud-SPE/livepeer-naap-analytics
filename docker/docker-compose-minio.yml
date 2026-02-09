@@ -1,0 +1,27 @@
+services:
+  minio:
+    image: quay.io/minio/minio:RELEASE.2024-01-18T22-51-28Z
+    command: server --console-address ":9001" /data
+    hostname: minio
+    restart: unless-stopped
+    ports:
+      - 9001:9001
+    #   - 9000:9000
+
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - naap_minio-data:/data
+volumes:
+  naap_minio-data:
+    external: true
+networks:
+  default:
+    name: livepeer-tester-network
+    external: true
