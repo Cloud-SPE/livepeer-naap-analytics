@@ -68,6 +68,8 @@ authInternalUsers:
         path:
       - action: playback
         path:
+      - action: api
+        path:
 
     # Default administrator.
     # This allows to use API, metrics and PPROF without authentication,
@@ -643,7 +645,7 @@ pathDefaults:
   #   a regular expression.
   # * MTX_SOURCE_TYPE: source type
   # * MTX_SOURCE_ID: source ID
-  #runOnReady: curl http://localhost:5936/live/video-to-video/$MTX_PATH/start -F source_id=$MTX_SOURCE_ID -F source_type=$MTX_SOURCE_TYPE -F query=$MTX_QUERY
+  runOnReady: curl http://live-video-to-video-gateway:5937/live/video-to-video/$MTX_PATH/start -F source_id=$MTX_SOURCE_ID -F source_type=$MTX_SOURCE_TYPE -F query=$MTX_QUERY
   # Restart the command if it exits.
   runOnReadyRestart: no
   # Command to run when the stream is not available anymore.
@@ -703,3 +705,5 @@ paths:
   # Settings under path "all_others" are applied to all paths that
   # do not match another entry.
   all_others:
+
+

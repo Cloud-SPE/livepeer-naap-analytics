@@ -55,6 +55,7 @@ services:
   kafka:
     image: apache/kafka:3.9.0
     container_name: live-video-to-video-kafka
+    user: root
     ports:
       - 9092:9092
     environment:
@@ -132,6 +133,7 @@ services:
   connect:
     image: confluentinc/cp-kafka-connect:7.8.0
     container_name: livepeer-analytics-connect
+    user: root
     depends_on:
       kafka:
         condition: service_healthy
@@ -372,7 +374,7 @@ services:
       - "9001:9001"
     environment:
       MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_ROOT_PASSWORD: m1n104dm1n
     volumes:
       - ./data/minio:/data
     command: server /data --console-address ":9001"
@@ -390,7 +392,7 @@ services:
         condition: service_healthy
     entrypoint: >
       /bin/sh -c "
-      mc alias set myminio http://minio:9000 minioadmin minioadmin;
+      mc alias set myminio http://minio:9000 minioadmin m1n104dm1n;
       mc mb myminio/streaming-events --ignore-existing;
       mc anonymous set download myminio/streaming-events;
       echo 'MinIO buckets created';
@@ -475,4 +477,4 @@ volumes:
 
 networks:
   default:
-    name: live-video-to-video
+    name: livepeer-analytics-dev-network

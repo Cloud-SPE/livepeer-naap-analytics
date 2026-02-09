@@ -1,0 +1,88 @@
+services:
+  connect:
+    image: confluentinc/cp-kafka-connect:7.8.0
+    container_name: livepeer-analytics-connect
+    ports:
+      - "8083:8083"
+    environment:
+      CONNECT_BOOTSTRAP_SERVERS: 'kafka:9092'
+      CONNECT_REST_ADVERTISED_HOST_NAME: connect
+      CONNECT_GROUP_ID: livepeer-analytics-connect-group
+      CONNECT_CONFIG_STORAGE_TOPIC: _connect-configs
+      CONNECT_OFFSET_STORAGE_TOPIC: _connect-offsets
+      CONNECT_STATUS_STORAGE_TOPIC: _connect-status
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_KEY_CONVERTER: org.apache.kafka.connect.storage.StringConverter
+      CONNECT_VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+      CONNECT_PLUGIN_PATH: "/usr/share/java,/usr/share/confluent-hub-components"
+    volumes:
+      - naap_kafka_connect_config:/etc/kafka-connect/configs:ro
+    command:
+      - /bin/bash
+      - -c
+      - |
+        # Install ClickHouse JDBC connector
+        confluent-hub install --no-prompt clickhouse/clickhouse-kafka-connect:latest
+        # Install S3 connector for MinIO
+        confluent-hub install --no-prompt confluentinc/kafka-connect-s3:latest
+        /etc/confluent/docker/run
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://livepeer-analytics-connect:8083/connectors"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  connect-init:
+    image: curlimages/curl:latest
+    container_name: livepeer-analytics-connect-init
+    volumes:
+      - naap_kafka_connect_config:/configs:ro
+    depends_on:
+      connect:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Waiting for Kafka Connect to be fully ready..."
+        while [ $$(curl -s -o /dev/null -w %{http_code} http://connect:8083/connectors) -eq 000 ] ; do 
+          sleep 5 
+        done
+        echo "Kafka Connect is up!"
+        
+        echo ""
+        echo "=========================================="
+        echo "Registering ClickHouse Sink for Raw Events..."
+        echo "=========================================="
+        curl -s -X POST http://connect:8083/connectors \
+          -H "Content-Type: application/json" \
+          -d @/configs/clickhouse-sink.json
+        
+        echo ""
+        echo "ClickHouse sink configured!"
+        echo ""
+        
+        echo "=========================================="
+        echo "Registering MinIO S3 Sink for Raw Events..."
+        echo "=========================================="
+        curl -s -X POST http://connect:8083/connectors \
+          -H "Content-Type: application/json" \
+          -d @/configs/minio-sink.json
+        
+        echo ""
+        echo "MinIO sink registered successfully!"
+        echo ""
+        echo "=========================================="
+        echo "All Kafka Connect sinks configured!"
+        echo "=========================================="
+    init: true
+volumes:
+  naap_kafka_connect_config:
+    external: true
+
+networks:
+  default:
+    name: livepeer-tester-network
+    external: true
