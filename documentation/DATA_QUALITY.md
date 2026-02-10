@@ -4,11 +4,17 @@ This document consolidates the data quality controls implemented in the Flink pi
 
 ## Deduplication Strategy
 
+### Dedup key
+
 **Where it lives**
 `flink-jobs/src/main/java/com/livepeer/analytics/quality/QualityGateProcessFunction.java`  
 `flink-jobs/src/main/java/com/livepeer/analytics/quality/DeduplicationProcessFunction.java`
 
 **Strategy**
+
+* The gateway already generates a UUID per event and Kafka publish retries can result in duplicate writes.
+* Kafka does not deduplicate on key; therefore `event_id` is the correct logical identifier.
+
 1. If `event.id` (GUID) is present, use it as the dedup key.
 2. If missing, build a deterministic hash from the normalized payload and selected dimensions.
 3. The dedup key is stored on the event and used as the Flink key for dedup state.
@@ -24,6 +30,23 @@ This document consolidates the data quality controls implemented in the Flink pi
 
 **Quarantine**
 Duplicates are emitted to the quarantine side output and written to Kafka topic `events.quarantine.streaming_events.v1` and ClickHouse table `streaming_events_quarantine`.
+
+#### **Why this approach was chosen over alternatives**
+
+#### Avoid deduping at Kafka Connect / ClickHouse ingest
+
+* Kafka Connect sinks are **at-least-once**; retries can insert duplicates.
+* ClickHouse insert quorum and in-memory/block dedup do **not** provide reliable idempotency by key.
+* Storage-engine dedup (`ReplacingMergeTree`) is **eventual** and can expose duplicates in near-real-time queries.
+
+#### Avoid deduping in ClickHouse queries (GROUP BY / DISTINCT / FINAL)
+
+* Pushes correctness into every query and degrades performance.
+
+#### Flink as the Control Point
+* Flink already performs semantic parsing and writes typed tables.
+* Keyed state + TTL is cheap, bounded, and auditable.
+* One implementation protects all downstream tables and avoids query-time workarounds.
 
 ## Validation Rules
 
