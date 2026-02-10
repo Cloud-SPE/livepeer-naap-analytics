@@ -48,6 +48,7 @@ public class DeduplicationProcessFunction extends KeyedProcessFunction<String, V
         duplicateCounter = metrics.counter("duplicates");
         acceptedCounter = metrics.counter("accepted");
         duplicateRate = metrics.meter("duplicate_rate", new MeterView(duplicateCounter, (int) config.metricsRateWindow.getSeconds()));
+        LOG.info("Deduplication initialized (ttlMinutes={})", config.dedupTtlMinutes);
     }
 
     @Override

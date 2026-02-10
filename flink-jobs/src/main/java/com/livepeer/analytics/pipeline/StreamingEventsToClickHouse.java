@@ -265,6 +265,8 @@ public class StreamingEventsToClickHouse {
 
     private static void sinkToClickHouse(DataStream<String> rows, QualityGateConfig config, String table, String name) {
         Sink<String> sink = ClickHouseSinkFactory.build(config, table);
+        LOG.info("Configuring ClickHouse sink (table={}, url={}, database={})",
+                table, config.clickhouseUrl, config.clickhouseDatabase);
         rows.sinkTo(sink).name(name);
     }
 

@@ -181,6 +181,8 @@ services:
     working_dir: /build
     volumes:
       - ./flink-jobs:/build
+      # Mount ClickHouse init scripts used by Clickhouse Schema Tests during Maven build
+      - ./configs/clickhouse-init:/configs/clickhouse-init:ro
       - flink-maven-cache:/root/.m2
     command: >
       sh -c "
@@ -228,6 +230,7 @@ services:
     volumes:
       - ./data/flink/tmp:/flink-tmp
       - ./flink-jobs/output:/opt/flink/usrlib
+      - ./configs/flink/log4j.properties:/opt/flink/conf/log4j-console.properties:ro
     depends_on:
       flink-builder:
         condition: service_completed_successfully
@@ -273,6 +276,7 @@ services:
       - ./data/flink/tmp/checkpoints:/tmp/flink-checkpoints
       - ./data/flink/tmp/savepoints:/tmp/flink-savepoints
       - ./flink-jobs/output:/opt/flink/usrlib
+      - ./configs/flink/log4j.properties:/opt/flink/conf/log4j-console.properties:ro
     scale: 1
 
   flink-job-submitter:

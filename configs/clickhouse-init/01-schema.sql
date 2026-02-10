@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS streaming_events
     event_date Date MATERIALIZED toDate(event_timestamp),
 
     -- Metadata
-    ingestion_timestamp DateTime DEFAULT now()
+    ingestion_timestamp DateTime64(3, 'UTC') DEFAULT now64(3)
 )
     ENGINE = MergeTree()
         PARTITION BY toYYYYMM(event_date)
@@ -73,7 +73,7 @@ CREATE TABLE IF NOT EXISTS streaming_events_dlq
     payload_body String,
     payload_canonical_json Nullable(String),
 
-    ingestion_timestamp DateTime DEFAULT now()
+    ingestion_timestamp DateTime64(3, 'UTC') DEFAULT now64(3)
 )
     ENGINE = MergeTree()
         PARTITION BY toYYYYMM(event_date)
@@ -117,7 +117,7 @@ CREATE TABLE IF NOT EXISTS streaming_events_quarantine
     payload_body String,
     payload_canonical_json Nullable(String),
 
-    ingestion_timestamp DateTime DEFAULT now()
+    ingestion_timestamp DateTime64(3, 'UTC') DEFAULT now64(3)
 )
     ENGINE = MergeTree()
         PARTITION BY toYYYYMM(event_date)
@@ -171,7 +171,7 @@ CREATE TABLE IF NOT EXISTS ai_stream_status
     raw_json String,
 
     -- Metadata
-    ingestion_timestamp DateTime DEFAULT now()
+    ingestion_timestamp DateTime64(3, 'UTC') DEFAULT now64(3)
 )
     ENGINE = MergeTree()
         PARTITION BY toYYYYMM(event_date)
@@ -219,7 +219,7 @@ CREATE TABLE IF NOT EXISTS stream_ingest_metrics
     raw_json String,
 
     -- Metadata
-    ingestion_timestamp DateTime DEFAULT now()
+    ingestion_timestamp DateTime64(3, 'UTC') DEFAULT now64(3)
 )
     ENGINE = MergeTree()
         PARTITION BY toYYYYMM(event_date)
@@ -250,7 +250,7 @@ CREATE TABLE IF NOT EXISTS stream_trace_events
     raw_json String,
 
     -- Metadata
-    ingestion_timestamp DateTime DEFAULT now()
+    ingestion_timestamp DateTime64(3, 'UTC') DEFAULT now64(3)
 )
     ENGINE = MergeTree()
         PARTITION BY toYYYYMM(event_date)
@@ -296,7 +296,7 @@ CREATE TABLE IF NOT EXISTS network_capabilities
     raw_json String,
 
     -- Metadata
-    ingestion_timestamp DateTime DEFAULT now()
+    ingestion_timestamp DateTime64(3, 'UTC') DEFAULT now64(3)
 )
     ENGINE = ReplacingMergeTree(event_timestamp)
         PARTITION BY toYYYYMM(event_date)
@@ -325,7 +325,7 @@ CREATE TABLE IF NOT EXISTS ai_stream_events
     raw_json String,
 
     -- Metadata
-    ingestion_timestamp DateTime DEFAULT now()
+    ingestion_timestamp DateTime64(3, 'UTC') DEFAULT now64(3)
 )
     ENGINE = MergeTree()
         PARTITION BY toYYYYMM(event_date)
@@ -348,7 +348,7 @@ CREATE TABLE IF NOT EXISTS discovery_results
     raw_json String,
 
     -- Metadata
-    ingestion_timestamp DateTime DEFAULT now()
+    ingestion_timestamp DateTime64(3, 'UTC') DEFAULT now64(3)
 )
     ENGINE = MergeTree()
         PARTITION BY toYYYYMM(event_date)
@@ -386,7 +386,7 @@ CREATE TABLE IF NOT EXISTS payment_events
     raw_json String,
 
     -- Metadata
-    ingestion_timestamp DateTime DEFAULT now()
+    ingestion_timestamp DateTime64(3, 'UTC') DEFAULT now64(3)
 )
     ENGINE = MergeTree()
         PARTITION BY toYYYYMM(event_date)

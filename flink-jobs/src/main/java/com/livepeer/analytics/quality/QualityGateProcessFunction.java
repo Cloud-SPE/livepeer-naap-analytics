@@ -34,6 +34,8 @@ public class QualityGateProcessFunction extends ProcessFunction<KafkaInboundReco
     private transient Counter dlqCounter;
     private transient Meter inputRate;
     private transient Meter dlqRate;
+    private transient long lastDlqLogMs;
+    private transient long dlqSinceLastLog;
 
     public QualityGateProcessFunction(QualityGateConfig config, OutputTag<RejectedEventEnvelope> dlqTag) {
         this.config = config;
@@ -66,6 +68,10 @@ public class QualityGateProcessFunction extends ProcessFunction<KafkaInboundReco
         this.dlqCounter = metrics.counter("dlq");
         this.inputRate = metrics.meter("input_rate", new MeterView(inputCounter, (int) config.metricsRateWindow.getSeconds()));
         this.dlqRate = metrics.meter("dlq_rate", new MeterView(dlqCounter, (int) config.metricsRateWindow.getSeconds()));
+        this.lastDlqLogMs = System.currentTimeMillis();
+        this.dlqSinceLastLog = 0;
+        LOG.info("Quality gate initialized (supportedVersions={}, metricsWindowSec={})",
+                config.supportedVersions, config.metricsRateWindow.getSeconds());
     }
 
     @Override
@@ -145,6 +151,13 @@ public class QualityGateProcessFunction extends ProcessFunction<KafkaInboundReco
 
     private void emitDlq(Context ctx, RejectedEventEnvelope envelope) {
         dlqCounter.inc();
+        dlqSinceLastLog++;
+        long now = System.currentTimeMillis();
+        if (now - lastDlqLogMs >= 60000) {
+            LOG.warn("DLQ rate summary: {} rejects in last 60s", dlqSinceLastLog);
+            lastDlqLogMs = now;
+            dlqSinceLastLog = 0;
+        }
         ctx.output(dlqTag, envelope);
     }
 

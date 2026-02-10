@@ -54,7 +54,11 @@ public class ParsedEventRowGuardProcessFunction<T> extends ProcessFunction<Parse
                     LOG.warn("Dropping oversized row with no event context ({} bytes): {}", sizeBytes, details);
                 }
             } else {
-                LOG.warn("Dropping oversized row ({} bytes) for sink guard: {}", sizeBytes, details);
+                String eventId = value.event == null ? null : value.event.eventId;
+                String eventType = value.event == null ? null : value.event.eventType;
+                String dedupKey = value.event == null ? null : value.event.dedupKey;
+                LOG.warn("Dropping oversized row ({} bytes) for sink guard: {} (id={}, type={}, dedupKey={})",
+                        sizeBytes, details, eventId, eventType, dedupKey);
             }
             return;
         }

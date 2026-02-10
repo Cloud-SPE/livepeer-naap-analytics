@@ -34,7 +34,10 @@ public class EnvelopeRowGuardProcessFunction extends ProcessFunction<RejectedEve
             if (oversizeCounter != null) {
                 oversizeCounter.inc();
             }
-            LOG.warn("Dropping oversized DLQ row ({} bytes) for sink guard", sizeBytes);
+            String eventId = value.identity == null ? null : value.identity.eventId;
+            String eventType = value.identity == null ? null : value.identity.eventType;
+            LOG.warn("Dropping oversized DLQ row ({} bytes) for sink guard (id={}, type={})",
+                    sizeBytes, eventId, eventType);
             return;
         }
         out.collect(row);
