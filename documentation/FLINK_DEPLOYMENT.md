@@ -72,7 +72,7 @@ Execute the new JAR while pointing to the savepoint path retrieved in Step 2:
 curl -X POST http://YOUR_FLINK_SERVER:8081/jars/<new_jarid>/run \
      -H "Content-Type: application/json" \
      -d '{
-       "entryClass": "com.livepeer.analytics.StreamingEventsToClickHouse",
+       "entryClass": "com.livepeer.analytics.pipeline.StreamingEventsToClickHouse",
        "parallelism": 1,
        "savepointPath": "/opt/flink/storage/savepoints/<savepoint-id>"
      }'
