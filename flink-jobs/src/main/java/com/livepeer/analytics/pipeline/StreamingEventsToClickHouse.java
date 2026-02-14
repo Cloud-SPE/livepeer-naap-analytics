@@ -8,16 +8,23 @@ import org.apache.flink.connector.kafka.sink.KafkaRecordSerializationSchema;
 import org.apache.flink.connector.kafka.sink.KafkaSink;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
+import org.apache.flink.streaming.api.datastream.BroadcastStream;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.util.OutputTag;
 
+import com.livepeer.analytics.lifecycle.LifecycleSignal;
+import com.livepeer.analytics.lifecycle.CapabilityBroadcastState;
+import com.livepeer.analytics.lifecycle.WorkflowParamUpdateAggregatorFunction;
+import com.livepeer.analytics.lifecycle.WorkflowSessionAggregatorFunction;
+import com.livepeer.analytics.lifecycle.WorkflowSessionSegmentAggregatorFunction;
 import com.livepeer.analytics.model.EventPayloads;
 import com.livepeer.analytics.model.KafkaInboundRecord;
 import com.livepeer.analytics.model.ParsedEvent;
 import com.livepeer.analytics.model.RejectedEventEnvelope;
+import com.livepeer.analytics.model.StreamingEvent;
 import com.livepeer.analytics.parse.EventParsers;
 import com.livepeer.analytics.quality.DeduplicationProcessFunction;
 import com.livepeer.analytics.quality.QualityGateConfig;
@@ -29,7 +36,9 @@ import com.livepeer.analytics.sink.ClickHouseSinkFactory;
 import com.livepeer.analytics.sink.EnvelopeRowGuardProcessFunction;
 import com.livepeer.analytics.sink.ParsedEventRowGuardProcessFunction;
 import com.livepeer.analytics.sink.RowMapper;
+import com.livepeer.analytics.util.Hashing;
 import com.livepeer.analytics.util.JsonSupport;
+import com.livepeer.analytics.util.WorkflowSessionId;
 
 import java.util.List;
 
@@ -166,6 +175,49 @@ public class StreamingEventsToClickHouse {
                 new TypeHint<ParsedEvent<EventPayloads.PaymentEvent>>() {},
                 "Parse: Payments");
 
+        SingleOutputStreamOperator<LifecycleSignal> statusLifecycleSignals = aiStatusStream
+                .map(StreamingEventsToClickHouse::toLifecycleSignalFromStatus)
+                .returns(LifecycleSignal.class)
+                .name("Lifecycle Signal: AI Status");
+
+        SingleOutputStreamOperator<LifecycleSignal> traceLifecycleSignals = traceStream
+                .map(StreamingEventsToClickHouse::toLifecycleSignalFromTrace)
+                .returns(LifecycleSignal.class)
+                .name("Lifecycle Signal: Trace");
+
+        SingleOutputStreamOperator<LifecycleSignal> aiEventLifecycleSignals = aiEventsStream
+                .map(StreamingEventsToClickHouse::toLifecycleSignalFromAiEvent)
+                .returns(LifecycleSignal.class)
+                .name("Lifecycle Signal: AI Event");
+
+        DataStream<LifecycleSignal> lifecycleSignals = statusLifecycleSignals
+                .union(traceLifecycleSignals)
+                .union(aiEventLifecycleSignals);
+
+        BroadcastStream<ParsedEvent<EventPayloads.NetworkCapability>> capabilityBroadcast =
+                networkCapStream.broadcast(CapabilityBroadcastState.CAPABILITY_STATE_DESCRIPTOR);
+
+        SingleOutputStreamOperator<ParsedEvent<EventPayloads.FactWorkflowSession>> workflowSessionsStream = lifecycleSignals
+                .keyBy(signal -> signal.workflowSessionId)
+                .connect(capabilityBroadcast)
+                .process(new WorkflowSessionAggregatorFunction())
+                .returns(new TypeHint<ParsedEvent<EventPayloads.FactWorkflowSession>>() {})
+                .name("Sessionize: Workflow Sessions");
+
+        SingleOutputStreamOperator<ParsedEvent<EventPayloads.FactWorkflowSessionSegment>> workflowSessionSegmentsStream = lifecycleSignals
+                .keyBy(signal -> signal.workflowSessionId)
+                .connect(capabilityBroadcast)
+                .process(new WorkflowSessionSegmentAggregatorFunction())
+                .returns(new TypeHint<ParsedEvent<EventPayloads.FactWorkflowSessionSegment>>() {})
+                .name("Sessionize: Workflow Session Segments");
+
+        SingleOutputStreamOperator<ParsedEvent<EventPayloads.FactWorkflowParamUpdate>> workflowParamUpdatesStream = lifecycleSignals
+                .keyBy(signal -> signal.workflowSessionId)
+                .connect(capabilityBroadcast)
+                .process(new WorkflowParamUpdateAggregatorFunction())
+                .returns(new TypeHint<ParsedEvent<EventPayloads.FactWorkflowParamUpdate>>() {})
+                .name("Sessionize: Workflow Param Updates");
+
         DataStream<RejectedEventEnvelope> parseDlqStream = aiStatusStream.getSideOutput(DLQ_TAG)
                 .union(ingestMetricsStream.getSideOutput(DLQ_TAG))
                 .union(traceStream.getSideOutput(DLQ_TAG))
@@ -257,6 +309,30 @@ public class StreamingEventsToClickHouse {
                 "Rows: Payments",
                 true);
 
+        SingleOutputStreamOperator<String> workflowSessionRows = mapRowsWithGuard(
+                workflowSessionsStream,
+                ClickHouseRowMappers::factWorkflowSessionsRow,
+                DLQ_TAG,
+                config,
+                "Rows: Workflow Sessions",
+                true);
+
+        SingleOutputStreamOperator<String> workflowSessionSegmentRows = mapRowsWithGuard(
+                workflowSessionSegmentsStream,
+                ClickHouseRowMappers::factWorkflowSessionSegmentsRow,
+                DLQ_TAG,
+                config,
+                "Rows: Workflow Session Segments",
+                true);
+
+        SingleOutputStreamOperator<String> workflowParamUpdateRows = mapRowsWithGuard(
+                workflowParamUpdatesStream,
+                ClickHouseRowMappers::factWorkflowParamUpdatesRow,
+                DLQ_TAG,
+                config,
+                "Rows: Workflow Param Updates",
+                true);
+
         DataStream<RejectedEventEnvelope> guardDlqStream = aiStatusRows.getSideOutput(DLQ_TAG)
                 .union(ingestMetricsRows.getSideOutput(DLQ_TAG))
                 .union(traceRows.getSideOutput(DLQ_TAG))
@@ -266,7 +342,10 @@ public class StreamingEventsToClickHouse {
                 .union(networkCapsPriceRows.getSideOutput(DLQ_TAG))
                 .union(aiEventsRows.getSideOutput(DLQ_TAG))
                 .union(discoveryRows.getSideOutput(DLQ_TAG))
-                .union(paymentRows.getSideOutput(DLQ_TAG));
+                .union(paymentRows.getSideOutput(DLQ_TAG))
+                .union(workflowSessionRows.getSideOutput(DLQ_TAG))
+                .union(workflowSessionSegmentRows.getSideOutput(DLQ_TAG))
+                .union(workflowParamUpdateRows.getSideOutput(DLQ_TAG));
 
         // ClickHouse connector handles retry/backoff; sink failures surface as job failures, not per-record DLQ.
         sinkToClickHouse(aiStatusRows, config, "ai_stream_status", "CH: AI Status");
@@ -279,6 +358,9 @@ public class StreamingEventsToClickHouse {
         sinkToClickHouse(aiEventsRows, config, "ai_stream_events", "CH: AI Events");
         sinkToClickHouse(discoveryRows, config, "discovery_results", "CH: Discovery");
         sinkToClickHouse(paymentRows, config, "payment_events", "CH: Payments");
+        sinkToClickHouse(workflowSessionRows, config, "fact_workflow_sessions", "CH: Workflow Sessions");
+        sinkToClickHouse(workflowSessionSegmentRows, config, "fact_workflow_session_segments", "CH: Workflow Session Segments");
+        sinkToClickHouse(workflowParamUpdateRows, config, "fact_workflow_param_updates", "CH: Workflow Param Updates");
 
         // Centralized DLQ stream to feed Kafka and ClickHouse audit sinks.
         DataStream<RejectedEventEnvelope> dlqStream = qualityDlqStream.union(parseDlqStream).union(guardDlqStream);
@@ -368,6 +450,69 @@ public class StreamingEventsToClickHouse {
         return input.process(new EnvelopeRowGuardProcessFunction(
                 mapper,
                 config.clickhouseSinkMaxRecordSizeBytes)).returns(String.class).name(name);
+    }
+
+    private static LifecycleSignal toLifecycleSignalFromStatus(ParsedEvent<EventPayloads.AiStreamStatus> parsed) {
+        LifecycleSignal signal = new LifecycleSignal();
+        signal.signalType = LifecycleSignal.SignalType.STREAM_STATUS;
+        signal.workflowSessionId = WorkflowSessionId.from(parsed.payload.streamId, parsed.payload.requestId, parsed.event.eventId);
+        signal.signalTimestamp = parsed.payload.eventTimestamp;
+        signal.ingestTimestamp = parsed.event.timestamp;
+        signal.streamId = parsed.payload.streamId;
+        signal.requestId = parsed.payload.requestId;
+        signal.pipeline = parsed.payload.pipeline;
+        signal.pipelineId = parsed.payload.pipelineId;
+        signal.gateway = parsed.payload.gateway;
+        signal.orchestratorAddress = parsed.payload.orchestratorAddress;
+        signal.orchestratorUrl = parsed.payload.orchestratorUrl;
+        signal.startTimeMs = parsed.payload.startTime;
+        signal.sourceEventUid = sourceEventUid(parsed.event);
+        signal.sourceEvent = parsed.event;
+        return signal;
+    }
+
+    private static LifecycleSignal toLifecycleSignalFromTrace(ParsedEvent<EventPayloads.StreamTraceEvent> parsed) {
+        LifecycleSignal signal = new LifecycleSignal();
+        signal.signalType = LifecycleSignal.SignalType.STREAM_TRACE;
+        signal.workflowSessionId = WorkflowSessionId.from(parsed.payload.streamId, parsed.payload.requestId, parsed.event.eventId);
+        signal.signalTimestamp = parsed.payload.dataTimestamp > 0 ? parsed.payload.dataTimestamp : parsed.payload.eventTimestamp;
+        signal.ingestTimestamp = parsed.event.timestamp;
+        signal.streamId = parsed.payload.streamId;
+        signal.requestId = parsed.payload.requestId;
+        signal.pipelineId = parsed.payload.pipelineId;
+        signal.orchestratorAddress = parsed.payload.orchestratorAddress;
+        signal.orchestratorUrl = parsed.payload.orchestratorUrl;
+        signal.traceType = parsed.payload.traceType;
+        signal.sourceEventUid = sourceEventUid(parsed.event);
+        signal.sourceEvent = parsed.event;
+        return signal;
+    }
+
+    private static LifecycleSignal toLifecycleSignalFromAiEvent(ParsedEvent<EventPayloads.AiStreamEvent> parsed) {
+        LifecycleSignal signal = new LifecycleSignal();
+        signal.signalType = LifecycleSignal.SignalType.AI_STREAM_EVENT;
+        signal.workflowSessionId = WorkflowSessionId.from(parsed.payload.streamId, parsed.payload.requestId, parsed.event.eventId);
+        signal.signalTimestamp = parsed.payload.eventTimestamp;
+        signal.ingestTimestamp = parsed.event.timestamp;
+        signal.streamId = parsed.payload.streamId;
+        signal.requestId = parsed.payload.requestId;
+        signal.pipeline = parsed.payload.pipeline;
+        signal.pipelineId = parsed.payload.pipelineId;
+        signal.aiEventType = parsed.payload.eventType;
+        signal.message = parsed.payload.message;
+        signal.sourceEventUid = sourceEventUid(parsed.event);
+        signal.sourceEvent = parsed.event;
+        return signal;
+    }
+
+    private static String sourceEventUid(StreamingEvent event) {
+        if (event == null) {
+            return "";
+        }
+        if (event.eventId != null && !event.eventId.trim().isEmpty()) {
+            return event.eventId;
+        }
+        return Hashing.sha256Hex(event.rawJson == null ? "" : event.rawJson);
     }
 
     static class SafeParser<T> extends ProcessFunction<ValidatedEvent, ParsedEvent<T>> {

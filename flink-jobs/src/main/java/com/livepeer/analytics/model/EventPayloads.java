@@ -10,7 +10,7 @@ public final class EventPayloads {
         public String pipeline, pipelineId, state, paramsHash, lastError, promptText;
         public float outputFps, inputFps;
         public int restartCount, promptWidth, promptHeight;
-        public Long startTime;
+        public Long startTime, lastErrorTime;
         public String rawJson;
     }
 
@@ -99,6 +99,81 @@ public final class EventPayloads {
         public String requestId, sessionId, manifestId, sender, recipient, orchestrator;
         public String faceValue, price, numTickets, winProb, clientIp, capability;
         public String rawJson;
+    }
+
+    /**
+     * Stateful lifecycle fact at workflow-session grain.
+     */
+    public static class FactWorkflowSession implements java.io.Serializable {
+        private static final long serialVersionUID = 1L;
+
+        public String workflowSessionId, workflowType, workflowId;
+        public String streamId, requestId, sessionId, pipeline, pipelineId;
+        public String gateway, orchestratorAddress, orchestratorUrl;
+        public String modelId, gpuId, region;
+        public String attributionMethod;
+        public float attributionConfidence;
+
+        public long sessionStartTs;
+        public Long sessionEndTs;
+        public int knownStream, startupSuccess, startupExcused, startupUnexcused;
+        public int swapCount;
+        public long errorCount, excusableErrorCount;
+        public Long firstStreamRequestTs, firstProcessedTs, firstPlayableTs;
+        public long eventCount, version;
+        public String sourceFirstEventUid, sourceLastEventUid;
+    }
+
+    /**
+     * Stateful lifecycle segment fact at workflow-session + segment-index grain.
+     */
+    public static class FactWorkflowSessionSegment implements java.io.Serializable {
+        private static final long serialVersionUID = 1L;
+
+        public String workflowSessionId;
+        public int segmentIndex;
+        public long segmentStartTs;
+        public Long segmentEndTs;
+
+        public String gateway;
+        public String orchestratorAddress;
+        public String orchestratorUrl;
+        public String workerId;
+        public String gpuId;
+        public String modelId;
+        public String region;
+        public String attributionMethod;
+        public float attributionConfidence;
+
+        public String reason;
+        public String sourceTraceType;
+        public String sourceEventUid;
+        public long version;
+    }
+
+    /**
+     * Lifecycle marker for parameter updates (prompt/controlnet changes).
+     */
+    public static class FactWorkflowParamUpdate implements java.io.Serializable {
+        private static final long serialVersionUID = 1L;
+
+        public long updateTs;
+        public String workflowSessionId;
+        public String streamId;
+        public String requestId;
+        public String pipeline;
+        public String pipelineId;
+        public String gateway;
+        public String orchestratorAddress;
+        public String orchestratorUrl;
+        public String modelId;
+        public String gpuId;
+        public String attributionMethod;
+        public float attributionConfidence;
+        public String updateType;
+        public String message;
+        public String sourceEventUid;
+        public long version;
     }
 
 }

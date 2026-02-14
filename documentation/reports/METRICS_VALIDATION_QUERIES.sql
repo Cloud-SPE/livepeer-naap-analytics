@@ -469,3 +469,281 @@ FROM livepeer_analytics.stream_trace_events
 WHERE event_timestamp >= from_ts AND event_timestamp < to_ts
 GROUP BY trace_type
 ORDER BY cnt DESC;
+
+-- ============================================================
+-- Serving Layer Alignment Checks (Step 3)
+-- ============================================================
+
+-- 11) Rollup parity: performance rollup vs raw status facts
+-- Compares 1-minute avg output FPS from:
+--   A) fact_stream_status_samples
+--   B) v_api_gpu_metrics (backed by agg_stream_performance_1m)
+WITH
+  now64(3, 'UTC') AS to_ts,
+  to_ts - INTERVAL 24 HOUR AS from_ts,
+  raw AS (
+    SELECT
+      toStartOfInterval(sample_ts, INTERVAL 1 MINUTE) AS window_start,
+      orchestrator_address,
+      pipeline,
+      pipeline_id,
+      ifNull(model_id, '') AS model_id,
+      ifNull(gpu_id, '') AS gpu_id,
+      avg(output_fps) AS raw_avg_output_fps
+    FROM livepeer_analytics.fact_stream_status_samples
+    WHERE sample_ts >= from_ts AND sample_ts < to_ts
+    GROUP BY window_start, orchestrator_address, pipeline, pipeline_id, model_id, gpu_id
+  ),
+  api AS (
+    SELECT
+      window_start,
+      orchestrator_address,
+      pipeline,
+      pipeline_id,
+      ifNull(model_id, '') AS model_id,
+      ifNull(gpu_id, '') AS gpu_id,
+      avg_output_fps AS api_avg_output_fps
+    FROM livepeer_analytics.v_api_gpu_metrics
+    WHERE window_start >= from_ts AND window_start < to_ts
+  )
+SELECT
+  count() AS joined_rows,
+  avg(abs(raw.raw_avg_output_fps - api.api_avg_output_fps)) AS mean_abs_diff_fps,
+  max(abs(raw.raw_avg_output_fps - api.api_avg_output_fps)) AS max_abs_diff_fps
+FROM raw
+INNER JOIN api USING (window_start, orchestrator_address, pipeline, pipeline_id, model_id, gpu_id);
+
+-- 12) Rollup parity: reliability rollup vs raw workflow sessions
+-- Compares known/unexcused/swapped session counts at 1-hour grain.
+WITH
+  now64(3, 'UTC') AS to_ts,
+  to_ts - INTERVAL 24 HOUR AS from_ts,
+  raw AS (
+    SELECT
+      toStartOfInterval(session_start_ts, INTERVAL 1 HOUR) AS window_start,
+      orchestrator_address,
+      pipeline,
+      pipeline_id,
+      ifNull(model_id, '') AS model_id,
+      ifNull(gpu_id, '') AS gpu_id,
+      sum(toUInt64(known_stream)) AS raw_known_sessions,
+      sum(toUInt64(startup_unexcused)) AS raw_unexcused_sessions,
+      sum(toUInt64(swap_count > 0)) AS raw_swapped_sessions
+    FROM livepeer_analytics.fact_workflow_sessions FINAL
+    WHERE session_start_ts >= from_ts AND session_start_ts < to_ts
+    GROUP BY window_start, orchestrator_address, pipeline, pipeline_id, model_id, gpu_id
+  ),
+  api AS (
+    SELECT
+      window_start,
+      orchestrator_address,
+      pipeline,
+      pipeline_id,
+      ifNull(model_id, '') AS model_id,
+      ifNull(gpu_id, '') AS gpu_id,
+      known_sessions,
+      unexcused_sessions,
+      swapped_sessions
+    FROM livepeer_analytics.v_api_sla_compliance
+    WHERE window_start >= from_ts AND window_start < to_ts
+  )
+SELECT
+  count() AS joined_rows,
+  sum(abs(raw.raw_known_sessions - api.known_sessions)) AS total_known_diff,
+  sum(abs(raw.raw_unexcused_sessions - api.unexcused_sessions)) AS total_unexcused_diff,
+  sum(abs(raw.raw_swapped_sessions - api.swapped_sessions)) AS total_swapped_diff
+FROM raw
+INNER JOIN api USING (window_start, orchestrator_address, pipeline, pipeline_id, model_id, gpu_id);
+
+-- 13) API view sanity: null/empty key coverage for serving dimensions
+WITH
+  now64(3, 'UTC') AS to_ts,
+  to_ts - INTERVAL 24 HOUR AS from_ts
+SELECT
+  'v_api_gpu_metrics' AS view_name,
+  count() AS rows_total,
+  countIf(orchestrator_address = '' OR orchestrator_address IS NULL) AS rows_missing_orchestrator,
+  countIf(pipeline = '' OR pipeline IS NULL) AS rows_missing_pipeline
+FROM livepeer_analytics.v_api_gpu_metrics
+WHERE window_start >= from_ts AND window_start < to_ts
+UNION ALL
+SELECT
+  'v_api_network_demand' AS view_name,
+  count() AS rows_total,
+  countIf(gateway = '' OR gateway IS NULL) AS rows_missing_gateway,
+  countIf(pipeline = '' OR pipeline IS NULL) AS rows_missing_pipeline
+FROM livepeer_analytics.v_api_network_demand
+WHERE window_start >= from_ts AND window_start < to_ts
+UNION ALL
+SELECT
+  'v_api_sla_compliance' AS view_name,
+  count() AS rows_total,
+  countIf(orchestrator_address = '' OR orchestrator_address IS NULL) AS rows_missing_orchestrator,
+  countIf(pipeline = '' OR pipeline IS NULL) AS rows_missing_pipeline
+FROM livepeer_analytics.v_api_sla_compliance
+WHERE window_start >= from_ts AND window_start < to_ts;
+
+
+=================== SCHEMA VALIDATION QUERIES ===================
+-- Acceptance checks (last 24h UTC)
+WITH
+  now64(3, 'UTC') AS to_ts,
+  to_ts - INTERVAL 24 HOUR AS from_ts
+
+-- 1) Sessions: total rows vs unique session ids vs latest-version sessions
+SELECT
+  count() AS rows_total,
+  uniqExact(workflow_session_id) AS sessions_unique,
+  countIf(version = max_version) AS latest_rows
+FROM (
+  SELECT
+    workflow_session_id,
+    version,
+    max(version) OVER (PARTITION BY workflow_session_id) AS max_version
+  FROM livepeer_analytics.fact_workflow_sessions
+  WHERE session_start_ts >= from_ts AND session_start_ts < to_ts
+);
+
+-- 2) Session classification distribution (latest row per session)
+WITH
+  now64(3, 'UTC') AS to_ts,
+  to_ts - INTERVAL 24 HOUR AS from_ts
+SELECT
+  startup_success,
+  startup_excused,
+  startup_unexcused,
+  count() AS sessions
+FROM (
+  SELECT
+    workflow_session_id,
+    argMax(startup_success, version) AS startup_success,
+    argMax(startup_excused, version) AS startup_excused,
+    argMax(startup_unexcused, version) AS startup_unexcused
+  FROM livepeer_analytics.fact_workflow_sessions
+  WHERE session_start_ts >= from_ts AND session_start_ts < to_ts
+  GROUP BY workflow_session_id
+)
+GROUP BY startup_success, startup_excused, startup_unexcused
+ORDER BY sessions DESC;
+
+-- 3) Swap distribution (latest row per session)
+WITH
+  now64(3, 'UTC') AS to_ts,
+  to_ts - INTERVAL 24 HOUR AS from_ts
+SELECT
+  count() AS sessions_total,
+  countIf(swap_count > 0) AS sessions_with_swaps,
+  countIf(swap_count > 0) / nullIf(count(), 0) AS swap_rate
+FROM (
+  SELECT
+    workflow_session_id,
+    argMax(swap_count, version) AS swap_count
+  FROM livepeer_analytics.fact_workflow_sessions
+  WHERE session_start_ts >= from_ts AND session_start_ts < to_ts
+  GROUP BY workflow_session_id
+);
+
+-- 4) Segment counts per session
+WITH
+  now64(3, 'UTC') AS to_ts,
+  to_ts - INTERVAL 24 HOUR AS from_ts
+SELECT
+  quantileExact(0.5)(segment_count) AS p50_segments,
+  quantileExact(0.95)(segment_count) AS p95_segments,
+  max(segment_count) AS max_segments
+FROM (
+  SELECT
+    workflow_session_id,
+    uniqExact(segment_index) AS segment_count
+  FROM livepeer_analytics.fact_workflow_session_segments
+  WHERE segment_start_ts >= from_ts AND segment_start_ts < to_ts
+  GROUP BY workflow_session_id
+);
+
+-- 5) Segment close quality
+WITH
+  now64(3, 'UTC') AS to_ts,
+  to_ts - INTERVAL 24 HOUR AS from_ts
+SELECT
+  count() AS segment_rows,
+  countIf(segment_end_ts IS NOT NULL) AS segment_closed_rows,
+  countIf(segment_end_ts IS NULL) AS segment_open_rows
+FROM livepeer_analytics.fact_workflow_session_segments
+WHERE segment_start_ts >= from_ts AND segment_start_ts < to_ts;
+
+-- 6) Param update marker counts
+WITH
+  now64(3, 'UTC') AS to_ts,
+  to_ts - INTERVAL 24 HOUR AS from_ts
+SELECT
+  count() AS param_update_rows,
+  uniqExact(workflow_session_id) AS sessions_with_param_updates
+FROM livepeer_analytics.fact_workflow_param_updates
+WHERE update_ts >= from_ts AND update_ts < to_ts;
+
+-- 7) Param updates by model/gpu
+WITH
+  now64(3, 'UTC') AS to_ts,
+  to_ts - INTERVAL 24 HOUR AS from_ts
+SELECT
+  ifNull(model_id, '_null') AS model_id,
+  ifNull(gpu_id, '_null') AS gpu_id,
+  count() AS updates
+FROM livepeer_analytics.fact_workflow_param_updates
+WHERE update_ts >= from_ts AND update_ts < to_ts
+GROUP BY model_id, gpu_id
+ORDER BY updates DESC
+LIMIT 50;
+
+-- 8) Attribution coverage (latest row per session)
+WITH
+  now64(3, 'UTC') AS to_ts,
+  to_ts - INTERVAL 24 HOUR AS from_ts
+SELECT
+  count() AS sessions_total,
+  countIf(model_id IS NOT NULL AND model_id != '') AS sessions_with_model,
+  countIf(gpu_id IS NOT NULL AND gpu_id != '') AS sessions_with_gpu,
+  countIf(attribution_method != 'none') AS sessions_with_attribution,
+  countIf(model_id IS NOT NULL AND model_id != '') / nullIf(count(),0) AS model_coverage,
+  countIf(gpu_id IS NOT NULL AND gpu_id != '') / nullIf(count(),0) AS gpu_coverage
+FROM (
+  SELECT
+    workflow_session_id,
+    argMax(model_id, version) AS model_id,
+    argMax(gpu_id, version) AS gpu_id,
+    argMax(attribution_method, version) AS attribution_method
+  FROM livepeer_analytics.fact_workflow_sessions
+  WHERE session_start_ts >= from_ts AND session_start_ts < to_ts
+  GROUP BY workflow_session_id
+);
+
+-- 9) Session vs segment consistency (orchestrator changes vs segment count)
+WITH
+  now64(3, 'UTC') AS to_ts,
+  to_ts - INTERVAL 24 HOUR AS from_ts
+SELECT
+  count() AS sessions_checked,
+  countIf(seg_cnt > 1) AS sessions_multi_segment,
+  countIf(session_swap_count > 0 AND seg_cnt = 1) AS swap_without_segment_change
+FROM (
+  SELECT
+    s.workflow_session_id,
+    s.session_swap_count,
+    ifNull(g.seg_cnt, 0) AS seg_cnt
+  FROM (
+    SELECT
+      workflow_session_id,
+      argMax(swap_count, version) AS session_swap_count
+    FROM livepeer_analytics.fact_workflow_sessions
+    WHERE session_start_ts >= from_ts AND session_start_ts < to_ts
+    GROUP BY workflow_session_id
+  ) s
+  LEFT JOIN (
+    SELECT
+      workflow_session_id,
+      uniqExact(segment_index) AS seg_cnt
+    FROM livepeer_analytics.fact_workflow_session_segments
+    WHERE segment_start_ts >= from_ts AND segment_start_ts < to_ts
+    GROUP BY workflow_session_id
+  ) g USING (workflow_session_id)
+);

@@ -50,12 +50,13 @@ The below are the metrics we need to be able to create.
 6. Aggregate tables (rollups)
 - Define rollups (5s/1m/1h) on curated facts
 - Specify join-back keys to facts/raw for drill-through
-- Status: pending
+- Status: in progress
 
 7. ClickHouse schema/migrations
 - Deterministic migration order
 - DDL for lifecycle tables, facts, rollups, dictionary sources
 - Status: in progress
+ - Decision: single authoritative schema init file (`configs/clickhouse-init/01-schema.sql`) until multi-env migration versioning is needed.
 
 8. Flink enrichment and sessionization
 - Implement deterministic enrichment rules
@@ -73,7 +74,13 @@ The below are the metrics we need to be able to create.
 - Health checks (MV lag, dictionary freshness, data freshness)
 - Unit/integration tests
 - Documentation updates
-- Status: pending
+- Status: in progress
+
+11. Documentation consolidation
+- Consolidate design + runbook + schema + metric contracts into standardized docs
+- Remove overlaps between scratchpad and final design docs
+- Add end-to-end data flow narrative for Kafka -> Flink -> ClickHouse -> API/Dashboard
+- Status: in progress
 
 ## Implementation Progress (Current)
 
@@ -87,11 +94,23 @@ The below are the metrics we need to be able to create.
     - `mv_stream_trace_events_to_fact_stream_trace_edges`
     - `mv_stream_ingest_metrics_to_fact_stream_ingest_samples`
   - Added design split documentation: `documentation/PIPELINE_EXECUTION_SPLIT.md`
+  - Started consolidated documentation set (legacy notes preserved):
+    - `documentation/final/README.md`
+    - `documentation/final/01_SYSTEM_ARCHITECTURE.md`
+    - `documentation/final/02_DATA_FLOW_AND_PROCESSING.md`
+    - `documentation/final/03_SCHEMA_AND_SERVING_MODEL.md`
+    - `documentation/final/04_METRIC_CONTRACTS_AND_VALIDATION.md`
+    - `documentation/final/05_OPERATIONS_AND_RELEASE.md`
 - In progress:
   - Stateful fact emission and sessionization operators in Flink:
-    - `fact_workflow_sessions`
-    - `fact_workflow_session_segments`
+    - `fact_workflow_sessions` (implemented first pass: keyed session state + capability broadcast enrichment + sink wiring)
+    - `fact_workflow_session_segments` (implemented first pass: orchestrator-change boundaries + close-on-next-start/explicit-close + sink wiring)
+    - `fact_workflow_param_updates` (implemented first pass: emits `params_update` lifecycle markers for before/after KPI analysis)
   - ClickHouse derived `dim_orchestrator_capability_current` roll-forward validation.
+  - Serving layer parity validation (`agg_*` and `v_api_*`) in query pack.
+  - Reliability serving correction:
+    - `v_api_sla_compliance` switched to `fact_workflow_sessions FINAL` to avoid double counting versioned upserts.
+    - Added epoch guard on `session_start_ts` to prevent `1970-01-01` artifact rows.
 
 ## Notes
 
@@ -100,6 +119,31 @@ The below are the metrics we need to be able to create.
 - Dictionaries should be fed from data-driven sources, not static config files.
 - The data we are focused on is for Live Video AI streams from Livepeer.  The other paths for data processing in livepeer includes BYOC and batch AI jobs. We will need to report metrics on these someday.
 - We should add some tables or views that aggregate key network wide information (e.g. GPU inventory, known Orchestrators by job type, known Gateways, etc)
+- Technical debt (deferred by design):
+  - Keep current explicit `ClickHouseRowMappers` during medallion implementation.
+  - Revisit `TableSpec`-driven generic row mapping after lifecycle facts are live to reduce mapper boilerplate and schema drift risk.
+- Lifecycle implementation spec:
+  - `documentation/WORKFLOW_LIFECYCLE_EDGE_SPEC.md` is the canonical edge/session/classification contract.
+  - Fill all `TODO (User Clarification)` items there before implementing stateful lifecycle operators.
+- TODO (next metric rollout):
+  - Add `param_update_failure_rate` rollup and serving view.
+  - Proposed failure outcome classes per `params_update`: `failed_update_params`, `no_playback_stuck_state`, `no_playback_unknown`.
+  - Proposed formula: `failed_updates / total_param_updates` over 120s post-update window.
+  - Proposed serving objects: `agg_param_update_reliability_1m` and `v_api_param_update_reliability`.
+- TODO (test coverage expansion):
+  - Add integration-style operator tests for keyed + broadcast lifecycle functions:
+    - session aggregator (capability map changes over time)
+    - segment aggregator (boundary transition + close edge)
+    - param update aggregator (marker emission + attribution join)
+  - Add regression tests for canonical swap fallback to prevent hot/cold address drift.
+  - Added state machine regression coverage:
+    - classification precedence (`success` over excused signals)
+    - non-boundary signal handling for segment stability
+- TODO (maintainer comments):
+  - Add additional method-level Javadocs in state machines for:
+    - classification precedence and expected invariants
+    - segment boundary rationale and non-boundary fields
+    - attribution confidence tiers and TTL behavior
 
 ## Metric Validation Inputs (In Progress)
 

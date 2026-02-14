@@ -233,6 +233,93 @@ class ClickHouseSchemaSyncTest {
     }
 
     @Test
+    void factWorkflowSessionsRowMatchesSchema() throws Exception {
+        EventPayloads.FactWorkflowSession payload = new EventPayloads.FactWorkflowSession();
+        payload.workflowSessionId = "stream|request";
+        payload.workflowType = "ai_live_video_stream";
+        payload.workflowId = "live-video-to-video";
+        payload.streamId = "stream";
+        payload.requestId = "request";
+        payload.sessionId = "";
+        payload.pipeline = "live-video-to-video";
+        payload.pipelineId = "";
+        payload.gateway = "gateway-1";
+        payload.orchestratorAddress = "0xorch";
+        payload.orchestratorUrl = "https://orch";
+        payload.modelId = "streamdiffusion-sdxl";
+        payload.gpuId = "GPU-1";
+        payload.region = null;
+        payload.attributionMethod = "nearest_prior_snapshot";
+        payload.attributionConfidence = 0.9f;
+        payload.sessionStartTs = 1710000000000L;
+        payload.sessionEndTs = 1710000005000L;
+        payload.knownStream = 1;
+        payload.startupSuccess = 1;
+        payload.startupExcused = 0;
+        payload.startupUnexcused = 0;
+        payload.swapCount = 0;
+        payload.errorCount = 0L;
+        payload.excusableErrorCount = 0L;
+        payload.firstStreamRequestTs = 1710000000000L;
+        payload.firstProcessedTs = 1710000002000L;
+        payload.firstPlayableTs = 1710000003000L;
+        payload.eventCount = 5L;
+        payload.version = 5L;
+        payload.sourceFirstEventUid = "e1";
+        payload.sourceLastEventUid = "e2";
+
+        assertRowMatchesTable("fact_workflow_sessions", ClickHouseRowMappers.factWorkflowSessionsRow(payload));
+    }
+
+    @Test
+    void factWorkflowSessionSegmentsRowMatchesSchema() throws Exception {
+        EventPayloads.FactWorkflowSessionSegment payload = new EventPayloads.FactWorkflowSessionSegment();
+        payload.workflowSessionId = "stream|request";
+        payload.segmentIndex = 1;
+        payload.segmentStartTs = 1710000000000L;
+        payload.segmentEndTs = 1710000005000L;
+        payload.gateway = "gateway-1";
+        payload.orchestratorAddress = "0xorch";
+        payload.orchestratorUrl = "https://orch";
+        payload.workerId = null;
+        payload.gpuId = "GPU-1";
+        payload.modelId = "streamdiffusion-sdxl";
+        payload.region = null;
+        payload.attributionMethod = "nearest_prior_snapshot";
+        payload.attributionConfidence = 0.9f;
+        payload.reason = "orchestrator_change";
+        payload.sourceTraceType = "orchestrator_swap";
+        payload.sourceEventUid = "e2";
+        payload.version = 2L;
+
+        assertRowMatchesTable("fact_workflow_session_segments", ClickHouseRowMappers.factWorkflowSessionSegmentsRow(payload));
+    }
+
+    @Test
+    void factWorkflowParamUpdatesRowMatchesSchema() throws Exception {
+        EventPayloads.FactWorkflowParamUpdate payload = new EventPayloads.FactWorkflowParamUpdate();
+        payload.updateTs = 1710000000000L;
+        payload.workflowSessionId = "stream|request";
+        payload.streamId = "stream";
+        payload.requestId = "request";
+        payload.pipeline = "streamdiffusion-sdxl";
+        payload.pipelineId = "";
+        payload.gateway = "gateway-1";
+        payload.orchestratorAddress = "0xorch";
+        payload.orchestratorUrl = "https://orch";
+        payload.modelId = "streamdiffusion-sdxl";
+        payload.gpuId = "GPU-1";
+        payload.attributionMethod = "nearest_prior_snapshot";
+        payload.attributionConfidence = 0.9f;
+        payload.updateType = "params_update";
+        payload.message = "updated prompt";
+        payload.sourceEventUid = "e3";
+        payload.version = 3L;
+
+        assertRowMatchesTable("fact_workflow_param_updates", ClickHouseRowMappers.factWorkflowParamUpdatesRow(payload));
+    }
+
+    @Test
     void dlqRowMatchesSchema() throws Exception {
         RejectedEventEnvelope envelope = new RejectedEventEnvelope();
         envelope.schemaVersion = "v1";

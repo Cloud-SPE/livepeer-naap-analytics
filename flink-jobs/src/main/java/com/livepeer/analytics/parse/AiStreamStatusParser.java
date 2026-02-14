@@ -35,6 +35,7 @@ final class AiStreamStatusParser {
         status.outputFps = (float) inferStatus.path("fps").asDouble(0.0);
         status.restartCount = inferStatus.path("restart_count").asInt(0);
         status.lastError = JsonNodeUtils.asNullableText(inferStatus.path("last_error"));
+        status.lastErrorTime = JsonNodeUtils.parseTimestampMillis(inferStatus.path("last_error_time"));
         status.paramsHash = inferStatus.path("last_params_hash").asText("");
 
         JsonNode lastParams = inferStatus.path("last_params");
