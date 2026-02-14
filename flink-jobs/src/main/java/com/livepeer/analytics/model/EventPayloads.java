@@ -37,11 +37,44 @@ public final class EventPayloads {
     public static class NetworkCapability implements java.io.Serializable {
         private static final long serialVersionUID = 1L;
         public long eventTimestamp;
+        public String sourceEventId;
         public String orchestratorAddress, localAddress, orchUri, gpuId, gpuName;
         public String pipeline, modelId, runnerVersion, orchestratorVersion;
+        public Integer capabilityId;
+        public String capabilityName, capabilityGroup, capabilityCatalogVersion;
         public Long gpuMemoryTotal, gpuMemoryFree;
         public Integer gpuMajor, gpuMinor, capacity, capacityInUse, pricePerUnit, pixelsPerUnit;
         public Integer warm;
+        public String rawJson;
+    }
+
+    public static class NetworkCapabilityAdvertised implements java.io.Serializable {
+        private static final long serialVersionUID = 1L;
+        public long eventTimestamp;
+        public String sourceEventId;
+        public String orchestratorAddress, localAddress, orchUri;
+        public Integer capabilityId, capacity;
+        public String capabilityName, capabilityGroup, capabilityCatalogVersion;
+        public String rawJson;
+    }
+
+    public static class NetworkCapabilityModelConstraint implements java.io.Serializable {
+        private static final long serialVersionUID = 1L;
+        public long eventTimestamp;
+        public String sourceEventId;
+        public String orchestratorAddress, localAddress, orchUri;
+        public Integer capabilityId, capacity, capacityInUse, warm;
+        public String capabilityName, capabilityGroup, capabilityCatalogVersion, modelId, runnerVersion;
+        public String rawJson;
+    }
+
+    public static class NetworkCapabilityPrice implements java.io.Serializable {
+        private static final long serialVersionUID = 1L;
+        public long eventTimestamp;
+        public String sourceEventId;
+        public String orchestratorAddress, localAddress, orchUri;
+        public Integer capabilityId, pricePerUnit, pixelsPerUnit;
+        public String capabilityName, capabilityGroup, capabilityCatalogVersion, constraint;
         public String rawJson;
     }
 
@@ -67,4 +100,5 @@ public final class EventPayloads {
         public String faceValue, price, numTickets, winProb, clientIp, capability;
         public String rawJson;
     }
+
 }

@@ -30,8 +30,45 @@ class EventParsersTest {
         List<EventPayloads.NetworkCapability> results = EventParsers.parseNetworkCapabilities(event);
 
         assertEquals(5, results.size());
-        assertTrue(results.stream().anyMatch(r -> "0x9D61ae5875E89036FBf6059f3116d01a22ACe3C8".equals(r.orchestratorAddress)));
+        assertTrue(results.stream().anyMatch(r -> "0x9d61ae5875e89036fbf6059f3116d01a22ace3c8".equals(r.orchestratorAddress)));
         assertTrue(results.stream().anyMatch(r -> "NVIDIA GeForce RTX 4090".equals(r.gpuName)));
+        assertTrue(results.stream().anyMatch(r -> Integer.valueOf(35).equals(r.capabilityId)));
+        assertTrue(results.stream().anyMatch(r -> "Live video to video".equals(r.capabilityName)));
+    }
+
+    @Test
+    void networkCapabilitiesEmitsAdvertisedCapabilities() throws Exception {
+        String rawJson = new String(
+            EventParsersTest.class.getClassLoader().getResourceAsStream("net_caps.json").readAllBytes(),
+            java.nio.charset.StandardCharsets.UTF_8
+        );
+        JsonNode root = JsonSupport.MAPPER.readTree(rawJson);
+
+        ValidatedEvent event = buildValidatedEvent(root, rawJson);
+        List<EventPayloads.NetworkCapabilityAdvertised> results = EventParsers.parseNetworkCapabilitiesAdvertised(event);
+
+        assertFalse(results.isEmpty());
+        assertTrue(results.stream().anyMatch(r -> Integer.valueOf(35).equals(r.capabilityId)));
+        assertTrue(results.stream().anyMatch(r -> "Live video to video".equals(r.capabilityName)));
+        assertTrue(results.stream().anyMatch(r -> "transcoding".equals(r.capabilityGroup)));
+    }
+
+    @Test
+    void networkCapabilitiesEmitsModelConstraintsAndPrices() throws Exception {
+        String rawJson = new String(
+            EventParsersTest.class.getClassLoader().getResourceAsStream("net_caps.json").readAllBytes(),
+            java.nio.charset.StandardCharsets.UTF_8
+        );
+        JsonNode root = JsonSupport.MAPPER.readTree(rawJson);
+
+        ValidatedEvent event = buildValidatedEvent(root, rawJson);
+        List<EventPayloads.NetworkCapabilityModelConstraint> constraints = EventParsers.parseNetworkCapabilitiesModelConstraints(event);
+        List<EventPayloads.NetworkCapabilityPrice> prices = EventParsers.parseNetworkCapabilitiesPrices(event);
+
+        assertFalse(constraints.isEmpty());
+        assertTrue(constraints.stream().anyMatch(r -> "streamdiffusion-sdxl".equals(r.modelId)));
+        assertFalse(prices.isEmpty());
+        assertTrue(prices.stream().anyMatch(r -> Integer.valueOf(2149).equals(r.pricePerUnit)));
     }
 
     @Test

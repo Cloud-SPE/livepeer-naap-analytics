@@ -118,6 +118,30 @@ public class StreamingEventsToClickHouse {
                 new TypeHint<ParsedEvent<EventPayloads.NetworkCapability>>() {},
                 "Parse: Network Caps");
 
+        SingleOutputStreamOperator<ParsedEvent<EventPayloads.NetworkCapabilityAdvertised>> networkCapAdvertisedStream = parseEvents(
+                dedupedStream,
+                "network_capabilities",
+                EventParsers::parseNetworkCapabilitiesAdvertised,
+                DLQ_TAG,
+                new TypeHint<ParsedEvent<EventPayloads.NetworkCapabilityAdvertised>>() {},
+                "Parse: Network Caps Advertised");
+
+        SingleOutputStreamOperator<ParsedEvent<EventPayloads.NetworkCapabilityModelConstraint>> networkCapModelConstraintStream = parseEvents(
+                dedupedStream,
+                "network_capabilities",
+                EventParsers::parseNetworkCapabilitiesModelConstraints,
+                DLQ_TAG,
+                new TypeHint<ParsedEvent<EventPayloads.NetworkCapabilityModelConstraint>>() {},
+                "Parse: Network Caps Model Constraints");
+
+        SingleOutputStreamOperator<ParsedEvent<EventPayloads.NetworkCapabilityPrice>> networkCapPriceStream = parseEvents(
+                dedupedStream,
+                "network_capabilities",
+                EventParsers::parseNetworkCapabilitiesPrices,
+                DLQ_TAG,
+                new TypeHint<ParsedEvent<EventPayloads.NetworkCapabilityPrice>>() {},
+                "Parse: Network Caps Prices");
+
         SingleOutputStreamOperator<ParsedEvent<EventPayloads.AiStreamEvent>> aiEventsStream = parseEvents(
                 dedupedStream,
                 "ai_stream_events",
@@ -146,6 +170,9 @@ public class StreamingEventsToClickHouse {
                 .union(ingestMetricsStream.getSideOutput(DLQ_TAG))
                 .union(traceStream.getSideOutput(DLQ_TAG))
                 .union(networkCapStream.getSideOutput(DLQ_TAG))
+                .union(networkCapAdvertisedStream.getSideOutput(DLQ_TAG))
+                .union(networkCapModelConstraintStream.getSideOutput(DLQ_TAG))
+                .union(networkCapPriceStream.getSideOutput(DLQ_TAG))
                 .union(aiEventsStream.getSideOutput(DLQ_TAG))
                 .union(discoveryStream.getSideOutput(DLQ_TAG))
                 .union(paymentStream.getSideOutput(DLQ_TAG));
@@ -182,6 +209,30 @@ public class StreamingEventsToClickHouse {
                 "Rows: Network Caps",
                 true);
 
+        SingleOutputStreamOperator<String> networkCapsAdvertisedRows = mapRowsWithGuard(
+                networkCapAdvertisedStream,
+                ClickHouseRowMappers::networkCapabilitiesAdvertisedRow,
+                DLQ_TAG,
+                config,
+                "Rows: Network Caps Advertised",
+                true);
+
+        SingleOutputStreamOperator<String> networkCapsModelConstraintRows = mapRowsWithGuard(
+                networkCapModelConstraintStream,
+                ClickHouseRowMappers::networkCapabilitiesModelConstraintsRow,
+                DLQ_TAG,
+                config,
+                "Rows: Network Caps Model Constraints",
+                true);
+
+        SingleOutputStreamOperator<String> networkCapsPriceRows = mapRowsWithGuard(
+                networkCapPriceStream,
+                ClickHouseRowMappers::networkCapabilitiesPricesRow,
+                DLQ_TAG,
+                config,
+                "Rows: Network Caps Prices",
+                true);
+
         SingleOutputStreamOperator<String> aiEventsRows = mapRowsWithGuard(
                 aiEventsStream,
                 ClickHouseRowMappers::aiStreamEventsRow,
@@ -210,6 +261,9 @@ public class StreamingEventsToClickHouse {
                 .union(ingestMetricsRows.getSideOutput(DLQ_TAG))
                 .union(traceRows.getSideOutput(DLQ_TAG))
                 .union(networkCapsRows.getSideOutput(DLQ_TAG))
+                .union(networkCapsAdvertisedRows.getSideOutput(DLQ_TAG))
+                .union(networkCapsModelConstraintRows.getSideOutput(DLQ_TAG))
+                .union(networkCapsPriceRows.getSideOutput(DLQ_TAG))
                 .union(aiEventsRows.getSideOutput(DLQ_TAG))
                 .union(discoveryRows.getSideOutput(DLQ_TAG))
                 .union(paymentRows.getSideOutput(DLQ_TAG));
@@ -219,6 +273,9 @@ public class StreamingEventsToClickHouse {
         sinkToClickHouse(ingestMetricsRows, config, "stream_ingest_metrics", "CH: Ingest Metrics");
         sinkToClickHouse(traceRows, config, "stream_trace_events", "CH: Trace Events");
         sinkToClickHouse(networkCapsRows, config, "network_capabilities", "CH: Network Caps");
+        sinkToClickHouse(networkCapsAdvertisedRows, config, "network_capabilities_advertised", "CH: Network Caps Advertised");
+        sinkToClickHouse(networkCapsModelConstraintRows, config, "network_capabilities_model_constraints", "CH: Network Caps Model Constraints");
+        sinkToClickHouse(networkCapsPriceRows, config, "network_capabilities_prices", "CH: Network Caps Prices");
         sinkToClickHouse(aiEventsRows, config, "ai_stream_events", "CH: AI Events");
         sinkToClickHouse(discoveryRows, config, "discovery_results", "CH: Discovery");
         sinkToClickHouse(paymentRows, config, "payment_events", "CH: Payments");

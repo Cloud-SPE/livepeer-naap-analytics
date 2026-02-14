@@ -77,6 +77,7 @@ public final class ClickHouseRowMappers {
     public static String networkCapabilitiesRow(EventPayloads.NetworkCapability n) {
         return ClickHouseJsonRow.create()
                 .addTimestampMillis("event_timestamp", n.eventTimestamp)
+                .addString("source_event_id", n.sourceEventId)
                 .addString("orchestrator_address", n.orchestratorAddress)
                 .addString("local_address", n.localAddress)
                 .addString("orch_uri", n.orchUri)
@@ -88,6 +89,10 @@ public final class ClickHouseRowMappers {
                 .addNullableInt("gpu_minor", n.gpuMinor)
                 .addString("pipeline", n.pipeline)
                 .addString("model_id", n.modelId)
+                .addNullableInt("capability_id", n.capabilityId)
+                .addNullableString("capability_name", n.capabilityName)
+                .addNullableString("capability_group", n.capabilityGroup)
+                .addNullableString("capability_catalog_version", n.capabilityCatalogVersion)
                 .addNullableString("runner_version", n.runnerVersion)
                 .addNullableInt("capacity", n.capacity)
                 .addNullableInt("capacity_in_use", n.capacityInUse)
@@ -95,6 +100,60 @@ public final class ClickHouseRowMappers {
                 .addNullableInt("price_per_unit", n.pricePerUnit)
                 .addNullableInt("pixels_per_unit", n.pixelsPerUnit)
                 .addString("orchestrator_version", n.orchestratorVersion)
+                .addString("raw_json", n.rawJson)
+                .build();
+    }
+
+    public static String networkCapabilitiesAdvertisedRow(EventPayloads.NetworkCapabilityAdvertised n) {
+        return ClickHouseJsonRow.create()
+                .addTimestampMillis("event_timestamp", n.eventTimestamp)
+                .addString("source_event_id", n.sourceEventId)
+                .addString("orchestrator_address", n.orchestratorAddress)
+                .addString("local_address", n.localAddress)
+                .addString("orch_uri", n.orchUri)
+                .addInt("capability_id", n.capabilityId == null ? -1 : n.capabilityId)
+                .addString("capability_name", n.capabilityName)
+                .addString("capability_group", n.capabilityGroup)
+                .addString("capability_catalog_version", n.capabilityCatalogVersion)
+                .addNullableInt("capacity", n.capacity)
+                .addString("raw_json", n.rawJson)
+                .build();
+    }
+
+    public static String networkCapabilitiesModelConstraintsRow(EventPayloads.NetworkCapabilityModelConstraint n) {
+        return ClickHouseJsonRow.create()
+                .addTimestampMillis("event_timestamp", n.eventTimestamp)
+                .addString("source_event_id", n.sourceEventId)
+                .addString("orchestrator_address", n.orchestratorAddress)
+                .addString("local_address", n.localAddress)
+                .addString("orch_uri", n.orchUri)
+                .addInt("capability_id", n.capabilityId == null ? -1 : n.capabilityId)
+                .addString("capability_name", n.capabilityName)
+                .addString("capability_group", n.capabilityGroup)
+                .addString("capability_catalog_version", n.capabilityCatalogVersion)
+                .addString("model_id", n.modelId)
+                .addNullableString("runner_version", n.runnerVersion)
+                .addNullableInt("capacity", n.capacity)
+                .addNullableInt("capacity_in_use", n.capacityInUse)
+                .addNullableInt("warm", n.warm)
+                .addString("raw_json", n.rawJson)
+                .build();
+    }
+
+    public static String networkCapabilitiesPricesRow(EventPayloads.NetworkCapabilityPrice n) {
+        return ClickHouseJsonRow.create()
+                .addTimestampMillis("event_timestamp", n.eventTimestamp)
+                .addString("source_event_id", n.sourceEventId)
+                .addString("orchestrator_address", n.orchestratorAddress)
+                .addString("local_address", n.localAddress)
+                .addString("orch_uri", n.orchUri)
+                .addInt("capability_id", n.capabilityId == null ? -1 : n.capabilityId)
+                .addString("capability_name", n.capabilityName)
+                .addString("capability_group", n.capabilityGroup)
+                .addString("capability_catalog_version", n.capabilityCatalogVersion)
+                .addNullableString("constraint_name", n.constraint)
+                .addNullableInt("price_per_unit", n.pricePerUnit)
+                .addNullableInt("pixels_per_unit", n.pixelsPerUnit)
                 .addString("raw_json", n.rawJson)
                 .build();
     }

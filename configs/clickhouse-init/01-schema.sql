@@ -263,6 +263,7 @@ CREATE TABLE IF NOT EXISTS network_capabilities
 (
     event_timestamp DateTime64(3, 'UTC'),
     event_date Date MATERIALIZED toDate(event_timestamp),
+    source_event_id String,
 
     -- Orchestrator info
     orchestrator_address String,
@@ -280,6 +281,10 @@ CREATE TABLE IF NOT EXISTS network_capabilities
     -- Model/Pipeline info
     pipeline String,
     model_id String,
+    capability_id Nullable(Int32),
+    capability_name Nullable(String),
+    capability_group Nullable(String),
+    capability_catalog_version Nullable(String),
     runner_version Nullable(String),
     capacity Nullable(UInt8),
     capacity_in_use Nullable(UInt8),
@@ -303,6 +308,273 @@ CREATE TABLE IF NOT EXISTS network_capabilities
         ORDER BY (orchestrator_address, orch_uri, model_id, event_timestamp)
         TTL event_date + INTERVAL 90 DAY DELETE
         SETTINGS index_granularity = 8192;
+
+-- Table 4b: Network Capability Advertised (one row per capability id advertised)
+CREATE TABLE IF NOT EXISTS network_capabilities_advertised
+(
+    event_timestamp DateTime64(3, 'UTC'),
+    event_date Date MATERIALIZED toDate(event_timestamp),
+    source_event_id String,
+
+    orchestrator_address String,
+    local_address String,
+    orch_uri String,
+
+    capability_id Int32,
+    capability_name LowCardinality(String),
+    capability_group LowCardinality(String),
+    capability_catalog_version LowCardinality(String),
+    capacity Nullable(Int32),
+
+    raw_json String,
+    ingestion_timestamp DateTime64(3, 'UTC') DEFAULT now64(3)
+)
+    ENGINE = ReplacingMergeTree(event_timestamp)
+        PARTITION BY toYYYYMM(event_date)
+        ORDER BY (orchestrator_address, capability_id, event_timestamp, source_event_id)
+        TTL event_date + INTERVAL 180 DAY DELETE
+        SETTINGS index_granularity = 8192;
+
+-- Table 4c: Network Capability Model Constraints (one row per capability/model)
+CREATE TABLE IF NOT EXISTS network_capabilities_model_constraints
+(
+    event_timestamp DateTime64(3, 'UTC'),
+    event_date Date MATERIALIZED toDate(event_timestamp),
+    source_event_id String,
+
+    orchestrator_address String,
+    local_address String,
+    orch_uri String,
+
+    capability_id Int32,
+    capability_name LowCardinality(String),
+    capability_group LowCardinality(String),
+    capability_catalog_version LowCardinality(String),
+
+    model_id String,
+    runner_version Nullable(String),
+    capacity Nullable(Int32),
+    capacity_in_use Nullable(Int32),
+    warm Nullable(Int32),
+
+    raw_json String,
+    ingestion_timestamp DateTime64(3, 'UTC') DEFAULT now64(3)
+)
+    ENGINE = ReplacingMergeTree(event_timestamp)
+        PARTITION BY toYYYYMM(event_date)
+        ORDER BY (orchestrator_address, capability_id, model_id, event_timestamp, source_event_id)
+        TTL event_date + INTERVAL 180 DAY DELETE
+        SETTINGS index_granularity = 8192;
+
+-- Table 4d: Network Capability Prices (one row per price entry)
+CREATE TABLE IF NOT EXISTS network_capabilities_prices
+(
+    event_timestamp DateTime64(3, 'UTC'),
+    event_date Date MATERIALIZED toDate(event_timestamp),
+    source_event_id String,
+
+    orchestrator_address String,
+    local_address String,
+    orch_uri String,
+
+    capability_id Int32,
+    capability_name LowCardinality(String),
+    capability_group LowCardinality(String),
+    capability_catalog_version LowCardinality(String),
+    constraint_name Nullable(String),
+    price_per_unit Nullable(Int32),
+    pixels_per_unit Nullable(Int32),
+
+    raw_json String,
+    ingestion_timestamp DateTime64(3, 'UTC') DEFAULT now64(3)
+)
+    ENGINE = ReplacingMergeTree(event_timestamp)
+        PARTITION BY toYYYYMM(event_date)
+        ORDER BY (orchestrator_address, capability_id, event_timestamp, source_event_id)
+        TTL event_date + INTERVAL 180 DAY DELETE
+        SETTINGS index_granularity = 8192;
+
+-- Silver Fact: Stream Status Samples
+CREATE TABLE IF NOT EXISTS fact_stream_status_samples
+(
+    sample_ts DateTime64(3, 'UTC'),
+    sample_date Date MATERIALIZED toDate(sample_ts),
+
+    workflow_session_id String,
+    stream_id String,
+    request_id String,
+
+    gateway String,
+    orchestrator_address String,
+    orchestrator_url String,
+
+    pipeline String,
+    pipeline_id String,
+    model_id Nullable(String),
+    gpu_id Nullable(String),
+    region Nullable(String),
+
+    state LowCardinality(String),
+    output_fps Float32,
+    input_fps Float32,
+    attribution_method LowCardinality(String),
+    attribution_confidence Float32,
+
+    source_event_uid String,
+    ingestion_timestamp DateTime64(3, 'UTC') DEFAULT now64(3)
+)
+    ENGINE = MergeTree()
+        PARTITION BY toYYYYMM(sample_date)
+        ORDER BY (sample_date, workflow_session_id, sample_ts)
+        TTL sample_date + INTERVAL 180 DAY DELETE
+        SETTINGS index_granularity = 8192;
+
+-- Silver Fact: Stream Trace Edges
+CREATE TABLE IF NOT EXISTS fact_stream_trace_edges
+(
+    edge_ts DateTime64(3, 'UTC'),
+    edge_date Date MATERIALIZED toDate(edge_ts),
+
+    workflow_session_id String,
+    stream_id String,
+    request_id String,
+
+    gateway String,
+    orchestrator_address String,
+    orchestrator_url String,
+
+    pipeline String,
+    pipeline_id String,
+
+    trace_type LowCardinality(String),
+    trace_category LowCardinality(String),
+    is_swap_event UInt8,
+
+    source_event_uid String,
+    ingestion_timestamp DateTime64(3, 'UTC') DEFAULT now64(3)
+)
+    ENGINE = MergeTree()
+        PARTITION BY toYYYYMM(edge_date)
+        ORDER BY (edge_date, workflow_session_id, edge_ts, trace_type)
+        TTL edge_date + INTERVAL 180 DAY DELETE
+        SETTINGS index_granularity = 8192;
+
+-- Silver Fact: Stream Ingest Samples
+CREATE TABLE IF NOT EXISTS fact_stream_ingest_samples
+(
+    sample_ts DateTime64(3, 'UTC'),
+    sample_date Date MATERIALIZED toDate(sample_ts),
+
+    workflow_session_id String,
+    stream_id String,
+    request_id String,
+    pipeline_id String,
+
+    connection_quality LowCardinality(String),
+    video_jitter Float32,
+    audio_jitter Float32,
+    video_latency Float32,
+    audio_latency Float32,
+
+    bytes_received UInt64,
+    bytes_sent UInt64,
+
+    source_event_uid String,
+    ingestion_timestamp DateTime64(3, 'UTC') DEFAULT now64(3)
+)
+    ENGINE = MergeTree()
+        PARTITION BY toYYYYMM(sample_date)
+        ORDER BY (sample_date, workflow_session_id, sample_ts)
+        TTL sample_date + INTERVAL 90 DAY DELETE
+        SETTINGS index_granularity = 8192;
+
+-- Non-stateful silver fact materialization.
+-- Rationale:
+-- - These facts are direct per-event projections that do not require cross-event/session state.
+-- - Keeping them in ClickHouse MVs reduces Flink mapper boilerplate while preserving deterministic logic.
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS mv_ai_stream_status_to_fact_stream_status_samples
+TO fact_stream_status_samples
+AS
+SELECT
+    event_timestamp AS sample_ts,
+    multiIf(
+        stream_id != '' AND request_id != '', concat(stream_id, '|', request_id),
+        stream_id != '', concat(stream_id, '|_missing_request'),
+        request_id != '', concat('_missing_stream|', request_id),
+        concat('_missing_stream|_missing_request|', toString(cityHash64(raw_json)))
+    ) AS workflow_session_id,
+    stream_id,
+    request_id,
+    gateway,
+    orchestrator_address,
+    orchestrator_url,
+    pipeline,
+    pipeline_id,
+    CAST(NULL AS Nullable(String)) AS model_id,
+    CAST(NULL AS Nullable(String)) AS gpu_id,
+    CAST(NULL AS Nullable(String)) AS region,
+    state,
+    output_fps,
+    input_fps,
+    'none' AS attribution_method,
+    toFloat32(0) AS attribution_confidence,
+    toString(cityHash64(raw_json)) AS source_event_uid
+FROM ai_stream_status;
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS mv_stream_trace_events_to_fact_stream_trace_edges
+TO fact_stream_trace_edges
+AS
+SELECT
+    data_timestamp AS edge_ts,
+    multiIf(
+        stream_id != '' AND request_id != '', concat(stream_id, '|', request_id),
+        stream_id != '', concat(stream_id, '|_missing_request'),
+        request_id != '', concat('_missing_stream|', request_id),
+        concat('_missing_stream|_missing_request|', toString(cityHash64(raw_json)))
+    ) AS workflow_session_id,
+    stream_id,
+    request_id,
+    '' AS gateway,
+    orchestrator_address,
+    orchestrator_url,
+    '' AS pipeline,
+    pipeline_id,
+    trace_type,
+    multiIf(
+        startsWith(trace_type, 'gateway_'), 'gateway',
+        startsWith(trace_type, 'orchestrator_'), 'orchestrator',
+        startsWith(trace_type, 'runner_'), 'runner',
+        startsWith(trace_type, 'app_'), 'app',
+        'other'
+    ) AS trace_category,
+    toUInt8(trace_type = 'orchestrator_swap') AS is_swap_event,
+    toString(cityHash64(raw_json)) AS source_event_uid
+FROM stream_trace_events;
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS mv_stream_ingest_metrics_to_fact_stream_ingest_samples
+TO fact_stream_ingest_samples
+AS
+SELECT
+    event_timestamp AS sample_ts,
+    multiIf(
+        stream_id != '' AND request_id != '', concat(stream_id, '|', request_id),
+        stream_id != '', concat(stream_id, '|_missing_request'),
+        request_id != '', concat('_missing_stream|', request_id),
+        concat('_missing_stream|_missing_request|', toString(cityHash64(raw_json)))
+    ) AS workflow_session_id,
+    stream_id,
+    request_id,
+    pipeline_id,
+    connection_quality,
+    video_jitter,
+    audio_jitter,
+    video_latency,
+    audio_latency,
+    bytes_received,
+    bytes_sent,
+    toString(cityHash64(raw_json)) AS source_event_uid
+FROM stream_ingest_metrics;
 
 -- Table 5: AI Stream Events (errors and lifecycle events)
 CREATE TABLE IF NOT EXISTS ai_stream_events

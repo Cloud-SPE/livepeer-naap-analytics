@@ -95,6 +95,7 @@ class ClickHouseSchemaSyncTest {
     void networkCapabilitiesRowMatchesSchema() throws Exception {
         EventPayloads.NetworkCapability payload = new EventPayloads.NetworkCapability();
         payload.eventTimestamp = 1710000000000L;
+        payload.sourceEventId = "e1";
         payload.orchestratorAddress = "0xabc";
         payload.localAddress = "0xdef";
         payload.orchUri = "https://orch";
@@ -106,6 +107,10 @@ class ClickHouseSchemaSyncTest {
         payload.gpuMinor = 9;
         payload.pipeline = "pipe";
         payload.modelId = "model";
+        payload.capabilityId = 35;
+        payload.capabilityName = "Live video to video";
+        payload.capabilityGroup = "live-video";
+        payload.capabilityCatalogVersion = "v1";
         payload.runnerVersion = "0.1";
         payload.capacity = 1;
         payload.capacityInUse = 1;
@@ -116,6 +121,66 @@ class ClickHouseSchemaSyncTest {
         payload.rawJson = "{}";
 
         assertRowMatchesTable("network_capabilities", ClickHouseRowMappers.networkCapabilitiesRow(payload));
+    }
+
+    @Test
+    void networkCapabilitiesAdvertisedRowMatchesSchema() throws Exception {
+        EventPayloads.NetworkCapabilityAdvertised payload = new EventPayloads.NetworkCapabilityAdvertised();
+        payload.eventTimestamp = 1710000000000L;
+        payload.sourceEventId = "e1";
+        payload.orchestratorAddress = "0xabc";
+        payload.localAddress = "0xdef";
+        payload.orchUri = "https://orch";
+        payload.capabilityId = 35;
+        payload.capabilityName = "Live video to video";
+        payload.capabilityGroup = "live-video";
+        payload.capabilityCatalogVersion = "v1";
+        payload.capacity = 1;
+        payload.rawJson = "{}";
+
+        assertRowMatchesTable("network_capabilities_advertised", ClickHouseRowMappers.networkCapabilitiesAdvertisedRow(payload));
+    }
+
+    @Test
+    void networkCapabilitiesModelConstraintsRowMatchesSchema() throws Exception {
+        EventPayloads.NetworkCapabilityModelConstraint payload = new EventPayloads.NetworkCapabilityModelConstraint();
+        payload.eventTimestamp = 1710000000000L;
+        payload.sourceEventId = "e1";
+        payload.orchestratorAddress = "0xabc";
+        payload.localAddress = "0xdef";
+        payload.orchUri = "https://orch";
+        payload.capabilityId = 35;
+        payload.capabilityName = "Live video to video";
+        payload.capabilityGroup = "live-video";
+        payload.capabilityCatalogVersion = "v1";
+        payload.modelId = "streamdiffusion-sdxl";
+        payload.runnerVersion = "0.14.1";
+        payload.capacity = 1;
+        payload.capacityInUse = 0;
+        payload.warm = 1;
+        payload.rawJson = "{}";
+
+        assertRowMatchesTable("network_capabilities_model_constraints", ClickHouseRowMappers.networkCapabilitiesModelConstraintsRow(payload));
+    }
+
+    @Test
+    void networkCapabilitiesPricesRowMatchesSchema() throws Exception {
+        EventPayloads.NetworkCapabilityPrice payload = new EventPayloads.NetworkCapabilityPrice();
+        payload.eventTimestamp = 1710000000000L;
+        payload.sourceEventId = "e1";
+        payload.orchestratorAddress = "0xabc";
+        payload.localAddress = "0xdef";
+        payload.orchUri = "https://orch";
+        payload.capabilityId = 35;
+        payload.capabilityName = "Live video to video";
+        payload.capabilityGroup = "live-video";
+        payload.capabilityCatalogVersion = "v1";
+        payload.constraint = "streamdiffusion-sdxl";
+        payload.pricePerUnit = 2149;
+        payload.pixelsPerUnit = 1;
+        payload.rawJson = "{}";
+
+        assertRowMatchesTable("network_capabilities_prices", ClickHouseRowMappers.networkCapabilitiesPricesRow(payload));
     }
 
     @Test
