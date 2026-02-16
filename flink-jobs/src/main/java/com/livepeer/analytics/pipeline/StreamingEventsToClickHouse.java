@@ -17,6 +17,7 @@ import org.apache.flink.util.OutputTag;
 
 import com.livepeer.analytics.lifecycle.LifecycleSignal;
 import com.livepeer.analytics.lifecycle.CapabilityBroadcastState;
+import com.livepeer.analytics.lifecycle.WorkflowLifecycleCoverageAggregatorFunction;
 import com.livepeer.analytics.lifecycle.WorkflowParamUpdateAggregatorFunction;
 import com.livepeer.analytics.lifecycle.WorkflowSessionAggregatorFunction;
 import com.livepeer.analytics.lifecycle.WorkflowSessionSegmentAggregatorFunction;
@@ -218,6 +219,12 @@ public class StreamingEventsToClickHouse {
                 .returns(new TypeHint<ParsedEvent<EventPayloads.FactWorkflowParamUpdate>>() {})
                 .name("Sessionize: Workflow Param Updates");
 
+        SingleOutputStreamOperator<ParsedEvent<EventPayloads.FactLifecycleEdgeCoverage>> lifecycleCoverageStream = lifecycleSignals
+                .keyBy(signal -> signal.workflowSessionId)
+                .process(new WorkflowLifecycleCoverageAggregatorFunction())
+                .returns(new TypeHint<ParsedEvent<EventPayloads.FactLifecycleEdgeCoverage>>() {})
+                .name("Sessionize: Lifecycle Edge Coverage");
+
         DataStream<RejectedEventEnvelope> parseDlqStream = aiStatusStream.getSideOutput(DLQ_TAG)
                 .union(ingestMetricsStream.getSideOutput(DLQ_TAG))
                 .union(traceStream.getSideOutput(DLQ_TAG))
@@ -333,6 +340,14 @@ public class StreamingEventsToClickHouse {
                 "Rows: Workflow Param Updates",
                 true);
 
+        SingleOutputStreamOperator<String> lifecycleCoverageRows = mapRowsWithGuard(
+                lifecycleCoverageStream,
+                ClickHouseRowMappers::factLifecycleEdgeCoverageRow,
+                DLQ_TAG,
+                config,
+                "Rows: Lifecycle Edge Coverage",
+                true);
+
         DataStream<RejectedEventEnvelope> guardDlqStream = aiStatusRows.getSideOutput(DLQ_TAG)
                 .union(ingestMetricsRows.getSideOutput(DLQ_TAG))
                 .union(traceRows.getSideOutput(DLQ_TAG))
@@ -345,7 +360,8 @@ public class StreamingEventsToClickHouse {
                 .union(paymentRows.getSideOutput(DLQ_TAG))
                 .union(workflowSessionRows.getSideOutput(DLQ_TAG))
                 .union(workflowSessionSegmentRows.getSideOutput(DLQ_TAG))
-                .union(workflowParamUpdateRows.getSideOutput(DLQ_TAG));
+                .union(workflowParamUpdateRows.getSideOutput(DLQ_TAG))
+                .union(lifecycleCoverageRows.getSideOutput(DLQ_TAG));
 
         // ClickHouse connector handles retry/backoff; sink failures surface as job failures, not per-record DLQ.
         sinkToClickHouse(aiStatusRows, config, "ai_stream_status", "CH: AI Status");
@@ -361,6 +377,7 @@ public class StreamingEventsToClickHouse {
         sinkToClickHouse(workflowSessionRows, config, "fact_workflow_sessions", "CH: Workflow Sessions");
         sinkToClickHouse(workflowSessionSegmentRows, config, "fact_workflow_session_segments", "CH: Workflow Session Segments");
         sinkToClickHouse(workflowParamUpdateRows, config, "fact_workflow_param_updates", "CH: Workflow Param Updates");
+        sinkToClickHouse(lifecycleCoverageRows, config, "fact_lifecycle_edge_coverage", "CH: Lifecycle Edge Coverage");
 
         // Centralized DLQ stream to feed Kafka and ClickHouse audit sinks.
         DataStream<RejectedEventEnvelope> dlqStream = qualityDlqStream.union(parseDlqStream).union(guardDlqStream);

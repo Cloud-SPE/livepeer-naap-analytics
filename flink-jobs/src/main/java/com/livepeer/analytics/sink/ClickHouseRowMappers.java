@@ -283,6 +283,29 @@ public final class ClickHouseRowMappers {
                 .build();
     }
 
+    public static String factLifecycleEdgeCoverageRow(EventPayloads.FactLifecycleEdgeCoverage f) {
+        return ClickHouseJsonRow.create()
+                .addTimestampMillis("signal_ts", f.signalTs)
+                .addString("workflow_session_id", f.workflowSessionId)
+                .addString("stream_id", f.streamId)
+                .addString("request_id", f.requestId)
+                .addString("pipeline", f.pipeline)
+                .addString("pipeline_id", f.pipelineId)
+                .addString("gateway", f.gateway)
+                .addString("orchestrator_address", f.orchestratorAddress)
+                .addString("trace_type", f.traceType)
+                .addString("source_event_uid", f.sourceEventUid)
+                .addInt("known_stream", f.knownStream)
+                .addInt("has_first_processed_edge", f.hasFirstProcessedEdge)
+                .addInt("has_first_playable_edge", f.hasFirstPlayableEdge)
+                .addInt("startup_edge_matched", f.startupEdgeMatched)
+                .addInt("playable_edge_matched", f.playableEdgeMatched)
+                .addInt("is_terminal_signal", f.isTerminalSignal)
+                .addString("unmatched_reason", f.unmatchedReason)
+                .addLong("version", f.version)
+                .build();
+    }
+
     public static String dlqRow(RejectedEventEnvelope envelope) {
         long sourceRecordTimestamp = envelope.source == null
                 ? envelope.ingestionTimestamp

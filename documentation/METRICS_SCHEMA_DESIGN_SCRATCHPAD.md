@@ -412,7 +412,9 @@ This section is a work in progress and will be known more clearly once the intia
 - Current known orchestrator state - IDLE/RUNNING, capabilities, addresses, etc
 - Gateway state - # of jobs, job types, fees paid
 
-## SLA Scoring
+## Potential Metrics to Implement
+
+### SLA Scoring
 
 Once we have all the data collected and stored, we will want to support calculating a SLA score for orchestrators.  The score should allow us to view scores by:
 
@@ -426,6 +428,127 @@ Once we have all the data collected and stored, we will want to support calculat
 SLA Scores will be calculated based on a weight formula that balanced various signals.  For example, we might have it based on Jitter component (40%), Latency component (40%), and a Reliability component (20% - error rate detection).
 
 The scoring formula may be Gateway specific and thus needs to be flexible in its defition.  This could mean it is a SQL query off a table that produce key tuples that go through some go code to add weights.  It could be other approaches as well.  This needs to be defined, but we will make a best effort to design something in the first schema without more details.  The end result is being able to show that the Livepeer network is capable of delivering job execution in a predictable and scalable manner.  So being able to report these scores at a given point in time and over various rollup periods will be useful in understanding performance at a given time and over time.  That way we can use this to select an Orchestrator for work not only based on historical work but real time metrics.  This will allow Gateways to make selections based on near-real time data and not potential select an Orchestrator who is historical good, but offline at the moment.
+
+### SLA Decision Template (Required Before Further Reliability/SLA Buildout)
+
+Status: `OPEN`
+
+Use this checklist to lock SLA contracts before adding new `agg_*` / `v_api_*` objects for compliance scoring.
+
+- Reliability numerator (failure definition):
+  - Decision needed: `startup_unexcused` only OR broader fatal-class taxonomy.
+  - Current default recommendation: `startup_unexcused` from `fact_workflow_sessions`.
+- Reliability denominator:
+  - Decision needed: `known_stream` sessions OR all sessions.
+  - Current default recommendation: `known_stream`.
+- Swap-rate numerator:
+  - Decision needed: session-level `swap_count > 0` OR explicit swap events only.
+  - Current default recommendation: session-level `swap_count > 0`.
+- Swap-rate dimension model:
+  - Decision needed: by current orchestrator, by swapped-out orchestrator, or both.
+  - Current default recommendation: both (if swapped-out attribution coverage is sufficient).
+- SLA time windows:
+  - Decision needed: `5m`, `1h`, or both.
+  - Current default recommendation: keep `1h` as baseline and add `5m` only after formula lock.
+- Threshold policy:
+  - Failure target: `< 1%` (confirm strictness).
+  - Swap target: `< 5%` (confirm strictness).
+  - Decision needed: do we flag violations as boolean columns in view outputs.
+- Late/missing data policy:
+  - Decision needed: minimum coverage thresholds before SLA values are considered valid.
+  - Current default recommendation: add coverage fields and suppress SLA flags when coverage is below threshold.
+- API contract:
+  - Decision needed: final response fields for `/sla/compliance` and filter dimensions.
+  - Current default recommendation: include numerator/denominator, rate, threshold, violation boolean, and coverage.
+
+Decision Log:
+- [ ] Numerator/denominator approved
+- [ ] Window(s) approved
+- [ ] Swap attribution model approved
+- [ ] Threshold + violation policy approved
+- [ ] Coverage validity policy approved
+- [ ] API contract approved
+
+### Stream Ingest Network Metrics (Rollup Candidate)
+
+Status: `OPEN`
+
+Goal:
+- Add serving rollups for ingest-leg network observability from curated ingest facts.
+- Keep Flink unchanged unless new attribution fields are required.
+
+Current source path:
+- Raw typed: `stream_ingest_metrics`
+- Curated fact: `fact_stream_ingest_samples`
+
+Proposed serving objects:
+- `agg_ingest_network_1h` (AggregatingMergeTree)
+- `mv_fact_ingest_to_network_1h`
+- `v_api_ingest_network_1h`
+
+Candidate aggregates:
+- `avg(video_jitter)`
+- `avg(audio_jitter)`
+- `sum(video_packets_lost)`
+- `sum(audio_packets_lost)`
+- `sum(bytes_received)`
+- `sum(bytes_sent)`
+
+Decision checklist:
+- [ ] Confirm window(s): `1h` only or `1m + 1h`
+- [ ] Confirm required dimensions (stream/request/gateway/orchestrator/pipeline/model/region)
+- [ ] Confirm whether orchestrator attribution is required for ingest views
+- [ ] Confirm API contract fields for `/network/demand`
+
+Implementation note:
+- This is ClickHouse rollup/view work (net new), not Flink parser/sessionization work.
+
+### Flink Internal Lifecycle Metrics (Observability TODO)
+
+Status: `OPEN`
+
+Goal:
+- Add operator-level Flink counters/gauges/meters for lifecycle correlation health.
+- Complement (not replace) SQL/data-plane coverage facts.
+
+Recommended metrics:
+- `lifecycle_signals_total` (counter)
+- `lifecycle_terminal_signals_total` (counter)
+- `edge_startup_matched_total` / `edge_startup_unmatched_total` (counters)
+- `edge_playable_matched_total` / `edge_playable_unmatched_total` (counters)
+- `known_stream_sessions_total` (counter)
+- `swap_sessions_total` (counter)
+- `out_of_order_signal_total` (counter)
+- `coverage_unmatched_reason_<reason>` (counter family)
+- `workflow_session_state_size` (gauge, approximate if needed)
+- `lifecycle_signal_lag_ms` (gauge or histogram-like summary)
+- `coverage_emit_rows_total` (counter)
+- `coverage_emit_failures_total` (counter)
+
+Decision checklist:
+- [ ] Confirm metric namespace and naming convention for scraping dashboards.
+- [ ] Confirm sink/alert backend (Prometheus/JMX/other).
+- [ ] Confirm which metrics are required for release gate vs best-effort.
+
+### Missing/Late Event Graceful Handling (Ops TODO)
+
+Status: `OPEN`
+
+Goal:
+- Enforce the contract: pipeline handles missing/late events gracefully and surfaces quality via validation checks.
+
+Current state:
+- Data-plane diagnostics exist (`fact_lifecycle_edge_coverage`).
+- Validation query packs exist (`documentation/reports/OPS_ACTIVITY_VALIDATION_QUERIES.sql`).
+
+TODO:
+- [ ] Define alert thresholds:
+  - unmatched terminal rate threshold
+  - freshness lag threshold
+  - rollup/view parity tolerance threshold
+- [ ] Define where alerts execute (Grafana/Prometheus/SQL scheduled checks).
+- [ ] Add release gate checklist that must pass before deployment.
+- [ ] Decide if Flink runtime counters are mandatory in addition to SQL diagnostics.
 
 ## APIs Needed
 /gpu/metrics	GET	Retrieve per-GPU realtime metrics	o_wallet, gpu_id, region, workflow, time_range	JSON with performance/reliability fields

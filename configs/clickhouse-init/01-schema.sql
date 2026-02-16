@@ -693,6 +693,39 @@ CREATE TABLE IF NOT EXISTS fact_workflow_param_updates
         TTL update_date + INTERVAL 180 DAY DELETE
         SETTINGS index_granularity = 8192;
 
+-- Lifecycle edge coverage diagnostics (signal grain)
+CREATE TABLE IF NOT EXISTS fact_lifecycle_edge_coverage
+(
+    signal_ts DateTime64(3, 'UTC'),
+    signal_date Date MATERIALIZED toDate(signal_ts),
+
+    workflow_session_id String,
+    stream_id String,
+    request_id String,
+    pipeline String,
+    pipeline_id String,
+    gateway String,
+    orchestrator_address String,
+    trace_type LowCardinality(String),
+    source_event_uid String,
+
+    known_stream UInt8,
+    has_first_processed_edge UInt8,
+    has_first_playable_edge UInt8,
+    startup_edge_matched UInt8,
+    playable_edge_matched UInt8,
+    is_terminal_signal UInt8,
+    unmatched_reason LowCardinality(String),
+    version UInt64,
+
+    ingestion_timestamp DateTime64(3, 'UTC') DEFAULT now64(3)
+)
+    ENGINE = ReplacingMergeTree(version)
+        PARTITION BY toYYYYMM(signal_date)
+        ORDER BY (signal_date, workflow_session_id, signal_ts, source_event_uid)
+        TTL signal_date + INTERVAL 180 DAY DELETE
+        SETTINGS index_granularity = 8192;
+
 -- ============================================================
 -- DIMENSIONS (METRICS SERVING)
 -- ============================================================
@@ -1057,6 +1090,29 @@ GROUP BY
     region,
     pipeline,
     pipeline_id;
+
+CREATE VIEW IF NOT EXISTS v_api_jitter_5m AS
+SELECT
+    toStartOfInterval(window_start, INTERVAL 5 MINUTE) AS window_start_5m,
+    orchestrator_address,
+    pipeline,
+    pipeline_id,
+    model_id,
+    gpu_id,
+    region,
+    avg(avg_output_fps) AS avg_output_fps,
+    stddevPop(avg_output_fps) / nullIf(avg(avg_output_fps), 0) AS jitter_coeff_fps,
+    sum(status_samples) AS status_samples
+FROM v_api_gpu_metrics
+GROUP BY
+    window_start_5m,
+    orchestrator_address,
+    pipeline,
+    pipeline_id,
+    model_id,
+    gpu_id,
+    region
+HAVING status_samples >= 10;
 
 CREATE VIEW IF NOT EXISTS v_api_sla_compliance AS
 SELECT

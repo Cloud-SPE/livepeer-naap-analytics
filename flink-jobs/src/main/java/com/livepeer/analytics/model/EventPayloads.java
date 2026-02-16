@@ -176,4 +176,36 @@ public final class EventPayloads {
         public long version;
     }
 
+    /**
+     * Lifecycle edge-coverage diagnostic fact at workflow-session signal grain.
+     *
+     * <p>Purpose:
+     * - Surface unmatched/missing edge states for correlation observability.
+     * - Enable operational queries to track edge-pair completeness over time.
+     * </p>
+     */
+    public static class FactLifecycleEdgeCoverage implements java.io.Serializable {
+        private static final long serialVersionUID = 1L;
+
+        public long signalTs;
+        public String workflowSessionId;
+        public String streamId;
+        public String requestId;
+        public String pipeline;
+        public String pipelineId;
+        public String gateway;
+        public String orchestratorAddress;
+        public String traceType;
+        public String sourceEventUid;
+
+        public int knownStream;
+        public int hasFirstProcessedEdge;
+        public int hasFirstPlayableEdge;
+        public int startupEdgeMatched;
+        public int playableEdgeMatched;
+        public int isTerminalSignal;
+        public String unmatchedReason;
+        public long version;
+    }
+
 }

@@ -264,3 +264,130 @@ LEFT JOIN
 ) observed
 USING (window_start)
 WHERE observed.window_start IS NULL;
+
+-- A8) Goal: Validate lifecycle unmatched-edge diagnostics are being emitted.
+-- What this query does: Summarizes matched/unmatched coverage for terminal lifecycle signals.
+-- Valid output: Non-zero total_terminal_rows when traffic exists; unmatched rows should be explainable.
+WITH
+  now64(3, 'UTC') AS to_ts,
+  to_ts - INTERVAL 24 HOUR AS from_ts
+SELECT
+  count() AS total_terminal_rows,
+  countIf(unmatched_reason = '') AS terminal_matched_rows,
+  countIf(unmatched_reason != '') AS terminal_unmatched_rows
+FROM livepeer_analytics.fact_lifecycle_edge_coverage
+WHERE signal_ts >= from_ts
+  AND signal_ts < to_ts
+  AND is_terminal_signal = 1;
+
+-- A9) Goal: Validate 5-minute jitter serving contract with sample threshold.
+-- What this query does: Checks v_api_jitter_5m output and confirms no rows violate sample minimum.
+-- Valid output: rows_24h >= 0 and rows_below_min_samples = 0.
+WITH
+  now64(3, 'UTC') AS to_ts,
+  to_ts - INTERVAL 24 HOUR AS from_ts
+SELECT
+  count() AS rows_24h,
+  countIf(status_samples < 10) AS rows_below_min_samples
+FROM livepeer_analytics.v_api_jitter_5m
+WHERE window_start_5m >= from_ts
+  AND window_start_5m < to_ts;
+
+-- A10) Goal: Validate hourly jitter trend support (query 1.2 equivalent).
+-- What this query does: Computes hourly jitter coefficient per orchestrator + pipeline
+-- from curated status facts over last 24h.
+-- Valid output: Non-empty rows during traffic windows; sample_count >= 10 for each row.
+WITH
+  now64(3, 'UTC') AS to_ts,
+  to_ts - INTERVAL 24 HOUR AS from_ts
+SELECT
+  toStartOfInterval(sample_ts, INTERVAL 1 HOUR) AS hour_bucket,
+  orchestrator_address,
+  pipeline,
+  count() AS sample_count,
+  avg(output_fps) AS mean_fps,
+  stddevPop(output_fps) / nullIf(avg(output_fps), 0) AS jitter_coefficient,
+  quantileTDigest(0.95)(output_fps) AS p95_fps
+FROM livepeer_analytics.fact_stream_status_samples
+WHERE sample_ts >= from_ts
+  AND sample_ts < to_ts
+  AND output_fps > 0
+GROUP BY hour_bucket, orchestrator_address, pipeline
+HAVING sample_count >= 10
+ORDER BY hour_bucket DESC, jitter_coefficient DESC;
+
+-- A11) Goal: Validate network-wide jitter benchmark support (query 1.5 equivalent).
+-- What this query does: Computes per-pipeline network jitter distribution over last 1h.
+-- Valid output: One row per active pipeline with stable percentile outputs.
+WITH
+  now64(3, 'UTC') AS to_ts,
+  to_ts - INTERVAL 1 HOUR AS from_ts
+SELECT
+  pipeline,
+  uniqExact(orchestrator_address) AS num_orchestrators,
+  uniqExact(stream_id) AS num_streams,
+  count() AS total_samples,
+  avg(output_fps) AS network_mean_fps,
+  stddevPop(output_fps) / nullIf(avg(output_fps), 0) AS network_jitter_coefficient,
+  quantileTDigest(0.05)(output_fps) AS p05_fps,
+  quantileTDigest(0.25)(output_fps) AS p25_fps,
+  quantileTDigest(0.50)(output_fps) AS p50_fps,
+  quantileTDigest(0.75)(output_fps) AS p75_fps,
+  quantileTDigest(0.95)(output_fps) AS p95_fps,
+  quantileTDigest(0.99)(output_fps) AS p99_fps
+FROM livepeer_analytics.fact_stream_status_samples
+WHERE sample_ts >= from_ts
+  AND sample_ts < to_ts
+  AND output_fps > 0
+GROUP BY pipeline
+ORDER BY pipeline;
+
+-- A12) Goal: Alert query for high jitter (query 4.1 equivalent).
+-- What this query does: Uses 5-minute serving jitter view and flags rows above threshold.
+-- Valid output: Empty/low row count in healthy periods.
+WITH
+  now64(3, 'UTC') AS to_ts,
+  to_ts - INTERVAL 15 MINUTE AS from_ts
+SELECT
+  window_start_5m,
+  orchestrator_address,
+  pipeline,
+  model_id,
+  gpu_id,
+  status_samples,
+  jitter_coeff_fps
+FROM livepeer_analytics.v_api_jitter_5m
+WHERE window_start_5m >= from_ts
+  AND window_start_5m < to_ts
+  AND jitter_coeff_fps > 0.2
+ORDER BY jitter_coeff_fps DESC, status_samples DESC;
+
+-- A13) Goal: Alert query for high startup latency proxy (query 4.2 equivalent).
+-- What this query does: Builds per-orchestrator startup latency stats from session facts
+-- using first_processed_ts - first_stream_request_ts over last 15 minutes.
+-- Valid output: Empty/low row count in healthy periods.
+WITH
+  now64(3, 'UTC') AS to_ts,
+  to_ts - INTERVAL 15 MINUTE AS from_ts,
+  latencies AS (
+    SELECT
+      orchestrator_address,
+      dateDiff('millisecond', first_stream_request_ts, first_processed_ts) AS latency_ms
+    FROM livepeer_analytics.fact_workflow_sessions FINAL
+    WHERE session_start_ts >= from_ts
+      AND session_start_ts < to_ts
+      AND first_stream_request_ts IS NOT NULL
+      AND first_processed_ts IS NOT NULL
+      AND first_processed_ts > first_stream_request_ts
+  )
+SELECT
+  orchestrator_address,
+  count() AS stream_count,
+  avg(latency_ms) AS avg_latency_ms,
+  quantileTDigest(0.95)(latency_ms) AS p95_latency_ms,
+  max(latency_ms) AS max_latency_ms
+FROM latencies
+GROUP BY orchestrator_address
+HAVING avg_latency_ms > 3000
+    OR p95_latency_ms > 5000
+ORDER BY avg_latency_ms DESC;
