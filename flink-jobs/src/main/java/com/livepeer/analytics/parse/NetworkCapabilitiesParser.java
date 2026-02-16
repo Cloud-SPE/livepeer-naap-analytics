@@ -80,9 +80,6 @@ final class NetworkCapabilitiesParser {
             }
         }
 
-        if (results.isEmpty()) {
-            throw new Exception("No valid orchestrator data found");
-        }
         return results;
     }
 
@@ -127,9 +124,6 @@ final class NetworkCapabilitiesParser {
             }
         }
 
-        if (results.isEmpty()) {
-            throw new Exception("No valid advertised capabilities found");
-        }
         return results;
     }
 
@@ -188,9 +182,6 @@ final class NetworkCapabilitiesParser {
             }
         }
 
-        if (results.isEmpty()) {
-            throw new Exception("No valid capability model constraints found");
-        }
         return results;
     }
 
@@ -232,9 +223,6 @@ final class NetworkCapabilitiesParser {
             }
         }
 
-        if (results.isEmpty()) {
-            throw new Exception("No valid capability prices found");
-        }
         return results;
     }
 
