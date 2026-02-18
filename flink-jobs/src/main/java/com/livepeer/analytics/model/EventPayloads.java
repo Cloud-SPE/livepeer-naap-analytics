@@ -208,4 +208,37 @@ public final class EventPayloads {
         public long version;
     }
 
+    /**
+     * Derived latency KPI fact at workflow-session snapshot grain.
+     *
+     * <p>Produced by Flink from deterministic session-edge timestamps so pairing semantics
+     * are versioned in code, not ad hoc SQL.</p>
+     */
+    public static class FactWorkflowLatencySample implements java.io.Serializable {
+        private static final long serialVersionUID = 1L;
+
+        public long sampleTs;
+        public String workflowSessionId;
+        public String streamId;
+        public String requestId;
+        public String gateway;
+        public String orchestratorAddress;
+        public String pipeline;
+        public String pipelineId;
+        public String modelId;
+        public String gpuId;
+        public String region;
+
+        public Double promptToFirstFrameMs;
+        public Double startupTimeMs;
+        public Double e2eLatencyMs;
+
+        public int hasPromptToFirstFrame;
+        public int hasStartupTime;
+        public int hasE2eLatency;
+
+        public String edgeSemanticsVersion;
+        public long version;
+    }
+
 }

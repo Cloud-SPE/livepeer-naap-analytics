@@ -98,7 +98,7 @@ SELECT
   count() AS sessions,
   sum(model_id != '' AND model_id IS NOT NULL) AS with_model,
   sum(gpu_id != '' AND gpu_id IS NOT NULL) AS with_gpu,
-  avg(attribution_confidence) AS avg_attr_conf
+  avg(gpu_attribution_confidence) AS avg_attr_conf
 FROM livepeer_analytics.fact_workflow_sessions
 WHERE session_start_ts >= from_ts AND session_start_ts < to_ts;
 
@@ -137,10 +137,7 @@ UNION ALL
 SELECT 'agg_reliability_1h' AS object_name, count() AS rows_24h
 FROM livepeer_analytics.agg_reliability_1h
 WHERE window_start >= from_ts AND window_start < to_ts
-UNION ALL
-SELECT 'agg_latency_edges_1m' AS object_name, count() AS rows_24h
-FROM livepeer_analytics.agg_latency_edges_1m
-WHERE window_start >= from_ts AND window_start < to_ts;
+;
 
 -- A2) Goal: Confirm API/dashboard views are populated.
 -- What this query does: Counts rows in each v_api_* view over last 24h.
@@ -188,11 +185,13 @@ INNER JOIN
 ) b
 USING (window_start, orchestrator_address, pipeline, pipeline_id, model_id, gpu_id, region);
 
--- A4) Goal: Verify v_api_sla_compliance counts match reliability rollups.
--- What this query does: Recomputes known/unexcused/swapped session counts from
--- agg_reliability_1h aggregate states and compares to v_api_sla_compliance.
+-- A4) Goal: Verify v_api_sla_compliance counts match deduped session facts.
+-- What this query does: Recomputes known/unexcused/swapped counts from latest
+-- (argMax by version) workflow sessions and compares to v_api_sla_compliance.
 -- Valid output: known_diff = 0, unexcused_diff = 0, swapped_diff = 0.
-WITH now64(3,'UTC') AS to_ts, to_ts - INTERVAL 24 HOUR AS from_ts
+WITH
+  now64(3,'UTC') AS to_ts,
+  to_ts - INTERVAL 24 HOUR AS from_ts
 SELECT
   count() AS joined_rows,
   sum(abs(a.known_sessions - b.known_sessions)) AS known_diff,
@@ -200,13 +199,31 @@ SELECT
   sum(abs(a.swapped_sessions - b.swapped_sessions)) AS swapped_diff
 FROM
 (
+  WITH latest_sessions AS
+  (
+    SELECT
+      workflow_session_id,
+      argMax(session_start_ts, version) AS session_start_ts,
+      argMax(orchestrator_address, version) AS orchestrator_address,
+      argMax(pipeline, version) AS pipeline,
+      argMax(pipeline_id, version) AS pipeline_id,
+      argMax(model_id, version) AS model_id,
+      argMax(gpu_id, version) AS gpu_id,
+      argMax(region, version) AS region,
+      argMax(known_stream, version) AS known_stream,
+      argMax(startup_unexcused, version) AS startup_unexcused,
+      argMax(swap_count, version) AS swap_count
+    FROM livepeer_analytics.fact_workflow_sessions
+    GROUP BY workflow_session_id
+  )
   SELECT
-    window_start, orchestrator_address, pipeline, pipeline_id, model_id, gpu_id, region,
-    sumMerge(known_sessions_state) AS known_sessions,
-    sumMerge(unexcused_sessions_state) AS unexcused_sessions,
-    sumMerge(swapped_sessions_state) AS swapped_sessions
-  FROM livepeer_analytics.agg_reliability_1h
-  WHERE window_start >= from_ts AND window_start < to_ts
+    toStartOfInterval(session_start_ts, INTERVAL 1 HOUR) AS window_start,
+    orchestrator_address, pipeline, pipeline_id, model_id, gpu_id, region,
+    sum(toUInt64(known_stream)) AS known_sessions,
+    sum(toUInt64(startup_unexcused)) AS unexcused_sessions,
+    sum(toUInt64(swap_count > 0)) AS swapped_sessions
+  FROM latest_sessions
+  WHERE session_start_ts >= from_ts AND session_start_ts < to_ts
   GROUP BY window_start, orchestrator_address, pipeline, pipeline_id, model_id, gpu_id, region
 ) a
 INNER JOIN

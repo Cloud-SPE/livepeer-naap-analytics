@@ -68,7 +68,7 @@ Capability catalog source:
 - Grain: one row per `workflow_session_id`.
 - Purpose: canonical lifecycle row for reliability and session-level drill-through.
 - Metric use: denominator and classification source for failure/swap/startup outcomes.
-- Attribution quality: `attribution_method`, `attribution_confidence` expose enrichment certainty.
+- Attribution quality: `gpu_attribution_method`, `gpu_attribution_confidence` expose enrichment certainty.
 - Raw mapping:
 - `stream_trace_events` -> lifecycle edges (`known_stream`, edge timestamps, swap evidence)
 - `ai_stream_events` -> error counts/taxonomy
@@ -78,14 +78,14 @@ Capability catalog source:
 - Grain: one row per segment (`workflow_session_id`, `segment_index`).
 - Purpose: actor attribution over time (gateway/orchestrator/worker/GPU transitions).
 - Metric use: swap behavior, per-actor lifecycle analysis.
-- Attribution quality: `attribution_method`, `attribution_confidence` expose enrichment certainty per segment.
+- Attribution quality: `gpu_attribution_method`, `gpu_attribution_confidence` expose enrichment certainty per segment.
 - Raw mapping: primarily `stream_trace_events` + Flink sessionization logic.
 
 ### `fact_stream_status_samples`
 - Grain: one row per status sample timestamp.
 - Purpose: FPS and state timeseries.
 - Metric use: output FPS, FPS jitter coefficient.
-- Attribution quality: `attribution_method`, `attribution_confidence` expose enrichment certainty per sample.
+- Attribution quality: `gpu_attribution_method`, `gpu_attribution_confidence` expose enrichment certainty per sample.
 - Raw mapping: `ai_stream_status` (+ capability enrichment fields).
 
 ### `fact_stream_trace_edges`
@@ -93,6 +93,13 @@ Capability catalog source:
 - Purpose: latency edge pairing and lifecycle classification evidence.
 - Metric use: startup, e2e proxy, prompt-to-playable proxy, swap evidence.
 - Raw mapping: `stream_trace_events`.
+
+### `fact_workflow_latency_samples`
+- Grain: one row per workflow-session snapshot version.
+- Purpose: deterministic latency KPI derivation from Flink-owned edge semantics.
+- Metric use: prompt-to-first-frame, startup time, e2e latency (+ coverage counts).
+- Key fields: `prompt_to_first_frame_ms`, `startup_time_ms`, `e2e_latency_ms`, `edge_semantics_version`.
+- Raw mapping: derived from `fact_workflow_sessions` edge timestamps in Flink.
 
 ### `fact_stream_ingest_samples`
 - Grain: one row per ingest snapshot.
@@ -117,10 +124,10 @@ Capability catalog source:
 - Purpose: reliability KPIs (success/excused/unexcused/swap rates).
 - Join-back keys: dimensions + `workflow_session_id` in `fact_workflow_sessions`.
 
-### `agg_latency_edges_1m`
-- Grain: 1 minute x session/request.
-- Purpose: latency KPI serving with explicit pair coverage counts.
-- Join-back keys: `workflow_session_id`, `stream_id`, `request_id`.
+### `agg_latency_kpis_1m`
+- Grain: 1 minute x orchestrator/workflow/model/GPU/region.
+- Purpose: serve latency KPIs with validity counts.
+- Join-back keys: dimensions + `workflow_session_id` in `fact_workflow_latency_samples`.
 
 ## Raw -> Fact Mapping
 
@@ -150,7 +157,7 @@ Reasoning:
 - Jitter Coefficient (FPS): covered now via `fact_stream_status_samples` + `agg_stream_performance_1m`.
 - Startup Time (proxy): covered with edge pairs from `fact_stream_trace_edges` and session timestamps in `fact_workflow_sessions`.
 - E2E Stream Latency (proxy): covered with agreed edge pairs in `fact_stream_trace_edges`.
-- Prompt-to-First-Frame (proxy/playable): covered with `start_time` + trace edges in `fact_workflow_sessions` / `agg_latency_edges_1m`.
+- Prompt-to-First-Frame (proxy/playable): derived from edge timestamps in `fact_workflow_sessions`; serving rollup is planned as Flink-owned derived fact/aggregate (not ClickHouse edge-pair SQL).
 - Failure Rate (unexcused proxy): covered via `fact_workflow_sessions` classification fields + `agg_reliability_1h`.
 - Swap Rate: covered via `swap_count` in `fact_workflow_sessions` and segment transitions in `fact_workflow_session_segments`.
 - Up/Down Bandwidth (target GPU/orchestrator): not covered by current events; planned via `fact_orchestrator_transport_bandwidth`.
@@ -158,8 +165,54 @@ Reasoning:
 ## API Mapping
 
 - `/gpu/metrics` -> `v_api_gpu_metrics` (FPS/jitter by GPU/model/orchestrator/time).
+- `/gpu/metrics` latency extension -> `v_api_gpu_metrics` (prompt-to-first-frame/startup/e2e from `agg_latency_kpis_1m`).
 - `/network/demand` -> `v_api_network_demand` (active streams/sessions and throughput proxies by gateway/region/workflow).
+- `/network/demand` (supply slice) -> `v_api_network_demand_by_gpu` (GPU-type/capacity proxy by gateway/orchestrator/model/GPU/time).
 - `/sla/compliance` -> `v_api_sla_compliance` (success/no-swap components; weighting applied in API layer).
+
+## API Contract Summary (Canonical)
+
+| API Endpoint | Backing View | Canonical Grain | Supported Fields (Current/Planned) | Explicitly Out of Scope (Now) |
+|---|---|---|---|---|
+| `/gpu/metrics` | `v_api_gpu_metrics` | 1 minute x orchestrator/pipeline/model/gpu/region | keys: `window_start`, `orchestrator_address`, `pipeline`, `pipeline_id`, `model_id`, `gpu_id`, `region`; metadata: `gpu_name`, `gpu_memory_total`, `cuda_version`, `runner_version`; KPIs: `avg_output_fps`, `p95_output_fps`, `jitter_coeff_fps`, `status_samples`, `known_sessions`, `success_sessions`, `excused_sessions`, `unexcused_sessions`, `swapped_sessions`, `failure_rate`, `swap_rate`; latency (planned via Flink-derived fact): `prompt_to_first_frame_ms`, `startup_time_ms`, `e2e_latency_ms` | `network_up_mbps`, `network_down_mbps`, `cue` |
+| `/network/demand` | `v_api_network_demand` | 1 hour x gateway/region/pipeline | `total_streams`, `total_sessions`, `total_inference_minutes`, `known_sessions`, `unexcused_sessions`, `swapped_sessions`, `missing_capacity_count`, `fee_payment_eth`, `avg_output_fps`, `success_ratio` | `staking_lpt` |
+| `/network/demand` (supply slice) | `v_api_network_demand_by_gpu` (planned) | 1 hour x gateway/orchestrator/gpu_type/pipeline/region | `inference_minutes_by_gpu_type`, `used_inference_minutes`, `available_capacity_minutes` (proxy), `capacity_rate`, `missing_capacity_count`, `fee_payment_eth` | none beyond source availability |
+| `/sla/compliance` | `v_api_sla_compliance` | 1 hour x orchestrator/pipeline/model/gpu/region | `known_sessions`, `success_sessions`, `excused_sessions`, `unexcused_sessions`, `swapped_sessions`, `success_ratio`, `no_swap_ratio`, `sla_score` | none |
+
+Contract rule:
+- Additive fields are authoritative for client-side re-rollups.
+- Derived ratios/scores must be recomputed from additive fields when aggregating to larger windows.
+
+## Dimension Join Policy for API Views
+
+Use capability dimensions based on the question the view is answering:
+
+- `*_current` answers "what is true now" (latest metadata labels/inventory).
+- `*_snapshots` answers "what was true at event time" (historically accurate metadata).
+
+### View-specific policy
+
+- `v_api_gpu_metrics`:
+  - Primary use: realtime operations and dashboard health panels.
+  - Join policy: use `dim_orchestrator_capability_current` for descriptive metadata.
+  - Note: historical rows may display current metadata labels when capabilities change.
+
+- `v_api_network_demand`:
+  - Primary use: historical demand, usage, and cost reporting.
+  - Join policy: prefer `dim_orchestrator_capability_snapshots` with an as-of time join
+    (latest snapshot at or before the bucket timestamp).
+  - Goal: historical buckets reflect metadata known at that time.
+
+- `v_api_sla_compliance`:
+  - Core SLA math should not depend on dimension joins.
+  - If labels are added, use `*_current` for display-only dashboards, or `*_snapshots`
+    when historical label correctness is required.
+
+### Join safety rules
+
+- Do not mix `*_current` and `*_snapshots` semantics in one API view.
+- Keep one declared grain per view and ensure dimension joins stay 1:1 at that grain.
+- If a dimension join can become 1:N, pre-deduplicate to one row per join key before joining.
 
 ## Flink Responsibilities Required for V1
 
@@ -168,7 +221,7 @@ Reasoning:
 - Normalize trace taxonomy: classify trace edges and flag swap events.
 - Sessionize and classify startup outcomes (`success`, `excused`, `unexcused`) from trace + error taxonomy.
 - Enrich facts with nearest valid orchestrator capability snapshot (`model_id`, `gpu_id`, `capability_id`, `capability_name`, `capability_group`) when available.
-- Emit attribution quality fields (`attribution_method`, `attribution_confidence`) for auditability.
+- Emit attribution quality fields (`gpu_attribution_method`, `gpu_attribution_confidence`) for auditability.
 - Produce stateful lifecycle facts directly: `fact_workflow_sessions`, `fact_workflow_session_segments`.
 
 ## What Stays in ClickHouse

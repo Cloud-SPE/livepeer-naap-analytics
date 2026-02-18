@@ -22,4 +22,3 @@ public class WorkflowParamUpdateAccumulator implements Serializable {
     public float attributionConfidence = 0.0f;
     public long version = 0L;
 }
-

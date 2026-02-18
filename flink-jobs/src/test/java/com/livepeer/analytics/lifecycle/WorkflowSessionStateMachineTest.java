@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class WorkflowSessionStateMachineTest {
 
     @Test
-    void classifiesKnownStreamSuccessAndSwapFallback() {
+    void classifiesKnownStreamSuccessWithoutCanonicalSwapFallback() {
         WorkflowSessionAccumulator state = new WorkflowSessionAccumulator();
 
         LifecycleSignal streamRequest = signal(LifecycleSignal.SignalType.STREAM_TRACE, 1000L);
@@ -36,7 +36,7 @@ class WorkflowSessionStateMachineTest {
         assertEquals(1, fact.knownStream);
         assertEquals(1, fact.startupSuccess);
         assertEquals(0, fact.startupUnexcused);
-        assertEquals(1, fact.swapCount); // fallback orch_count > 1
+        assertEquals(0, fact.swapCount); // fallback uses canonical identity only
         assertEquals("e1", fact.sourceFirstEventUid);
         assertEquals("e2", fact.sourceLastEventUid);
     }

@@ -39,9 +39,6 @@ public final class WorkflowSessionStateMachine {
                 ? state.pipelineId
                 : firstNonEmpty(state.workflowId, state.pipeline, "ai_live_video_stream");
         state.gateway = firstNonEmpty(state.gateway, signal.gateway);
-        if (!isEmpty(signal.orchestratorAddress)) {
-            state.orchestratorAddress = signal.orchestratorAddress;
-        }
         if (!isEmpty(signal.orchestratorUrl)) {
             state.orchestratorUrl = signal.orchestratorUrl;
         }
@@ -59,12 +56,6 @@ public final class WorkflowSessionStateMachine {
             state.sourceFirstEventUid = signal.sourceEventUid;
         }
         state.sourceLastEventUid = signal.sourceEventUid;
-
-        if (!isEmpty(signal.orchestratorAddress)) {
-            state.orchestratorsSeen.add(normalizeAddress(signal.orchestratorAddress));
-        } else if (!isEmpty(state.orchestratorAddress)) {
-            state.orchestratorsSeen.add(normalizeAddress(state.orchestratorAddress));
-        }
 
         if (signal.signalType == LifecycleSignal.SignalType.STREAM_TRACE) {
             applyTrace(state, signal);
@@ -158,9 +149,7 @@ public final class WorkflowSessionStateMachine {
         fact.startupExcused = startupExcused ? 1 : 0;
         fact.startupUnexcused = startupUnexcused ? 1 : 0;
 
-        long canonicalCount = state.canonicalOrchestratorsSeen.isEmpty()
-                ? state.orchestratorsSeen.size()
-                : state.canonicalOrchestratorsSeen.size();
+        long canonicalCount = state.canonicalOrchestratorsSeen.size();
         long fallbackSwapCount = Math.max(0L, canonicalCount - 1L);
         fact.swapCount = (int) Math.max(state.explicitSwapCount, fallbackSwapCount);
         fact.errorCount = state.errorCount;

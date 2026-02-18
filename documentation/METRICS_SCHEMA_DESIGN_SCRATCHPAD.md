@@ -16,6 +16,45 @@ The below are the metrics we need to be able to create.
 | Failure Rate                    | —           | Reliability  | wallet, GPU ID, workflow id, region, time            | Medium           | %                     | Gateway           | Partial          | < 1%                              |
 | Swap Rate                       | —           | Reliability  | wallet, GPU ID, workflow id, region, time            | Medium           | %                     | Gateway           | Partial          | < 5%                              |
 
+
+## Key APIs to Enable
+
+The below are the API contracts we need the serving model to support directly.
+
+| API Endpoint         | Backing View               | Canonical Grain | Required Filters                           | Required Grouping Dimensions                          | Core Additive Fields                                                                 | Core Derived Fields                              | Status |
+|----------------------|----------------------------|-----------------|--------------------------------------------|-------------------------------------------------------|--------------------------------------------------------------------------------------|--------------------------------------------------|--------|
+| `/gpu/metrics`       | `v_api_gpu_metrics`        | 1 hour          | time range, orchestrator, pipeline/model/GPU, region | orchestrator, pipeline, pipeline_id, model_id, gpu_id, region, window_start | `status_samples`, `known_sessions`, `success_sessions`, `excused_sessions`, `unexcused_sessions`, `swapped_sessions` | `avg_output_fps`, `p95_output_fps`, `jitter_coeff_fps`, `failure_rate`, `swap_rate` | In Progress |
+| `/network/demand`    | `v_api_network_demand`     | 1 hour          | time range, gateway, region, pipeline       | gateway, region, pipeline, pipeline_id, window_start  | `total_streams`, `total_sessions`, `total_inference_minutes`, `known_sessions`, `unexcused_sessions`, `swapped_sessions`, `missing_capacity_count`, `fee_payment_eth` | `avg_output_fps`, `success_ratio`                | In Progress |
+| `/sla/compliance`    | `v_api_sla_compliance`     | 1 hour          | time range, orchestrator, pipeline/model/GPU, region | orchestrator, pipeline, pipeline_id, model_id, gpu_id, region, window_start | `known_sessions`, `success_sessions`, `excused_sessions`, `unexcused_sessions`, `swapped_sessions` | `success_ratio`, `no_swap_ratio`, `sla_score`    | In Progress |
+
+Notes:
+- `/datasets` remains out-of-scope for current implementation.
+- API responses must be rollup-safe outside the DB by recomputing ratios from additive fields.
+- `v_api_network_demand` can show low/zero `avg_output_fps` for very short streams when too few status samples are emitted before close. This is an expected telemetry sparsity edge case, not always a serving bug.
+
+### Recommended Approach: Edge-Derived Latency KPIs
+
+- Ownership:
+  - Keep edge-pairing/classification logic in Flink (state machine + deterministic tests).
+  - Keep ClickHouse focused on rollups/serving joins, not complex edge-pair SQL.
+- Change safety:
+  - Add `edge_semantics_version` to derived latency facts/rollups.
+  - If edge definitions change, bump version and replay affected windows; API views must filter to one semantics version.
+- Current disposition:
+  - `agg_latency_edges_1m` is removed from schema because it had no producer/MV path and no active API dependency.
+  - Latency API fields (`prompt_to_first_frame_ms`, `startup_time_s`, `e2e_latency_ms`) should be fed by Flink-owned derived latency facts in a follow-up implementation.
+
+### API Implementation Plan (Execution)
+
+| Step | Work Item | Status | Notes |
+|---|---|---|---|
+| 1 | Dimension projection stability (`network_capabilities*` -> `dim_orchestrator_capability_*`) | Completed (Local) | Verified MVs exist and dimensions project rows in local environment after schema apply. |
+| 2 | Canonical API contract documentation | Completed | Added canonical API contract summary in `METRICS_SCHEMA_V1_DESIGN.md`. |
+| 3 | `/gpu/metrics` latency fields via Flink-derived fact | In Progress | Implemented `fact_workflow_latency_samples` + `agg_latency_kpis_1m` + `v_api_gpu_metrics` latency fields; pending end-to-end data validation after job run. |
+| 4 | `/network/demand` supply split (`v_api_network_demand_by_gpu`) | In Progress | View added in schema with GPU-type demand and capacity proxy fields; needs runtime validation + API adoption. |
+| 5 | API readiness assertion expansion | In Progress | `assertions_api_readiness.sql` added; extend with latency/supply checks once steps 3-4 land. |
+| 6 | Notebook/query-pack cleanup | Pending | Remove stale references, add API readiness section and updated contract checks. |
+
 ## Plan (Live)
 
 1. Baseline discovery
@@ -125,7 +164,7 @@ The below are the metrics we need to be able to create.
 - Lifecycle implementation spec:
   - `documentation/WORKFLOW_LIFECYCLE_EDGE_SPEC.md` is the canonical edge/session/classification contract.
   - Fill all `TODO (User Clarification)` items there before implementing stateful lifecycle operators.
-- TODO (next metric rollout):
+- TODO (next metrics rollout)
   - Add `param_update_failure_rate` rollup and serving view.
   - Proposed failure outcome classes per `params_update`: `failed_update_params`, `no_playback_stuck_state`, `no_playback_unknown`.
   - Proposed formula: `failed_updates / total_param_updates` over 120s post-update window.
@@ -405,14 +444,83 @@ This section captures the normalization concepts we are retaining from `other-pr
 - Rollup-level (`agg_failure_rate_1m|1h|1d`): grouped by time window + dimensions (`gateway`, `orchestrator`, `workflow_id`, `pipeline_id`, `region` when available).
 - Drill-through keys: `session_key`, `stream_id`, `request_id`, plus edge/event timestamps to trace and AI-event facts.
 
-## Additional Fact Tables/Views/Dictionaries Needed
+
+## Outstanding Areas for Improvement (BACKLOG)
+
+Document high-impact gaps that can affect correctness, explain why they matter operationally, and record an implementable path (schema, Flink, and serving/query changes) to close each gap.
+
+### Cross-component timestamp skew and edge-order correctness:
+  - Problem:
+    - `stream_trace_events.data_timestamp` reflects emitter-side time (runner/gateway clocks can differ).
+    - `stream_trace_events.event_timestamp` reflects gateway publish/ingest time (can be delayed by queueing/network).
+    - Using only one timestamp domain can invert expected causal order for cross-component edges (for example runner edges appearing before gateway send, or after gateway receive).
+  - Why this matters:
+    - Session drill-down timelines appear illogical to users.
+    - Cross-component latency metrics can be noisy or negative.
+    - Dashboard/API trust degrades when event progression looks impossible.
+  - Suggested approach:
+    - Preserve dual-time fields through silver facts:
+      - `source_ts` (emitter-reported, currently `data_timestamp`)
+      - `gateway_ingest_ts` (gateway observed/published, currently `event_timestamp`)
+      - optional `pipeline_ingest_ts` (Flink processing time)
+    - Define metric-level timestamp policy (no mixed-domain arithmetic in one KPI):
+      - intra-component metrics use `source_ts`
+      - cross-component/user-facing progression uses `gateway_ingest_ts` or gateway-only edge pairs
+    - Add ordering annotations for drill-down/serving:
+      - `ordering_corrected` flag when displayed/logical event sequence required precedence correction
+      - `timestamp_confidence` tier to indicate raw ordering quality
+    - Add skew observability:
+      - `clock_offset_ms = gateway_ingest_ts - source_ts`
+      - monitor p50/p95/p99 by edge type, orchestrator, and gateway
+      - alert on sustained offset drift
+
+### `v_api_gpu_inventory_current` (metadata-only serving view):
+  - Status: `DEFERRED` (planned, not in current implementation scope).
+  - Context:
+    - We need a clear hardware inventory surface that does not overload performance rollups.
+    - `v_api_gpu_metrics` should stay focused on performance/reliability aggregates.
+    - Inventory fields (`gpu_name`, `gpu_memory_total`, optional `gpu_memory_free`, `runner_version`) belong in a current-state metadata view.
+  - Suggested definition scope:
+    - Source: capability dimensions (`dim_orchestrator_capability_current` or equivalent latest-snapshot derivation).
+    - Grain: one row per `(orchestrator_address, pipeline_id, model_id, gpu_id)`.
+    - Fields:
+      - `orchestrator_address`, `pipeline`, `pipeline_id`, `model_id`, `gpu_id`, `region`
+      - `gpu_name`, `gpu_memory_total`, optional `gpu_memory_free`
+      - `runner_version`, `latest_snapshot_ts`
+    - Semantics:
+      - Inventory-only metadata view; no performance KPI math.
+      - `gpu_memory_free` is snapshot-derived and should be labeled as freshness-sensitive.
+  - Implementation plan:
+    1. Add/confirm required columns in capability dimension source (including `gpu_memory_free` if retained).
+    2. Create `v_api_gpu_inventory_current` view with explicit grain + latest snapshot timestamp.
+    3. Add validation query for null/empty critical keys (`orchestrator_address`, `gpu_id`) and snapshot freshness.
+    4. Document API usage: use this view for GPU metadata drill-down; use `v_api_gpu_metrics` for KPI time series.
+
+### `v_api_gpu_metrics_enriched` (optional convenience join view):
+  - Status: `DEFERRED` (planned, not in current implementation scope).
+  - Purpose:
+    - Provide a reader-friendly combined surface by joining KPI outputs from `v_api_gpu_metrics`
+      with metadata from `v_api_gpu_inventory_current`.
+  - Notes:
+    - Keep base contracts separated (`metrics` vs `inventory`) even if this convenience view is added later.
+
+### `v_api_network_demand_by_model` (grain-split demand view):
+  - Status: `DEFERRED` (planned, not in current implementation scope).
+  - Context:
+    - `v_api_network_demand` is intentionally pipeline-level demand and excludes `model_id`.
+    - Adding `model_id` to the existing view would change grain and can cause accidental double counting by consumers.
+  - Plan:
+    1. Keep `v_api_network_demand` unchanged as the stable coarse-grain contract.
+    2. Add `v_api_network_demand_by_model` with `model_id` included in `SELECT` + `GROUP BY`.
+    3. Document that totals across models should not be compared to pipeline-level totals without grain awareness.
+      
+### Additional Fact Tables/Views/Dictionaries Needed
 
 This section is a work in progress and will be known more clearly once the intial metrics/queries for these elements are defined.  This is subject to change.
 
 - Current known orchestrator state - IDLE/RUNNING, capabilities, addresses, etc
+- `v_api_attribution_coverage_1h` (DEFERRED): hourly coverage view for attributable vs unattributable serving rows by pipeline/region/gateway to explain missing API tuples and track telemetry quality drift.
 - Gateway state - # of jobs, job types, fees paid
-
-## Potential Metrics to Implement
 
 ### SLA Scoring
 
@@ -549,6 +657,28 @@ TODO:
 - [ ] Define where alerts execute (Grafana/Prometheus/SQL scheduled checks).
 - [ ] Add release gate checklist that must pass before deployment.
 - [ ] Decide if Flink runtime counters are mandatory in addition to SQL diagnostics.
+
+##  Lineage Tracking of Orchestrator Per Session
+
+Status: `OPEN`
+
+Goal:  Easily query and see all Orchestrators for a given session
+
+CURRENT STATE:
+- Silver and serving layers store canonical `orchestrator_address` only.
+- Hot-wallet addresses remain available in raw event tables for forensic/debug workflows.
+
+TODO: 
+- For complete per-session canonical orchestrator lineage, run an aggregation query on `fact_workflow_session_segments`, for example:
+
+```sql
+WITH {session_id:String} AS sid
+SELECT
+  sid AS workflow_session_id,
+  groupUniqArrayIf(orchestrator_address, orchestrator_address != '') AS canonical_orchestrators
+FROM livepeer_analytics.fact_workflow_session_segments
+WHERE workflow_session_id = sid;
+```
 
 ## APIs Needed
 /gpu/metrics	GET	Retrieve per-GPU realtime metrics	o_wallet, gpu_id, region, workflow, time_range	JSON with performance/reliability fields

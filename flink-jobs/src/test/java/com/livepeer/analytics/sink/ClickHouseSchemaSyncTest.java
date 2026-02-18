@@ -184,6 +184,19 @@ class ClickHouseSchemaSyncTest {
     }
 
     @Test
+    void capabilityDimensionMaterializedViewsAreDeclaredInSchema() throws Exception {
+        String schemaSql = readSchemaSql();
+        assertTrue(schemaSql.contains("CREATE MATERIALIZED VIEW IF NOT EXISTS mv_network_capabilities_to_dim_orchestrator_capability_snapshots"),
+                "Missing MV declaration for capability snapshots");
+        assertTrue(schemaSql.contains("CREATE MATERIALIZED VIEW IF NOT EXISTS mv_network_capabilities_advertised_to_dim_orchestrator_capability_advertised_snapshots"),
+                "Missing MV declaration for advertised capability snapshots");
+        assertTrue(schemaSql.contains("CREATE MATERIALIZED VIEW IF NOT EXISTS mv_network_capabilities_model_constraints_to_dim_orchestrator_capability_model_constraints"),
+                "Missing MV declaration for model constraint snapshots");
+        assertTrue(schemaSql.contains("CREATE MATERIALIZED VIEW IF NOT EXISTS mv_network_capabilities_prices_to_dim_orchestrator_capability_prices"),
+                "Missing MV declaration for capability prices");
+    }
+
+    @Test
     void aiStreamEventsRowMatchesSchema() throws Exception {
         EventPayloads.AiStreamEvent payload = new EventPayloads.AiStreamEvent();
         payload.eventTimestamp = 1710000000000L;
@@ -317,6 +330,32 @@ class ClickHouseSchemaSyncTest {
         payload.version = 3L;
 
         assertRowMatchesTable("fact_workflow_param_updates", ClickHouseRowMappers.factWorkflowParamUpdatesRow(payload));
+    }
+
+    @Test
+    void factWorkflowLatencySamplesRowMatchesSchema() throws Exception {
+        EventPayloads.FactWorkflowLatencySample payload = new EventPayloads.FactWorkflowLatencySample();
+        payload.sampleTs = 1710000000000L;
+        payload.workflowSessionId = "stream|request";
+        payload.streamId = "stream";
+        payload.requestId = "request";
+        payload.gateway = "gateway-1";
+        payload.orchestratorAddress = "0xorch";
+        payload.pipeline = "live-video-to-video";
+        payload.pipelineId = "";
+        payload.modelId = "streamdiffusion-sdxl";
+        payload.gpuId = "GPU-1";
+        payload.region = null;
+        payload.promptToFirstFrameMs = 120.0;
+        payload.startupTimeMs = 3500.0;
+        payload.e2eLatencyMs = 3900.0;
+        payload.hasPromptToFirstFrame = 1;
+        payload.hasStartupTime = 1;
+        payload.hasE2eLatency = 1;
+        payload.edgeSemanticsVersion = "v1";
+        payload.version = 5L;
+
+        assertRowMatchesTable("fact_workflow_latency_samples", ClickHouseRowMappers.factWorkflowLatencySamplesRow(payload));
     }
 
     @Test

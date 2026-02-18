@@ -518,6 +518,21 @@ INNER JOIN api USING (window_start, orchestrator_address, pipeline, pipeline_id,
 WITH
   now64(3, 'UTC') AS to_ts,
   to_ts - INTERVAL 24 HOUR AS from_ts,
+  latest_sessions AS (
+    SELECT
+      workflow_session_id,
+      argMax(session_start_ts, version) AS session_start_ts,
+      argMax(orchestrator_address, version) AS orchestrator_address,
+      argMax(pipeline, version) AS pipeline,
+      argMax(pipeline_id, version) AS pipeline_id,
+      argMax(model_id, version) AS model_id,
+      argMax(gpu_id, version) AS gpu_id,
+      argMax(known_stream, version) AS known_stream,
+      argMax(startup_unexcused, version) AS startup_unexcused,
+      argMax(swap_count, version) AS swap_count
+    FROM livepeer_analytics.fact_workflow_sessions
+    GROUP BY workflow_session_id
+  ),
   raw AS (
     SELECT
       toStartOfInterval(session_start_ts, INTERVAL 1 HOUR) AS window_start,
@@ -529,7 +544,7 @@ WITH
       sum(toUInt64(known_stream)) AS raw_known_sessions,
       sum(toUInt64(startup_unexcused)) AS raw_unexcused_sessions,
       sum(toUInt64(swap_count > 0)) AS raw_swapped_sessions
-    FROM livepeer_analytics.fact_workflow_sessions FINAL
+    FROM latest_sessions
     WHERE session_start_ts >= from_ts AND session_start_ts < to_ts
     GROUP BY window_start, orchestrator_address, pipeline, pipeline_id, model_id, gpu_id
   ),
@@ -703,7 +718,7 @@ SELECT
   count() AS sessions_total,
   countIf(model_id IS NOT NULL AND model_id != '') AS sessions_with_model,
   countIf(gpu_id IS NOT NULL AND gpu_id != '') AS sessions_with_gpu,
-  countIf(attribution_method != 'none') AS sessions_with_attribution,
+  countIf(gpu_attribution_method != 'none') AS sessions_with_attribution,
   countIf(model_id IS NOT NULL AND model_id != '') / nullIf(count(),0) AS model_coverage,
   countIf(gpu_id IS NOT NULL AND gpu_id != '') / nullIf(count(),0) AS gpu_coverage
 FROM (
@@ -711,7 +726,7 @@ FROM (
     workflow_session_id,
     argMax(model_id, version) AS model_id,
     argMax(gpu_id, version) AS gpu_id,
-    argMax(attribution_method, version) AS attribution_method
+    argMax(gpu_attribution_method, version) AS gpu_attribution_method
   FROM livepeer_analytics.fact_workflow_sessions
   WHERE session_start_ts >= from_ts AND session_start_ts < to_ts
   GROUP BY workflow_session_id

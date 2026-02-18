@@ -28,4 +28,3 @@ public class WorkflowSessionSegmentAccumulator implements Serializable {
     public String sourceEventUid = "";
     public long version = 0L;
 }
-

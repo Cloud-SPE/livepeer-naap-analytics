@@ -56,6 +56,11 @@ final class ClickHouseJsonRow {
         return this;
     }
 
+    ClickHouseJsonRow addNullableDouble(String name, Double value) {
+        fields.put(name, value);
+        return this;
+    }
+
     ClickHouseJsonRow addBoolean(String name, boolean value) {
         fields.put(name, value ? 1 : 0);
         return this;

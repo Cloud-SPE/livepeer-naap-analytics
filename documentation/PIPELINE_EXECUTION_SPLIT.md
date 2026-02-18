@@ -20,7 +20,7 @@ These require cross-event correlation, session windows, ordering, and classifica
 - deterministic `workflow_session_id`
 - success/excused/unexcused outcomes
 - swap detection across edges
-- attribution quality (`attribution_method`, `attribution_confidence`)
+- attribution quality (`gpu_attribution_method`, `gpu_attribution_confidence`)
 
 ## Non-stateful facts (computed in ClickHouse MVs)
 - `fact_stream_status_samples` from `ai_stream_status`

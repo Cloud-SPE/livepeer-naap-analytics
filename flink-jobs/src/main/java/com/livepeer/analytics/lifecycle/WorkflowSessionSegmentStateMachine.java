@@ -23,11 +23,8 @@ public final class WorkflowSessionSegmentStateMachine {
             CapabilitySnapshotRef snapshot,
             long attributionTtlMs) {
         List<EventPayloads.FactWorkflowSessionSegment> out = new ArrayList<>(2);
-        String signalOrchestrator = normalizeAddress(signal.orchestratorAddress);
         String canonicalFromSnapshot = snapshot == null ? "" : normalizeAddress(snapshot.canonicalOrchestratorAddress);
-        String effectiveOrchestrator = !isEmpty(canonicalFromSnapshot)
-                ? canonicalFromSnapshot
-                : signalOrchestrator;
+        String effectiveOrchestrator = canonicalFromSnapshot;
 
         if (!state.openSegment) {
             openSegment(state, signal, effectiveOrchestrator, "initial", signal.traceType);
@@ -86,7 +83,7 @@ public final class WorkflowSessionSegmentStateMachine {
         state.segmentStartTs = signal.signalTimestamp;
         state.segmentEndTs = null;
         state.gateway = firstNonEmpty(state.gateway, signal.gateway);
-        state.orchestratorAddress = firstNonEmpty(effectiveOrchestrator, signal.orchestratorAddress);
+        state.orchestratorAddress = firstNonEmpty(effectiveOrchestrator, state.orchestratorAddress);
         state.orchestratorUrl = firstNonEmpty(signal.orchestratorUrl, state.orchestratorUrl);
         state.reason = reason;
         state.sourceTraceType = firstNonEmpty(sourceTraceType, "");

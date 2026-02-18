@@ -217,8 +217,8 @@ For stream/session facts, enrich using nearest valid capability snapshot by orch
 Fields:
 - `model_id`
 - `gpu_id`
-- `attribution_method`
-- `attribution_confidence`
+- `gpu_attribution_method`
+- `gpu_attribution_confidence`
 
 ### 6.2 Attribution Method Enum (`Needs Clarification`)
 Draft values:
@@ -249,7 +249,7 @@ Required outputs:
 - timing: `session_start_ts`, `session_end_ts`, `first_stream_request_ts`, `first_processed_ts`, `first_playable_ts`
 - classification: `known_stream`, `startup_success`, `startup_excused`, `startup_unexcused`
 - reliability: `swap_count`, `error_count`, `excusable_error_count`
-- attribution: `orchestrator_address`, `gateway`, `model_id`, `gpu_id`, `attribution_method`, `attribution_confidence`
+- attribution: `orchestrator_address`, `gateway`, `model_id`, `gpu_id`, `gpu_attribution_method`, `gpu_attribution_confidence`
 - lineage/idempotency: `source_first_event_uid`, `source_last_event_uid`, `version`
 
 ### 7.2 `fact_workflow_session_segments` (`Needs Clarification`)
@@ -277,7 +277,7 @@ USER CLARIFICATION:
 4. Confirm approved excusable error taxonomy and matching mode.
 5. Confirm swap fallback rule strictness (unique count vs ordered transition).
 6. Confirm segment boundary identity fields.
-7. Confirm attribution TTL and final `attribution_method` enum.
+7. Confirm attribution TTL and final `gpu_attribution_method` enum.
 8. Confirm segment close behavior (`segment_end_ts` policy).
 
 

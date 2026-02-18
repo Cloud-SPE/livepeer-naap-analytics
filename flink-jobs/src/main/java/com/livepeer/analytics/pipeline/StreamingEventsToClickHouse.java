@@ -21,6 +21,7 @@ import com.livepeer.analytics.lifecycle.WorkflowLifecycleCoverageAggregatorFunct
 import com.livepeer.analytics.lifecycle.WorkflowParamUpdateAggregatorFunction;
 import com.livepeer.analytics.lifecycle.WorkflowSessionAggregatorFunction;
 import com.livepeer.analytics.lifecycle.WorkflowSessionSegmentAggregatorFunction;
+import com.livepeer.analytics.lifecycle.WorkflowLatencyDerivation;
 import com.livepeer.analytics.model.EventPayloads;
 import com.livepeer.analytics.model.KafkaInboundRecord;
 import com.livepeer.analytics.model.ParsedEvent;
@@ -205,6 +206,13 @@ public class StreamingEventsToClickHouse {
                 .returns(new TypeHint<ParsedEvent<EventPayloads.FactWorkflowSession>>() {})
                 .name("Sessionize: Workflow Sessions");
 
+        // Derive latency KPIs from deterministic session-edge timestamps emitted by Flink state.
+        // This keeps edge semantics versioned in code and minimizes complex ClickHouse SQL pairing logic.
+        SingleOutputStreamOperator<ParsedEvent<EventPayloads.FactWorkflowLatencySample>> workflowLatencySamplesStream = workflowSessionsStream
+                .map(StreamingEventsToClickHouse::toWorkflowLatencySample)
+                .returns(new TypeHint<ParsedEvent<EventPayloads.FactWorkflowLatencySample>>() {})
+                .name("Derive: Workflow Latency Samples");
+
         SingleOutputStreamOperator<ParsedEvent<EventPayloads.FactWorkflowSessionSegment>> workflowSessionSegmentsStream = lifecycleSignals
                 .keyBy(signal -> signal.workflowSessionId)
                 .connect(capabilityBroadcast)
@@ -324,6 +332,14 @@ public class StreamingEventsToClickHouse {
                 "Rows: Workflow Sessions",
                 true);
 
+        SingleOutputStreamOperator<String> workflowLatencySampleRows = mapRowsWithGuard(
+                workflowLatencySamplesStream,
+                ClickHouseRowMappers::factWorkflowLatencySamplesRow,
+                DLQ_TAG,
+                config,
+                "Rows: Workflow Latency Samples",
+                true);
+
         SingleOutputStreamOperator<String> workflowSessionSegmentRows = mapRowsWithGuard(
                 workflowSessionSegmentsStream,
                 ClickHouseRowMappers::factWorkflowSessionSegmentsRow,
@@ -359,6 +375,7 @@ public class StreamingEventsToClickHouse {
                 .union(discoveryRows.getSideOutput(DLQ_TAG))
                 .union(paymentRows.getSideOutput(DLQ_TAG))
                 .union(workflowSessionRows.getSideOutput(DLQ_TAG))
+                .union(workflowLatencySampleRows.getSideOutput(DLQ_TAG))
                 .union(workflowSessionSegmentRows.getSideOutput(DLQ_TAG))
                 .union(workflowParamUpdateRows.getSideOutput(DLQ_TAG))
                 .union(lifecycleCoverageRows.getSideOutput(DLQ_TAG));
@@ -375,6 +392,7 @@ public class StreamingEventsToClickHouse {
         sinkToClickHouse(discoveryRows, config, "discovery_results", "CH: Discovery");
         sinkToClickHouse(paymentRows, config, "payment_events", "CH: Payments");
         sinkToClickHouse(workflowSessionRows, config, "fact_workflow_sessions", "CH: Workflow Sessions");
+        sinkToClickHouse(workflowLatencySampleRows, config, "fact_workflow_latency_samples", "CH: Workflow Latency Samples");
         sinkToClickHouse(workflowSessionSegmentRows, config, "fact_workflow_session_segments", "CH: Workflow Session Segments");
         sinkToClickHouse(workflowParamUpdateRows, config, "fact_workflow_param_updates", "CH: Workflow Param Updates");
         sinkToClickHouse(lifecycleCoverageRows, config, "fact_lifecycle_edge_coverage", "CH: Lifecycle Edge Coverage");
@@ -520,6 +538,12 @@ public class StreamingEventsToClickHouse {
         signal.sourceEventUid = sourceEventUid(parsed.event);
         signal.sourceEvent = parsed.event;
         return signal;
+    }
+
+    private static ParsedEvent<EventPayloads.FactWorkflowLatencySample> toWorkflowLatencySample(
+            ParsedEvent<EventPayloads.FactWorkflowSession> parsed) {
+        EventPayloads.FactWorkflowLatencySample sample = WorkflowLatencyDerivation.fromSession(parsed.payload);
+        return new ParsedEvent<>(parsed.event, sample);
     }
 
     private static String sourceEventUid(StreamingEvent event) {

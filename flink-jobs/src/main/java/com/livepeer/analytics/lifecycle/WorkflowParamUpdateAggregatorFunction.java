@@ -57,16 +57,14 @@ public class WorkflowParamUpdateAggregatorFunction extends KeyedBroadcastProcess
         state.pipeline = firstNonEmpty(state.pipeline, signal.pipeline);
         state.pipelineId = firstNonEmpty(state.pipelineId, signal.pipelineId);
         state.gateway = firstNonEmpty(state.gateway, signal.gateway);
-        if (!isEmpty(signal.orchestratorAddress)) {
-            state.orchestratorAddress = normalizeAddress(signal.orchestratorAddress);
-        }
         state.orchestratorUrl = firstNonEmpty(state.orchestratorUrl, signal.orchestratorUrl);
 
         // Reuse broadcast enrichment for canonical orchestrator and model/GPU attribution.
         CapabilitySnapshotRef snapshot = null;
-        if (!isEmpty(state.orchestratorAddress)) {
+        String signalAddress = normalizeAddress(signal.orchestratorAddress);
+        if (!isEmpty(signalAddress)) {
             snapshot = ctx.getBroadcastState(CapabilityBroadcastState.CAPABILITY_STATE_DESCRIPTOR)
-                    .get(state.orchestratorAddress);
+                    .get(signalAddress);
         }
         applySnapshotAttribution(state, snapshot, signal.signalTimestamp);
 
