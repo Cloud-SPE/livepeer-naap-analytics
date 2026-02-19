@@ -22,7 +22,7 @@ Script reference for all repository scripts: `docs/automation/SCRIPTS_REFERENCE.
 
 - Weekly doc-gardening run:
   - identify stale references,
-  - propose canonical/legacy status updates,
+  - propose canonical status updates,
   - open small follow-up PRs.
 - Contract drift run:
   - compare schema/mappers/tests/docs touched in PR,

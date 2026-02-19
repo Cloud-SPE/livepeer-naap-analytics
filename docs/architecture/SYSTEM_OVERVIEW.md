@@ -266,4 +266,3 @@ These facts require ordering-aware correlation and classification (session ident
 
 - Canonical open issues/backlog: `docs/references/ISSUES_BACKLOG.md`
 - Data contract details: `docs/data/SCHEMA_AND_METRIC_CONTRACTS.md`
-- Historical supplemental docs: `docs/legacy/`

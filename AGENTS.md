@@ -31,7 +31,6 @@ This file is a short operating map for AI agents and humans. Treat `docs/` as th
 | Operate deployment and replay | `docs/operations/RUNBOOKS_AND_RELEASE.md` | `docs/operations/FLINK_DEPLOYMENT.md`, `docs/operations/REPLAY_RUNBOOK.md` |
 | Debug quality issues (DLQ/quarantine/dedup) | `docs/quality/TESTING_AND_VALIDATION.md` | `docs/quality/DATA_QUALITY.md` |
 | Review open feature work | `docs/references/ISSUES_BACKLOG.md` | `docs/references/METRICS_SCHEMA_DESIGN_SCRATCHPAD.md` |
-| Trace migration and legacy coverage | `docs/references/LEGACY_CONTENT_TRACEABILITY_MATRIX.md` | `docs/references/DOC_INVENTORY_AND_MIGRATION_MAP.md` |
 
 ## Project Snapshot
 
@@ -71,8 +70,6 @@ This file is a short operating map for AI agents and humans. Treat `docs/` as th
 - Ops + release: `docs/operations/RUNBOOKS_AND_RELEASE.md`
 - Tests + validation: `docs/quality/TESTING_AND_VALIDATION.md`
 - Canonical glossary: `docs/references/GLOSSARY.md`
-- Full legacy-to-canonical map: `docs/references/DOC_INVENTORY_AND_MIGRATION_MAP.md`
-- Legacy section-level traceability matrix: `docs/references/LEGACY_CONTENT_TRACEABILITY_MATRIX.md`
 
 ## Change Playbooks
 
@@ -102,8 +99,6 @@ This file is a short operating map for AI agents and humans. Treat `docs/` as th
 ## Boundaries
 
 - Always:
-  - Preserve legacy docs unless explicitly asked to delete/move.
-  - Keep `docs/references/DOC_INVENTORY_AND_MIGRATION_MAP.md` up to date when docs are reorganized.
   - Prefer deterministic, testable changes over query-time heuristics.
 - Ask first:
   - database schema drops or destructive migrations,
@@ -129,8 +124,6 @@ This file is a short operating map for AI agents and humans. Treat `docs/` as th
 - Do not create ad-hoc scratch docs at repo root.
 - Working/scratch content belongs only in explicitly marked reference files (for example `docs/references/METRICS_SCHEMA_DESIGN_SCRATCHPAD.md`), not scattered new files.
 - Any add/move/delete of docs must co-update:
-  - `docs/references/DOC_INVENTORY_AND_MIGRATION_MAP.md`
-  - `docs/references/LEGACY_CONTENT_TRACEABILITY_MATRIX.md` (if content mapping changed)
   - `docs/README.md` (if canonical navigation changed)
 - Prefer editing existing canonical docs over creating near-duplicate files.
 - Before finishing any docs PR, run:

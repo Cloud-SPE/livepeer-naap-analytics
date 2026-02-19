@@ -40,4 +40,3 @@ Ship quickly without contract drift by making design decisions legible and mecha
 ## Non-Goals
 
 - Do not optimize for perfect one-shot docs.
-- Do not delete legacy docs before migration map coverage is complete.

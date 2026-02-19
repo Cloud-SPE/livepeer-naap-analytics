@@ -6,7 +6,6 @@ This project provides a real-time data pipeline for monitoring and analyzing **L
 
 - Quick agent map: `AGENTS.md`
 - Canonical documentation set: `docs/README.md`
-- Legacy and report doc migration ledger: `docs/references/DOC_INVENTORY_AND_MIGRATION_MAP.md`
 
 ## Quick Path by Task
 
