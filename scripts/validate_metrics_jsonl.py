@@ -18,7 +18,7 @@ from typing import Any
 
 
 DEFAULT_INPUT = "scripts/livepeer_samples.jsonl"
-DEFAULT_REPORT = "documentation/reports/METRICS_VALIDATION_REPORT.md"
+DEFAULT_REPORT = "docs/reports/METRICS_VALIDATION_REPORT.generated.md"
 
 
 @dataclass

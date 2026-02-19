@@ -15,7 +15,6 @@ public class WorkflowSessionAccumulator implements Serializable {
     public String requestId = "";
     public String sessionId = "";
     public String pipeline = "";
-    public String pipelineId = "";
     public String workflowId = "";
     public String workflowType = "ai_live_video_stream";
     public String gateway = "";

@@ -22,7 +22,6 @@ final class AiStreamEventParser {
         parsed.streamId = data.path("stream_id").asText("");
         parsed.requestId = data.path("request_id").asText("");
         parsed.pipeline = data.path("pipeline").asText("");
-        parsed.pipelineId = data.path("pipeline_id").asText("");
         parsed.eventType = data.path("type").asText("");
         parsed.message = data.path("message").asText("");
         parsed.capability = data.path("capability").asText("");

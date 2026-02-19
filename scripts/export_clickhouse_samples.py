@@ -44,7 +44,11 @@ def parse_args():
 
 def require_client():
     if clickhouse_connect is None:
-        print("Missing dependency: clickhouse_connect. Install with: pip install clickhouse-connect", file=sys.stderr)
+        print(
+            "Missing dependency: clickhouse_connect. Run via uv project: "
+            "uv run --project tools/python python scripts/export_clickhouse_samples.py ...",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
 

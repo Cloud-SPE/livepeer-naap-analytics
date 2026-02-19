@@ -2,16 +2,32 @@
 
 This project provides a real-time data pipeline for monitoring and analyzing **Livepeer Network-as-a-Product (NaaP)** metrics. It ingests streaming events from a Livepeer gateway, processes them using Apache Flink, and stores the analytics in ClickHouse for visualization via Grafana.
 
-## 📂 Project Artifacts
+## Documentation and Agent Navigation
 
-### 🏗️ Infrastructure & Orchestration
+- Quick agent map: `AGENTS.md`
+- Canonical documentation set: `docs/README.md`
+- Legacy and report doc migration ledger: `docs/references/DOC_INVENTORY_AND_MIGRATION_MAP.md`
+
+## Quick Path by Task
+
+| Task | Start here | Then use |
+|---|---|---|
+| Understand the system end-to-end | `docs/architecture/SYSTEM_OVERVIEW.md` | `docs/data/SCHEMA_AND_METRIC_CONTRACTS.md` |
+| Change schema/metrics safely | `docs/data/SCHEMA_AND_METRIC_CONTRACTS.md` | `docs/quality/TESTING_AND_VALIDATION.md`, `docs/workflows/ENGINEERING_WORKFLOW.md` |
+| Deploy/redeploy/replay | `docs/operations/RUNBOOKS_AND_RELEASE.md` | `docs/operations/FLINK_DEPLOYMENT.md`, `docs/operations/REPLAY_RUNBOOK.md` |
+| Debug data quality issues | `docs/quality/TESTING_AND_VALIDATION.md` | `docs/quality/DATA_QUALITY.md` |
+| Review open ideas and backlog | `docs/references/ISSUES_BACKLOG.md` | `docs/references/METRICS_SCHEMA_DESIGN_SCRATCHPAD.md` |
+
+## Project Artifacts
+
+### Infrastructure and Orchestration
 
 * **`docker-compose.yml`**: The primary orchestration file that spins up the entire stack, including the gateway, Kafka, Flink, ClickHouse, and Grafana.
 * **`Dockerfile.webapp`**: A multi-stage Dockerfile used to build the Stream Test UI and serve it via a Caddy webserver.
 * **`Caddyfile`**: Configuration for the Caddy webserver, handling reverse proxying for the AI runner, orchestrator, and Kafka SSE API.
 * **`.env.template`**: A template for environment variables required for the gateway and network settings.
 
-### 🛠️ Stream Processing (Apache Flink)
+### Stream Processing (Apache Flink)
 
 * **`flink-jobs/src/main/java/com/livepeer/analytics/pipeline/StreamingEventsToClickHouse.java`**: The core Java application that enforces quality gates (schema validation + dedup), parses events, and routes them to ClickHouse tables.
 * **`flink-jobs/src/main/java/com/livepeer/analytics/pipeline/DlqReplayJob.java`**: Replay job that re-ingests DLQ payloads into Kafka with replay metadata.
@@ -19,7 +35,7 @@ This project provides a real-time data pipeline for monitoring and analyzing **L
 * **`submit-jobs.sh`**: Submits the main ingestion job to the Flink JobManager.
 * **`submit-replay-job.sh`**: Submits the DLQ replay job on demand.
 
-### 🧭 Source Layout
+### Source Layout
 
 Packages under `flink-jobs/src/main/java/com/livepeer/analytics` are organized by responsibility:
 
@@ -30,7 +46,7 @@ Packages under `flink-jobs/src/main/java/com/livepeer/analytics` are organized b
 * `model`: POJOs for events, envelopes, and payloads.
 * `util`: Shared JSON and hashing utilities.
 
-### 📊 Storage & Visualization
+### Storage and Visualization
 
 * **`01-schema.sql`**: SQL initialization script that defines the ClickHouse database schema and materialized views for metrics like FPS and ingest quality.
 * **`default-user.xml`**: Configures the `analytics_user` with necessary permissions in ClickHouse.
@@ -38,12 +54,12 @@ Packages under `flink-jobs/src/main/java/com/livepeer/analytics` are organized b
 * **`naap-overview.json`**: A pre-configured Grafana dashboard for real-time NaaP performance monitoring.
 * **`quality-gate.json`**: Grafana dashboard for DLQ/quarantine volume and top failure classes.
 
-### 📡 Gateway & Ingest
+### Gateway and Ingest
 
 * **`mediamtx.yml`**: Configuration for the MediaMTX server, which handles WebRTC/RTMP ingest and egress.
 * **`index.html`**: A simple event source viewer for testing Kafka messages via the Zilla SSE API.
 
-## 🚀 Getting Started
+## Getting Started
 
 ### 1. Prerequisites
 
@@ -99,7 +115,7 @@ docker compose up
 
 This will automatically build the Flink job, initialize the ClickHouse schema, and start all monitoring services.
 
-## ✅ Quality Gate & Replay
+## Quality Gate and Replay
 
 The Flink job enforces a quality gate before writing to ClickHouse:
 
@@ -108,8 +124,8 @@ The Flink job enforces a quality gate before writing to ClickHouse:
 - DLQ envelopes with source pointers and payloads for replay
 - Network capability + discovery events emit multiple rows per event when arrays are present
 
-Replay runbook: `documentation/REPLAY_RUNBOOK.md`
-Alert guidance: `documentation/QUALITY_ALERTS.md`
+Replay runbook: `docs/operations/REPLAY_RUNBOOK.md`
+Quality guardrails: `docs/quality/DATA_QUALITY.md`
 
 ### ClickHouse Sink (Flink Connector)
 
@@ -142,7 +158,7 @@ When the ClickHouse schema or inbound JSON changes, update these files in this o
 4. `flink-jobs/src/main/java/com/livepeer/analytics/sink/ClickHouseRowMappers.java` (column mapping)
 5. Update tests/fixtures as needed: `flink-jobs/src/test/java/com/livepeer/analytics/sink/ClickHouseSchemaSyncTest.java`, `flink-jobs/src/test/java/com/livepeer/analytics/parse/EventParsersTest.java`
 
-## 🔗 Service Endpoints
+## Service Endpoints
 
 Once running, the following interfaces are available:
 
@@ -156,13 +172,13 @@ Once running, the following interfaces are available:
 
 ---
 
-## 📌 Kafka Topics (Quality Gate)
+## Kafka Topics (Quality Gate)
 
 - `streaming_events` (input)
 - `events.dlq.streaming_events.v1` (DLQ)
 - `events.quarantine.streaming_events.v1` (duplicates / expected rejects)
 
-## 🛠️ Troubleshooting & Permissions
+## Troubleshooting and Permissions
 
 If you encounter errors where containers (specifically Kafka or Flink) are crashing or "permission denied" errors appear in the logs, it is likely because the host-mounted data directories do not have the correct permissions.
 
@@ -207,7 +223,7 @@ For a smooth first-time setup, the recommended command sequence is:
 4. `docker compose up`
 ---
 
-## 🛠️ Build Tester UI (optional)
+## Build Tester UI (optional)
 `Dockerfile.webapp` requires checking out Brad's live-video-to-video app:
 
 ```

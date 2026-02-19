@@ -147,7 +147,6 @@ CREATE TABLE IF NOT EXISTS ai_stream_status
 
     -- Workflow info
     pipeline LowCardinality(String),
-    pipeline_id String,
 
     -- Performance metrics
     output_fps Float32,
@@ -189,7 +188,6 @@ CREATE TABLE IF NOT EXISTS stream_ingest_metrics
     -- Identifiers
     stream_id String,
     request_id String,
-    pipeline_id String,
 
     -- Connection quality
     connection_quality LowCardinality(String),
@@ -237,7 +235,6 @@ CREATE TABLE IF NOT EXISTS stream_trace_events
     -- Identifiers
     stream_id String,
     request_id String,
-    pipeline_id String,
     orchestrator_address String,
     orchestrator_url String,
 
@@ -410,7 +407,6 @@ CREATE TABLE IF NOT EXISTS fact_stream_status_samples
     orchestrator_url String,
 
     pipeline String,
-    pipeline_id String,
     model_id Nullable(String),
     gpu_id Nullable(String),
     region Nullable(String),
@@ -445,7 +441,6 @@ CREATE TABLE IF NOT EXISTS fact_stream_trace_edges
     orchestrator_url String,
 
     pipeline String,
-    pipeline_id String,
 
     trace_type LowCardinality(String),
     trace_category LowCardinality(String),
@@ -469,7 +464,6 @@ CREATE TABLE IF NOT EXISTS fact_stream_ingest_samples
     workflow_session_id String,
     stream_id String,
     request_id String,
-    pipeline_id String,
 
     connection_quality LowCardinality(String),
     video_jitter Float32,
@@ -501,15 +495,15 @@ WITH cap_lookup AS
 (
     SELECT
         lower(local_address) AS hot_wallet,
-        pipeline,
+        model_id AS capability_model_id,
         argMax(lower(orchestrator_address), event_timestamp) AS canonical_orchestrator_address,
         argMax(orch_uri, event_timestamp) AS canonical_orchestrator_url,
-        argMax(model_id, event_timestamp) AS model_id,
         argMax(gpu_id, event_timestamp) AS gpu_id,
         max(event_timestamp) AS latest_snapshot_ts
     FROM network_capabilities
     WHERE local_address != ''
-    GROUP BY hot_wallet, pipeline
+      AND model_id != ''
+    GROUP BY hot_wallet, capability_model_id
 )
 SELECT
     s.event_timestamp AS sample_ts,
@@ -522,17 +516,26 @@ SELECT
     s.stream_id,
     s.request_id,
     s.gateway,
-    ifNull(canonical_orchestrator_address, lower(s.orchestrator_address)) AS orchestrator_address,
-    ifNull(canonical_orchestrator_url, s.orchestrator_url) AS orchestrator_url,
-    s.pipeline,
-    s.pipeline_id,
+    ifNull(nullIf(canonical_orchestrator_address, ''), '') AS orchestrator_address,
     if(
-        latest_snapshot_ts IS NOT NULL AND abs(dateDiff('millisecond', latest_snapshot_ts, s.event_timestamp)) <= 86400000,
-        nullIf(model_id, ''),
-        CAST(NULL AS Nullable(String))
+        nullIf(canonical_orchestrator_url, '') IS NOT NULL,
+        nullIf(canonical_orchestrator_url, ''),
+        s.orchestrator_url
+    ) AS orchestrator_url,
+    s.pipeline,
+    nullIf(
+        if(
+            nullIf(latest_snapshot_ts, toDateTime64(0, 3, 'UTC')) IS NOT NULL
+                AND abs(dateDiff('millisecond', nullIf(latest_snapshot_ts, toDateTime64(0, 3, 'UTC')), s.event_timestamp)) <= 86400000
+                AND nullIf(capability_model_id, '') IS NOT NULL,
+            capability_model_id,
+            s.pipeline
+        ),
+        ''
     ) AS model_id,
     if(
-        latest_snapshot_ts IS NOT NULL AND abs(dateDiff('millisecond', latest_snapshot_ts, s.event_timestamp)) <= 86400000,
+        nullIf(latest_snapshot_ts, toDateTime64(0, 3, 'UTC')) IS NOT NULL
+            AND abs(dateDiff('millisecond', nullIf(latest_snapshot_ts, toDateTime64(0, 3, 'UTC')), s.event_timestamp)) <= 86400000,
         nullIf(gpu_id, ''),
         CAST(NULL AS Nullable(String))
     ) AS gpu_id,
@@ -541,54 +544,67 @@ SELECT
     s.output_fps,
     s.input_fps,
     multiIf(
-        latest_snapshot_ts IS NULL, 'none',
-        dateDiff('millisecond', latest_snapshot_ts, s.event_timestamp) = 0, 'exact_orchestrator_time_match',
-        latest_snapshot_ts <= s.event_timestamp AND abs(dateDiff('millisecond', latest_snapshot_ts, s.event_timestamp)) <= 86400000, 'nearest_prior_snapshot',
-        abs(dateDiff('millisecond', latest_snapshot_ts, s.event_timestamp)) <= 86400000, 'nearest_snapshot_within_ttl',
+        nullIf(latest_snapshot_ts, toDateTime64(0, 3, 'UTC')) IS NULL, 'none',
+        dateDiff('millisecond', nullIf(latest_snapshot_ts, toDateTime64(0, 3, 'UTC')), s.event_timestamp) = 0, 'exact_orchestrator_time_match',
+        nullIf(latest_snapshot_ts, toDateTime64(0, 3, 'UTC')) <= s.event_timestamp
+            AND abs(dateDiff('millisecond', nullIf(latest_snapshot_ts, toDateTime64(0, 3, 'UTC')), s.event_timestamp)) <= 86400000, 'nearest_prior_snapshot',
+        abs(dateDiff('millisecond', nullIf(latest_snapshot_ts, toDateTime64(0, 3, 'UTC')), s.event_timestamp)) <= 86400000, 'nearest_snapshot_within_ttl',
         'proxy_address_join'
     ) AS gpu_attribution_method,
     multiIf(
-        latest_snapshot_ts IS NULL, toFloat32(0),
-        dateDiff('millisecond', latest_snapshot_ts, s.event_timestamp) = 0, toFloat32(1.0),
-        latest_snapshot_ts <= s.event_timestamp AND abs(dateDiff('millisecond', latest_snapshot_ts, s.event_timestamp)) <= 86400000, toFloat32(0.9),
-        abs(dateDiff('millisecond', latest_snapshot_ts, s.event_timestamp)) <= 86400000, toFloat32(0.7),
+        nullIf(latest_snapshot_ts, toDateTime64(0, 3, 'UTC')) IS NULL, toFloat32(0),
+        dateDiff('millisecond', nullIf(latest_snapshot_ts, toDateTime64(0, 3, 'UTC')), s.event_timestamp) = 0, toFloat32(1.0),
+        nullIf(latest_snapshot_ts, toDateTime64(0, 3, 'UTC')) <= s.event_timestamp
+            AND abs(dateDiff('millisecond', nullIf(latest_snapshot_ts, toDateTime64(0, 3, 'UTC')), s.event_timestamp)) <= 86400000, toFloat32(0.9),
+        abs(dateDiff('millisecond', nullIf(latest_snapshot_ts, toDateTime64(0, 3, 'UTC')), s.event_timestamp)) <= 86400000, toFloat32(0.7),
         toFloat32(0.4)
     ) AS gpu_attribution_confidence,
     toString(cityHash64(s.raw_json)) AS source_event_uid
 FROM ai_stream_status s
 LEFT JOIN cap_lookup c
   ON lower(s.orchestrator_address) = c.hot_wallet
- AND s.pipeline = c.pipeline;
+ AND ifNull(nullIf(s.pipeline, ''), '') = ifNull(nullIf(c.capability_model_id, ''), '');
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_stream_trace_events_to_fact_stream_trace_edges
 TO fact_stream_trace_edges
 AS
+WITH cap_lookup AS
+(
+    SELECT
+        lower(local_address) AS hot_wallet,
+        argMax(lower(orchestrator_address), event_timestamp) AS canonical_orchestrator_address
+    FROM network_capabilities
+    WHERE local_address != ''
+      AND orchestrator_address != ''
+    GROUP BY hot_wallet
+)
 SELECT
-    data_timestamp AS edge_ts,
+    t.data_timestamp AS edge_ts,
     multiIf(
-        stream_id != '' AND request_id != '', concat(stream_id, '|', request_id),
-        stream_id != '', concat(stream_id, '|_missing_request'),
-        request_id != '', concat('_missing_stream|', request_id),
-        concat('_missing_stream|_missing_request|', toString(cityHash64(raw_json)))
+        t.stream_id != '' AND t.request_id != '', concat(t.stream_id, '|', t.request_id),
+        t.stream_id != '', concat(t.stream_id, '|_missing_request'),
+        t.request_id != '', concat('_missing_stream|', t.request_id),
+        concat('_missing_stream|_missing_request|', toString(cityHash64(t.raw_json)))
     ) AS workflow_session_id,
-    stream_id,
-    request_id,
+    t.stream_id,
+    t.request_id,
     '' AS gateway,
-    orchestrator_address,
-    orchestrator_url,
+    ifNull(nullIf(c.canonical_orchestrator_address, ''), '') AS orchestrator_address,
+    t.orchestrator_url,
     '' AS pipeline,
-    pipeline_id,
-    trace_type,
+    t.trace_type,
     multiIf(
-        startsWith(trace_type, 'gateway_'), 'gateway',
-        startsWith(trace_type, 'orchestrator_'), 'orchestrator',
-        startsWith(trace_type, 'runner_'), 'runner',
-        startsWith(trace_type, 'app_'), 'app',
+        startsWith(t.trace_type, 'gateway_'), 'gateway',
+        startsWith(t.trace_type, 'orchestrator_'), 'orchestrator',
+        startsWith(t.trace_type, 'runner_'), 'runner',
+        startsWith(t.trace_type, 'app_'), 'app',
         'other'
     ) AS trace_category,
-    toUInt8(trace_type = 'orchestrator_swap') AS is_swap_event,
-    toString(cityHash64(raw_json)) AS source_event_uid
-FROM stream_trace_events;
+    toUInt8(t.trace_type = 'orchestrator_swap') AS is_swap_event,
+    toString(cityHash64(t.raw_json)) AS source_event_uid
+FROM stream_trace_events t
+LEFT JOIN cap_lookup c
+  ON lower(t.orchestrator_address) = c.hot_wallet;
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_stream_ingest_metrics_to_fact_stream_ingest_samples
 TO fact_stream_ingest_samples
@@ -603,7 +619,6 @@ SELECT
     ) AS workflow_session_id,
     stream_id,
     request_id,
-    pipeline_id,
     connection_quality,
     video_jitter,
     audio_jitter,
@@ -625,7 +640,6 @@ CREATE TABLE IF NOT EXISTS fact_workflow_sessions
     request_id String,
     session_id String,
     pipeline String,
-    pipeline_id String,
 
     gateway String,
     orchestrator_address String,
@@ -707,7 +721,6 @@ CREATE TABLE IF NOT EXISTS fact_workflow_param_updates
     stream_id String,
     request_id String,
     pipeline String,
-    pipeline_id String,
 
     gateway String,
     orchestrator_address String,
@@ -740,7 +753,6 @@ CREATE TABLE IF NOT EXISTS fact_lifecycle_edge_coverage
     stream_id String,
     request_id String,
     pipeline String,
-    pipeline_id String,
     gateway String,
     orchestrator_address String,
     trace_type LowCardinality(String),
@@ -775,7 +787,6 @@ CREATE TABLE IF NOT EXISTS fact_workflow_latency_samples
     gateway String,
     orchestrator_address String,
     pipeline String,
-    pipeline_id String,
     model_id Nullable(String),
     gpu_id Nullable(String),
     region Nullable(String),
@@ -813,7 +824,6 @@ CREATE TABLE IF NOT EXISTS dim_orchestrator_capability_snapshots
     orchestrator_url String,
 
     pipeline String,
-    pipeline_id String,
     model_id String,
     capability_id Int32,
     capability_name LowCardinality(String),
@@ -833,7 +843,7 @@ CREATE TABLE IF NOT EXISTS dim_orchestrator_capability_snapshots
 )
     ENGINE = ReplacingMergeTree(snapshot_ts)
         PARTITION BY toYYYYMM(snapshot_date)
-        ORDER BY (orchestrator_address, pipeline_id, model_id, snapshot_ts)
+        ORDER BY (orchestrator_address, model_id, snapshot_ts)
         TTL snapshot_date + INTERVAL 365 DAY DELETE
         SETTINGS index_granularity = 8192;
 
@@ -928,7 +938,6 @@ SELECT
     lower(local_address) AS orchestrator_proxy_address,
     orch_uri AS orchestrator_url,
     pipeline,
-    '' AS pipeline_id,
     model_id,
     ifNull(capability_id, 0) AS capability_id,
     ifNull(capability_name, 'unknown') AS capability_name,
@@ -1004,7 +1013,6 @@ SELECT
     argMax(orchestrator_proxy_address, snapshot_ts) AS orchestrator_proxy_address,
     argMax(orchestrator_url, snapshot_ts) AS orchestrator_url,
     pipeline,
-    pipeline_id,
     model_id,
     capability_id,
     argMax(capability_name, snapshot_ts) AS capability_name,
@@ -1021,7 +1029,6 @@ FROM dim_orchestrator_capability_snapshots
 GROUP BY
     orchestrator_address,
     pipeline,
-    pipeline_id,
     model_id,
     capability_id,
     gpu_id;
@@ -1063,7 +1070,6 @@ CREATE TABLE IF NOT EXISTS agg_stream_performance_1m
     gateway String,
     orchestrator_address String,
     pipeline String,
-    pipeline_id String,
     model_id Nullable(String),
     gpu_id Nullable(String),
     region Nullable(String),
@@ -1080,7 +1086,7 @@ CREATE TABLE IF NOT EXISTS agg_stream_performance_1m
 )
     ENGINE = AggregatingMergeTree
         PARTITION BY toYYYYMM(toDate(window_start))
-        ORDER BY (window_start, orchestrator_address, pipeline_id, ifNull(gpu_id, ''))
+        ORDER BY (window_start, orchestrator_address, ifNull(gpu_id, ''))
         TTL toDate(window_start) + INTERVAL 365 DAY DELETE
         SETTINGS index_granularity = 8192;
 
@@ -1091,7 +1097,6 @@ CREATE TABLE IF NOT EXISTS agg_reliability_1h
     gateway String,
     orchestrator_address String,
     pipeline String,
-    pipeline_id String,
     model_id Nullable(String),
     gpu_id Nullable(String),
     region Nullable(String),
@@ -1104,7 +1109,7 @@ CREATE TABLE IF NOT EXISTS agg_reliability_1h
 )
     ENGINE = AggregatingMergeTree
         PARTITION BY toYYYYMM(toDate(window_start))
-        ORDER BY (window_start, gateway, orchestrator_address, pipeline_id)
+        ORDER BY (window_start, gateway, orchestrator_address)
         TTL toDate(window_start) + INTERVAL 400 DAY DELETE
         SETTINGS index_granularity = 8192;
 
@@ -1114,7 +1119,6 @@ CREATE TABLE IF NOT EXISTS agg_latency_kpis_1m
 
     orchestrator_address String,
     pipeline String,
-    pipeline_id String,
     model_id Nullable(String),
     gpu_id Nullable(String),
     region Nullable(String),
@@ -1133,7 +1137,7 @@ CREATE TABLE IF NOT EXISTS agg_latency_kpis_1m
 )
     ENGINE = AggregatingMergeTree
         PARTITION BY toYYYYMM(toDate(window_start))
-        ORDER BY (window_start, orchestrator_address, pipeline_id, ifNull(gpu_id, ''))
+        ORDER BY (window_start, orchestrator_address, ifNull(gpu_id, ''))
         TTL toDate(window_start) + INTERVAL 365 DAY DELETE
         SETTINGS index_granularity = 8192;
 
@@ -1149,7 +1153,6 @@ SELECT
     gateway,
     orchestrator_address,
     pipeline,
-    pipeline_id,
     model_id,
     gpu_id,
     region,
@@ -1169,7 +1172,6 @@ GROUP BY
     gateway,
     orchestrator_address,
     pipeline,
-    pipeline_id,
     model_id,
     gpu_id,
     region;
@@ -1182,7 +1184,6 @@ SELECT
     gateway,
     orchestrator_address,
     pipeline,
-    pipeline_id,
     model_id,
     gpu_id,
     region,
@@ -1198,7 +1199,6 @@ GROUP BY
     gateway,
     orchestrator_address,
     pipeline,
-    pipeline_id,
     model_id,
     gpu_id,
     region;
@@ -1210,7 +1210,6 @@ SELECT
     toStartOfInterval(sample_ts, INTERVAL 1 MINUTE) AS window_start,
     orchestrator_address,
     pipeline,
-    pipeline_id,
     model_id,
     gpu_id,
     region,
@@ -1231,7 +1230,6 @@ GROUP BY
     window_start,
     orchestrator_address,
     pipeline,
-    pipeline_id,
     model_id,
     gpu_id,
     region;
@@ -1279,7 +1277,7 @@ CREATE TABLE IF NOT EXISTS payment_events
 -- ============================================================
 
 CREATE OR REPLACE VIEW v_api_gpu_metrics AS
--- Grain: 1 row per (hour, orchestrator, pipeline, pipeline_id, model_id, gpu_id, region).
+-- Grain: 1 row per (hour, orchestrator, pipeline, model_id, gpu_id, region).
 -- Purpose: primary serving view for /gpu/metrics.
 WITH latest_session_keys AS
 (
@@ -1288,7 +1286,6 @@ WITH latest_session_keys AS
         workflow_session_id,
         argMax(orchestrator_address, version) AS orchestrator_address,
         argMax(pipeline, version) AS pipeline,
-        argMax(pipeline_id, version) AS pipeline_id,
         argMax(model_id, version) AS model_id,
         argMax(gpu_id, version) AS gpu_id,
         argMax(region, version) AS region
@@ -1302,8 +1299,14 @@ perf_1h AS
         toStartOfInterval(s.sample_ts, INTERVAL 1 HOUR) AS window_start,
         if(s.orchestrator_address != '', s.orchestrator_address, ifNull(k.orchestrator_address, '')) AS orchestrator_address,
         if(s.pipeline != '', s.pipeline, ifNull(k.pipeline, '')) AS pipeline,
-        if(s.pipeline_id != '', s.pipeline_id, ifNull(k.pipeline_id, '')) AS pipeline_id,
-        nullIf(if(ifNull(s.model_id, '') != '', s.model_id, ifNull(k.model_id, '')), '') AS model_id,
+        nullIf(
+            if(
+                ifNull(s.model_id, '') != '',
+                s.model_id,
+                if(ifNull(k.model_id, '') != '', k.model_id, s.pipeline)
+            ),
+            ''
+        ) AS model_id,
         nullIf(if(ifNull(s.gpu_id, '') != '', s.gpu_id, ifNull(k.gpu_id, '')), '') AS gpu_id,
         nullIf(if(ifNull(s.region, '') != '', s.region, ifNull(k.region, '')), '') AS region,
         avg(s.output_fps) AS avg_output_fps,
@@ -1317,7 +1320,6 @@ perf_1h AS
         window_start,
         orchestrator_address,
         pipeline,
-        pipeline_id,
         model_id,
         gpu_id,
         region
@@ -1334,7 +1336,6 @@ rel_1h AS
             argMax(session_start_ts, version) AS session_start_ts,
             argMax(orchestrator_address, version) AS orchestrator_address,
             argMax(pipeline, version) AS pipeline,
-            argMax(pipeline_id, version) AS pipeline_id,
             argMax(model_id, version) AS model_id,
             argMax(gpu_id, version) AS gpu_id,
             argMax(region, version) AS region,
@@ -1350,7 +1351,6 @@ rel_1h AS
         toStartOfInterval(session_start_ts, INTERVAL 1 HOUR) AS rel_window_start,
         orchestrator_address,
         pipeline,
-        pipeline_id,
         model_id,
         gpu_id,
         region,
@@ -1365,7 +1365,6 @@ rel_1h AS
         rel_window_start,
         orchestrator_address,
         pipeline,
-        pipeline_id,
         model_id,
         gpu_id,
         region
@@ -1380,7 +1379,6 @@ lat_1h AS
             argMax(sample_ts, version) AS sample_ts,
             argMax(orchestrator_address, version) AS orchestrator_address,
             argMax(pipeline, version) AS pipeline,
-            argMax(pipeline_id, version) AS pipeline_id,
             argMax(model_id, version) AS model_id,
             argMax(gpu_id, version) AS gpu_id,
             argMax(region, version) AS region,
@@ -1397,8 +1395,14 @@ lat_1h AS
         toStartOfInterval(l.sample_ts, INTERVAL 1 HOUR) AS window_start,
         if(ifNull(l.orchestrator_address, '') != '', l.orchestrator_address, ifNull(k.orchestrator_address, '')) AS orchestrator_address,
         if(ifNull(l.pipeline, '') != '', l.pipeline, ifNull(k.pipeline, '')) AS pipeline,
-        if(ifNull(l.pipeline_id, '') != '', l.pipeline_id, ifNull(k.pipeline_id, '')) AS pipeline_id,
-        nullIf(if(ifNull(l.model_id, '') != '', l.model_id, ifNull(k.model_id, '')), '') AS model_id,
+        nullIf(
+            if(
+                ifNull(l.model_id, '') != '',
+                l.model_id,
+                if(ifNull(k.model_id, '') != '', k.model_id, if(ifNull(l.pipeline, '') != '', l.pipeline, ifNull(k.pipeline, '')))
+            ),
+            ''
+        ) AS model_id,
         nullIf(if(ifNull(l.gpu_id, '') != '', l.gpu_id, ifNull(k.gpu_id, '')), '') AS gpu_id,
         nullIf(if(ifNull(l.region, '') != '', l.region, ifNull(k.region, '')), '') AS region,
         avgIf(l.prompt_to_first_frame_ms, l.has_prompt_to_first_frame = 1) AS prompt_to_first_frame_ms,
@@ -1417,7 +1421,6 @@ lat_1h AS
         window_start,
         orchestrator_address,
         pipeline,
-        pipeline_id,
         model_id,
         gpu_id,
         region
@@ -1429,7 +1432,6 @@ base_keys AS
         window_start,
         orchestrator_address,
         pipeline,
-        pipeline_id,
         model_id,
         gpu_id,
         region
@@ -1439,7 +1441,6 @@ base_keys AS
         window_start,
         orchestrator_address,
         pipeline,
-        pipeline_id,
         model_id,
         gpu_id,
         region
@@ -1465,7 +1466,6 @@ SELECT
     b.window_start AS window_start,
     b.orchestrator_address AS orchestrator_address,
     b.pipeline AS pipeline,
-    b.pipeline_id AS pipeline_id,
     b.model_id AS model_id,
     b.gpu_id AS gpu_id,
     b.region AS region,
@@ -1505,7 +1505,6 @@ RIGHT JOIN base_keys b
     ON b.window_start = p.window_start
    AND b.orchestrator_address = p.orchestrator_address
    AND b.pipeline = p.pipeline
-   AND b.pipeline_id = p.pipeline_id
    AND ifNull(b.model_id, '') = ifNull(p.model_id, '')
    AND ifNull(b.gpu_id, '') = ifNull(p.gpu_id, '')
    AND ifNull(b.region, '') = ifNull(p.region, '')
@@ -1513,7 +1512,6 @@ LEFT JOIN rel_1h r
     ON r.rel_window_start = b.window_start
    AND r.orchestrator_address = b.orchestrator_address
    AND r.pipeline = b.pipeline
-   AND r.pipeline_id = b.pipeline_id
    AND ifNull(r.model_id, '') = ifNull(b.model_id, '')
    AND ifNull(r.gpu_id, '') = ifNull(b.gpu_id, '')
    AND ifNull(r.region, '') = ifNull(b.region, '')
@@ -1521,7 +1519,6 @@ LEFT JOIN lat_1h l
     ON l.window_start = b.window_start
    AND l.orchestrator_address = b.orchestrator_address
    AND l.pipeline = b.pipeline
-   AND l.pipeline_id = b.pipeline_id
    AND ifNull(l.model_id, '') = ifNull(b.model_id, '')
    AND ifNull(l.gpu_id, '') = ifNull(b.gpu_id, '')
    AND ifNull(l.region, '') = ifNull(b.region, '')
@@ -1534,7 +1531,7 @@ WHERE b.orchestrator_address != ''
   AND ifNull(b.gpu_id, '') != '';
 
 CREATE OR REPLACE VIEW v_api_network_demand AS
--- Grain: 1 row per (hour, gateway, region, pipeline, pipeline_id).
+-- Grain: 1 row per (hour, gateway, region, pipeline).
 -- Purpose: primary serving view for /network/demand.
 WITH perf_1h AS
 (
@@ -1544,7 +1541,6 @@ WITH perf_1h AS
         gateway,
         region,
         pipeline,
-        pipeline_id,
         uniqExactMerge(sessions_uniq_state) AS total_sessions,
         uniqExactMerge(streams_uniq_state) AS total_streams,
         countMerge(sample_count_state) / 60.0 AS total_inference_minutes,
@@ -1554,8 +1550,7 @@ WITH perf_1h AS
         window_start,
         gateway,
         region,
-        pipeline,
-        pipeline_id
+        pipeline
 ),
 latest_sessions AS
 (
@@ -1566,7 +1561,6 @@ latest_sessions AS
         argMax(gateway, version) AS gateway,
         argMax(region, version) AS region,
         argMax(pipeline, version) AS pipeline,
-        argMax(pipeline_id, version) AS pipeline_id,
         argMax(orchestrator_address, version) AS orchestrator_address,
         argMax(known_stream, version) AS known_stream,
         argMax(startup_unexcused, version) AS startup_unexcused,
@@ -1582,7 +1576,6 @@ demand_1h AS
         gateway,
         region,
         pipeline,
-        pipeline_id,
         sum(toUInt64(known_stream)) AS known_sessions,
         sum(toUInt64(known_stream AND orchestrator_address != '')) AS served_sessions,
         sum(toUInt64(known_stream AND orchestrator_address = '')) AS unserved_sessions,
@@ -1594,8 +1587,7 @@ demand_1h AS
         window_start,
         gateway,
         region,
-        pipeline,
-        pipeline_id
+        pipeline
 ),
 latest_session_by_request AS
 (
@@ -1603,8 +1595,7 @@ latest_session_by_request AS
         request_id,
         argMax(gateway, version) AS gateway,
         argMax(region, version) AS region,
-        argMax(pipeline, version) AS pipeline,
-        argMax(pipeline_id, version) AS pipeline_id
+        argMax(pipeline, version) AS pipeline
     FROM fact_workflow_sessions
     WHERE request_id != ''
     GROUP BY request_id
@@ -1617,7 +1608,6 @@ fees_1h AS
         s.gateway,
         s.region,
         s.pipeline,
-        s.pipeline_id,
         sum(toFloat64OrZero(p.face_value)) / 1000000000000000000.0 AS fee_payment_eth
     FROM payment_events p
     INNER JOIN latest_session_by_request s ON s.request_id = p.request_id
@@ -1625,8 +1615,7 @@ fees_1h AS
         window_start,
         s.gateway,
         s.region,
-        s.pipeline,
-        s.pipeline_id
+        s.pipeline
 )
 SELECT
     -- Core serving keys
@@ -1634,7 +1623,6 @@ SELECT
     p.gateway AS gateway,
     p.region AS region,
     p.pipeline AS pipeline,
-    p.pipeline_id AS pipeline_id,
 
     p.total_streams,
     p.total_sessions,
@@ -1657,18 +1645,16 @@ LEFT JOIN demand_1h d
    AND d.gateway = p.gateway
    AND ifNull(d.region, '') = ifNull(p.region, '')
    AND d.pipeline = p.pipeline
-   AND d.pipeline_id = p.pipeline_id
 LEFT JOIN fees_1h f
     ON f.window_start = p.window_start
    AND f.gateway = p.gateway
    AND ifNull(f.region, '') = ifNull(p.region, '')
-   AND f.pipeline = p.pipeline
-   AND f.pipeline_id = p.pipeline_id;
+   AND f.pipeline = p.pipeline;
 
 CREATE OR REPLACE VIEW v_api_network_demand_by_gpu AS
--- Grain: 1 row per (hour, gateway, orchestrator, region, pipeline, pipeline_id, model_id, gpu_id).
+-- Grain: 1 row per (hour, gateway, orchestrator, region, pipeline, model_id, gpu_id).
 -- Purpose: GPU-sliced demand/capacity companion view.
-WITH perf_gpu_1h AS
+WITH perf_gpu_1h_raw AS
 (
     -- Used minutes and demand volume at GPU key grain.
     SELECT
@@ -1677,7 +1663,6 @@ WITH perf_gpu_1h AS
         orchestrator_address,
         region,
         pipeline,
-        pipeline_id,
         model_id,
         gpu_id,
         uniqExactMerge(streams_uniq_state) AS total_streams,
@@ -1690,11 +1675,66 @@ WITH perf_gpu_1h AS
         orchestrator_address,
         region,
         pipeline,
-        pipeline_id,
         model_id,
         gpu_id
 ),
-rel_gpu_1h AS
+latest_gpu_by_key AS
+(
+    -- Hourly fallback GPU attribution from latest session snapshots.
+    WITH latest_sessions AS
+    (
+        SELECT
+            workflow_session_id,
+            argMax(session_start_ts, version) AS session_start_ts,
+            argMax(gateway, version) AS gateway,
+            argMax(orchestrator_address, version) AS orchestrator_address,
+            argMax(region, version) AS region,
+            argMax(pipeline, version) AS pipeline,
+            argMax(model_id, version) AS model_id,
+            argMax(gpu_id, version) AS gpu_id
+        FROM fact_workflow_sessions
+        GROUP BY workflow_session_id
+    )
+    SELECT
+        toStartOfInterval(session_start_ts, INTERVAL 1 HOUR) AS window_start,
+        gateway,
+        orchestrator_address,
+        region,
+        pipeline,
+        model_id,
+        argMaxIf(gpu_id, session_start_ts, ifNull(gpu_id, '') != '') AS gpu_id
+    FROM latest_sessions
+    GROUP BY
+        window_start,
+        gateway,
+        orchestrator_address,
+        region,
+        pipeline,
+        model_id
+),
+perf_gpu_1h AS
+(
+    SELECT
+        p.window_start,
+        p.gateway,
+        p.orchestrator_address,
+        p.region,
+        p.pipeline,
+        p.model_id,
+        nullIf(if(ifNull(p.gpu_id, '') != '', p.gpu_id, ifNull(k.gpu_id, '')), '') AS gpu_id,
+        p.total_streams,
+        p.total_sessions,
+        p.used_inference_minutes
+    FROM perf_gpu_1h_raw p
+    LEFT JOIN latest_gpu_by_key k
+        ON k.window_start = p.window_start
+       AND k.gateway = p.gateway
+       AND k.orchestrator_address = p.orchestrator_address
+       AND ifNull(k.region, '') = ifNull(p.region, '')
+       AND k.pipeline = p.pipeline
+       AND ifNull(k.model_id, '') = ifNull(p.model_id, '')
+),
+rel_gpu_1h_raw AS
 (
     -- Reliability counters aligned to GPU key grain.
     SELECT
@@ -1703,7 +1743,6 @@ rel_gpu_1h AS
         orchestrator_address,
         region,
         pipeline,
-        pipeline_id,
         model_id,
         gpu_id,
         sumMerge(known_sessions_state) AS known_sessions,
@@ -1716,22 +1755,41 @@ rel_gpu_1h AS
         orchestrator_address,
         region,
         pipeline,
-        pipeline_id,
         model_id,
         gpu_id
+),
+rel_gpu_1h AS
+(
+    SELECT
+        r.window_start,
+        r.gateway,
+        r.orchestrator_address,
+        r.region,
+        r.pipeline,
+        r.model_id,
+        nullIf(if(ifNull(r.gpu_id, '') != '', r.gpu_id, ifNull(k.gpu_id, '')), '') AS gpu_id,
+        r.known_sessions,
+        r.unexcused_sessions,
+        r.swapped_sessions
+    FROM rel_gpu_1h_raw r
+    LEFT JOIN latest_gpu_by_key k
+        ON k.window_start = r.window_start
+       AND k.gateway = r.gateway
+       AND k.orchestrator_address = r.orchestrator_address
+       AND ifNull(k.region, '') = ifNull(r.region, '')
+       AND k.pipeline = r.pipeline
+       AND ifNull(k.model_id, '') = ifNull(r.model_id, '')
 ),
 dim_gpu_type AS
 (
     -- Map GPU IDs to stable display type/name.
     SELECT
         orchestrator_address,
-        pipeline,
-        pipeline_id,
         model_id,
         gpu_id,
         argMax(gpu_name, latest_snapshot_ts) AS gpu_type
     FROM dim_orchestrator_capability_current
-    GROUP BY orchestrator_address, pipeline, pipeline_id, model_id, gpu_id
+    GROUP BY orchestrator_address, model_id, gpu_id
 ),
 capacity_current AS
 (
@@ -1751,14 +1809,13 @@ latest_session_by_request AS
         argMax(orchestrator_address, version) AS orchestrator_address,
         argMax(region, version) AS region,
         argMax(pipeline, version) AS pipeline,
-        argMax(pipeline_id, version) AS pipeline_id,
         argMax(model_id, version) AS model_id,
         argMax(gpu_id, version) AS gpu_id
     FROM fact_workflow_sessions
     WHERE request_id != ''
     GROUP BY request_id
 ),
-fees_gpu_1h AS
+fees_gpu_1h_raw AS
 (
     -- Fees attributed at GPU key grain.
     SELECT
@@ -1767,7 +1824,6 @@ fees_gpu_1h AS
         s.orchestrator_address,
         s.region,
         s.pipeline,
-        s.pipeline_id,
         s.model_id,
         s.gpu_id,
         sum(toFloat64OrZero(p.face_value)) / 1000000000000000000.0 AS fee_payment_eth
@@ -1779,9 +1835,28 @@ fees_gpu_1h AS
         s.orchestrator_address,
         s.region,
         s.pipeline,
-        s.pipeline_id,
         s.model_id,
         s.gpu_id
+),
+fees_gpu_1h AS
+(
+    SELECT
+        f.window_start,
+        f.gateway,
+        f.orchestrator_address,
+        f.region,
+        f.pipeline,
+        f.model_id,
+        nullIf(if(ifNull(f.gpu_id, '') != '', f.gpu_id, ifNull(k.gpu_id, '')), '') AS gpu_id,
+        f.fee_payment_eth
+    FROM fees_gpu_1h_raw f
+    LEFT JOIN latest_gpu_by_key k
+        ON k.window_start = f.window_start
+       AND k.gateway = f.gateway
+       AND k.orchestrator_address = f.orchestrator_address
+       AND ifNull(k.region, '') = ifNull(f.region, '')
+       AND k.pipeline = f.pipeline
+       AND ifNull(k.model_id, '') = ifNull(f.model_id, '')
 )
 SELECT
     p.window_start AS window_start,
@@ -1789,7 +1864,6 @@ SELECT
     p.orchestrator_address AS orchestrator_address,
     p.region AS region,
     p.pipeline AS pipeline,
-    p.pipeline_id AS pipeline_id,
     p.model_id AS model_id,
     p.gpu_id AS gpu_id,
     ifNull(d.gpu_type, 'unknown') AS gpu_type,
@@ -1815,13 +1889,10 @@ LEFT JOIN rel_gpu_1h r
    AND r.orchestrator_address = p.orchestrator_address
    AND ifNull(r.region, '') = ifNull(p.region, '')
    AND r.pipeline = p.pipeline
-   AND r.pipeline_id = p.pipeline_id
    AND ifNull(r.model_id, '') = ifNull(p.model_id, '')
    AND ifNull(r.gpu_id, '') = ifNull(p.gpu_id, '')
 LEFT JOIN dim_gpu_type d
     ON d.orchestrator_address = p.orchestrator_address
-   AND d.pipeline = p.pipeline
-   AND d.pipeline_id = p.pipeline_id
    AND ifNull(d.model_id, '') = ifNull(p.model_id, '')
    AND ifNull(d.gpu_id, '') = ifNull(p.gpu_id, '')
 LEFT JOIN capacity_current c
@@ -1833,7 +1904,6 @@ LEFT JOIN fees_gpu_1h f
    AND f.orchestrator_address = p.orchestrator_address
    AND ifNull(f.region, '') = ifNull(p.region, '')
    AND f.pipeline = p.pipeline
-   AND f.pipeline_id = p.pipeline_id
    AND ifNull(f.model_id, '') = ifNull(p.model_id, '')
    AND ifNull(f.gpu_id, '') = ifNull(p.gpu_id, '');
 
@@ -1842,7 +1912,6 @@ SELECT
     toStartOfInterval(window_start, INTERVAL 5 MINUTE) AS window_start_5m,
     orchestrator_address,
     pipeline,
-    pipeline_id,
     model_id,
     gpu_id,
     region,
@@ -1854,14 +1923,13 @@ GROUP BY
     window_start_5m,
     orchestrator_address,
     pipeline,
-    pipeline_id,
     model_id,
     gpu_id,
     region
 HAVING status_samples >= 10;
 
 CREATE OR REPLACE VIEW v_api_sla_compliance AS
--- Grain: 1 row per (hour, orchestrator, pipeline, pipeline_id, model_id, gpu_id, region).
+-- Grain: 1 row per (hour, orchestrator, pipeline, model_id, gpu_id, region).
 -- Purpose: serving view for /sla/compliance and reliability joins.
 WITH latest_sessions AS
 (
@@ -1871,7 +1939,6 @@ WITH latest_sessions AS
         argMax(session_start_ts, version) AS session_start_ts,
         argMax(orchestrator_address, version) AS orchestrator_address,
         argMax(pipeline, version) AS pipeline,
-        argMax(pipeline_id, version) AS pipeline_id,
         argMax(model_id, version) AS model_id,
         argMax(gpu_id, version) AS gpu_id,
         argMax(region, version) AS region,
@@ -1887,7 +1954,6 @@ SELECT
     toStartOfInterval(session_start_ts, INTERVAL 1 HOUR) AS window_start,
     orchestrator_address,
     pipeline,
-    pipeline_id,
     model_id,
     gpu_id,
     region,
@@ -1909,7 +1975,6 @@ GROUP BY
     window_start,
     orchestrator_address,
     pipeline,
-    pipeline_id,
     model_id,
     gpu_id,
     region;
@@ -1956,7 +2021,6 @@ CREATE TABLE IF NOT EXISTS ai_stream_events
     stream_id String,
     request_id String,
     pipeline String,
-    pipeline_id String,
 
     -- Event info
     event_type LowCardinality(String),  -- 'error', 'warning', 'info'

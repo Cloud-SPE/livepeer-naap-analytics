@@ -21,7 +21,6 @@ final class StreamIngestMetricsParser {
         metrics.eventTimestamp = event.event.timestamp;
         metrics.streamId = data.path("stream_id").asText("");
         metrics.requestId = data.path("request_id").asText("");
-        metrics.pipelineId = data.path("pipeline_id").asText("");
 
         JsonNode stats = data.path("stats");
         metrics.connectionQuality = stats.path("conn_quality").asText("");

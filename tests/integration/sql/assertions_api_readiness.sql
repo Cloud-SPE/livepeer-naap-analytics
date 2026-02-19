@@ -106,6 +106,27 @@ FROM livepeer_analytics.v_api_network_demand_by_gpu
 WHERE window_start >= {from_ts:DateTime64(3)}
   AND window_start < {to_ts:DateTime64(3)};
 
+-- TEST: network_demand_by_gpu_required_columns_present
+SELECT
+  toUInt64(countIf(is_present = 0) > 0) AS failed_rows,
+  groupArrayIf(column_name, is_present = 0) AS missing_columns
+FROM
+(
+  SELECT
+    required.column_name,
+    toUInt8(count(c.name) > 0) AS is_present
+  FROM
+  (
+    SELECT 'gpu_id' AS column_name
+    UNION ALL SELECT 'gpu_type'
+  ) required
+  LEFT JOIN system.columns c
+    ON c.database = 'livepeer_analytics'
+   AND c.table = 'v_api_network_demand_by_gpu'
+   AND c.name = required.column_name
+  GROUP BY required.column_name
+);
+
 -- TEST: network_demand_by_gpu_capacity_fields_nonnegative
 SELECT
   toUInt64(countIf(

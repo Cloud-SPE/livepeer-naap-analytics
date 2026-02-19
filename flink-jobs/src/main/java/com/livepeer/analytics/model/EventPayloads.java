@@ -7,7 +7,7 @@ public final class EventPayloads {
         private static final long serialVersionUID = 1L;
         public long eventTimestamp;
         public String streamId, requestId, gateway, orchestratorAddress, orchestratorUrl;
-        public String pipeline, pipelineId, state, paramsHash, lastError, promptText;
+        public String pipeline, state, paramsHash, lastError, promptText;
         public float outputFps, inputFps;
         public int restartCount, promptWidth, promptHeight;
         public Long startTime, lastErrorTime;
@@ -17,7 +17,7 @@ public final class EventPayloads {
     public static class StreamIngestMetrics implements java.io.Serializable {
         private static final long serialVersionUID = 1L;
         public long eventTimestamp;
-        public String streamId, requestId, pipelineId, connectionQuality;
+        public String streamId, requestId, connectionQuality;
         public float videoJitter, audioJitter;
         public int videoPacketsReceived, videoPacketsLost, audioPacketsReceived, audioPacketsLost;
         public float videoPacketLossPct, audioPacketLossPct;
@@ -30,7 +30,7 @@ public final class EventPayloads {
         private static final long serialVersionUID = 1L;
         public long eventTimestamp;
         public long dataTimestamp;
-        public String streamId, requestId, pipelineId, orchestratorAddress, orchestratorUrl, traceType;
+        public String streamId, requestId, orchestratorAddress, orchestratorUrl, traceType;
         public String rawJson;
     }
 
@@ -81,7 +81,7 @@ public final class EventPayloads {
     public static class AiStreamEvent implements java.io.Serializable {
         private static final long serialVersionUID = 1L;
         public long eventTimestamp;
-        public String streamId, requestId, pipeline, pipelineId, eventType, message, capability;
+        public String streamId, requestId, pipeline, eventType, message, capability;
         public String rawJson;
     }
 
@@ -108,7 +108,7 @@ public final class EventPayloads {
         private static final long serialVersionUID = 1L;
 
         public String workflowSessionId, workflowType, workflowId;
-        public String streamId, requestId, sessionId, pipeline, pipelineId;
+        public String streamId, requestId, sessionId, pipeline;
         public String gateway, orchestratorAddress, orchestratorUrl;
         public String modelId, gpuId, region;
         public String attributionMethod;
@@ -162,7 +162,6 @@ public final class EventPayloads {
         public String streamId;
         public String requestId;
         public String pipeline;
-        public String pipelineId;
         public String gateway;
         public String orchestratorAddress;
         public String orchestratorUrl;
@@ -192,7 +191,6 @@ public final class EventPayloads {
         public String streamId;
         public String requestId;
         public String pipeline;
-        public String pipelineId;
         public String gateway;
         public String orchestratorAddress;
         public String traceType;
@@ -224,7 +222,6 @@ public final class EventPayloads {
         public String gateway;
         public String orchestratorAddress;
         public String pipeline;
-        public String pipelineId;
         public String modelId;
         public String gpuId;
         public String region;

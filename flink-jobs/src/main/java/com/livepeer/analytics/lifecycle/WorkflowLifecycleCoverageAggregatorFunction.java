@@ -61,7 +61,6 @@ public class WorkflowLifecycleCoverageAggregatorFunction extends KeyedProcessFun
         row.streamId = state.streamId;
         row.requestId = state.requestId;
         row.pipeline = state.pipeline;
-        row.pipelineId = state.pipelineId;
         row.gateway = state.gateway;
         row.orchestratorAddress = state.orchestratorAddress;
         row.traceType = signal.traceType == null ? "" : signal.traceType;

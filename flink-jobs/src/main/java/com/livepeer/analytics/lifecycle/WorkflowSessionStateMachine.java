@@ -34,10 +34,7 @@ public final class WorkflowSessionStateMachine {
         state.streamId = firstNonEmpty(state.streamId, signal.streamId);
         state.requestId = firstNonEmpty(state.requestId, signal.requestId);
         state.pipeline = firstNonEmpty(state.pipeline, signal.pipeline);
-        state.pipelineId = firstNonEmpty(state.pipelineId, signal.pipelineId);
-        state.workflowId = !isEmpty(state.pipelineId)
-                ? state.pipelineId
-                : firstNonEmpty(state.workflowId, state.pipeline, "ai_live_video_stream");
+        state.workflowId = firstNonEmpty(state.workflowId, state.pipeline, "ai_live_video_stream");
         state.gateway = firstNonEmpty(state.gateway, signal.gateway);
         if (!isEmpty(signal.orchestratorUrl)) {
             state.orchestratorUrl = signal.orchestratorUrl;
@@ -120,7 +117,6 @@ public final class WorkflowSessionStateMachine {
         fact.requestId = state.requestId;
         fact.sessionId = state.sessionId;
         fact.pipeline = state.pipeline;
-        fact.pipelineId = state.pipelineId;
         fact.gateway = state.gateway;
         fact.orchestratorAddress = state.orchestratorAddress;
         fact.orchestratorUrl = state.orchestratorUrl;

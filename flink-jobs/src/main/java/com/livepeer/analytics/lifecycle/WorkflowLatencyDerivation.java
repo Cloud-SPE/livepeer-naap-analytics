@@ -26,7 +26,6 @@ public final class WorkflowLatencyDerivation {
         sample.gateway = session.gateway;
         sample.orchestratorAddress = session.orchestratorAddress;
         sample.pipeline = session.pipeline;
-        sample.pipelineId = session.pipelineId;
         sample.modelId = session.modelId;
         sample.gpuId = session.gpuId;
         sample.region = session.region;

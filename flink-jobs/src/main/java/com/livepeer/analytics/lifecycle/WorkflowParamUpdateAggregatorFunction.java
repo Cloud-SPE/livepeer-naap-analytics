@@ -55,7 +55,6 @@ public class WorkflowParamUpdateAggregatorFunction extends KeyedBroadcastProcess
         state.streamId = firstNonEmpty(state.streamId, signal.streamId);
         state.requestId = firstNonEmpty(state.requestId, signal.requestId);
         state.pipeline = firstNonEmpty(state.pipeline, signal.pipeline);
-        state.pipelineId = firstNonEmpty(state.pipelineId, signal.pipelineId);
         state.gateway = firstNonEmpty(state.gateway, signal.gateway);
         state.orchestratorUrl = firstNonEmpty(state.orchestratorUrl, signal.orchestratorUrl);
 
@@ -80,7 +79,6 @@ public class WorkflowParamUpdateAggregatorFunction extends KeyedBroadcastProcess
             row.streamId = state.streamId;
             row.requestId = state.requestId;
             row.pipeline = state.pipeline;
-            row.pipelineId = state.pipelineId;
             row.gateway = state.gateway;
             row.orchestratorAddress = state.orchestratorAddress;
             row.orchestratorUrl = state.orchestratorUrl;

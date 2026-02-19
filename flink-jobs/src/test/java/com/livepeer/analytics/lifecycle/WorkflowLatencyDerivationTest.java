@@ -17,7 +17,6 @@ class WorkflowLatencyDerivationTest {
         s.gateway = "gateway-1";
         s.orchestratorAddress = "0xorch";
         s.pipeline = "live-video-to-video";
-        s.pipelineId = "";
         s.modelId = "streamdiffusion-sdxl";
         s.gpuId = "GPU-1";
         s.sessionStartTs = 1000L;

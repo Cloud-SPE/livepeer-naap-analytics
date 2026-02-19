@@ -1,5 +1,7 @@
 *.env
+**/.env
 .idea/
+.vscode/
 flink-jobs/target/
 /flink-jobs/project/project/target/
 /flink-jobs/project/target/
@@ -54,3 +56,4 @@ data/minio/streaming-events/topics/streaming_events/partition=**
 data/flink/tmp/checkpoints/.gitkeep
 data/flink/tmp/savepoints/.gitkeep
 data/kafka/.gitkeep
+tools/python/.venv/

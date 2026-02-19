@@ -34,7 +34,6 @@ class ClickHouseSchemaSyncTest {
         payload.orchestratorAddress = "0xabc";
         payload.orchestratorUrl = "https://orch";
         payload.pipeline = "pipe";
-        payload.pipelineId = "p1";
         payload.outputFps = 30.0f;
         payload.inputFps = 30.0f;
         payload.state = "running";
@@ -52,7 +51,6 @@ class ClickHouseSchemaSyncTest {
         payload.eventTimestamp = 1710000000000L;
         payload.streamId = "s1";
         payload.requestId = "r1";
-        payload.pipelineId = "p1";
         payload.connectionQuality = "good";
         payload.videoJitter = 0.1f;
         payload.videoPacketsReceived = 1;
@@ -81,7 +79,6 @@ class ClickHouseSchemaSyncTest {
         payload.eventTimestamp = 1710000000000L;
         payload.streamId = "s1";
         payload.requestId = "r1";
-        payload.pipelineId = "p1";
         payload.orchestratorAddress = "0xabc";
         payload.orchestratorUrl = "https://orch";
         payload.traceType = "gateway_receive_stream_request";
@@ -203,7 +200,6 @@ class ClickHouseSchemaSyncTest {
         payload.streamId = "s1";
         payload.requestId = "r1";
         payload.pipeline = "pipe";
-        payload.pipelineId = "p1";
         payload.eventType = "error";
         payload.message = "msg";
         payload.capability = "cap";
@@ -255,7 +251,6 @@ class ClickHouseSchemaSyncTest {
         payload.requestId = "request";
         payload.sessionId = "";
         payload.pipeline = "live-video-to-video";
-        payload.pipelineId = "";
         payload.gateway = "gateway-1";
         payload.orchestratorAddress = "0xorch";
         payload.orchestratorUrl = "https://orch";
@@ -316,7 +311,6 @@ class ClickHouseSchemaSyncTest {
         payload.streamId = "stream";
         payload.requestId = "request";
         payload.pipeline = "streamdiffusion-sdxl";
-        payload.pipelineId = "";
         payload.gateway = "gateway-1";
         payload.orchestratorAddress = "0xorch";
         payload.orchestratorUrl = "https://orch";
@@ -342,7 +336,6 @@ class ClickHouseSchemaSyncTest {
         payload.gateway = "gateway-1";
         payload.orchestratorAddress = "0xorch";
         payload.pipeline = "live-video-to-video";
-        payload.pipelineId = "";
         payload.modelId = "streamdiffusion-sdxl";
         payload.gpuId = "GPU-1";
         payload.region = null;

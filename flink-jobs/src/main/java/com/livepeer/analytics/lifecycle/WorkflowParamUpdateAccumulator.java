@@ -12,7 +12,6 @@ public class WorkflowParamUpdateAccumulator implements Serializable {
     public String streamId = "";
     public String requestId = "";
     public String pipeline = "";
-    public String pipelineId = "";
     public String gateway = "";
     public String orchestratorAddress = "";
     public String orchestratorUrl = "";
