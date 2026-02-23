@@ -57,3 +57,6 @@ data/flink/tmp/checkpoints/.gitkeep
 data/flink/tmp/savepoints/.gitkeep
 data/kafka/.gitkeep
 tools/python/.venv/
+artifacts/test-runs/
+scripts/__pycache__/
+**/.ipynb_checkpoints/

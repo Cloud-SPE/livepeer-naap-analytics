@@ -334,7 +334,7 @@ def main() -> None:
                     "request_id": session.request_id,
                     "session_start_ts": session.session_start_ts.isoformat(),
                     "session_end_ts": session.session_end_ts.isoformat() if session.session_end_ts else None,
-                    "file": str(out_file),
+                    "file": str(out_file.relative_to(base_out)),
                     "table_counts": table_counts,
                 }
             )

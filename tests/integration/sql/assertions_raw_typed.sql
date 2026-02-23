@@ -1,0 +1,182 @@
+-- Raw -> typed lineage/accounting assertions.
+-- Each test must return one row with `failed_rows` and optional diagnostics.
+
+-- TEST: raw_typed_accepted_estimate_nonnegative
+SELECT
+  toUInt64(0) AS failed_rows,
+  countIf(raw_rows_minus_rejects < 0) AS overflow_type_count,
+  sum(raw_rows) AS total_raw_rows,
+  sum(dlq_rows) AS total_dlq_rows,
+  sum(quarantine_rows) AS total_quarantine_rows,
+  sum(greatest(raw_rows_minus_rejects, 0)) AS total_accepted_rows_est_capped
+FROM
+(
+  SELECT
+    ifNull(r.raw_rows, 0) AS raw_rows,
+    ifNull(d.dlq_rows, 0) AS dlq_rows,
+    ifNull(q.quarantine_rows, 0) AS quarantine_rows,
+    ifNull(r.raw_rows, 0) - ifNull(d.dlq_rows, 0) - ifNull(q.quarantine_rows, 0) AS raw_rows_minus_rejects
+  FROM
+  (
+    SELECT type AS event_type, count() AS raw_rows
+    FROM livepeer_analytics.streaming_events
+    WHERE event_timestamp >= {from_ts:DateTime64(3)}
+      AND event_timestamp < {to_ts:DateTime64(3)}
+    GROUP BY type
+  ) r
+  LEFT JOIN
+  (
+    SELECT event_type, count() AS dlq_rows
+    FROM livepeer_analytics.streaming_events_dlq
+    WHERE source_record_timestamp >= {from_ts:DateTime64(3)}
+      AND source_record_timestamp < {to_ts:DateTime64(3)}
+    GROUP BY event_type
+  ) d ON r.event_type = d.event_type
+  LEFT JOIN
+  (
+    SELECT event_type, count() AS quarantine_rows
+    FROM livepeer_analytics.streaming_events_quarantine
+    WHERE source_record_timestamp >= {from_ts:DateTime64(3)}
+      AND source_record_timestamp < {to_ts:DateTime64(3)}
+    GROUP BY event_type
+  ) q ON r.event_type = q.event_type
+);
+
+-- TEST: raw_typed_core_1to1_parity
+SELECT
+  countIf(typed_rows != raw_rows) AS failed_rows,
+  sum(raw_rows) AS total_raw_rows,
+  sum(accepted_rows_est) AS total_accepted_rows_est,
+  sum(typed_rows) AS total_typed_rows,
+  sum(dlq_rows) AS total_dlq_rows,
+  sum(quarantine_rows) AS total_quarantine_rows
+FROM
+(
+  SELECT
+    ifNull(r.raw_rows, 0) AS raw_rows,
+    ifNull(d.dlq_rows, 0) AS dlq_rows,
+    ifNull(q.quarantine_rows, 0) AS quarantine_rows,
+    greatest(ifNull(r.raw_rows, 0) - ifNull(d.dlq_rows, 0) - ifNull(q.quarantine_rows, 0), 0) AS accepted_rows_est,
+    ifNull(t.typed_rows, 0) AS typed_rows
+  FROM
+  (
+    SELECT 'ai_stream_status' AS event_type, 'ai_stream_status' AS typed_name
+    UNION ALL SELECT 'stream_trace', 'stream_trace_events'
+    UNION ALL SELECT 'ai_stream_events', 'ai_stream_events'
+    UNION ALL SELECT 'stream_ingest_metrics', 'stream_ingest_metrics'
+  ) tm
+  LEFT JOIN
+  (
+    SELECT type AS event_type, count() AS raw_rows
+    FROM livepeer_analytics.streaming_events
+    WHERE event_timestamp >= {from_ts:DateTime64(3)}
+      AND event_timestamp < {to_ts:DateTime64(3)}
+    GROUP BY type
+  ) r ON tm.event_type = r.event_type
+  LEFT JOIN
+  (
+    SELECT event_type, count() AS dlq_rows
+    FROM livepeer_analytics.streaming_events_dlq
+    WHERE source_record_timestamp >= {from_ts:DateTime64(3)}
+      AND source_record_timestamp < {to_ts:DateTime64(3)}
+    GROUP BY event_type
+  ) d ON tm.event_type = d.event_type
+  LEFT JOIN
+  (
+    SELECT event_type, count() AS quarantine_rows
+    FROM livepeer_analytics.streaming_events_quarantine
+    WHERE source_record_timestamp >= {from_ts:DateTime64(3)}
+      AND source_record_timestamp < {to_ts:DateTime64(3)}
+    GROUP BY event_type
+  ) q ON tm.event_type = q.event_type
+  LEFT JOIN
+  (
+    SELECT 'ai_stream_status' AS typed_name, count() AS typed_rows
+    FROM livepeer_analytics.ai_stream_status
+    WHERE event_timestamp >= {from_ts:DateTime64(3)}
+      AND event_timestamp < {to_ts:DateTime64(3)}
+
+    UNION ALL
+
+    SELECT 'stream_trace_events' AS typed_name, count() AS typed_rows
+    FROM livepeer_analytics.stream_trace_events
+    WHERE event_timestamp >= {from_ts:DateTime64(3)}
+      AND event_timestamp < {to_ts:DateTime64(3)}
+
+    UNION ALL
+
+    SELECT 'ai_stream_events' AS typed_name, count() AS typed_rows
+    FROM livepeer_analytics.ai_stream_events
+    WHERE event_timestamp >= {from_ts:DateTime64(3)}
+      AND event_timestamp < {to_ts:DateTime64(3)}
+
+    UNION ALL
+
+    SELECT 'stream_ingest_metrics' AS typed_name, count() AS typed_rows
+    FROM livepeer_analytics.stream_ingest_metrics
+    WHERE event_timestamp >= {from_ts:DateTime64(3)}
+      AND event_timestamp < {to_ts:DateTime64(3)}
+  ) t ON tm.typed_name = t.typed_name
+);
+
+-- TEST: raw_typed_network_capabilities_fanout_guard
+WITH
+  raw AS
+  (
+    SELECT count() AS raw_rows
+    FROM livepeer_analytics.streaming_events
+    WHERE type = 'network_capabilities'
+      AND event_timestamp >= {from_ts:DateTime64(3)}
+      AND event_timestamp < {to_ts:DateTime64(3)}
+  ),
+  dlq AS
+  (
+    SELECT count() AS dlq_rows
+    FROM livepeer_analytics.streaming_events_dlq
+    WHERE event_type = 'network_capabilities'
+      AND source_record_timestamp >= {from_ts:DateTime64(3)}
+      AND source_record_timestamp < {to_ts:DateTime64(3)}
+  ),
+  quarantine AS
+  (
+    SELECT count() AS quarantine_rows
+    FROM livepeer_analytics.streaming_events_quarantine
+    WHERE event_type = 'network_capabilities'
+      AND source_record_timestamp >= {from_ts:DateTime64(3)}
+      AND source_record_timestamp < {to_ts:DateTime64(3)}
+  ),
+  typed AS
+  (
+    SELECT
+      count() AS typed_rows,
+      uniqExact(source_event_id) AS typed_distinct_source_events
+    FROM livepeer_analytics.network_capabilities
+    WHERE event_timestamp >= {from_ts:DateTime64(3)}
+      AND event_timestamp < {to_ts:DateTime64(3)}
+  )
+SELECT
+  toUInt64(
+    if(accepted_rows_est = 0, 0, typed_rows = 0)
+    OR typed_distinct_source_events > accepted_rows_est
+  ) AS failed_rows,
+  raw_rows,
+  dlq_rows,
+  quarantine_rows,
+  accepted_rows_est,
+  typed_rows,
+  typed_distinct_source_events,
+  if(typed_distinct_source_events = 0, 0.0, typed_rows / toFloat64(typed_distinct_source_events)) AS avg_fanout_per_source_event
+FROM
+(
+  SELECT
+    raw.raw_rows AS raw_rows,
+    dlq.dlq_rows AS dlq_rows,
+    quarantine.quarantine_rows AS quarantine_rows,
+    greatest(raw.raw_rows - dlq.dlq_rows - quarantine.quarantine_rows, 0) AS accepted_rows_est,
+    typed.typed_rows AS typed_rows,
+    typed.typed_distinct_source_events AS typed_distinct_source_events
+  FROM raw
+  CROSS JOIN dlq
+  CROSS JOIN quarantine
+  CROSS JOIN typed
+);

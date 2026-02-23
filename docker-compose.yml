@@ -123,6 +123,15 @@ services:
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic streaming_events --partitions 1 --replication-factor 1
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic events.dlq.streaming_events.v1 --partitions 1 --replication-factor 1 --config retention.ms=2592000000
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic events.quarantine.streaming_events.v1 --partitions 1 --replication-factor 1 --config retention.ms=604800000
+        # Kafka Connect internal topics (configs/offsets/status) must be compacted.
+        # Connect can fail startup if these are missing or cleanup.policy is delete.
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic _connect-configs --partitions 1 --replication-factor 1 --config cleanup.policy=compact
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic _connect-offsets --partitions 1 --replication-factor 1 --config cleanup.policy=compact
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic _connect-status --partitions 1 --replication-factor 1 --config cleanup.policy=compact
+        # Re-apply compaction on existing topics so dirty/dev environments self-heal.
+        /opt/kafka/bin/kafka-configs.sh --bootstrap-server kafka:9092 --alter --entity-type topics --entity-name _connect-configs --add-config cleanup.policy=compact
+        /opt/kafka/bin/kafka-configs.sh --bootstrap-server kafka:9092 --alter --entity-type topics --entity-name _connect-offsets --add-config cleanup.policy=compact
+        /opt/kafka/bin/kafka-configs.sh --bootstrap-server kafka:9092 --alter --entity-type topics --entity-name _connect-status --add-config cleanup.policy=compact
     depends_on:
       kafka:
         condition: service_healthy
@@ -137,6 +146,8 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
       clickhouse:
         condition: service_healthy
       minio:
@@ -178,19 +189,31 @@ services:
   flink-builder:
     image: maven:3.9-eclipse-temurin-11
     container_name: livepeer-analytics-flink-builder
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
     working_dir: /build
+    environment:
+      MAVEN_CONFIG: /tmp/.m2
     volumes:
       - ./flink-jobs:/build
       # Mount ClickHouse init scripts used by Clickhouse Schema Tests during Maven build
       - ./configs/clickhouse-init:/configs/clickhouse-init:ro
-      - flink-maven-cache:/root/.m2
+      - livepeer-analytics-flink-maven-cache:/tmp/.m2
     command: >
-      sh -c "
+      bash -lc "
+        set -euo pipefail;
         echo 'Building Flink jobs...';
-        mvn clean package;
+        mvn -q -Duser.home=/tmp -Dmaven.repo.local=/tmp/.m2/repository help:evaluate -Dexpression=settings.localRepository -DforceStdout;
+        mvn -Duser.home=/tmp -Dmaven.repo.local=/tmp/.m2/repository clean package;
         echo 'Build complete. Copying JAR to output directory...';
         mkdir -p /build/output;
-        cp target/*.jar /build/output/ 2>/dev/null || echo 'Warning: No JAR files found in target/';
+        JAR_PATH=$$(ls -1t /build/target/livepeer-analytics-flink-*.jar 2>/dev/null | grep -v '/original-' | head -n 1 || true);
+        if [ -z \"$$JAR_PATH\" ]; then
+          echo 'ERROR: No Flink job JAR found in /build/target';
+          ls -lah /build/target || true;
+          exit 1;
+        fi;
+        cp \"$$JAR_PATH\" /build/output/livepeer-analytics-flink.jar;
+        cp \"$$JAR_PATH\" /build/output/;
         ls -lh /build/output/;
       "
     init: true
@@ -476,9 +499,10 @@ services:
       timeout: 5s
       retries: 5
 
-volumes:
-  flink-maven-cache:
-
 networks:
   default:
     name: livepeer-analytics-dev-network
+
+volumes:
+  livepeer-analytics-flink-maven-cache:
+    external: true
