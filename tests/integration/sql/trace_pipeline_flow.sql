@@ -260,7 +260,6 @@ FROM
     window_start,
     orchestrator_address,
     pipeline,
-    pipeline_id,
     ifNull(model_id, '') AS model_id,
     ifNull(gpu_id, '') AS gpu_id,
     ifNull(region, '') AS region,
@@ -268,7 +267,7 @@ FROM
   FROM livepeer_analytics.agg_stream_performance_1m
   WHERE window_start >= {from_ts:DateTime64(3)}
     AND window_start < {to_ts:DateTime64(3)}
-  GROUP BY window_start, orchestrator_address, pipeline, pipeline_id, model_id, gpu_id, region
+  GROUP BY window_start, orchestrator_address, pipeline, model_id, gpu_id, region
 ) a
 INNER JOIN
 (
@@ -276,7 +275,6 @@ INNER JOIN
     window_start,
     orchestrator_address,
     pipeline,
-    pipeline_id,
     ifNull(model_id, '') AS model_id,
     ifNull(gpu_id, '') AS gpu_id,
     ifNull(region, '') AS region,
@@ -285,7 +283,7 @@ INNER JOIN
   WHERE window_start >= {from_ts:DateTime64(3)}
     AND window_start < {to_ts:DateTime64(3)}
 ) b
-USING (window_start, orchestrator_address, pipeline, pipeline_id, model_id, gpu_id, region);
+USING (window_start, orchestrator_address, pipeline, model_id, gpu_id, region);
 
 -- QUERY: 09_sla_view_parity
 WITH
@@ -295,7 +293,6 @@ WITH
       argMax(session_start_ts, version) AS session_start_ts,
       argMax(orchestrator_address, version) AS orchestrator_address,
       argMax(pipeline, version) AS pipeline,
-      argMax(pipeline_id, version) AS pipeline_id,
       argMax(model_id, version) AS model_id,
       argMax(gpu_id, version) AS gpu_id,
       argMax(region, version) AS region,
@@ -310,7 +307,6 @@ WITH
       toStartOfInterval(session_start_ts, INTERVAL 1 HOUR) AS window_start,
       orchestrator_address,
       pipeline,
-      pipeline_id,
       ifNull(model_id, '') AS model_id,
       ifNull(gpu_id, '') AS gpu_id,
       ifNull(region, '') AS region,
@@ -320,14 +316,13 @@ WITH
     FROM latest_sessions
     WHERE session_start_ts >= {from_ts:DateTime64(3)}
       AND session_start_ts < {to_ts:DateTime64(3)}
-    GROUP BY window_start, orchestrator_address, pipeline, pipeline_id, model_id, gpu_id, region
+    GROUP BY window_start, orchestrator_address, pipeline, model_id, gpu_id, region
   ),
   api AS (
     SELECT
       window_start,
       orchestrator_address,
       pipeline,
-      pipeline_id,
       ifNull(model_id, '') AS model_id,
       ifNull(gpu_id, '') AS gpu_id,
       ifNull(region, '') AS region,
@@ -345,4 +340,4 @@ SELECT
   sum(abs(raw.raw_swapped_sessions - api.swapped_sessions)) AS total_swapped_diff
 FROM raw
 INNER JOIN api
-USING (window_start, orchestrator_address, pipeline, pipeline_id, model_id, gpu_id, region);
+USING (window_start, orchestrator_address, pipeline, model_id, gpu_id, region);

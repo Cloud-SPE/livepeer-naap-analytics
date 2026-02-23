@@ -486,20 +486,18 @@ WITH
       toStartOfInterval(sample_ts, INTERVAL 1 MINUTE) AS window_start,
       orchestrator_address,
       pipeline,
-      pipeline_id,
       ifNull(model_id, '') AS model_id,
       ifNull(gpu_id, '') AS gpu_id,
       avg(output_fps) AS raw_avg_output_fps
     FROM livepeer_analytics.fact_stream_status_samples
     WHERE sample_ts >= from_ts AND sample_ts < to_ts
-    GROUP BY window_start, orchestrator_address, pipeline, pipeline_id, model_id, gpu_id
+    GROUP BY window_start, orchestrator_address, pipeline, model_id, gpu_id
   ),
   api AS (
     SELECT
       window_start,
       orchestrator_address,
       pipeline,
-      pipeline_id,
       ifNull(model_id, '') AS model_id,
       ifNull(gpu_id, '') AS gpu_id,
       avg_output_fps AS api_avg_output_fps
@@ -511,7 +509,7 @@ SELECT
   avg(abs(raw.raw_avg_output_fps - api.api_avg_output_fps)) AS mean_abs_diff_fps,
   max(abs(raw.raw_avg_output_fps - api.api_avg_output_fps)) AS max_abs_diff_fps
 FROM raw
-INNER JOIN api USING (window_start, orchestrator_address, pipeline, pipeline_id, model_id, gpu_id);
+INNER JOIN api USING (window_start, orchestrator_address, pipeline, model_id, gpu_id);
 
 -- 12) Rollup parity: reliability rollup vs raw workflow sessions
 -- Compares known/unexcused/swapped session counts at 1-hour grain.
@@ -524,7 +522,6 @@ WITH
       argMax(session_start_ts, version) AS session_start_ts,
       argMax(orchestrator_address, version) AS orchestrator_address,
       argMax(pipeline, version) AS pipeline,
-      argMax(pipeline_id, version) AS pipeline_id,
       argMax(model_id, version) AS model_id,
       argMax(gpu_id, version) AS gpu_id,
       argMax(known_stream, version) AS known_stream,
@@ -538,7 +535,6 @@ WITH
       toStartOfInterval(session_start_ts, INTERVAL 1 HOUR) AS window_start,
       orchestrator_address,
       pipeline,
-      pipeline_id,
       ifNull(model_id, '') AS model_id,
       ifNull(gpu_id, '') AS gpu_id,
       sum(toUInt64(known_stream)) AS raw_known_sessions,
@@ -546,14 +542,13 @@ WITH
       sum(toUInt64(swap_count > 0)) AS raw_swapped_sessions
     FROM latest_sessions
     WHERE session_start_ts >= from_ts AND session_start_ts < to_ts
-    GROUP BY window_start, orchestrator_address, pipeline, pipeline_id, model_id, gpu_id
+    GROUP BY window_start, orchestrator_address, pipeline, model_id, gpu_id
   ),
   api AS (
     SELECT
       window_start,
       orchestrator_address,
       pipeline,
-      pipeline_id,
       ifNull(model_id, '') AS model_id,
       ifNull(gpu_id, '') AS gpu_id,
       known_sessions,
@@ -568,7 +563,7 @@ SELECT
   sum(abs(raw.raw_unexcused_sessions - api.unexcused_sessions)) AS total_unexcused_diff,
   sum(abs(raw.raw_swapped_sessions - api.swapped_sessions)) AS total_swapped_diff
 FROM raw
-INNER JOIN api USING (window_start, orchestrator_address, pipeline, pipeline_id, model_id, gpu_id);
+INNER JOIN api USING (window_start, orchestrator_address, pipeline, model_id, gpu_id);
 
 -- 13) API view sanity: null/empty key coverage for serving dimensions
 WITH

@@ -44,16 +44,6 @@ FROM livepeer_analytics.v_api_gpu_metrics
 WHERE window_start >= {from_ts:DateTime64(3)}
   AND window_start < {to_ts:DateTime64(3)};
 
--- TEST: gpu_metrics_pipeline_id_coverage
--- Informational telemetry-coverage metric: some producers currently emit empty pipeline_id.
-SELECT
-  toUInt64(0) AS failed_rows,
-  count() AS rows_checked,
-  countIf(pipeline_id = '') AS empty_pipeline_id_rows
-FROM livepeer_analytics.v_api_gpu_metrics
-WHERE window_start >= {from_ts:DateTime64(3)}
-  AND window_start < {to_ts:DateTime64(3)};
-
 -- TEST: gpu_metrics_rollup_fields_consistent
 SELECT
   toUInt64(countIf(
@@ -201,7 +191,6 @@ WITH latest_sessions AS
     argMax(session_start_ts, version) AS session_start_ts,
     argMax(orchestrator_address, version) AS orchestrator_address,
     argMax(pipeline, version) AS pipeline,
-    argMax(pipeline_id, version) AS pipeline_id,
     argMax(model_id, version) AS model_id,
     argMax(gpu_id, version) AS gpu_id,
     argMax(region, version) AS region,
@@ -217,7 +206,6 @@ raw_rollup AS
     toStartOfInterval(session_start_ts, INTERVAL 1 HOUR) AS window_start,
     orchestrator_address,
     pipeline,
-    pipeline_id,
     ifNull(model_id, '') AS model_id,
     ifNull(gpu_id, '') AS gpu_id,
     ifNull(region, '') AS region,
@@ -227,7 +215,7 @@ raw_rollup AS
   FROM latest_sessions
   WHERE session_start_ts >= {from_ts:DateTime64(3)}
     AND session_start_ts < {to_ts:DateTime64(3)}
-  GROUP BY window_start, orchestrator_address, pipeline, pipeline_id, model_id, gpu_id, region
+  GROUP BY window_start, orchestrator_address, pipeline, model_id, gpu_id, region
 ),
 api_rollup AS
 (
@@ -235,7 +223,6 @@ api_rollup AS
     window_start,
     orchestrator_address,
     pipeline,
-    pipeline_id,
     ifNull(model_id, '') AS model_id,
     ifNull(gpu_id, '') AS gpu_id,
     ifNull(region, '') AS region,
@@ -255,4 +242,4 @@ SELECT
   count() AS joined_rows
 FROM raw_rollup r
 INNER JOIN api_rollup a
-  USING (window_start, orchestrator_address, pipeline, pipeline_id, model_id, gpu_id, region);
+  USING (window_start, orchestrator_address, pipeline, model_id, gpu_id, region);

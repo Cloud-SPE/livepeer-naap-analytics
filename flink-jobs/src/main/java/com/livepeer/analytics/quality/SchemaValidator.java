@@ -91,7 +91,6 @@ public class SchemaValidator {
                 "data.stream_id",
                 "data.request_id",
                 "data.pipeline"
-                // "data.pipeline_id", // optional for stream_trace
         ));
         map.put("stream_ingest_metrics", Arrays.asList(
                 "data.stream_id",
@@ -101,7 +100,6 @@ public class SchemaValidator {
                 "id",  //guid at root level
                 "data.stream_id",
                 "data.request_id",
-                // "data.pipeline_id", // optional for stream_trace
                 "data.type"
         ));
         map.put("network_capabilities", Collections.singletonList("data"));
@@ -109,7 +107,6 @@ public class SchemaValidator {
                 "data.stream_id",
                 "data.request_id",
                 "data.pipeline",
-                // "data.pipeline_id",  // not always present
                 "data.type"
         ));
         map.put("discovery_results", Collections.singletonList("data"));

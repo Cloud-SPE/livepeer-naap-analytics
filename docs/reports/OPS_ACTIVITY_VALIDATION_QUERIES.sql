@@ -169,21 +169,21 @@ SELECT
 FROM
 (
   SELECT
-    window_start, orchestrator_address, pipeline, pipeline_id, model_id, gpu_id, region,
+    window_start, orchestrator_address, pipeline, model_id, gpu_id, region,
     avgMerge(output_fps_avg_state) AS avg_output_fps
   FROM livepeer_analytics.agg_stream_performance_1m
   WHERE window_start >= from_ts AND window_start < to_ts
-  GROUP BY window_start, orchestrator_address, pipeline, pipeline_id, model_id, gpu_id, region
+  GROUP BY window_start, orchestrator_address, pipeline, model_id, gpu_id, region
 ) a
 INNER JOIN
 (
   SELECT
-    window_start, orchestrator_address, pipeline, pipeline_id, model_id, gpu_id, region,
+    window_start, orchestrator_address, pipeline, model_id, gpu_id, region,
     avg_output_fps
   FROM livepeer_analytics.v_api_gpu_metrics
   WHERE window_start >= from_ts AND window_start < to_ts
 ) b
-USING (window_start, orchestrator_address, pipeline, pipeline_id, model_id, gpu_id, region);
+USING (window_start, orchestrator_address, pipeline, model_id, gpu_id, region);
 
 -- A4) Goal: Verify v_api_sla_compliance counts match deduped session facts.
 -- What this query does: Recomputes known/unexcused/swapped counts from latest
@@ -206,7 +206,6 @@ FROM
       argMax(session_start_ts, version) AS session_start_ts,
       argMax(orchestrator_address, version) AS orchestrator_address,
       argMax(pipeline, version) AS pipeline,
-      argMax(pipeline_id, version) AS pipeline_id,
       argMax(model_id, version) AS model_id,
       argMax(gpu_id, version) AS gpu_id,
       argMax(region, version) AS region,
@@ -218,23 +217,23 @@ FROM
   )
   SELECT
     toStartOfInterval(session_start_ts, INTERVAL 1 HOUR) AS window_start,
-    orchestrator_address, pipeline, pipeline_id, model_id, gpu_id, region,
+    orchestrator_address, pipeline, model_id, gpu_id, region,
     sum(toUInt64(known_stream)) AS known_sessions,
     sum(toUInt64(startup_unexcused)) AS unexcused_sessions,
     sum(toUInt64(swap_count > 0)) AS swapped_sessions
   FROM latest_sessions
   WHERE session_start_ts >= from_ts AND session_start_ts < to_ts
-  GROUP BY window_start, orchestrator_address, pipeline, pipeline_id, model_id, gpu_id, region
+  GROUP BY window_start, orchestrator_address, pipeline, model_id, gpu_id, region
 ) a
 INNER JOIN
 (
   SELECT
-    window_start, orchestrator_address, pipeline, pipeline_id, model_id, gpu_id, region,
+    window_start, orchestrator_address, pipeline, model_id, gpu_id, region,
     known_sessions, unexcused_sessions, swapped_sessions
   FROM livepeer_analytics.v_api_sla_compliance
   WHERE window_start >= from_ts AND window_start < to_ts
 ) b
-USING (window_start, orchestrator_address, pipeline, pipeline_id, model_id, gpu_id, region);
+USING (window_start, orchestrator_address, pipeline, model_id, gpu_id, region);
 
 -- A5) Goal: Validate SLA ratios are mathematically valid.
 -- What this query does: Checks API ratio columns for out-of-bound values.
