@@ -62,8 +62,13 @@ public class WorkflowParamUpdateAggregatorFunction extends KeyedBroadcastProcess
         CapabilitySnapshotRef snapshot = null;
         String signalAddress = normalizeAddress(signal.orchestratorAddress);
         if (!isEmpty(signalAddress)) {
-            snapshot = ctx.getBroadcastState(CapabilityBroadcastState.CAPABILITY_STATE_DESCRIPTOR)
+            CapabilitySnapshotBucket bucket = ctx.getBroadcastState(CapabilityBroadcastState.CAPABILITY_STATE_DESCRIPTOR)
                     .get(signalAddress);
+            snapshot = CapabilityAttributionSelector.selectBestCandidate(
+                    bucket,
+                    signal.pipeline,
+                    signal.signalTimestamp,
+                    DEFAULT_ATTRIBUTION_TTL_MS);
         }
         applySnapshotAttribution(state, snapshot, signal.signalTimestamp);
 
@@ -113,7 +118,18 @@ public class WorkflowParamUpdateAggregatorFunction extends KeyedBroadcastProcess
         ref.orchestratorUrl = cap.orchUri;
         ref.modelId = cap.modelId;
         ref.gpuId = cap.gpuId;
-        ctx.getBroadcastState(CapabilityBroadcastState.CAPABILITY_STATE_DESCRIPTOR).put(hotAddress, ref);
+        CapabilitySnapshotBucket bucket = ctx.getBroadcastState(CapabilityBroadcastState.CAPABILITY_STATE_DESCRIPTOR)
+                .get(hotAddress);
+        if (bucket == null) {
+            bucket = new CapabilitySnapshotBucket();
+        }
+        CapabilityAttributionSelector.upsertCandidate(
+                bucket,
+                ref,
+                cap.eventTimestamp,
+                DEFAULT_ATTRIBUTION_TTL_MS,
+                CapabilityAttributionSelector.DEFAULT_MAX_CANDIDATES_PER_WALLET);
+        ctx.getBroadcastState(CapabilityBroadcastState.CAPABILITY_STATE_DESCRIPTOR).put(hotAddress, bucket);
     }
 
     private void applySnapshotAttribution(

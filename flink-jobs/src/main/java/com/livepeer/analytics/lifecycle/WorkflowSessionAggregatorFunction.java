@@ -16,7 +16,7 @@ import java.util.Locale;
  *
  * <p>Design notes:
  * - Keyed state keeps one mutable accumulator per workflow session.
- * - Broadcast state carries the latest capability snapshot by hot-wallet address.
+ * - Broadcast state carries bounded capability candidates by hot-wallet address.
  * - For each lifecycle signal we update session state, apply attribution, then emit the latest
  *   versioned session row (ReplacingMergeTree upsert model in ClickHouse).
  * - This operator intentionally emits incremental snapshots; consumers should query latest version
@@ -59,7 +59,13 @@ public class WorkflowSessionAggregatorFunction extends KeyedBroadcastProcessFunc
         CapabilitySnapshotRef snapshot = null;
         String hotKey = normalizeAddress(signal.orchestratorAddress);
         if (!isEmpty(hotKey)) {
-            snapshot = ctx.getBroadcastState(CapabilityBroadcastState.CAPABILITY_STATE_DESCRIPTOR).get(hotKey);
+            CapabilitySnapshotBucket bucket =
+                    ctx.getBroadcastState(CapabilityBroadcastState.CAPABILITY_STATE_DESCRIPTOR).get(hotKey);
+            snapshot = CapabilityAttributionSelector.selectBestCandidate(
+                    bucket,
+                    signal.pipeline,
+                    signal.signalTimestamp,
+                    DEFAULT_ATTRIBUTION_TTL_MS);
         }
 
         // Apply deterministic state transitions and attribution in a fixed order.
@@ -99,7 +105,18 @@ public class WorkflowSessionAggregatorFunction extends KeyedBroadcastProcessFunc
         ref.orchestratorUrl = cap.orchUri;
         ref.modelId = cap.modelId;
         ref.gpuId = cap.gpuId;
-        ctx.getBroadcastState(CapabilityBroadcastState.CAPABILITY_STATE_DESCRIPTOR).put(hotAddress, ref);
+        CapabilitySnapshotBucket bucket = ctx.getBroadcastState(CapabilityBroadcastState.CAPABILITY_STATE_DESCRIPTOR)
+                .get(hotAddress);
+        if (bucket == null) {
+            bucket = new CapabilitySnapshotBucket();
+        }
+        CapabilityAttributionSelector.upsertCandidate(
+                bucket,
+                ref,
+                cap.eventTimestamp,
+                DEFAULT_ATTRIBUTION_TTL_MS,
+                CapabilityAttributionSelector.DEFAULT_MAX_CANDIDATES_PER_WALLET);
+        ctx.getBroadcastState(CapabilityBroadcastState.CAPABILITY_STATE_DESCRIPTOR).put(hotAddress, bucket);
     }
 
     private static String normalizeAddress(String address) {

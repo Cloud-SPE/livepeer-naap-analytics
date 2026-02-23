@@ -56,7 +56,7 @@ public final class WorkflowSessionSegmentStateMachine {
         if (!isEmpty(effectiveOrchestrator)) {
             state.orchestratorAddress = effectiveOrchestrator;
         }
-        state.orchestratorUrl = firstNonEmpty(state.orchestratorUrl, signal.orchestratorUrl);
+        state.orchestratorUrl = firstNonEmpty(signal.orchestratorUrl, state.orchestratorUrl);
         state.sourceTraceType = firstNonEmpty(signal.traceType, state.sourceTraceType);
         state.sourceEventUid = firstNonEmpty(signal.sourceEventUid, state.sourceEventUid);
         applySnapshot(state, snapshot, signal.signalTimestamp, attributionTtlMs);
@@ -118,7 +118,7 @@ public final class WorkflowSessionSegmentStateMachine {
         if (!isEmpty(snapshot.canonicalOrchestratorAddress)) {
             state.orchestratorAddress = snapshot.canonicalOrchestratorAddress;
         }
-        state.orchestratorUrl = firstNonEmpty(state.orchestratorUrl, snapshot.orchestratorUrl);
+        state.orchestratorUrl = firstNonEmpty(snapshot.orchestratorUrl, state.orchestratorUrl);
         state.modelId = emptyToNull(snapshot.modelId);
         state.gpuId = emptyToNull(snapshot.gpuId);
     }

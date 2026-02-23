@@ -56,7 +56,13 @@ public class WorkflowSessionSegmentAggregatorFunction extends KeyedBroadcastProc
         CapabilitySnapshotRef snapshot = null;
         String hotKey = normalizeAddress(signal.orchestratorAddress);
         if (!isEmpty(hotKey)) {
-            snapshot = ctx.getBroadcastState(CapabilityBroadcastState.CAPABILITY_STATE_DESCRIPTOR).get(hotKey);
+            CapabilitySnapshotBucket bucket =
+                    ctx.getBroadcastState(CapabilityBroadcastState.CAPABILITY_STATE_DESCRIPTOR).get(hotKey);
+            snapshot = CapabilityAttributionSelector.selectBestCandidate(
+                    bucket,
+                    signal.pipeline,
+                    signal.signalTimestamp,
+                    DEFAULT_ATTRIBUTION_TTL_MS);
         }
 
         // State machine may emit one or more rows per signal depending on boundary transitions.
@@ -89,7 +95,18 @@ public class WorkflowSessionSegmentAggregatorFunction extends KeyedBroadcastProc
         ref.orchestratorUrl = cap.orchUri;
         ref.modelId = cap.modelId;
         ref.gpuId = cap.gpuId;
-        ctx.getBroadcastState(CapabilityBroadcastState.CAPABILITY_STATE_DESCRIPTOR).put(hotAddress, ref);
+        CapabilitySnapshotBucket bucket = ctx.getBroadcastState(CapabilityBroadcastState.CAPABILITY_STATE_DESCRIPTOR)
+                .get(hotAddress);
+        if (bucket == null) {
+            bucket = new CapabilitySnapshotBucket();
+        }
+        CapabilityAttributionSelector.upsertCandidate(
+                bucket,
+                ref,
+                cap.eventTimestamp,
+                DEFAULT_ATTRIBUTION_TTL_MS,
+                CapabilityAttributionSelector.DEFAULT_MAX_CANDIDATES_PER_WALLET);
+        ctx.getBroadcastState(CapabilityBroadcastState.CAPABILITY_STATE_DESCRIPTOR).put(hotAddress, bucket);
     }
 
     private static String normalizeAddress(String address) {

@@ -66,6 +66,38 @@ class WorkflowSessionSegmentStateMachineTest {
         assertEquals(null, out2.get(0).segmentEndTs);
     }
 
+    @Test
+    void prefersFreshOrchestratorUrlOnSegmentRolloverAndInPlaceUpdates() {
+        WorkflowSessionSegmentAccumulator state = new WorkflowSessionSegmentAccumulator();
+
+        LifecycleSignal first = signal("s|r", 1000L, "0xhot1", "gateway_receive_stream_request");
+        first.orchestratorUrl = "https://orch-old.example";
+        List<EventPayloads.FactWorkflowSessionSegment> out1 =
+                WorkflowSessionSegmentStateMachine.applySignal(
+                        state, first, snapshot(1000L, "0xofficial1", "https://orch-old.example"), ttlMs());
+        assertEquals(1, out1.size());
+        assertEquals("https://orch-old.example", out1.get(0).orchestratorUrl);
+
+        // In-place update should accept newer URL even without a segment boundary.
+        LifecycleSignal inPlace = signal("s|r", 1500L, "0xhot1", "gateway_receive_first_processed_segment");
+        inPlace.orchestratorUrl = "https://orch-updated.example";
+        List<EventPayloads.FactWorkflowSessionSegment> out2 =
+                WorkflowSessionSegmentStateMachine.applySignal(
+                        state, inPlace, snapshot(1500L, "0xofficial1", "https://orch-updated.example"), ttlMs());
+        assertEquals(1, out2.size());
+        assertEquals("https://orch-updated.example", out2.get(0).orchestratorUrl);
+
+        // Boundary update should carry the new orchestrator URL into the new segment.
+        LifecycleSignal second = signal("s|r", 2000L, "0xhot2", "orchestrator_swap");
+        List<EventPayloads.FactWorkflowSessionSegment> out3 =
+                WorkflowSessionSegmentStateMachine.applySignal(
+                        state, second, snapshot(2000L, "0xofficial2", "https://orch-new.example"), ttlMs());
+        assertEquals(2, out3.size());
+        assertEquals(1, out3.get(1).segmentIndex);
+        assertEquals("0xofficial2", out3.get(1).orchestratorAddress);
+        assertEquals("https://orch-new.example", out3.get(1).orchestratorUrl);
+    }
+
     private static LifecycleSignal signal(String sessionId, long ts, String orchestrator, String traceType) {
         LifecycleSignal signal = new LifecycleSignal();
         signal.signalType = LifecycleSignal.SignalType.STREAM_TRACE;
@@ -83,9 +115,14 @@ class WorkflowSessionSegmentStateMachineTest {
     }
 
     private static CapabilitySnapshotRef snapshot(long ts, String canonicalAddress) {
+        return snapshot(ts, canonicalAddress, "");
+    }
+
+    private static CapabilitySnapshotRef snapshot(long ts, String canonicalAddress, String orchestratorUrl) {
         CapabilitySnapshotRef ref = new CapabilitySnapshotRef();
         ref.snapshotTs = ts;
         ref.canonicalOrchestratorAddress = canonicalAddress;
+        ref.orchestratorUrl = orchestratorUrl;
         return ref;
     }
 }

@@ -8,7 +8,6 @@ import org.apache.flink.api.common.state.MapStateDescriptor;
 public final class CapabilityBroadcastState {
     private CapabilityBroadcastState() {}
 
-    public static final MapStateDescriptor<String, CapabilitySnapshotRef> CAPABILITY_STATE_DESCRIPTOR =
-            new MapStateDescriptor<>("capability-by-hot-wallet", String.class, CapabilitySnapshotRef.class);
+    public static final MapStateDescriptor<String, CapabilitySnapshotBucket> CAPABILITY_STATE_DESCRIPTOR =
+            new MapStateDescriptor<>("capability-by-hot-wallet", String.class, CapabilitySnapshotBucket.class);
 }
-

@@ -141,6 +141,11 @@ Maven `scenario-it` profiles default to:
 - `--down-volumes`
 This keeps scenario runs isolated from host `./data` bind mounts and avoids manual `chmod 777` workflows.
 
+Compose file behavior:
+- `docker-compose.yml` is the base stack.
+- `docker-compose.scenario.yml` is an override used for scenario/integration runs.
+- Compose merges files in order (`-f base -f override`), so scenario settings replace selected service fields from base and add scenario-only services/volumes.
+
 Before first scenario run on a machine/runner:
 - `docker volume create livepeer-analytics-flink-maven-cache`
 - This volume is intentionally external so Maven cache survives scenario teardowns and avoids repeated dependency downloads.
