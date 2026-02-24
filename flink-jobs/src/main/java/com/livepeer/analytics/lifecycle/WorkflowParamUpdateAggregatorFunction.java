@@ -8,8 +8,12 @@ import org.apache.flink.util.Collector;
 
 import com.livepeer.analytics.model.EventPayloads;
 import com.livepeer.analytics.model.ParsedEvent;
+import com.livepeer.analytics.util.BuildMetadata;
 
 import java.util.Locale;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Emits lifecycle parameter-update markers keyed by workflow session id.
@@ -27,6 +31,7 @@ public class WorkflowParamUpdateAggregatorFunction extends KeyedBroadcastProcess
         ParsedEvent<EventPayloads.NetworkCapability>,
         ParsedEvent<EventPayloads.FactWorkflowParamUpdate>> {
     private static final long serialVersionUID = 1L;
+    private static final Logger LOG = LoggerFactory.getLogger(WorkflowParamUpdateAggregatorFunction.class);
     private static final long DEFAULT_ATTRIBUTION_TTL_MS = 24L * 60L * 60L * 1000L;
 
     private transient ValueState<WorkflowParamUpdateAccumulator> stateRef;
@@ -35,6 +40,12 @@ public class WorkflowParamUpdateAggregatorFunction extends KeyedBroadcastProcess
     public void open(Configuration parameters) {
         stateRef = getRuntimeContext().getState(
                 new ValueStateDescriptor<>("workflow-param-update-state", WorkflowParamUpdateAccumulator.class));
+        LOG.info(
+                "Lifecycle attribution mode initialized (operator=workflow-param-update, mode=multi-candidate, ttl_ms={}, max_candidates_per_wallet={}, broadcast_descriptor={}, build_version={})",
+                DEFAULT_ATTRIBUTION_TTL_MS,
+                CapabilityAttributionSelector.DEFAULT_MAX_CANDIDATES_PER_WALLET,
+                CapabilityBroadcastState.CAPABILITY_STATE_DESCRIPTOR.getName(),
+                BuildMetadata.current().identity());
     }
 
     @Override
@@ -61,12 +72,15 @@ public class WorkflowParamUpdateAggregatorFunction extends KeyedBroadcastProcess
         // Reuse broadcast enrichment for canonical orchestrator and model/GPU attribution.
         CapabilitySnapshotRef snapshot = null;
         String signalAddress = normalizeAddress(signal.orchestratorAddress);
+        // Critical: preserve non-empty pipeline context across signals; empty pipeline must not
+        // broaden compatibility and allow nearest-but-incompatible snapshot selection.
+        String attributionPipeline = firstNonEmpty(signal.pipeline, state.pipeline);
         if (!isEmpty(signalAddress)) {
             CapabilitySnapshotBucket bucket = ctx.getBroadcastState(CapabilityBroadcastState.CAPABILITY_STATE_DESCRIPTOR)
                     .get(signalAddress);
             snapshot = CapabilityAttributionSelector.selectBestCandidate(
                     bucket,
-                    signal.pipeline,
+                    attributionPipeline,
                     signal.signalTimestamp,
                     DEFAULT_ATTRIBUTION_TTL_MS);
         }

@@ -59,7 +59,11 @@ public final class RejectedEventEnvelopeFactory {
 
     public static RejectedEventEnvelope forParseFailure(StreamingEvent event, Exception ex) {
         RejectedEventEnvelope envelope = baseEnvelopeFromEvent(event);
-        envelope.failure = buildFailure("PARSE", "PARSING_FAILED", "parse_exception", ex.getMessage());
+        String details = ex == null ? "Unknown parse error"
+                : (ex.getMessage() == null || ex.getMessage().isBlank()
+                ? ex.getClass().getName()
+                : ex.getClass().getName() + ": " + ex.getMessage());
+        envelope.failure = buildFailure("PARSE", "PARSING_FAILED", "parse_exception", details);
         return envelope;
     }
 

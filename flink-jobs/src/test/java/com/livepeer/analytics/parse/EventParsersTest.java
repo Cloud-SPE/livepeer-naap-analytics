@@ -20,10 +20,7 @@ class EventParsersTest {
 
     @Test
     void networkCapabilitiesEmitsAllHardwareEntries() throws Exception {
-        String rawJson = new String(
-            EventParsersTest.class.getClassLoader().getResourceAsStream("net_caps.json").readAllBytes(),
-            java.nio.charset.StandardCharsets.UTF_8
-        );
+        String rawJson = readResource("net_caps.json");
         JsonNode root = JsonSupport.MAPPER.readTree(rawJson);
 
         ValidatedEvent event = buildValidatedEvent(root, rawJson);
@@ -38,10 +35,7 @@ class EventParsersTest {
 
     @Test
     void networkCapabilitiesEmitsAdvertisedCapabilities() throws Exception {
-        String rawJson = new String(
-            EventParsersTest.class.getClassLoader().getResourceAsStream("net_caps.json").readAllBytes(),
-            java.nio.charset.StandardCharsets.UTF_8
-        );
+        String rawJson = readResource("net_caps.json");
         JsonNode root = JsonSupport.MAPPER.readTree(rawJson);
 
         ValidatedEvent event = buildValidatedEvent(root, rawJson);
@@ -55,10 +49,7 @@ class EventParsersTest {
 
     @Test
     void networkCapabilitiesEmitsModelConstraintsAndPrices() throws Exception {
-        String rawJson = new String(
-            EventParsersTest.class.getClassLoader().getResourceAsStream("net_caps.json").readAllBytes(),
-            java.nio.charset.StandardCharsets.UTF_8
-        );
+        String rawJson = readResource("net_caps.json");
         JsonNode root = JsonSupport.MAPPER.readTree(rawJson);
 
         ValidatedEvent event = buildValidatedEvent(root, rawJson);
@@ -73,10 +64,7 @@ class EventParsersTest {
 
     @Test
     void discoveryResultsEmitsMultipleEntries() throws Exception {
-        String rawJson = new String(
-            EventParsersTest.class.getClassLoader().getResourceAsStream("discovery_results.json").readAllBytes(),
-            java.nio.charset.StandardCharsets.UTF_8
-        );
+        String rawJson = readResource("discovery_results.json");
         JsonNode root = JsonSupport.MAPPER.readTree(rawJson);
 
         ValidatedEvent event = buildValidatedEvent(root, rawJson);
@@ -93,10 +81,7 @@ class EventParsersTest {
 
     @Test
     void aiStreamStatusRowMatchesExpectedColumns() throws Exception {
-        String rawJson = new String(
-            EventParsersTest.class.getClassLoader().getResourceAsStream("ai_stream_status.json").readAllBytes(),
-            java.nio.charset.StandardCharsets.UTF_8
-        );
+        String rawJson = readResource("ai_stream_status.json");
         JsonNode root = JsonSupport.MAPPER.readTree(rawJson);
 
         ValidatedEvent event = buildValidatedEvent(root, rawJson);
@@ -110,6 +95,24 @@ class EventParsersTest {
         assertTrue(node.has("event_timestamp"));
     }
 
+    @Test
+    void networkCapabilitiesParsersHandleProdParseFailureFixture() throws Exception {
+        String rawJson = readResource("net_caps_prod_parse_failed_20260224.json");
+        JsonNode root = JsonSupport.MAPPER.readTree(rawJson);
+        ValidatedEvent event = buildValidatedEvent(root, rawJson);
+
+        List<EventPayloads.NetworkCapability> snapshots = EventParsers.parseNetworkCapabilities(event);
+        List<EventPayloads.NetworkCapabilityAdvertised> advertised = EventParsers.parseNetworkCapabilitiesAdvertised(event);
+        List<EventPayloads.NetworkCapabilityModelConstraint> constraints = EventParsers.parseNetworkCapabilitiesModelConstraints(event);
+        List<EventPayloads.NetworkCapabilityPrice> prices = EventParsers.parseNetworkCapabilitiesPrices(event);
+
+        assertFalse(snapshots.isEmpty());
+        assertFalse(advertised.isEmpty());
+        assertFalse(constraints.isEmpty());
+        assertFalse(prices.isEmpty());
+        assertEquals("a0b048eb-cb94-4639-8f9f-f283a22a154d", event.event.eventId);
+    }
+
     private static ValidatedEvent buildValidatedEvent(JsonNode root, String rawJson) {
         StreamingEvent event = new StreamingEvent();
         event.eventId = root.path("id").asText("");
@@ -119,6 +122,13 @@ class EventParsersTest {
         event.rawJson = rawJson;
         event.replay = root.path("__replay").asBoolean(false);
         return new ValidatedEvent(event, root);
+    }
+
+    private static String readResource(String resourceName) throws Exception {
+        return new String(
+                EventParsersTest.class.getClassLoader().getResourceAsStream(resourceName).readAllBytes(),
+                java.nio.charset.StandardCharsets.UTF_8
+        );
     }
 
 }

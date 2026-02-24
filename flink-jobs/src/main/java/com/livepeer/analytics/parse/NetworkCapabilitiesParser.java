@@ -174,8 +174,7 @@ final class NetworkCapabilitiesParser {
                     row.runnerVersion = JsonNodeUtils.asNullableText(modelCfg.path("runnerVersion"));
                     row.capacity = JsonNodeUtils.asNullableInt(modelCfg.path("capacity"));
                     row.capacityInUse = JsonNodeUtils.asNullableInt(modelCfg.path("capacityInUse"));
-                    JsonNode warmNode = modelCfg.path("warm");
-                    row.warm = warmNode.isBoolean() ? (warmNode.asBoolean(false) ? 1 : 0) : JsonNodeUtils.asNullableInt(warmNode);
+                    row.warm = parseWarm(modelCfg);
                     row.rawJson = orch.toString();
                     results.add(row);
                 }

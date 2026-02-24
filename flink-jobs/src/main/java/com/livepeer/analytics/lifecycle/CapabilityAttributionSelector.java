@@ -7,6 +7,19 @@ import java.util.Locale;
 
 /**
  * Utility for bounded capability-candidate maintenance and deterministic attribution selection.
+ *
+ * <p>Selection contract (do not weaken without regression updates):
+ * - Compatibility first: when pipeline context is available, incompatible model candidates must
+ *   be ignored, even if they are temporally closer/fresher.
+ * - Freshness second: among compatible candidates, prefer exact timestamp, then nearest prior
+ *   within TTL, then nearest within TTL.
+ * - Safety fallback: if no compatible candidate exists, return null so callers keep prior
+ *   attribution state instead of force-applying an incompatible snapshot.
+ *
+ * <p>Context:
+ * Production incidents showed mixed-model capability snapshots (for example streamdiffusion and
+ * llama on the same hot wallet) causing wrong model attribution when compatibility context was
+ * missing. Regression tests in CapabilityAttributionSelectorTest lock this behavior.</p>
  */
 public final class CapabilityAttributionSelector {
     private static final String EMPTY_MODEL_KEY = "__empty__";

@@ -8,9 +8,13 @@ import org.apache.flink.util.Collector;
 
 import com.livepeer.analytics.model.EventPayloads;
 import com.livepeer.analytics.model.ParsedEvent;
+import com.livepeer.analytics.util.BuildMetadata;
 
 import java.util.List;
 import java.util.Locale;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Stateful segment builder keyed by workflow session id with broadcast capability enrichment.
@@ -28,6 +32,7 @@ public class WorkflowSessionSegmentAggregatorFunction extends KeyedBroadcastProc
         ParsedEvent<EventPayloads.NetworkCapability>,
         ParsedEvent<EventPayloads.FactWorkflowSessionSegment>> {
     private static final long serialVersionUID = 1L;
+    private static final Logger LOG = LoggerFactory.getLogger(WorkflowSessionSegmentAggregatorFunction.class);
     private static final long DEFAULT_ATTRIBUTION_TTL_MS = 24L * 60L * 60L * 1000L;
 
     private transient ValueState<WorkflowSessionSegmentAccumulator> segmentState;
@@ -36,6 +41,12 @@ public class WorkflowSessionSegmentAggregatorFunction extends KeyedBroadcastProc
     public void open(Configuration parameters) {
         segmentState = getRuntimeContext().getState(
                 new ValueStateDescriptor<>("workflow-session-segment-state", WorkflowSessionSegmentAccumulator.class));
+        LOG.info(
+                "Lifecycle attribution mode initialized (operator=workflow-session-segment, mode=multi-candidate, ttl_ms={}, max_candidates_per_wallet={}, broadcast_descriptor={}, build_version={})",
+                DEFAULT_ATTRIBUTION_TTL_MS,
+                CapabilityAttributionSelector.DEFAULT_MAX_CANDIDATES_PER_WALLET,
+                CapabilityBroadcastState.CAPABILITY_STATE_DESCRIPTOR.getName(),
+                BuildMetadata.current().identity());
     }
 
     @Override
@@ -55,12 +66,15 @@ public class WorkflowSessionSegmentAggregatorFunction extends KeyedBroadcastProc
         // Resolve nearest capability snapshot for canonical orchestrator + model/GPU attribution.
         CapabilitySnapshotRef snapshot = null;
         String hotKey = normalizeAddress(signal.orchestratorAddress);
+        // Critical: for empty trace pipelines, fallback to existing segment model context so
+        // selector keeps compatibility constraints and does not pick unrelated models.
+        String attributionPipeline = firstNonEmpty(signal.pipeline, state.modelId);
         if (!isEmpty(hotKey)) {
             CapabilitySnapshotBucket bucket =
                     ctx.getBroadcastState(CapabilityBroadcastState.CAPABILITY_STATE_DESCRIPTOR).get(hotKey);
             snapshot = CapabilityAttributionSelector.selectBestCandidate(
                     bucket,
-                    signal.pipeline,
+                    attributionPipeline,
                     signal.signalTimestamp,
                     DEFAULT_ATTRIBUTION_TTL_MS);
         }
@@ -115,5 +129,14 @@ public class WorkflowSessionSegmentAggregatorFunction extends KeyedBroadcastProc
 
     private static boolean isEmpty(String value) {
         return value == null || value.trim().isEmpty();
+    }
+
+    private static String firstNonEmpty(String... values) {
+        for (String value : values) {
+            if (!isEmpty(value)) {
+                return value;
+            }
+        }
+        return "";
     }
 }

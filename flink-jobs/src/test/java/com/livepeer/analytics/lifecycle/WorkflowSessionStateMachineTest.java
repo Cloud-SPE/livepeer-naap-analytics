@@ -147,6 +147,84 @@ class WorkflowSessionStateMachineTest {
         assertEquals(0, fact.swapCount);
     }
 
+    @Test
+    void prodRegression_mixedSignalSequenceKeepsStreamdiffusionAttribution() {
+        // Why this test exists:
+        // The original defect appeared under a real signal sequence where stream-trace signals
+        // often had empty pipeline while capability snapshots for the same hot wallet contained
+        // both streamdiffusion and llama models. This test simulates that mixed sequence and
+        // verifies attribution does not drift to llama.
+        WorkflowSessionAccumulator state = new WorkflowSessionAccumulator();
+        CapabilitySnapshotBucket bucket = new CapabilitySnapshotBucket();
+        long ttlMs = 24L * 60L * 60L * 1000L;
+
+        CapabilityAttributionSelector.upsertCandidate(
+                bucket,
+                ref(1_739_040_506_612L, "0xd00354656922168815fcd1e51cbddb9e359e3c7f",
+                        "streamdiffusion-sdxl", "GPU-6f1bacf5-d5be-9cad-aa38-e35f905daebe"),
+                1_739_040_506_612L,
+                ttlMs,
+                32);
+        CapabilityAttributionSelector.upsertCandidate(
+                bucket,
+                ref(1_739_040_509_903L, "0xd00354656922168815fcd1e51cbddb9e359e3c7f",
+                        "meta-llama/Meta-Llama-3.1-8B-Instruct", null),
+                1_739_040_509_903L,
+                ttlMs,
+                32);
+        CapabilityAttributionSelector.upsertCandidate(
+                bucket,
+                ref(1_739_040_519_000L, "0xd00354656922168815fcd1e51cbddb9e359e3c7f",
+                        "streamdiffusion-sdxl", "GPU-6f1bacf5-d5be-9cad-aa38-e35f905daebe"),
+                1_739_040_519_000L,
+                ttlMs,
+                32);
+
+        LifecycleSignal status = signal(LifecycleSignal.SignalType.STREAM_STATUS, 1_739_041_800_304L);
+        status.workflowSessionId = "aiJobTesterStream-1771579795824071406|f43724b2";
+        status.streamId = "aiJobTesterStream-1771579795824071406";
+        status.requestId = "f43724b2";
+        status.pipeline = "streamdiffusion-sdxl";
+        status.orchestratorAddress = "0x52cf2968b3dc6016778742d3539449a6597d5954";
+        status.sourceEventUid = "evt-status";
+
+        WorkflowSessionStateMachine.applySignal(state, status);
+        CapabilitySnapshotRef firstSelection = CapabilityAttributionSelector.selectBestCandidate(
+                bucket, status.pipeline, status.signalTimestamp, ttlMs);
+        WorkflowSessionStateMachine.applyCapabilityAttribution(state, firstSelection, status.signalTimestamp, ttlMs);
+
+        LifecycleSignal trace = signal(LifecycleSignal.SignalType.STREAM_TRACE, 1_739_041_803_000L);
+        trace.workflowSessionId = status.workflowSessionId;
+        trace.streamId = status.streamId;
+        trace.requestId = status.requestId;
+        trace.traceType = "gateway_receive_first_processed_segment";
+        trace.pipeline = ""; // prod-like trace shape: empty pipeline
+        trace.orchestratorAddress = status.orchestratorAddress;
+        trace.sourceEventUid = "evt-trace";
+
+        WorkflowSessionStateMachine.applySignal(state, trace);
+        CapabilitySnapshotRef secondSelection = CapabilityAttributionSelector.selectBestCandidate(
+                bucket, state.pipeline, trace.signalTimestamp, ttlMs);
+        WorkflowSessionStateMachine.applyCapabilityAttribution(state, secondSelection, trace.signalTimestamp, ttlMs);
+
+        assertEquals("streamdiffusion-sdxl", state.pipeline);
+        assertEquals("streamdiffusion-sdxl", state.modelId);
+        assertEquals("GPU-6f1bacf5-d5be-9cad-aa38-e35f905daebe", state.gpuId);
+    }
+
+    private static CapabilitySnapshotRef ref(
+            long snapshotTs,
+            String canonicalAddress,
+            String modelId,
+            String gpuId) {
+        CapabilitySnapshotRef ref = new CapabilitySnapshotRef();
+        ref.snapshotTs = snapshotTs;
+        ref.canonicalOrchestratorAddress = canonicalAddress;
+        ref.modelId = modelId;
+        ref.gpuId = gpuId;
+        return ref;
+    }
+
     private static LifecycleSignal signal(LifecycleSignal.SignalType type, long ts) {
         LifecycleSignal signal = new LifecycleSignal();
         signal.signalType = type;

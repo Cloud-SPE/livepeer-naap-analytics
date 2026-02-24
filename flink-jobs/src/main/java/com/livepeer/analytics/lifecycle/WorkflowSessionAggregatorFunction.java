@@ -8,8 +8,12 @@ import org.apache.flink.util.Collector;
 
 import com.livepeer.analytics.model.EventPayloads;
 import com.livepeer.analytics.model.ParsedEvent;
+import com.livepeer.analytics.util.BuildMetadata;
 
 import java.util.Locale;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Stateful workflow-session builder keyed by workflow session id with broadcast capability enrichment.
@@ -29,6 +33,7 @@ public class WorkflowSessionAggregatorFunction extends KeyedBroadcastProcessFunc
         ParsedEvent<EventPayloads.NetworkCapability>,
         ParsedEvent<EventPayloads.FactWorkflowSession>> {
     private static final long serialVersionUID = 1L;
+    private static final Logger LOG = LoggerFactory.getLogger(WorkflowSessionAggregatorFunction.class);
 
     private static final long DEFAULT_ATTRIBUTION_TTL_MS = 24L * 60L * 60L * 1000L;
 
@@ -38,6 +43,12 @@ public class WorkflowSessionAggregatorFunction extends KeyedBroadcastProcessFunc
     public void open(Configuration parameters) {
         sessionState = getRuntimeContext().getState(
                 new ValueStateDescriptor<>("workflow-session-state", WorkflowSessionAccumulator.class));
+        LOG.info(
+                "Lifecycle attribution mode initialized (operator=workflow-session, mode=multi-candidate, ttl_ms={}, max_candidates_per_wallet={}, broadcast_descriptor={}, build_version={})",
+                DEFAULT_ATTRIBUTION_TTL_MS,
+                CapabilityAttributionSelector.DEFAULT_MAX_CANDIDATES_PER_WALLET,
+                CapabilityBroadcastState.CAPABILITY_STATE_DESCRIPTOR.getName(),
+                BuildMetadata.current().identity());
     }
 
     @Override
@@ -58,12 +69,15 @@ public class WorkflowSessionAggregatorFunction extends KeyedBroadcastProcessFunc
         // Lookup capability by the observed hot-wallet identity in the signal.
         CapabilitySnapshotRef snapshot = null;
         String hotKey = normalizeAddress(signal.orchestratorAddress);
+        // Critical: use persisted session pipeline when signal pipeline is empty (common for
+        // trace edges). Passing empty pipeline reopens mixed-model selection drift.
+        String attributionPipeline = firstNonEmpty(signal.pipeline, state.pipeline);
         if (!isEmpty(hotKey)) {
             CapabilitySnapshotBucket bucket =
                     ctx.getBroadcastState(CapabilityBroadcastState.CAPABILITY_STATE_DESCRIPTOR).get(hotKey);
             snapshot = CapabilityAttributionSelector.selectBestCandidate(
                     bucket,
-                    signal.pipeline,
+                    attributionPipeline,
                     signal.signalTimestamp,
                     DEFAULT_ATTRIBUTION_TTL_MS);
         }
@@ -125,5 +139,14 @@ public class WorkflowSessionAggregatorFunction extends KeyedBroadcastProcessFunc
 
     private static boolean isEmpty(String value) {
         return value == null || value.trim().isEmpty();
+    }
+
+    private static String firstNonEmpty(String... values) {
+        for (String value : values) {
+            if (!isEmpty(value)) {
+                return value;
+            }
+        }
+        return "";
     }
 }
