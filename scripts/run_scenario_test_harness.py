@@ -101,6 +101,8 @@ class Harness:
         self.diagnostics_dir = self.run_dir / "diagnostics"
         self.stage_results: list[StageResult] = []
         self.failed = False
+        self._manifest_cache: Path | None = None
+        self._manifest_window_cache: tuple[str, str] | None = None
 
         self.compose_files = [f.strip() for f in args.compose_files.split(",") if f.strip()]
         if not self.compose_files:
@@ -139,10 +141,14 @@ class Harness:
 
     def resolve_manifest(self) -> Path:
         """Return manifest path, falling back to latest exported snapshot when needed."""
+        if self._manifest_cache is not None:
+            return self._manifest_cache
+
         manifest = Path(self.args.manifest)
         if not manifest.is_absolute():
             manifest = (self.repo_root / manifest).resolve()
         if manifest.exists():
+            self._manifest_cache = manifest
             return manifest
 
         # Default fallback behavior keeps local workflows low-friction:
@@ -157,9 +163,49 @@ class Harness:
                 self.log(
                     f"Manifest not found at {manifest}; using latest snapshot manifest {latest}"
                 )
-                return latest.resolve()
+                self._manifest_cache = latest.resolve()
+                return self._manifest_cache
 
         raise HarnessError(f"Fixture manifest not found: {manifest}")
+
+    def resolve_manifest_window(self) -> tuple[str, str]:
+        if self._manifest_window_cache is not None:
+            return self._manifest_window_cache
+
+        manifest = self.resolve_manifest()
+        try:
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise HarnessError(f"Failed to read fixture manifest {manifest}: {exc}") from exc
+
+        window = payload.get("window")
+        if not isinstance(window, dict):
+            raise HarnessError(
+                f"Fixture manifest missing 'window' object: {manifest}"
+            )
+        from_ts = window.get("from_ts")
+        to_ts = window.get("to_ts")
+        if not isinstance(from_ts, str) or not from_ts:
+            raise HarnessError(f"Fixture manifest has invalid window.from_ts: {manifest}")
+        if not isinstance(to_ts, str) or not to_ts:
+            raise HarnessError(f"Fixture manifest has invalid window.to_ts: {manifest}")
+
+        self._manifest_window_cache = (from_ts, to_ts)
+        return self._manifest_window_cache
+
+    def stage_time_window_args(self, lookback_hours: int) -> list[str]:
+        if self.args.window_source == "manifest":
+            try:
+                from_ts, to_ts = self.resolve_manifest_window()
+                self.log(
+                    f"Using fixture manifest time window for assertions/query-pack: from_ts={from_ts} to_ts={to_ts}"
+                )
+                return ["--from-ts", from_ts, "--to-ts", to_ts]
+            except HarnessError as exc:
+                self.log(
+                    f"Manifest window unavailable ({exc}); falling back to --lookback-hours={lookback_hours}"
+                )
+        return ["--lookback-hours", str(lookback_hours)]
 
     def log(self, message: str) -> None:
         line = f"[{datetime.now(timezone.utc).isoformat()}] {message}"
@@ -407,11 +453,11 @@ class Harness:
                     fh.write("completed\n")
 
             elif stage == "query_pack":
+                window_args = self.stage_time_window_args(self.args.lookback_hours)
                 cmd = [
                     *self.python_prefix,
                     "scripts/run_clickhouse_query_pack.py",
-                    "--lookback-hours",
-                    str(self.args.lookback_hours),
+                    *window_args,
                     "--max-rows",
                     str(self.args.max_rows),
                 ]
@@ -420,13 +466,13 @@ class Harness:
 
             elif stage == "assert_pipeline":
                 json_out = self.stages_dir / "assert_pipeline.json"
+                window_args = self.stage_time_window_args(self.args.lookback_hours)
                 cmd = [
                     *self.python_prefix,
                     "scripts/run_clickhouse_data_tests.py",
                     "--sql-file",
                     "tests/integration/sql/assertions_pipeline.sql",
-                    "--lookback-hours",
-                    str(self.args.lookback_hours),
+                    *window_args,
                     "--json-out",
                     str(json_out),
                 ]
@@ -435,13 +481,13 @@ class Harness:
 
             elif stage == "assert_raw_typed":
                 json_out = self.stages_dir / "assert_raw_typed.json"
+                window_args = self.stage_time_window_args(self.args.lookback_hours)
                 cmd = [
                     *self.python_prefix,
                     "scripts/run_clickhouse_data_tests.py",
                     "--sql-file",
                     "tests/integration/sql/assertions_raw_typed.sql",
-                    "--lookback-hours",
-                    str(self.args.lookback_hours),
+                    *window_args,
                     "--json-out",
                     str(json_out),
                 ]
@@ -450,13 +496,13 @@ class Harness:
 
             elif stage == "assert_api":
                 json_out = self.stages_dir / "assert_api.json"
+                window_args = self.stage_time_window_args(self.args.lookback_hours)
                 cmd = [
                     *self.python_prefix,
                     "scripts/run_clickhouse_data_tests.py",
                     "--sql-file",
                     "tests/integration/sql/assertions_api_readiness.sql",
-                    "--lookback-hours",
-                    str(self.args.lookback_hours),
+                    *window_args,
                     "--json-out",
                     str(json_out),
                 ]
@@ -585,6 +631,40 @@ class Harness:
         else:
             for r in failed:
                 lines.append(f"- `{r.stage}`: {r.error or 'unknown error'}")
+
+        replay_json = self.stages_dir / "replay_events.json"
+        if replay_json.exists():
+            try:
+                replay_payload = json.loads(replay_json.read_text(encoding="utf-8"))
+                fixture_resolution = replay_payload.get("fixture_resolution", {})
+                dropped = int(fixture_resolution.get("duplicate_references_dropped", 0))
+                if dropped > 0:
+                    lines.extend(["", "## Replay Fixture Dedupe", ""])
+                    lines.append(
+                        f"- Duplicate fixture references dropped: `{dropped}`"
+                    )
+                    lines.append(
+                        "- Referenced files before dedupe: "
+                        f"`{fixture_resolution.get('files_referenced_before_dedupe', '<unknown>')}`"
+                    )
+                    lines.append(
+                        "- Files replayed after dedupe: "
+                        f"`{fixture_resolution.get('files_replayed_after_dedupe', '<unknown>')}`"
+                    )
+                    details = fixture_resolution.get("duplicate_references", [])
+                    for item in details[:10]:
+                        scenario = item.get("scenario", "<unknown>")
+                        file_path = item.get("file", "<unknown>")
+                        occurrences = item.get("occurrences", "<unknown>")
+                        lines.append(
+                            f"- Scenario `{scenario}` file `{file_path}` appeared `{occurrences}` times."
+                        )
+                    if len(details) > 10:
+                        lines.append(
+                            f"- Additional duplicate file entries omitted: `{len(details) - 10}`"
+                        )
+            except Exception:
+                pass
 
         lines.extend(
             [
@@ -718,6 +798,16 @@ def parse_args() -> argparse.Namespace:
         help="Optional scenario name filter for replay stage; repeatable.",
     )
     parser.add_argument("--lookback-hours", type=int, default=24)
+    parser.add_argument(
+        "--window-source",
+        choices=["manifest", "lookback"],
+        default="manifest",
+        help=(
+            "Time-window source for replay-driven query/assert stages. "
+            "'manifest' uses tests/integration fixture window.from_ts/to_ts for deterministic CI; "
+            "'lookback' keeps rolling now()-N-hours behavior."
+        ),
+    )
     parser.add_argument("--scenario-lookback-hours", type=int, default=720)
     parser.add_argument("--pipeline-wait-seconds", type=int, default=20)
     parser.add_argument("--pipeline-ready-timeout-seconds", type=int, default=240)

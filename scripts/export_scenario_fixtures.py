@@ -45,6 +45,8 @@ EVENT_TABLES = [
     ("stream_ingest_metrics", "event_timestamp"),
 ]
 
+CAPABILITY_TABLE = "network_capabilities"
+
 
 @dataclass
 class SessionRef:
@@ -75,6 +77,30 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--limit-per-scenario", type=int, default=3)
     parser.add_argument("--session-padding-minutes", type=int, default=5)
     parser.add_argument("--open-session-duration-minutes", type=int, default=30)
+    parser.add_argument(
+        "--capability-window-minutes",
+        type=int,
+        default=120,
+        help=(
+            "Capability lookup window around each session start/end for matching "
+            "orchestrator/gpu snapshots."
+        ),
+    )
+    parser.add_argument(
+        "--capability-max-rows-per-context",
+        type=int,
+        default=2,
+        help="Max network_capabilities rows exported per (orchestrator,gpu) context.",
+    )
+    parser.add_argument(
+        "--capability-unrelated-rows",
+        type=int,
+        default=0,
+        help=(
+            "Optional extra network_capabilities rows per session that do not match "
+            "the session's orchestrator/gpu context."
+        ),
+    )
     parser.add_argument("--require-all-scenarios", dest="require_all_scenarios", action="store_true")
     parser.add_argument("--allow-missing-scenarios", dest="require_all_scenarios", action="store_false")
     parser.set_defaults(require_all_scenarios=True)
@@ -172,6 +198,11 @@ def discover_sessions(client, scenario_sql_path: Path, params: dict[str, Any]) -
         col_names, rows = query_rows(client, sql, params)
         idx = {name: i for i, name in enumerate(col_names)}
         refs: list[SessionRef] = []
+        # Scenario candidate queries can return duplicate logical sessions
+        # (e.g. same workflow/request pair with slightly different timestamps).
+        # Keep the first occurrence to avoid writing duplicate fixture files and
+        # replaying the same raw events twice.
+        seen_session_keys: set[tuple[str, str, str]] = set()
         for row in rows:
             workflow_session_id = str(row[idx["workflow_session_id"]])
             stream_id = str(row[idx.get("stream_id", -1)]) if "stream_id" in idx and row[idx["stream_id"]] is not None else ""
@@ -180,6 +211,10 @@ def discover_sessions(client, scenario_sql_path: Path, params: dict[str, Any]) -
             session_end_ts = normalize_dt(row[idx["session_end_ts"]]) if "session_end_ts" in idx else None
             if not workflow_session_id or session_start_ts is None:
                 continue
+            session_key = (workflow_session_id, stream_id, request_id)
+            if session_key in seen_session_keys:
+                continue
+            seen_session_keys.add(session_key)
             refs.append(
                 SessionRef(
                     scenario_name=block_name,
@@ -200,6 +235,11 @@ def export_session_rows(
     session: SessionRef,
     padding_minutes: int,
     open_session_minutes: int,
+    global_from_ts: datetime,
+    global_to_ts: datetime,
+    capability_window_minutes: int,
+    capability_max_rows_per_context: int,
+    capability_unrelated_rows: int,
 ) -> dict[str, int]:
     counts: dict[str, int] = {}
 
@@ -256,6 +296,144 @@ def export_session_rows(
                 for i, col in enumerate(col_names):
                     payload[col] = to_json_value(row[i])
                 out.write(json.dumps(payload, default=str, ensure_ascii=False) + "\n")
+
+        # Pull network_capabilities using orchestrator/gpu from session facts.
+        # These rows do not carry request_id/stream_id, so we align by session context.
+        capability_context_sql = """
+SELECT DISTINCT orchestrator_address, ifNull(gpu_id, '') AS gpu_id
+FROM
+(
+  SELECT orchestrator_address, ifNull(gpu_id, '') AS gpu_id
+  FROM livepeer_analytics.fact_workflow_sessions FINAL
+  WHERE workflow_session_id = %(workflow_session_id)s
+  UNION ALL
+  SELECT orchestrator_address, ifNull(gpu_id, '') AS gpu_id
+  FROM livepeer_analytics.fact_workflow_session_segments FINAL
+  WHERE workflow_session_id = %(workflow_session_id)s
+)
+WHERE orchestrator_address != ''
+"""
+        ctx_cols, ctx_rows = query_rows(
+            client, capability_context_sql, {"workflow_session_id": session.workflow_session_id}
+        )
+        ctx_idx = {name: i for i, name in enumerate(ctx_cols)}
+        seen_capability_source_event_ids: set[str] = set()
+        capability_context_pairs: set[tuple[str, str]] = set()
+        for ctx_row in ctx_rows:
+            orchestrator_address = str(ctx_row[ctx_idx["orchestrator_address"]]).strip()
+            gpu_id = str(ctx_row[ctx_idx["gpu_id"]]).strip()
+            if not orchestrator_address:
+                continue
+            capability_context_pairs.add((orchestrator_address.lower(), gpu_id))
+
+            cap_start = start_bound - timedelta(minutes=max(int(capability_window_minutes), 0))
+            cap_end = end_bound + timedelta(minutes=max(int(capability_window_minutes), 0))
+            base_params = {
+                "orchestrator_address": orchestrator_address,
+                "gpu_id": gpu_id,
+                "session_start_ts": session.session_start_ts.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+                "window_start": cap_start.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+                "window_end": cap_end.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+                "global_start": global_from_ts.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+                "global_end": global_to_ts.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+                "cap_limit": max(int(capability_max_rows_per_context), 1),
+            }
+            capability_sql = f"""
+SELECT *
+FROM livepeer_analytics.{CAPABILITY_TABLE}
+WHERE event_timestamp >= %(window_start)s
+  AND event_timestamp < %(window_end)s
+  AND lower(orchestrator_address) = lower(%(orchestrator_address)s)
+  AND (%(gpu_id)s = '' OR ifNull(gpu_id, '') = %(gpu_id)s)
+ORDER BY abs(
+    toUnixTimestamp64Milli(event_timestamp)
+    - toUnixTimestamp64Milli(parseDateTime64BestEffort(%(session_start_ts)s, 3, 'UTC'))
+  ),
+  event_timestamp DESC
+LIMIT %(cap_limit)s
+"""
+            cap_cols, cap_rows = query_rows(client, capability_sql, base_params)
+
+            # Fallback for sparse windows: nearest context row in the manifest window.
+            if not cap_rows:
+                fallback_sql = f"""
+SELECT *
+FROM livepeer_analytics.{CAPABILITY_TABLE}
+WHERE event_timestamp >= %(global_start)s
+  AND event_timestamp < %(global_end)s
+  AND lower(orchestrator_address) = lower(%(orchestrator_address)s)
+  AND (%(gpu_id)s = '' OR ifNull(gpu_id, '') = %(gpu_id)s)
+ORDER BY abs(
+    toUnixTimestamp64Milli(event_timestamp)
+    - toUnixTimestamp64Milli(parseDateTime64BestEffort(%(session_start_ts)s, 3, 'UTC'))
+  ),
+  event_timestamp DESC
+LIMIT 1
+"""
+                cap_cols, cap_rows = query_rows(client, fallback_sql, base_params)
+
+            cap_idx = {name: i for i, name in enumerate(cap_cols)}
+            for row in cap_rows:
+                source_event_id = str(row[cap_idx.get("source_event_id", -1)]) if "source_event_id" in cap_idx else ""
+                if source_event_id and source_event_id in seen_capability_source_event_ids:
+                    continue
+                if source_event_id:
+                    seen_capability_source_event_ids.add(source_event_id)
+
+                payload = {
+                    "__table": CAPABILITY_TABLE,
+                    "__scenario": session.scenario_name,
+                    "__workflow_session_id": session.workflow_session_id,
+                }
+                for i, col in enumerate(cap_cols):
+                    payload[col] = to_json_value(row[i])
+                out.write(json.dumps(payload, default=str, ensure_ascii=False) + "\n")
+                counts[CAPABILITY_TABLE] = counts.get(CAPABILITY_TABLE, 0) + 1
+
+        if int(capability_unrelated_rows) > 0:
+            unrelated_limit = int(capability_unrelated_rows)
+            scan_limit = max(unrelated_limit * 50, 50)
+            unrelated_sql = f"""
+SELECT *
+FROM livepeer_analytics.{CAPABILITY_TABLE}
+WHERE event_timestamp >= %(global_start)s
+  AND event_timestamp < %(global_end)s
+ORDER BY event_timestamp DESC
+LIMIT %(scan_limit)s
+"""
+            unrelated_params = {
+                "global_start": global_from_ts.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+                "global_end": global_to_ts.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+                "scan_limit": scan_limit,
+            }
+            cap_cols, cap_rows = query_rows(client, unrelated_sql, unrelated_params)
+            cap_idx = {name: i for i, name in enumerate(cap_cols)}
+            added_unrelated = 0
+            for row in cap_rows:
+                source_event_id = str(row[cap_idx.get("source_event_id", -1)]) if "source_event_id" in cap_idx else ""
+                if source_event_id and source_event_id in seen_capability_source_event_ids:
+                    continue
+
+                row_orch = str(row[cap_idx["orchestrator_address"]]).strip().lower() if "orchestrator_address" in cap_idx else ""
+                row_gpu = str(row[cap_idx["gpu_id"]]).strip() if "gpu_id" in cap_idx else ""
+                if (row_orch, row_gpu) in capability_context_pairs:
+                    continue
+
+                if source_event_id:
+                    seen_capability_source_event_ids.add(source_event_id)
+
+                payload = {
+                    "__table": CAPABILITY_TABLE,
+                    "__scenario": session.scenario_name,
+                    "__workflow_session_id": session.workflow_session_id,
+                }
+                for i, col in enumerate(cap_cols):
+                    payload[col] = to_json_value(row[i])
+                out.write(json.dumps(payload, default=str, ensure_ascii=False) + "\n")
+                counts[CAPABILITY_TABLE] = counts.get(CAPABILITY_TABLE, 0) + 1
+                added_unrelated += 1
+                if added_unrelated >= unrelated_limit:
+                    break
 
     return counts
 
@@ -325,6 +503,11 @@ def main() -> None:
                 session=session,
                 padding_minutes=args.session_padding_minutes,
                 open_session_minutes=args.open_session_duration_minutes,
+                global_from_ts=from_ts,
+                global_to_ts=to_ts,
+                capability_window_minutes=args.capability_window_minutes,
+                capability_max_rows_per_context=args.capability_max_rows_per_context,
+                capability_unrelated_rows=args.capability_unrelated_rows,
             )
 
             scenario_manifest["sessions"].append(

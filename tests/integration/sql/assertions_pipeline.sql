@@ -197,7 +197,7 @@ FROM
 WITH window_rows AS
 (
   SELECT workflow_session_id, version
-  FROM livepeer_analytics.fact_workflow_sessions
+  FROM livepeer_analytics.fact_workflow_sessions FINAL
   WHERE session_start_ts >= {from_ts:DateTime64(3)}
     AND session_start_ts < {to_ts:DateTime64(3)}
 ),
@@ -283,6 +283,36 @@ LEFT JOIN session_ids s USING (workflow_session_id)
 WHERE pu.update_ts >= {from_ts:DateTime64(3)}
   AND pu.update_ts < {to_ts:DateTime64(3)}
   AND s.workflow_session_id IS NULL;
+
+-- TEST: lifecycle_session_pipeline_model_compatible
+-- Guardrail for lifecycle attribution correctness:
+-- when both fields are present, session pipeline label and model_id must match
+-- under current misnomer-compatible contract.
+WITH latest_sessions AS
+(
+  SELECT
+    workflow_session_id,
+    argMax(session_start_ts, version) AS session_start_ts,
+    argMax(pipeline, version) AS pipeline,
+    argMax(model_id, version) AS model_id
+  FROM livepeer_analytics.fact_workflow_sessions
+  GROUP BY workflow_session_id
+)
+SELECT
+  toUInt64(countIf(
+    pipeline != ''
+    AND ifNull(model_id, '') != ''
+    AND lowerUTF8(pipeline) != lowerUTF8(ifNull(model_id, ''))
+  ) > 0) AS failed_rows,
+  countIf(
+    pipeline != ''
+    AND ifNull(model_id, '') != ''
+    AND lowerUTF8(pipeline) != lowerUTF8(ifNull(model_id, ''))
+  ) AS mismatched_rows,
+  count() AS rows_checked
+FROM latest_sessions
+WHERE session_start_ts >= {from_ts:DateTime64(3)}
+  AND session_start_ts < {to_ts:DateTime64(3)};
 
 -- TEST: gpu_view_matches_rollup
 SELECT

@@ -10,6 +10,7 @@ Supported source records inside fixture JSONL:
 - stream_trace_events (uses raw_json)
 - ai_stream_events (uses raw_json)
 - stream_ingest_metrics (uses raw_json)
+- network_capabilities (uses raw_json)
 - streaming_events (reconstructs raw envelope directly from columns)
 """
 
@@ -22,6 +23,7 @@ import sys
 import time
 from collections import defaultdict
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +32,7 @@ RAW_EVENT_TABLES = {
     "stream_trace_events",
     "ai_stream_events",
     "stream_ingest_metrics",
+    "network_capabilities",
     "streaming_events",
 }
 
@@ -67,8 +70,12 @@ def load_manifest(path: Path) -> dict[str, Any]:
 
 def resolve_fixture_files(
     manifest: dict[str, Any], manifest_path: Path, scenario_filter: set[str]
-) -> list[tuple[str, Path]]:
+) -> tuple[list[tuple[str, Path]], dict[str, Any]]:
     pairs: list[tuple[str, Path]] = []
+    # Defensive dedupe: if a manifest accidentally references the same file more
+    # than once for a scenario, replay should still be idempotent.
+    seen_pairs: set[tuple[str, str]] = set()
+    pair_counts: dict[tuple[str, str], int] = {}
     base = manifest_path.parent
     repo_root = Path(__file__).resolve().parent.parent
     scenarios = manifest.get("scenarios", {})
@@ -90,8 +97,29 @@ def resolve_fixture_files(
                     p = repo_relative
                 else:
                     p = base_relative
+            key = (scenario_name, str(p))
+            pair_counts[key] = pair_counts.get(key, 0) + 1
+            if key in seen_pairs:
+                continue
+            seen_pairs.add(key)
             pairs.append((scenario_name, p))
-    return pairs
+    duplicate_details = [
+        {
+            "scenario": scenario,
+            "file": file_path,
+            "occurrences": count,
+            "dropped": count - 1,
+        }
+        for (scenario, file_path), count in sorted(pair_counts.items())
+        if count > 1
+    ]
+    fixture_resolution = {
+        "files_referenced_before_dedupe": sum(pair_counts.values()),
+        "files_replayed_after_dedupe": len(pairs),
+        "duplicate_references_dropped": sum(int(item["dropped"]) for item in duplicate_details),
+        "duplicate_references": duplicate_details,
+    }
+    return pairs, fixture_resolution
 
 
 def parse_ts_ms(obj: dict[str, Any]) -> int:
@@ -104,10 +132,46 @@ def parse_ts_ms(obj: dict[str, Any]) -> int:
         return 0
 
 
+def parse_record_iso_ts_ms(value: Any) -> int:
+    if not isinstance(value, str) or not value.strip():
+        return 0
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return 0
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return int(dt.timestamp() * 1000)
+
+
 def extract_raw_event(record: dict[str, Any]) -> dict[str, Any] | None:
     table = record.get("__table")
     if table not in RAW_EVENT_TABLES:
         return None
+
+    if table == "network_capabilities":
+        raw_json = record.get("raw_json")
+        if not isinstance(raw_json, str) or not raw_json.strip():
+            return None
+        try:
+            data_obj = json.loads(raw_json)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(data_obj, dict):
+            return None
+        event_id = str(record.get("source_event_id", "")).strip()
+        if not event_id:
+            return None
+        ts_ms = parse_record_iso_ts_ms(record.get("event_timestamp"))
+        if ts_ms <= 0:
+            return None
+        return {
+            "id": event_id,
+            "type": "network_capabilities",
+            "timestamp": str(ts_ms),
+            "gateway": "",
+            "data": data_obj,
+        }
 
     if table == "streaming_events":
         required = ["id", "type", "timestamp", "gateway", "data"]
@@ -250,7 +314,7 @@ def main() -> None:
 
     scenario_filter = set(args.scenario or [])
     manifest = load_manifest(manifest_path)
-    files = resolve_fixture_files(manifest, manifest_path, scenario_filter)
+    files, fixture_resolution = resolve_fixture_files(manifest, manifest_path, scenario_filter)
 
     if not files:
         print("No fixture files found for selected scenarios", file=sys.stderr)
@@ -267,6 +331,7 @@ def main() -> None:
         "kafka_container": args.kafka_container,
         "bootstrap_server": args.bootstrap_server,
         "dry_run": bool(args.dry_run),
+        "fixture_resolution": fixture_resolution,
         "stats": stats,
     }
 

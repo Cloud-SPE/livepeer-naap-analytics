@@ -42,7 +42,34 @@ FROM
   ) q ON r.event_type = q.event_type
 );
 
+-- TEST: raw_typed_no_dlq_or_quarantine_for_core_types
+SELECT
+  toUInt64(dlq_rows > 0 OR quarantine_rows > 0) AS failed_rows,
+  dlq_rows,
+  quarantine_rows
+FROM
+(
+  SELECT
+    (
+      SELECT count()
+      FROM livepeer_analytics.streaming_events_dlq
+      WHERE source_record_timestamp >= {from_ts:DateTime64(3)}
+        AND source_record_timestamp < {to_ts:DateTime64(3)}
+        AND event_type IN ('ai_stream_status', 'stream_trace', 'ai_stream_events', 'stream_ingest_metrics')
+    ) AS dlq_rows,
+    (
+      SELECT count()
+      FROM livepeer_analytics.streaming_events_quarantine
+      WHERE source_record_timestamp >= {from_ts:DateTime64(3)}
+        AND source_record_timestamp < {to_ts:DateTime64(3)}
+        AND event_type IN ('ai_stream_status', 'stream_trace', 'ai_stream_events', 'stream_ingest_metrics')
+    ) AS quarantine_rows
+);
+
 -- TEST: raw_typed_core_1to1_parity
+-- This is intentionally strict (raw row count vs typed row count). If replayed
+-- fixtures contain duplicate raw event IDs, Flink dedup keeps typed rows lower
+-- than raw rows and this check fails even when parsing is healthy.
 SELECT
   countIf(typed_rows != raw_rows) AS failed_rows,
   sum(raw_rows) AS total_raw_rows,
@@ -120,6 +147,12 @@ FROM
 );
 
 -- TEST: raw_typed_network_capabilities_fanout_guard
+-- network_capabilities can legitimately fan out from one raw source event to
+-- multiple typed rows (for example one row per capability entry).
+-- In preserve-state runs, DLQ rows may accumulate faster than raw rows in the
+-- selected window, so accepted_rows_est can clamp to 0 even when valid typed
+-- rows exist for a raw source event. Guard against impossible lineage instead:
+-- typed distinct source ids must not exceed raw source events.
 WITH
   raw AS
   (
@@ -156,8 +189,7 @@ WITH
   )
 SELECT
   toUInt64(
-    if(accepted_rows_est = 0, 0, typed_rows = 0)
-    OR typed_distinct_source_events > accepted_rows_est
+    typed_distinct_source_events > raw_rows
   ) AS failed_rows,
   raw_rows,
   dlq_rows,

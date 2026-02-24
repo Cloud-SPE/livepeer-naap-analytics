@@ -44,6 +44,10 @@ def relativize_session_files(
     output_base = output_manifest.parent.resolve()
     scenarios = out.get("scenarios", {})
     for scenario in scenarios.values():
+        # Normalize and dedupe by relative fixture file path so downstream
+        # replay does not publish the same JSONL twice.
+        deduped_sessions = []
+        seen_files: set[str] = set()
         for session in scenario.get("sessions", []):
             file_path = Path(session.get("file", ""))
             if not file_path:
@@ -61,7 +65,13 @@ def relativize_session_files(
                     resolved = repo_relative
                 else:
                     resolved = source_relative
-            session["file"] = str(resolved.relative_to(output_base))
+            rel_file = str(resolved.relative_to(output_base))
+            if rel_file in seen_files:
+                continue
+            seen_files.add(rel_file)
+            session["file"] = rel_file
+            deduped_sessions.append(session)
+        scenario["sessions"] = deduped_sessions
     out.setdefault("metadata", {})
     out["metadata"]["promoted_from"] = str(source_manifest.resolve().relative_to(output_base))
     return out
