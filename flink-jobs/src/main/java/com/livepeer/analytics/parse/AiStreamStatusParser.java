@@ -4,10 +4,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 
 import com.livepeer.analytics.model.EventPayloads;
 import com.livepeer.analytics.quality.ValidatedEvent;
+import com.livepeer.analytics.util.AddressNormalizer;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 
 /**
  * Parser for `ai_stream_status` events.
@@ -25,7 +25,7 @@ final class AiStreamStatusParser {
         status.gateway = event.event.gateway;
 
         JsonNode orchInfo = data.path("orchestrator_info");
-        status.orchestratorAddress = normalizeAddress(orchInfo.path("address").asText(""));
+        status.orchestratorAddress = AddressNormalizer.normalizeOrEmpty(orchInfo.path("address").asText(""));
         status.orchestratorUrl = orchInfo.path("url").asText("");
 
         // Upstream `pipeline` is the model label (e.g. streamdiffusion-sdxl).
@@ -53,12 +53,5 @@ final class AiStreamStatusParser {
         List<EventPayloads.AiStreamStatus> results = new ArrayList<>(1);
         results.add(status);
         return results;
-    }
-
-    private static String normalizeAddress(String address) {
-        if (address == null || address.trim().isEmpty()) {
-            return "";
-        }
-        return address.trim().toLowerCase(Locale.ROOT);
     }
 }

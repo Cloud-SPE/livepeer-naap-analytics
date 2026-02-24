@@ -9,8 +9,6 @@ import com.livepeer.analytics.model.ParsedEvent;
 import com.livepeer.analytics.model.RejectedEventEnvelope;
 import com.livepeer.analytics.quality.RejectedEventEnvelopeFactory;
 
-import java.nio.charset.StandardCharsets;
-
 /**
  * Guards mapped ClickHouse rows produced from parsed events by enforcing a max size.
  * Oversized rows are either routed to the DLQ or dropped, depending on configuration.
@@ -41,7 +39,7 @@ public class ParsedEventRowGuardProcessFunction<T> extends ProcessFunction<Parse
             return;
         }
         String row = mapper.map(value.payload);
-        int sizeBytes = rowSizeBytes(row);
+        int sizeBytes = RowSizeUtil.utf8Bytes(row);
         if (sizeBytes > sizeLimitBytes) {
             if (oversizeCounter != null) {
                 oversizeCounter.inc();
@@ -71,9 +69,5 @@ public class ParsedEventRowGuardProcessFunction<T> extends ProcessFunction<Parse
                 .addGroup("quality_gate")
                 .addGroup("sink_guard");
         oversizeCounter = metrics.counter("oversize_drops");
-    }
-
-    private static int rowSizeBytes(String row) {
-        return row.getBytes(StandardCharsets.UTF_8).length;
     }
 }

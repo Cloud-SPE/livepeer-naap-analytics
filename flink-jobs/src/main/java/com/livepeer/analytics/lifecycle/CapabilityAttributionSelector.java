@@ -5,6 +5,8 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 
+import com.livepeer.analytics.util.StringSemantics;
+
 /**
  * Utility for bounded capability-candidate maintenance and deterministic attribution selection.
  *
@@ -91,7 +93,7 @@ public final class CapabilityAttributionSelector {
     }
 
     private static String modelKey(String modelId) {
-        if (isEmpty(modelId)) {
+        if (StringSemantics.isBlank(modelId)) {
             return EMPTY_MODEL_KEY;
         }
         return modelId.trim().toLowerCase(Locale.ROOT);
@@ -102,14 +104,10 @@ public final class CapabilityAttributionSelector {
     }
 
     private static boolean isSnapshotModelCompatible(String pipeline, String snapshotModelId) {
-        if (isEmpty(pipeline) || isEmpty(snapshotModelId)) {
+        if (StringSemantics.isBlank(pipeline) || StringSemantics.isBlank(snapshotModelId)) {
             return true;
         }
         return pipeline.trim().equalsIgnoreCase(snapshotModelId.trim());
-    }
-
-    private static boolean isEmpty(String value) {
-        return value == null || value.trim().isEmpty();
     }
 
     private static final class CandidateScore implements Comparable<CandidateScore> {
@@ -134,7 +132,7 @@ public final class CapabilityAttributionSelector {
 
         static CandidateScore of(CapabilitySnapshotRef candidate, String pipeline, long signalTs, long ttlMs) {
             long delta = Math.abs(signalTs - candidate.snapshotTs);
-            int compatibility = (!isEmpty(pipeline) && !isEmpty(candidate.modelId)
+            int compatibility = (!StringSemantics.isBlank(pipeline) && !StringSemantics.isBlank(candidate.modelId)
                     && pipeline.trim().equalsIgnoreCase(candidate.modelId.trim())) ? 0 : 1;
             int freshness;
             if (delta == 0) {

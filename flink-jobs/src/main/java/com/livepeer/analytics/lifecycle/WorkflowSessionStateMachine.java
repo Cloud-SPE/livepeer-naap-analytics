@@ -1,6 +1,8 @@
 package com.livepeer.analytics.lifecycle;
 
 import com.livepeer.analytics.model.EventPayloads;
+import com.livepeer.analytics.util.AddressNormalizer;
+import com.livepeer.analytics.util.StringSemantics;
 
 import java.util.Locale;
 
@@ -30,13 +32,13 @@ public final class WorkflowSessionStateMachine {
      * Apply one normalized lifecycle signal to a mutable workflow-session accumulator.
      */
     public static void applySignal(WorkflowSessionAccumulator state, LifecycleSignal signal) {
-        state.workflowSessionId = firstNonEmpty(state.workflowSessionId, signal.workflowSessionId);
-        state.streamId = firstNonEmpty(state.streamId, signal.streamId);
-        state.requestId = firstNonEmpty(state.requestId, signal.requestId);
-        state.pipeline = firstNonEmpty(state.pipeline, signal.pipeline);
-        state.workflowId = firstNonEmpty(state.workflowId, state.pipeline, "ai_live_video_stream");
-        state.gateway = firstNonEmpty(state.gateway, signal.gateway);
-        if (!isEmpty(signal.orchestratorUrl)) {
+        state.workflowSessionId = StringSemantics.firstNonBlank(state.workflowSessionId, signal.workflowSessionId);
+        state.streamId = StringSemantics.firstNonBlank(state.streamId, signal.streamId);
+        state.requestId = StringSemantics.firstNonBlank(state.requestId, signal.requestId);
+        state.pipeline = StringSemantics.firstNonBlank(state.pipeline, signal.pipeline);
+        state.workflowId = StringSemantics.firstNonBlank(state.workflowId, state.pipeline, "ai_live_video_stream");
+        state.gateway = StringSemantics.firstNonBlank(state.gateway, signal.gateway);
+        if (!StringSemantics.isBlank(signal.orchestratorUrl)) {
             state.orchestratorUrl = signal.orchestratorUrl;
         }
 
@@ -49,7 +51,7 @@ public final class WorkflowSessionStateMachine {
         state.eventCount++;
         state.version++;
 
-        if (isEmpty(state.sourceFirstEventUid)) {
+        if (StringSemantics.isBlank(state.sourceFirstEventUid)) {
             state.sourceFirstEventUid = signal.sourceEventUid;
         }
         state.sourceLastEventUid = signal.sourceEventUid;
@@ -70,41 +72,18 @@ public final class WorkflowSessionStateMachine {
             return;
         }
 
-        if (!isEmpty(snapshot.canonicalOrchestratorAddress)) {
+        if (!StringSemantics.isBlank(snapshot.canonicalOrchestratorAddress)) {
             state.orchestratorAddress = snapshot.canonicalOrchestratorAddress;
-            state.orchestratorsSeen.add(normalizeAddress(snapshot.canonicalOrchestratorAddress));
-            state.canonicalOrchestratorsSeen.add(normalizeAddress(snapshot.canonicalOrchestratorAddress));
+            state.orchestratorsSeen.add(AddressNormalizer.normalizeOrEmpty(snapshot.canonicalOrchestratorAddress));
+            state.canonicalOrchestratorsSeen.add(AddressNormalizer.normalizeOrEmpty(snapshot.canonicalOrchestratorAddress));
         }
-        state.orchestratorUrl = firstNonEmpty(state.orchestratorUrl, snapshot.orchestratorUrl);
-
-        long delta = Math.abs(signalTs - snapshot.snapshotTs);
-        if (delta == 0) {
-            state.attributionMethod = "exact_orchestrator_time_match";
-            state.attributionConfidence = 1.0f;
-            state.modelId = emptyToNull(snapshot.modelId);
-            state.gpuId = emptyToNull(snapshot.gpuId);
-            return;
-        }
-
-        if (delta <= attributionTtlMs && snapshot.snapshotTs <= signalTs) {
-            state.attributionMethod = "nearest_prior_snapshot";
-            state.attributionConfidence = 0.9f;
-            state.modelId = emptyToNull(snapshot.modelId);
-            state.gpuId = emptyToNull(snapshot.gpuId);
-            return;
-        }
-
-        if (delta <= attributionTtlMs) {
-            state.attributionMethod = "nearest_snapshot_within_ttl";
-            state.attributionConfidence = 0.7f;
-            state.modelId = emptyToNull(snapshot.modelId);
-            state.gpuId = emptyToNull(snapshot.gpuId);
-            return;
-        }
-
-        // Mapping is known, but snapshot is stale for model/GPU attribution.
-        state.attributionMethod = "proxy_address_join";
-        state.attributionConfidence = 0.4f;
+        state.orchestratorUrl = StringSemantics.firstNonBlank(state.orchestratorUrl, snapshot.orchestratorUrl);
+        AttributionSemantics.Decision decision =
+                AttributionSemantics.fromSnapshot(signalTs, snapshot.snapshotTs, attributionTtlMs);
+        state.attributionMethod = decision.method;
+        state.attributionConfidence = decision.confidence;
+        state.modelId = StringSemantics.blankToNull(snapshot.modelId);
+        state.gpuId = StringSemantics.blankToNull(snapshot.gpuId);
     }
 
     public static EventPayloads.FactWorkflowSession toFact(WorkflowSessionAccumulator state) {
@@ -158,7 +137,7 @@ public final class WorkflowSessionStateMachine {
     }
 
     private static void applyTrace(WorkflowSessionAccumulator state, LifecycleSignal signal) {
-        String traceType = firstNonEmpty(signal.traceType, "");
+        String traceType = StringSemantics.firstNonBlank(signal.traceType, "");
         long ts = signal.signalTimestamp;
         if ("gateway_receive_stream_request".equals(traceType)) {
             state.knownStream = true;
@@ -176,7 +155,7 @@ public final class WorkflowSessionStateMachine {
     }
 
     private static void applyAiEvent(WorkflowSessionAccumulator state, LifecycleSignal signal) {
-        String eventType = firstNonEmpty(signal.aiEventType, "");
+        String eventType = StringSemantics.firstNonBlank(signal.aiEventType, "");
         if ("error".equalsIgnoreCase(eventType)) {
             state.errorCount++;
             if (isExcusableError(signal.message)) {
@@ -188,7 +167,7 @@ public final class WorkflowSessionStateMachine {
     }
 
     private static boolean isExcusableError(String message) {
-        if (isEmpty(message)) {
+        if (StringSemantics.isBlank(message)) {
             return false;
         }
         String normalized = message.toLowerCase(Locale.ROOT);
@@ -200,31 +179,10 @@ public final class WorkflowSessionStateMachine {
         return false;
     }
 
-    private static String normalizeAddress(String address) {
-        return isEmpty(address) ? "" : address.trim().toLowerCase(Locale.ROOT);
-    }
-
     private static Long minNullable(Long existing, long candidate) {
         if (existing == null) {
             return candidate;
         }
         return Math.min(existing, candidate);
-    }
-
-    private static String emptyToNull(String value) {
-        return isEmpty(value) ? null : value;
-    }
-
-    private static String firstNonEmpty(String... values) {
-        for (String value : values) {
-            if (!isEmpty(value)) {
-                return value;
-            }
-        }
-        return "";
-    }
-
-    private static boolean isEmpty(String value) {
-        return value == null || value.trim().isEmpty();
     }
 }

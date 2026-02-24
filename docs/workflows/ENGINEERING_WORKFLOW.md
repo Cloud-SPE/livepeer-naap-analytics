@@ -21,6 +21,7 @@ Ship quickly without contract drift by making design decisions legible and mecha
 | API view grain/fields | metric contract docs + integration SQL assertions for API readiness |
 | Replay behavior | `docs/operations/RUNBOOKS_AND_RELEASE.md` + `docs/operations/REPLAY_RUNBOOK.md` |
 | Test harness scripts | `docs/quality/TESTING_AND_VALIDATION.md` |
+| Shared normalization/helper semantics | `docs/workflows/CODE_REUSE_AND_NORMALIZATION_GUIDELINES.md` + characterization tests in `flink-jobs/src/test/java` |
 
 ## PR Quality Bar
 
@@ -28,6 +29,7 @@ Ship quickly without contract drift by making design decisions legible and mecha
 - Metric/contract changes are versioned or explicitly backward compatible.
 - No silent semantic changes in SQL views.
 - Docs are updated where a new contributor/agent would look first.
+- Repeated helper logic is centralized; no new local clones of canonical normalization/fallback helpers.
 
 ## Preferred Iteration Pattern
 

@@ -8,9 +8,9 @@ import org.apache.flink.util.Collector;
 
 import com.livepeer.analytics.model.EventPayloads;
 import com.livepeer.analytics.model.ParsedEvent;
+import com.livepeer.analytics.util.AddressNormalizer;
 import com.livepeer.analytics.util.BuildMetadata;
-
-import java.util.Locale;
+import com.livepeer.analytics.util.StringSemantics;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -56,7 +56,7 @@ public class WorkflowSessionAggregatorFunction extends KeyedBroadcastProcessFunc
             LifecycleSignal signal,
             ReadOnlyContext ctx,
             Collector<ParsedEvent<EventPayloads.FactWorkflowSession>> out) throws Exception {
-        if (signal == null || isEmpty(signal.workflowSessionId)) {
+        if (signal == null || StringSemantics.isBlank(signal.workflowSessionId)) {
             return;
         }
 
@@ -68,11 +68,11 @@ public class WorkflowSessionAggregatorFunction extends KeyedBroadcastProcessFunc
 
         // Lookup capability by the observed hot-wallet identity in the signal.
         CapabilitySnapshotRef snapshot = null;
-        String hotKey = normalizeAddress(signal.orchestratorAddress);
+        String hotKey = AddressNormalizer.normalizeOrEmpty(signal.orchestratorAddress);
         // Critical: use persisted session pipeline when signal pipeline is empty (common for
         // trace edges). Passing empty pipeline reopens mixed-model selection drift.
-        String attributionPipeline = firstNonEmpty(signal.pipeline, state.pipeline);
-        if (!isEmpty(hotKey)) {
+        String attributionPipeline = StringSemantics.firstNonBlank(signal.pipeline, state.pipeline);
+        if (!StringSemantics.isBlank(hotKey)) {
             CapabilitySnapshotBucket bucket =
                     ctx.getBroadcastState(CapabilityBroadcastState.CAPABILITY_STATE_DESCRIPTOR).get(hotKey);
             snapshot = CapabilityAttributionSelector.selectBestCandidate(
@@ -106,8 +106,8 @@ public class WorkflowSessionAggregatorFunction extends KeyedBroadcastProcessFunc
         }
 
         EventPayloads.NetworkCapability cap = capabilityEvent.payload;
-        String hotAddress = normalizeAddress(cap.localAddress);
-        if (isEmpty(hotAddress)) {
+        String hotAddress = AddressNormalizer.normalizeOrEmpty(cap.localAddress);
+        if (StringSemantics.isBlank(hotAddress)) {
             return;
         }
 
@@ -115,7 +115,7 @@ public class WorkflowSessionAggregatorFunction extends KeyedBroadcastProcessFunc
         // can map to canonical orchestrator identity + model/GPU attribution.
         CapabilitySnapshotRef ref = new CapabilitySnapshotRef();
         ref.snapshotTs = cap.eventTimestamp;
-        ref.canonicalOrchestratorAddress = normalizeAddress(cap.orchestratorAddress);
+        ref.canonicalOrchestratorAddress = AddressNormalizer.normalizeOrEmpty(cap.orchestratorAddress);
         ref.orchestratorUrl = cap.orchUri;
         ref.modelId = cap.modelId;
         ref.gpuId = cap.gpuId;
@@ -133,20 +133,4 @@ public class WorkflowSessionAggregatorFunction extends KeyedBroadcastProcessFunc
         ctx.getBroadcastState(CapabilityBroadcastState.CAPABILITY_STATE_DESCRIPTOR).put(hotAddress, bucket);
     }
 
-    private static String normalizeAddress(String address) {
-        return isEmpty(address) ? "" : address.trim().toLowerCase(Locale.ROOT);
-    }
-
-    private static boolean isEmpty(String value) {
-        return value == null || value.trim().isEmpty();
-    }
-
-    private static String firstNonEmpty(String... values) {
-        for (String value : values) {
-            if (!isEmpty(value)) {
-                return value;
-            }
-        }
-        return "";
-    }
 }

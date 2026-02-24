@@ -137,8 +137,8 @@ public class QualityGateProcessFunction extends ProcessFunction<KafkaInboundReco
         event.gateway = root.path("gateway").asText("");
         event.rawJson = rawJson;
         event.replay = root.path("__replay").asBoolean(false);
-        event.source = buildSourcePointer(record);
-        event.dimensions = extractDimensions(root);
+        event.source = RejectedEventEnvelopeSupport.buildSourcePointer(record);
+        event.dimensions = RejectedEventEnvelopeSupport.extractDimensions(root);
 
         DedupKey dedupKey = DedupKey.build(event, root);
         event.dedupKey = dedupKey.key;
@@ -159,37 +159,6 @@ public class QualityGateProcessFunction extends ProcessFunction<KafkaInboundReco
             dlqSinceLastLog = 0;
         }
         ctx.output(dlqTag, envelope);
-    }
-
-    private static RejectedEventEnvelope.SourcePointer buildSourcePointer(KafkaInboundRecord record) {
-        RejectedEventEnvelope.SourcePointer source = new RejectedEventEnvelope.SourcePointer();
-        if (record != null) {
-            source.topic = record.topic;
-            source.partition = record.partition;
-            source.offset = record.offset;
-            source.recordTimestamp = record.recordTimestamp;
-        }
-        return source;
-    }
-
-    private static RejectedEventEnvelope.EventDimensions extractDimensions(JsonNode root) {
-        if (root == null) {
-            return null;
-        }
-        JsonNode data = root.path("data");
-        RejectedEventEnvelope.EventDimensions dims = new RejectedEventEnvelope.EventDimensions();
-        String orchestrator = null;
-        JsonNode orchInfo = data.path("orchestrator_info");
-        if (orchInfo.isObject()) {
-            orchestrator = orchInfo.path("address").asText(null);
-        }
-        if (orchestrator == null || orchestrator.isEmpty()) {
-            orchestrator = data.path("orchestrator").asText(null);
-        }
-        dims.orchestrator = orchestrator;
-        dims.broadcaster = JsonNodeUtils.asNullableText(data.path("broadcaster"));
-        dims.region = JsonNodeUtils.asNullableText(data.path("region"));
-        return dims;
     }
 
     public static class DedupKey {

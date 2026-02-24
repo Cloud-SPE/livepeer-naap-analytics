@@ -95,6 +95,20 @@ When assertion stages run, JSON outputs are also written under:
 - `EventParsersTest`: typed extraction behavior.
 - Quality gate tests: dedup, validation, and routing semantics.
 - Lifecycle state machine tests: session/segment/latency derivation invariants.
+- `RefactorDriftGuardTest`: prevents reintroduction of duplicated normalization/fallback helper implementations.
+
+## Refactor Safety Protocol
+
+Use this sequence for shared-helper refactors:
+
+1. Add characterization tests that lock current behavior.
+2. Centralize helper logic and migrate call sites in small slices.
+3. Run Java unit/contract tests:
+   - `cd flink-jobs && mvn test`
+4. Run integration assertions:
+   - `tests/integration/run_all.sh`
+5. Run query-pack validation:
+   - `uv run --project tools/python python scripts/run_clickhouse_query_pack.py --lookback-hours 24`
 
 ## Data Quality Contract
 

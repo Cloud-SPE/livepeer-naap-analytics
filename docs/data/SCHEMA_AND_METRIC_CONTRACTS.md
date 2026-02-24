@@ -137,6 +137,28 @@ Contract rule: additive fields are canonical; clients must recompute ratios/scor
     - `proxy_address_join`
     - `none`
 
+### Attribution Selection Contract
+
+This is a correctness-critical contract for lifecycle facts and downstream API views.
+
+1. `pipeline` source of truth:
+`pipeline` is event-derived lifecycle state. `pipeline` is not sourced from capability snapshots.
+
+2. Capability candidate cache model:
+Candidates are keyed by hot wallet and stored as bounded multi-candidate snapshot sets. Candidate sets are TTL-pruned and hard-capped per wallet.
+
+3. Selection precedence:
+Compatibility first: incompatible model candidates must be ignored when pipeline context is present. Freshness second: choose exact match, then nearest prior within TTL, then nearest within TTL. Deterministic tie-breakers are required.
+
+4. Empty-pipeline handling:
+Selector input pipeline must use signal pipeline with fallback to persisted lifecycle pipeline/model context. Passing empty pipeline broadens compatibility and can reintroduce mixed-model drift.
+
+5. No-compatible-candidate behavior:
+Do not overwrite `model_id`/`gpu_id` for that signal. Continue lifecycle signal processing and row emission.
+
+6. Regression guardrails:
+Prod-derived regression tests must cover mixed-model hot-wallet candidate sets, empty signal pipeline drift path, and incompatible-but-fresh candidate rejection.
+
 ## Rules-to-Implementation Traceability
 
 - Flink rule owners:

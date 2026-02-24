@@ -6,8 +6,6 @@ import org.slf4j.LoggerFactory;
 
 import com.livepeer.analytics.model.RejectedEventEnvelope;
 
-import java.nio.charset.StandardCharsets;
-
 /**
  * Guards DLQ/quarantine rows by dropping oversized envelopes to avoid recursive DLQ loops.
  */
@@ -29,7 +27,7 @@ public class EnvelopeRowGuardProcessFunction extends ProcessFunction<RejectedEve
             return;
         }
         String row = mapper.map(value);
-        int sizeBytes = rowSizeBytes(row);
+        int sizeBytes = RowSizeUtil.utf8Bytes(row);
         if (sizeBytes > sizeLimitBytes) {
             if (oversizeCounter != null) {
                 oversizeCounter.inc();
@@ -49,9 +47,5 @@ public class EnvelopeRowGuardProcessFunction extends ProcessFunction<RejectedEve
                 .addGroup("quality_gate")
                 .addGroup("sink_guard");
         oversizeCounter = metrics.counter("oversize_drops");
-    }
-
-    private static int rowSizeBytes(String row) {
-        return row.getBytes(StandardCharsets.UTF_8).length;
     }
 }

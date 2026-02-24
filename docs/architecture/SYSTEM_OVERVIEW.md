@@ -208,6 +208,29 @@ Materialization model:
 
 These facts require ordering-aware correlation and classification (session identity, startup outcomes, swap detection, attribution confidence).
 
+### Lifecycle Attribution Steady State
+
+Lifecycle attribution uses a bounded multi-candidate capability cache per hot wallet key (`local_address`).
+
+Selection flow:
+1. Resolve hot wallet from signal orchestrator identity.
+2. Load candidate capability snapshots for that wallet.
+3. Build pipeline context from signal pipeline, with fallback to persisted lifecycle state pipeline/model context when signal pipeline is empty.
+4. Filter candidates by compatibility first (`pipeline` vs candidate `model_id`).
+5. Rank compatible candidates by deterministic freshness rules:
+   - exact timestamp match
+   - nearest prior snapshot within TTL
+   - nearest snapshot within TTL
+   - stale fallback class (lowest confidence)
+6. Apply selected candidate model/GPU attribution to lifecycle state.
+
+Safety rules:
+1. If no compatible candidate exists, do not overwrite model/GPU attribution on that signal.
+2. Lifecycle signals are never dropped due to attribution mismatch/no-candidate conditions.
+3. Candidate cache is bounded and TTL-pruned to keep lookup O(k) with small bounded `k`.
+
+This design prevents mixed-model drift when one hot wallet advertises multiple model families (for example streamdiffusion and llama) in interleaved capability snapshots.
+
 ### Non-Stateful Facts (ClickHouse MV-emitted)
 
 - `fact_stream_status_samples`

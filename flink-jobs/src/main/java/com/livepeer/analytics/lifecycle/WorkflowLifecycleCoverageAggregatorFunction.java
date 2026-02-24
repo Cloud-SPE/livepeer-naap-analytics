@@ -2,6 +2,7 @@ package com.livepeer.analytics.lifecycle;
 
 import com.livepeer.analytics.model.EventPayloads;
 import com.livepeer.analytics.model.ParsedEvent;
+import com.livepeer.analytics.util.StringSemantics;
 import org.apache.flink.api.common.state.ValueState;
 import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.configuration.Configuration;
@@ -35,7 +36,7 @@ public class WorkflowLifecycleCoverageAggregatorFunction extends KeyedProcessFun
             LifecycleSignal signal,
             Context ctx,
             Collector<ParsedEvent<EventPayloads.FactLifecycleEdgeCoverage>> out) throws Exception {
-        if (signal == null || isEmpty(signal.workflowSessionId)) {
+        if (signal == null || StringSemantics.isBlank(signal.workflowSessionId)) {
             return;
         }
 
@@ -101,9 +102,5 @@ public class WorkflowLifecycleCoverageAggregatorFunction extends KeyedProcessFun
             return "gateway_ingest_stream_closed".equals(signal.traceType);
         }
         return false;
-    }
-
-    private static boolean isEmpty(String value) {
-        return value == null || value.trim().isEmpty();
     }
 }

@@ -36,6 +36,9 @@ Canonical backlog for unresolved feature ideas, design hardening, and engineerin
 | `BACKLOG-015` | `P3` | Docs automation | Add CI checks for markdown linting and local-link validation. | Prevents doc drift and broken navigation. | `docs/references/DOC_CONSOLIDATION_PLAN.md` |
 | `BACKLOG-016` | `P3` | Docs governance | Add freshness metadata (owner + last-reviewed date) to canonical docs. | Clarifies ownership and review cadence. | `docs/references/DOC_CONSOLIDATION_PLAN.md` |
 | `BACKLOG-017` | `P3` | PR guardrails | Add automated check that schema changes co-update mappers, tests, and canonical docs in one PR. | Enforces contract discipline and reduces partial changes. | `docs/references/DOC_CONSOLIDATION_PLAN.md` |
+| `BACKLOG-018` | `P1` | Flink observability | Configure and validate a production metrics reporter (for example Prometheus/JMX) so JobManager/TaskManager and pipeline metrics are exported. | Prevents blind spots during incident response and enables SLO-backed alerting. | `docs/operations/RUNBOOKS_AND_RELEASE.md`, `docs/quality/TESTING_AND_VALIDATION.md` |
+| `BACKLOG-019` | `P2` | Flink config hygiene | Replace deprecated Flink keys and submission paths (`restart-strategy` -> `restart-strategy.type`, REST query-param submission -> JSON body flow). | Reduces upgrade risk and avoids behavior drift on future Flink releases. | `docs/operations/RUNBOOKS_AND_RELEASE.md`, `docs/workflows/ENGINEERING_WORKFLOW.md` |
+| `BACKLOG-020` | `P1` | Flink serialization | Remove `GenericType` fallbacks in hot/stateful paths by introducing explicit Flink type information/serializers for warned fields (for example `KafkaInboundRecord#headers`, `CapabilitySnapshotBucket#byModelKey`). | Improves runtime performance and state schema evolution safety. | `docs/quality/TESTING_AND_VALIDATION.md`, `docs/workflows/ENGINEERING_WORKFLOW.md` |
 
 ## Notes
 

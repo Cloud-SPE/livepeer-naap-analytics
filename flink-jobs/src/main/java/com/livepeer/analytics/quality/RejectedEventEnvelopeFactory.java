@@ -51,7 +51,7 @@ public final class RejectedEventEnvelopeFactory {
         boolean replay = root.path("__replay").asBoolean(false);
 
         RejectedEventEnvelope envelope = baseEnvelope(record, eventId, eventType, eventVersion, rawJson, canonical, null, replay);
-        envelope.dimensions = extractDimensions(root);
+        envelope.dimensions = RejectedEventEnvelopeSupport.extractDimensions(root);
         envelope.eventTimestamp = eventTimestamp;
         envelope.failure = buildFailure(stage, failureClass, reason, details);
         return envelope;
@@ -117,7 +117,7 @@ public final class RejectedEventEnvelopeFactory {
             boolean replay) {
         RejectedEventEnvelope envelope = new RejectedEventEnvelope();
         envelope.schemaVersion = "v1";
-        envelope.source = buildSourcePointer(record);
+        envelope.source = RejectedEventEnvelopeSupport.buildSourcePointer(record);
         envelope.identity = new RejectedEventEnvelope.Identity();
         envelope.identity.eventId = eventId;
         envelope.identity.eventType = eventType;
@@ -134,17 +134,6 @@ public final class RejectedEventEnvelopeFactory {
         envelope.ingestionTimestamp = System.currentTimeMillis();
         envelope.replay = replay;
         return envelope;
-    }
-
-    private static RejectedEventEnvelope.SourcePointer buildSourcePointer(KafkaInboundRecord record) {
-        RejectedEventEnvelope.SourcePointer source = new RejectedEventEnvelope.SourcePointer();
-        if (record != null) {
-            source.topic = record.topic;
-            source.partition = record.partition;
-            source.offset = record.offset;
-            source.recordTimestamp = record.recordTimestamp;
-        }
-        return source;
     }
 
     private static RejectedEventEnvelope.FailureDetails buildFailure(String stage, String failureClass, String reason, String details) {
@@ -176,23 +165,4 @@ public final class RejectedEventEnvelopeFactory {
         return versionNode.asText(null);
     }
 
-    private static RejectedEventEnvelope.EventDimensions extractDimensions(JsonNode root) {
-        if (root == null) {
-            return null;
-        }
-        JsonNode data = root.path("data");
-        RejectedEventEnvelope.EventDimensions dims = new RejectedEventEnvelope.EventDimensions();
-        String orchestrator = null;
-        JsonNode orchInfo = data.path("orchestrator_info");
-        if (orchInfo.isObject()) {
-            orchestrator = JsonNodeUtils.asNullableText(orchInfo.path("address"));
-        }
-        if (orchestrator == null || orchestrator.isEmpty()) {
-            orchestrator = JsonNodeUtils.asNullableText(data.path("orchestrator"));
-        }
-        dims.orchestrator = orchestrator;
-        dims.broadcaster = JsonNodeUtils.asNullableText(data.path("broadcaster"));
-        dims.region = JsonNodeUtils.asNullableText(data.path("region"));
-        return dims;
-    }
 }

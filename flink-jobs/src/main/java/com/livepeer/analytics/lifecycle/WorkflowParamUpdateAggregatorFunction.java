@@ -8,9 +8,9 @@ import org.apache.flink.util.Collector;
 
 import com.livepeer.analytics.model.EventPayloads;
 import com.livepeer.analytics.model.ParsedEvent;
+import com.livepeer.analytics.util.AddressNormalizer;
 import com.livepeer.analytics.util.BuildMetadata;
-
-import java.util.Locale;
+import com.livepeer.analytics.util.StringSemantics;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -53,7 +53,7 @@ public class WorkflowParamUpdateAggregatorFunction extends KeyedBroadcastProcess
             LifecycleSignal signal,
             ReadOnlyContext ctx,
             Collector<ParsedEvent<EventPayloads.FactWorkflowParamUpdate>> out) throws Exception {
-        if (signal == null || isEmpty(signal.workflowSessionId)) {
+        if (signal == null || StringSemantics.isBlank(signal.workflowSessionId)) {
             return;
         }
 
@@ -62,20 +62,20 @@ public class WorkflowParamUpdateAggregatorFunction extends KeyedBroadcastProcess
             state = new WorkflowParamUpdateAccumulator();
         }
 
-        state.workflowSessionId = firstNonEmpty(state.workflowSessionId, signal.workflowSessionId);
-        state.streamId = firstNonEmpty(state.streamId, signal.streamId);
-        state.requestId = firstNonEmpty(state.requestId, signal.requestId);
-        state.pipeline = firstNonEmpty(state.pipeline, signal.pipeline);
-        state.gateway = firstNonEmpty(state.gateway, signal.gateway);
-        state.orchestratorUrl = firstNonEmpty(state.orchestratorUrl, signal.orchestratorUrl);
+        state.workflowSessionId = StringSemantics.firstNonBlank(state.workflowSessionId, signal.workflowSessionId);
+        state.streamId = StringSemantics.firstNonBlank(state.streamId, signal.streamId);
+        state.requestId = StringSemantics.firstNonBlank(state.requestId, signal.requestId);
+        state.pipeline = StringSemantics.firstNonBlank(state.pipeline, signal.pipeline);
+        state.gateway = StringSemantics.firstNonBlank(state.gateway, signal.gateway);
+        state.orchestratorUrl = StringSemantics.firstNonBlank(state.orchestratorUrl, signal.orchestratorUrl);
 
         // Reuse broadcast enrichment for canonical orchestrator and model/GPU attribution.
         CapabilitySnapshotRef snapshot = null;
-        String signalAddress = normalizeAddress(signal.orchestratorAddress);
+        String signalAddress = AddressNormalizer.normalizeOrEmpty(signal.orchestratorAddress);
         // Critical: preserve non-empty pipeline context across signals; empty pipeline must not
         // broaden compatibility and allow nearest-but-incompatible snapshot selection.
-        String attributionPipeline = firstNonEmpty(signal.pipeline, state.pipeline);
-        if (!isEmpty(signalAddress)) {
+        String attributionPipeline = StringSemantics.firstNonBlank(signal.pipeline, state.pipeline);
+        if (!StringSemantics.isBlank(signalAddress)) {
             CapabilitySnapshotBucket bucket = ctx.getBroadcastState(CapabilityBroadcastState.CAPABILITY_STATE_DESCRIPTOR)
                     .get(signalAddress);
             snapshot = CapabilityAttributionSelector.selectBestCandidate(
@@ -91,7 +91,7 @@ public class WorkflowParamUpdateAggregatorFunction extends KeyedBroadcastProcess
 
         // Emit markers strictly for parameter update signals.
         if (signal.signalType == LifecycleSignal.SignalType.AI_STREAM_EVENT
-                && "params_update".equalsIgnoreCase(firstNonEmpty(signal.aiEventType, ""))) {
+                && "params_update".equalsIgnoreCase(StringSemantics.firstNonBlank(signal.aiEventType, ""))) {
             EventPayloads.FactWorkflowParamUpdate row = new EventPayloads.FactWorkflowParamUpdate();
             row.updateTs = signal.signalTimestamp;
             row.workflowSessionId = state.workflowSessionId;
@@ -106,7 +106,7 @@ public class WorkflowParamUpdateAggregatorFunction extends KeyedBroadcastProcess
             row.attributionMethod = state.attributionMethod;
             row.attributionConfidence = state.attributionConfidence;
             row.updateType = "params_update";
-            row.message = firstNonEmpty(signal.message, "");
+            row.message = StringSemantics.firstNonBlank(signal.message, "");
             row.sourceEventUid = signal.sourceEventUid;
             row.version = state.version;
             out.collect(new ParsedEvent<>(signal.sourceEvent, row));
@@ -122,13 +122,13 @@ public class WorkflowParamUpdateAggregatorFunction extends KeyedBroadcastProcess
             return;
         }
         EventPayloads.NetworkCapability cap = capabilityEvent.payload;
-        String hotAddress = normalizeAddress(cap.localAddress);
-        if (isEmpty(hotAddress)) {
+        String hotAddress = AddressNormalizer.normalizeOrEmpty(cap.localAddress);
+        if (StringSemantics.isBlank(hotAddress)) {
             return;
         }
         CapabilitySnapshotRef ref = new CapabilitySnapshotRef();
         ref.snapshotTs = cap.eventTimestamp;
-        ref.canonicalOrchestratorAddress = normalizeAddress(cap.orchestratorAddress);
+        ref.canonicalOrchestratorAddress = AddressNormalizer.normalizeOrEmpty(cap.orchestratorAddress);
         ref.orchestratorUrl = cap.orchUri;
         ref.modelId = cap.modelId;
         ref.gpuId = cap.gpuId;
@@ -153,48 +153,16 @@ public class WorkflowParamUpdateAggregatorFunction extends KeyedBroadcastProcess
         if (snapshot == null) {
             return;
         }
-        if (!isEmpty(snapshot.canonicalOrchestratorAddress)) {
+        if (!StringSemantics.isBlank(snapshot.canonicalOrchestratorAddress)) {
             state.orchestratorAddress = snapshot.canonicalOrchestratorAddress;
         }
-        state.orchestratorUrl = firstNonEmpty(state.orchestratorUrl, snapshot.orchestratorUrl);
+        state.orchestratorUrl = StringSemantics.firstNonBlank(state.orchestratorUrl, snapshot.orchestratorUrl);
+        AttributionSemantics.Decision decision =
+                AttributionSemantics.fromSnapshot(signalTs, snapshot.snapshotTs, DEFAULT_ATTRIBUTION_TTL_MS);
+        state.attributionMethod = decision.method;
+        state.attributionConfidence = decision.confidence;
 
-        long delta = Math.abs(signalTs - snapshot.snapshotTs);
-        if (delta == 0) {
-            state.attributionMethod = "exact_orchestrator_time_match";
-            state.attributionConfidence = 1.0f;
-        } else if (snapshot.snapshotTs <= signalTs && delta <= DEFAULT_ATTRIBUTION_TTL_MS) {
-            state.attributionMethod = "nearest_prior_snapshot";
-            state.attributionConfidence = 0.9f;
-        } else if (delta <= DEFAULT_ATTRIBUTION_TTL_MS) {
-            state.attributionMethod = "nearest_snapshot_within_ttl";
-            state.attributionConfidence = 0.7f;
-        } else {
-            state.attributionMethod = "proxy_address_join";
-            state.attributionConfidence = 0.4f;
-        }
-
-        state.modelId = emptyToNull(snapshot.modelId);
-        state.gpuId = emptyToNull(snapshot.gpuId);
-    }
-
-    private static String normalizeAddress(String address) {
-        return isEmpty(address) ? "" : address.trim().toLowerCase(Locale.ROOT);
-    }
-
-    private static String firstNonEmpty(String... values) {
-        for (String value : values) {
-            if (!isEmpty(value)) {
-                return value;
-            }
-        }
-        return "";
-    }
-
-    private static String emptyToNull(String value) {
-        return isEmpty(value) ? null : value;
-    }
-
-    private static boolean isEmpty(String value) {
-        return value == null || value.trim().isEmpty();
+        state.modelId = StringSemantics.blankToNull(snapshot.modelId);
+        state.gpuId = StringSemantics.blankToNull(snapshot.gpuId);
     }
 }

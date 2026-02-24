@@ -7,6 +7,7 @@ import com.livepeer.analytics.capability.CapabilityCatalogLoader;
 import com.livepeer.analytics.capability.CapabilityDescriptor;
 import com.livepeer.analytics.model.EventPayloads;
 import com.livepeer.analytics.quality.ValidatedEvent;
+import com.livepeer.analytics.util.AddressNormalizer;
 
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -28,8 +29,8 @@ final class NetworkCapabilitiesParser {
 
         List<EventPayloads.NetworkCapability> results = new ArrayList<>();
         for (JsonNode orch : dataArray) {
-            String orchestratorAddress = normalizeAddress(orch.path("address").asText(""));
-            String localAddress = normalizeAddress(orch.path("local_address").asText(""));
+            String orchestratorAddress = AddressNormalizer.normalizeOrEmpty(orch.path("address").asText(""));
+            String localAddress = AddressNormalizer.normalizeOrEmpty(orch.path("local_address").asText(""));
             String orchUri = orch.path("orch_uri").asText("");
             String orchestratorVersion = orch.path("capabilities").path("version").asText("");
 
@@ -91,8 +92,8 @@ final class NetworkCapabilitiesParser {
 
         List<EventPayloads.NetworkCapabilityAdvertised> results = new ArrayList<>();
         for (JsonNode orch : dataArray) {
-            String orchestratorAddress = normalizeAddress(orch.path("address").asText(""));
-            String localAddress = normalizeAddress(orch.path("local_address").asText(""));
+            String orchestratorAddress = AddressNormalizer.normalizeOrEmpty(orch.path("address").asText(""));
+            String localAddress = AddressNormalizer.normalizeOrEmpty(orch.path("local_address").asText(""));
             String orchUri = orch.path("orch_uri").asText("");
 
             JsonNode capacities = orch.path("capabilities").path("capacities");
@@ -135,8 +136,8 @@ final class NetworkCapabilitiesParser {
 
         List<EventPayloads.NetworkCapabilityModelConstraint> results = new ArrayList<>();
         for (JsonNode orch : dataArray) {
-            String orchestratorAddress = normalizeAddress(orch.path("address").asText(""));
-            String localAddress = normalizeAddress(orch.path("local_address").asText(""));
+            String orchestratorAddress = AddressNormalizer.normalizeOrEmpty(orch.path("address").asText(""));
+            String localAddress = AddressNormalizer.normalizeOrEmpty(orch.path("local_address").asText(""));
             String orchUri = orch.path("orch_uri").asText("");
 
             JsonNode perCapability = orch.path("capabilities").path("constraints").path("PerCapability");
@@ -192,8 +193,8 @@ final class NetworkCapabilitiesParser {
 
         List<EventPayloads.NetworkCapabilityPrice> results = new ArrayList<>();
         for (JsonNode orch : dataArray) {
-            String orchestratorAddress = normalizeAddress(orch.path("address").asText(""));
-            String localAddress = normalizeAddress(orch.path("local_address").asText(""));
+            String orchestratorAddress = AddressNormalizer.normalizeOrEmpty(orch.path("address").asText(""));
+            String localAddress = AddressNormalizer.normalizeOrEmpty(orch.path("local_address").asText(""));
             String orchUri = orch.path("orch_uri").asText("");
 
             JsonNode prices = orch.path("capabilities_prices");
@@ -323,13 +324,6 @@ final class NetworkCapabilitiesParser {
         } catch (NumberFormatException ex) {
             return null;
         }
-    }
-
-    private static String normalizeAddress(String value) {
-        if (value == null || value.isBlank()) {
-            return value == null ? "" : value;
-        }
-        return value.toLowerCase();
     }
 
     private static final class ModelSelection {

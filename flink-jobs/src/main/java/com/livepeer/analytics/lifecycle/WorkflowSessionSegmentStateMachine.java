@@ -1,10 +1,11 @@
 package com.livepeer.analytics.lifecycle;
 
 import com.livepeer.analytics.model.EventPayloads;
+import com.livepeer.analytics.util.AddressNormalizer;
+import com.livepeer.analytics.util.StringSemantics;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 
 /**
  * Segment lifecycle transitions.
@@ -23,7 +24,7 @@ public final class WorkflowSessionSegmentStateMachine {
             CapabilitySnapshotRef snapshot,
             long attributionTtlMs) {
         List<EventPayloads.FactWorkflowSessionSegment> out = new ArrayList<>(2);
-        String canonicalFromSnapshot = snapshot == null ? "" : normalizeAddress(snapshot.canonicalOrchestratorAddress);
+        String canonicalFromSnapshot = snapshot == null ? "" : AddressNormalizer.normalizeOrEmpty(snapshot.canonicalOrchestratorAddress);
         String effectiveOrchestrator = canonicalFromSnapshot;
 
         if (!state.openSegment) {
@@ -34,13 +35,13 @@ public final class WorkflowSessionSegmentStateMachine {
         }
 
         // Boundary rule (v1): non-empty orchestrator changed from one value to another.
-        if (!isEmpty(effectiveOrchestrator)
-                && !isEmpty(state.orchestratorAddress)
-                && !normalizeAddress(state.orchestratorAddress).equals(effectiveOrchestrator)) {
+        if (!StringSemantics.isBlank(effectiveOrchestrator)
+                && !StringSemantics.isBlank(state.orchestratorAddress)
+                && !AddressNormalizer.normalizeOrEmpty(state.orchestratorAddress).equals(effectiveOrchestrator)) {
             state.segmentEndTs = signal.signalTimestamp;
             state.reason = "orchestrator_change";
-            state.sourceTraceType = firstNonEmpty(signal.traceType, state.sourceTraceType);
-            state.sourceEventUid = firstNonEmpty(signal.sourceEventUid, state.sourceEventUid);
+            state.sourceTraceType = StringSemantics.firstNonBlank(signal.traceType, state.sourceTraceType);
+            state.sourceEventUid = StringSemantics.firstNonBlank(signal.sourceEventUid, state.sourceEventUid);
             state.version++;
             out.add(toFact(state));
 
@@ -52,13 +53,13 @@ public final class WorkflowSessionSegmentStateMachine {
         }
 
         // In-place updates (no boundary).
-        state.gateway = firstNonEmpty(state.gateway, signal.gateway);
-        if (!isEmpty(effectiveOrchestrator)) {
+        state.gateway = StringSemantics.firstNonBlank(state.gateway, signal.gateway);
+        if (!StringSemantics.isBlank(effectiveOrchestrator)) {
             state.orchestratorAddress = effectiveOrchestrator;
         }
-        state.orchestratorUrl = firstNonEmpty(signal.orchestratorUrl, state.orchestratorUrl);
-        state.sourceTraceType = firstNonEmpty(signal.traceType, state.sourceTraceType);
-        state.sourceEventUid = firstNonEmpty(signal.sourceEventUid, state.sourceEventUid);
+        state.orchestratorUrl = StringSemantics.firstNonBlank(signal.orchestratorUrl, state.orchestratorUrl);
+        state.sourceTraceType = StringSemantics.firstNonBlank(signal.traceType, state.sourceTraceType);
+        state.sourceEventUid = StringSemantics.firstNonBlank(signal.sourceEventUid, state.sourceEventUid);
         applySnapshot(state, snapshot, signal.signalTimestamp, attributionTtlMs);
 
         // Explicit close edge finalizes current segment window.
@@ -82,12 +83,12 @@ public final class WorkflowSessionSegmentStateMachine {
         state.workflowSessionId = signal.workflowSessionId;
         state.segmentStartTs = signal.signalTimestamp;
         state.segmentEndTs = null;
-        state.gateway = firstNonEmpty(state.gateway, signal.gateway);
-        state.orchestratorAddress = firstNonEmpty(effectiveOrchestrator, state.orchestratorAddress);
-        state.orchestratorUrl = firstNonEmpty(signal.orchestratorUrl, state.orchestratorUrl);
+        state.gateway = StringSemantics.firstNonBlank(state.gateway, signal.gateway);
+        state.orchestratorAddress = StringSemantics.firstNonBlank(effectiveOrchestrator, state.orchestratorAddress);
+        state.orchestratorUrl = StringSemantics.firstNonBlank(signal.orchestratorUrl, state.orchestratorUrl);
         state.reason = reason;
-        state.sourceTraceType = firstNonEmpty(sourceTraceType, "");
-        state.sourceEventUid = firstNonEmpty(signal.sourceEventUid, state.sourceEventUid);
+        state.sourceTraceType = StringSemantics.firstNonBlank(sourceTraceType, "");
+        state.sourceEventUid = StringSemantics.firstNonBlank(signal.sourceEventUid, state.sourceEventUid);
         state.version++;
     }
 
@@ -100,27 +101,17 @@ public final class WorkflowSessionSegmentStateMachine {
             return;
         }
 
-        long delta = Math.abs(signalTs - snapshot.snapshotTs);
-        if (delta == 0) {
-            state.attributionMethod = "exact_orchestrator_time_match";
-            state.attributionConfidence = 1.0f;
-        } else if (snapshot.snapshotTs <= signalTs && delta <= attributionTtlMs) {
-            state.attributionMethod = "nearest_prior_snapshot";
-            state.attributionConfidence = 0.9f;
-        } else if (delta <= attributionTtlMs) {
-            state.attributionMethod = "nearest_snapshot_within_ttl";
-            state.attributionConfidence = 0.7f;
-        } else {
-            state.attributionMethod = "proxy_address_join";
-            state.attributionConfidence = 0.4f;
-        }
+        AttributionSemantics.Decision decision =
+                AttributionSemantics.fromSnapshot(signalTs, snapshot.snapshotTs, attributionTtlMs);
+        state.attributionMethod = decision.method;
+        state.attributionConfidence = decision.confidence;
 
-        if (!isEmpty(snapshot.canonicalOrchestratorAddress)) {
+        if (!StringSemantics.isBlank(snapshot.canonicalOrchestratorAddress)) {
             state.orchestratorAddress = snapshot.canonicalOrchestratorAddress;
         }
-        state.orchestratorUrl = firstNonEmpty(snapshot.orchestratorUrl, state.orchestratorUrl);
-        state.modelId = emptyToNull(snapshot.modelId);
-        state.gpuId = emptyToNull(snapshot.gpuId);
+        state.orchestratorUrl = StringSemantics.firstNonBlank(snapshot.orchestratorUrl, state.orchestratorUrl);
+        state.modelId = StringSemantics.blankToNull(snapshot.modelId);
+        state.gpuId = StringSemantics.blankToNull(snapshot.gpuId);
     }
 
     private static EventPayloads.FactWorkflowSessionSegment toFact(WorkflowSessionSegmentAccumulator state) {
@@ -145,24 +136,4 @@ public final class WorkflowSessionSegmentStateMachine {
         return fact;
     }
 
-    private static String firstNonEmpty(String... values) {
-        for (String value : values) {
-            if (!isEmpty(value)) {
-                return value;
-            }
-        }
-        return "";
-    }
-
-    private static String emptyToNull(String value) {
-        return isEmpty(value) ? null : value;
-    }
-
-    private static boolean isEmpty(String value) {
-        return value == null || value.trim().isEmpty();
-    }
-
-    private static String normalizeAddress(String address) {
-        return isEmpty(address) ? "" : address.trim().toLowerCase(Locale.ROOT);
-    }
 }
