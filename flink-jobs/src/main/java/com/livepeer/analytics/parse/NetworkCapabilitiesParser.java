@@ -10,6 +10,7 @@ import com.livepeer.analytics.quality.ValidatedEvent;
 import com.livepeer.analytics.util.AddressNormalizer;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 
@@ -22,13 +23,8 @@ final class NetworkCapabilitiesParser {
     private NetworkCapabilitiesParser() {}
 
     static List<EventPayloads.NetworkCapability> parseSnapshots(ValidatedEvent event) throws Exception {
-        JsonNode dataArray = event.data();
-        if (dataArray == null || !dataArray.isArray() || dataArray.size() == 0) {
-            throw new Exception("No valid orchestrator data found");
-        }
-
         List<EventPayloads.NetworkCapability> results = new ArrayList<>();
-        for (JsonNode orch : dataArray) {
+        for (JsonNode orch : orchestrators(event.data())) {
             String orchestratorAddress = AddressNormalizer.normalizeOrEmpty(orch.path("address").asText(""));
             String localAddress = AddressNormalizer.normalizeOrEmpty(orch.path("local_address").asText(""));
             String orchUri = orch.path("orch_uri").asText("");
@@ -85,13 +81,8 @@ final class NetworkCapabilitiesParser {
     }
 
     static List<EventPayloads.NetworkCapabilityAdvertised> parseAdvertisedCapabilities(ValidatedEvent event) throws Exception {
-        JsonNode dataArray = event.data();
-        if (dataArray == null || !dataArray.isArray() || dataArray.size() == 0) {
-            throw new Exception("No valid orchestrator data found");
-        }
-
         List<EventPayloads.NetworkCapabilityAdvertised> results = new ArrayList<>();
-        for (JsonNode orch : dataArray) {
+        for (JsonNode orch : orchestrators(event.data())) {
             String orchestratorAddress = AddressNormalizer.normalizeOrEmpty(orch.path("address").asText(""));
             String localAddress = AddressNormalizer.normalizeOrEmpty(orch.path("local_address").asText(""));
             String orchUri = orch.path("orch_uri").asText("");
@@ -129,13 +120,8 @@ final class NetworkCapabilitiesParser {
     }
 
     static List<EventPayloads.NetworkCapabilityModelConstraint> parseModelConstraints(ValidatedEvent event) throws Exception {
-        JsonNode dataArray = event.data();
-        if (dataArray == null || !dataArray.isArray() || dataArray.size() == 0) {
-            throw new Exception("No valid orchestrator data found");
-        }
-
         List<EventPayloads.NetworkCapabilityModelConstraint> results = new ArrayList<>();
-        for (JsonNode orch : dataArray) {
+        for (JsonNode orch : orchestrators(event.data())) {
             String orchestratorAddress = AddressNormalizer.normalizeOrEmpty(orch.path("address").asText(""));
             String localAddress = AddressNormalizer.normalizeOrEmpty(orch.path("local_address").asText(""));
             String orchUri = orch.path("orch_uri").asText("");
@@ -186,13 +172,8 @@ final class NetworkCapabilitiesParser {
     }
 
     static List<EventPayloads.NetworkCapabilityPrice> parsePrices(ValidatedEvent event) throws Exception {
-        JsonNode dataArray = event.data();
-        if (dataArray == null || !dataArray.isArray() || dataArray.size() == 0) {
-            throw new Exception("No valid orchestrator data found");
-        }
-
         List<EventPayloads.NetworkCapabilityPrice> results = new ArrayList<>();
-        for (JsonNode orch : dataArray) {
+        for (JsonNode orch : orchestrators(event.data())) {
             String orchestratorAddress = AddressNormalizer.normalizeOrEmpty(orch.path("address").asText(""));
             String localAddress = AddressNormalizer.normalizeOrEmpty(orch.path("local_address").asText(""));
             String orchUri = orch.path("orch_uri").asText("");
@@ -224,6 +205,27 @@ final class NetworkCapabilitiesParser {
         }
 
         return results;
+    }
+
+    private static List<JsonNode> orchestrators(JsonNode dataNode) {
+        if (dataNode == null || dataNode.isMissingNode() || dataNode.isNull()) {
+            return Collections.emptyList();
+        }
+        // `network_capabilities` data can be one orchestrator object or an array of objects.
+        if (dataNode.isObject()) {
+            return dataNode.size() == 0 ? Collections.emptyList() : Collections.singletonList(dataNode);
+        }
+        if (!dataNode.isArray() || dataNode.size() == 0) {
+            return Collections.emptyList();
+        }
+
+        List<JsonNode> orchestrators = new ArrayList<>();
+        for (JsonNode item : dataNode) {
+            if (item != null && item.isObject() && item.size() > 0) {
+                orchestrators.add(item);
+            }
+        }
+        return orchestrators;
     }
 
     private static EventPayloads.NetworkCapability buildBaseSnapshot(

@@ -12,8 +12,10 @@ import java.util.Locale;
  * <p>Invariant:
  * - Classification precedence is fixed as:
  *   success > excused > unexcused (for known streams).
- * - Swap fallback count is derived from canonical orchestrator identity when available
- *   to avoid hot/cold wallet address drift.
+ * - Swap signals are split into:
+ *   confirmed swap count (explicit trace evidence) and
+ *   inferred orchestrator-change count (canonical orchestrator set cardinality).
+ * - Legacy `swap_count` is retained as confirmed-only for backward-compatible consumers.
  * </p>
  */
 public final class WorkflowSessionStateMachine {
@@ -72,6 +74,7 @@ public final class WorkflowSessionStateMachine {
             return;
         }
 
+        // Canonical-only contract: never persist signal hot-wallet addresses into lifecycle facts.
         if (!StringSemantics.isBlank(snapshot.canonicalOrchestratorAddress)) {
             state.orchestratorAddress = snapshot.canonicalOrchestratorAddress;
             state.orchestratorsSeen.add(AddressNormalizer.normalizeOrEmpty(snapshot.canonicalOrchestratorAddress));
@@ -125,8 +128,12 @@ public final class WorkflowSessionStateMachine {
         fact.startupUnexcused = startupUnexcused ? 1 : 0;
 
         long canonicalCount = state.canonicalOrchestratorsSeen.size();
-        long fallbackSwapCount = Math.max(0L, canonicalCount - 1L);
-        fact.swapCount = (int) Math.max(state.explicitSwapCount, fallbackSwapCount);
+        long inferredOrchestratorChangeCount = Math.max(0L, canonicalCount - 1L);
+        // `swap_count` remains for backwards compatibility, but now tracks confirmed swaps only.
+        // Inferred multi-orchestrator evidence is emitted separately.
+        fact.confirmedSwapCount = (int) Math.max(0L, state.explicitSwapCount);
+        fact.inferredOrchestratorChangeCount = (int) inferredOrchestratorChangeCount;
+        fact.swapCount = fact.confirmedSwapCount;
         fact.errorCount = state.errorCount;
         fact.excusableErrorCount = state.excusableErrorCount;
         fact.eventCount = state.eventCount;

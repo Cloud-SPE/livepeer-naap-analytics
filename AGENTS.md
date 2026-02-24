@@ -96,6 +96,33 @@ This file is a short operating map for AI agents and humans. Treat `docs/` as th
    - `tests/integration/sql/assertions_api_readiness.sql`
 3. Version semantics fields (for example `edge_semantics_version`) and run parity checks.
 
+### Pipeline assertion SQL change
+
+1. Update `tests/integration/sql/assertions_pipeline.sql`.
+2. Co-update the requirement map in `docs/quality/TESTING_AND_VALIDATION.md`:
+   - section: `Pipeline Assertions Requirement Map`.
+   - rule: every `-- TEST:` block in SQL must have a corresponding row in the table.
+3. Re-run pipeline assertions and notebook checks to confirm no contract regressions.
+
+### General Contract-Drift Gate (Apply to Any Refactor)
+
+Use this checklist for any change that can alter schema, semantics, serving views, or analysis output.
+
+1. Update implementation + contracts together in the same change:
+   - code (`flink-jobs` / SQL),
+   - schema/contracts docs (`docs/data/*`),
+   - validation docs (`docs/quality/*`).
+2. Run deterministic checks in this order:
+   - `cd flink-jobs && mvn test`
+   - `tests/integration/run_all.sh`
+   - `uv run --project tools/python python scripts/run_clickhouse_query_pack.py --lookback-hours 24`
+3. Keep assertion SQL and assertion-map docs synchronized:
+   - `tests/integration/sql/assertions_pipeline.sql`
+   - `docs/quality/TESTING_AND_VALIDATION.md` (Pipeline Assertions Requirement Map)
+4. Keep notebook diagnostics aligned with contract semantics:
+   - `docs/reports/notebook/FLINK_DATA_TRACE_AND_INTEGRATION_TESTS.ipynb`
+5. If any check cannot be run, explicitly record what was skipped and residual risk in PR notes.
+
 ## Boundaries
 
 - Always:

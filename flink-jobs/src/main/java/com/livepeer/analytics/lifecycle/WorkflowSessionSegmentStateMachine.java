@@ -54,6 +54,7 @@ public final class WorkflowSessionSegmentStateMachine {
 
         // In-place updates (no boundary).
         state.gateway = StringSemantics.firstNonBlank(state.gateway, signal.gateway);
+        state.pipeline = StringSemantics.firstNonBlank(state.pipeline, signal.pipeline);
         if (!StringSemantics.isBlank(effectiveOrchestrator)) {
             state.orchestratorAddress = effectiveOrchestrator;
         }
@@ -84,6 +85,7 @@ public final class WorkflowSessionSegmentStateMachine {
         state.segmentStartTs = signal.signalTimestamp;
         state.segmentEndTs = null;
         state.gateway = StringSemantics.firstNonBlank(state.gateway, signal.gateway);
+        state.pipeline = StringSemantics.firstNonBlank(state.pipeline, signal.pipeline);
         state.orchestratorAddress = StringSemantics.firstNonBlank(effectiveOrchestrator, state.orchestratorAddress);
         state.orchestratorUrl = StringSemantics.firstNonBlank(signal.orchestratorUrl, state.orchestratorUrl);
         state.reason = reason;
@@ -106,6 +108,7 @@ public final class WorkflowSessionSegmentStateMachine {
         state.attributionMethod = decision.method;
         state.attributionConfidence = decision.confidence;
 
+        // Canonical-only contract: segment attribution never falls back to signal hot wallet.
         if (!StringSemantics.isBlank(snapshot.canonicalOrchestratorAddress)) {
             state.orchestratorAddress = snapshot.canonicalOrchestratorAddress;
         }

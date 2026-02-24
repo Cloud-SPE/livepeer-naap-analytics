@@ -15,6 +15,7 @@ public class WorkflowSessionSegmentAccumulator implements Serializable {
     public long segmentStartTs;
     public Long segmentEndTs;
     public String gateway = "";
+    public String pipeline = "";
     public String orchestratorAddress = "";
     public String orchestratorUrl = "";
     public String workerId = "";

@@ -146,6 +146,21 @@ FROM
   ) t ON tm.typed_name = t.typed_name
 );
 
+-- TEST: raw_typed_network_capabilities_expected_in_window
+-- Fixture runs are expected to replay network_capabilities. If this returns 0,
+-- the replay/fixture window likely drifted from the capability event timestamps.
+SELECT
+  toUInt64(raw_rows = 0) AS failed_rows,
+  raw_rows
+FROM
+(
+  SELECT count() AS raw_rows
+  FROM livepeer_analytics.streaming_events
+  WHERE type = 'network_capabilities'
+    AND event_timestamp >= {from_ts:DateTime64(3)}
+    AND event_timestamp < {to_ts:DateTime64(3)}
+);
+
 -- TEST: raw_typed_network_capabilities_fanout_guard
 -- network_capabilities can legitimately fan out from one raw source event to
 -- multiple typed rows (for example one row per capability entry).

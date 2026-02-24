@@ -265,6 +265,8 @@ class ClickHouseSchemaSyncTest {
         payload.startupSuccess = 1;
         payload.startupExcused = 0;
         payload.startupUnexcused = 0;
+        payload.confirmedSwapCount = 0;
+        payload.inferredOrchestratorChangeCount = 0;
         payload.swapCount = 0;
         payload.errorCount = 0L;
         payload.excusableErrorCount = 0L;

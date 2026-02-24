@@ -526,7 +526,8 @@ WITH
       argMax(gpu_id, version) AS gpu_id,
       argMax(known_stream, version) AS known_stream,
       argMax(startup_unexcused, version) AS startup_unexcused,
-      argMax(swap_count, version) AS swap_count
+      argMax(confirmed_swap_count, version) AS confirmed_swap_count,
+      argMax(inferred_orchestrator_change_count, version) AS inferred_orchestrator_change_count
     FROM livepeer_analytics.fact_workflow_sessions
     GROUP BY workflow_session_id
   ),
@@ -539,7 +540,7 @@ WITH
       ifNull(gpu_id, '') AS gpu_id,
       sum(toUInt64(known_stream)) AS raw_known_sessions,
       sum(toUInt64(startup_unexcused)) AS raw_unexcused_sessions,
-      sum(toUInt64(swap_count > 0)) AS raw_swapped_sessions
+      sum(toUInt64((confirmed_swap_count > 0) OR (inferred_orchestrator_change_count > 0))) AS raw_swapped_sessions
     FROM latest_sessions
     WHERE session_start_ts >= from_ts AND session_start_ts < to_ts
     GROUP BY window_start, orchestrator_address, pipeline, model_id, gpu_id
@@ -642,12 +643,15 @@ WITH
   to_ts - INTERVAL 24 HOUR AS from_ts
 SELECT
   count() AS sessions_total,
-  countIf(swap_count > 0) AS sessions_with_swaps,
-  countIf(swap_count > 0) / nullIf(count(), 0) AS swap_rate
+  countIf((confirmed_swap_count > 0) OR (inferred_orchestrator_change_count > 0)) AS sessions_with_swaps,
+  countIf(confirmed_swap_count > 0) AS sessions_with_confirmed_swaps,
+  countIf(inferred_orchestrator_change_count > 0) AS sessions_with_inferred_changes,
+  countIf((confirmed_swap_count > 0) OR (inferred_orchestrator_change_count > 0)) / nullIf(count(), 0) AS swap_rate
 FROM (
   SELECT
     workflow_session_id,
-    argMax(swap_count, version) AS swap_count
+    argMax(confirmed_swap_count, version) AS confirmed_swap_count,
+    argMax(inferred_orchestrator_change_count, version) AS inferred_orchestrator_change_count
   FROM livepeer_analytics.fact_workflow_sessions
   WHERE session_start_ts >= from_ts AND session_start_ts < to_ts
   GROUP BY workflow_session_id
@@ -734,16 +738,16 @@ WITH
 SELECT
   count() AS sessions_checked,
   countIf(seg_cnt > 1) AS sessions_multi_segment,
-  countIf(session_swap_count > 0 AND seg_cnt = 1) AS swap_without_segment_change
+  countIf(session_confirmed_swap_count > 0 AND seg_cnt = 1) AS confirmed_swap_without_segment_change
 FROM (
   SELECT
     s.workflow_session_id,
-    s.session_swap_count,
+    s.session_confirmed_swap_count,
     ifNull(g.seg_cnt, 0) AS seg_cnt
   FROM (
     SELECT
       workflow_session_id,
-      argMax(swap_count, version) AS session_swap_count
+      argMax(confirmed_swap_count, version) AS session_confirmed_swap_count
     FROM livepeer_analytics.fact_workflow_sessions
     WHERE session_start_ts >= from_ts AND session_start_ts < to_ts
     GROUP BY workflow_session_id

@@ -74,11 +74,20 @@ public class SchemaValidator {
             }
         }
 
-        if ("network_capabilities".equals(eventType) || "discovery_results".equals(eventType)) {
+        if ("discovery_results".equals(eventType)) {
             JsonNode dataArray = root.get("data");
             if (!dataArray.isArray() || dataArray.size() == 0) {
                 LOG.debug("Schema validation failed: empty data array for type {}", eventType);
                 return ValidationResult.invalid("SCHEMA_INVALID", "empty_array", "Expected non-empty data array");
+            }
+        }
+
+        if ("network_capabilities".equals(eventType)) {
+            JsonNode data = root.get("data");
+            // Producers emit either a single orchestrator object or an array of objects.
+            if (!(data.isArray() || data.isObject())) {
+                LOG.debug("Schema validation failed: invalid data shape for type {}", eventType);
+                return ValidationResult.invalid("SCHEMA_INVALID", "invalid_data_shape", "Expected data object or array");
             }
         }
 

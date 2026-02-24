@@ -4,6 +4,8 @@
 -- Additional columns are treated as diagnostics.
 
 -- TEST: raw_events_present
+-- Verifies that the core raw/typed ingress objects have at least one row in the validation window.
+-- Requirement: the pipeline run must have observable input and typed event coverage before deeper checks.
 SELECT
   countIf(rows_window = 0) AS failed_rows,
   groupArrayIf(object_name, rows_window = 0) AS missing_objects
@@ -30,6 +32,8 @@ FROM
 );
 
 -- TEST: capability_dimension_mvs_present
+-- Verifies required capability materialized views are present in ClickHouse system metadata.
+-- Requirement: dimensional projection infrastructure must exist before validating capability outputs.
 SELECT
   countIf(mv_exists = 0) AS failed_rows,
   groupArrayIf(mv_name, mv_exists = 0) AS missing_mvs
@@ -57,6 +61,8 @@ FROM
 );
 
 -- TEST: capability_dimensions_projecting
+-- Verifies capability raw/typed tables are being projected into their dimension snapshot tables.
+-- Requirement: when source rows exist, corresponding dimensional rows must also exist in-window.
 WITH
   raw_rows AS
   (
@@ -93,6 +99,8 @@ FROM raw_rows
 CROSS JOIN dim_rows;
 
 -- TEST: session_fact_present
+-- Verifies lifecycle session fact rows exist in the window.
+-- Requirement: Flink sessionization must emit `fact_workflow_sessions` for the replayed fixture period.
 SELECT
   toUInt64(count() = 0) AS failed_rows,
   count() AS sessions_window
@@ -100,7 +108,37 @@ FROM livepeer_analytics.fact_workflow_sessions
 WHERE session_start_ts >= {from_ts:DateTime64(3)}
   AND session_start_ts < {to_ts:DateTime64(3)};
 
+-- TEST: network_capabilities_raw_and_typed_present
+-- Verifies network capabilities events are present in both raw and typed layers.
+-- Requirement: fixture windows intended for attribution must include parseable capabilities coverage.
+-- Capability assertions are explicit because fixture windows are expected to
+-- include this event family; missing rows usually indicate window drift.
+WITH
+  raw AS
+  (
+    SELECT count() AS raw_rows
+    FROM livepeer_analytics.streaming_events
+    WHERE type = 'network_capabilities'
+      AND event_timestamp >= {from_ts:DateTime64(3)}
+      AND event_timestamp < {to_ts:DateTime64(3)}
+  ),
+  typed AS
+  (
+    SELECT count() AS typed_rows
+    FROM livepeer_analytics.network_capabilities
+    WHERE event_timestamp >= {from_ts:DateTime64(3)}
+      AND event_timestamp < {to_ts:DateTime64(3)}
+  )
+SELECT
+  toUInt64(raw_rows = 0 OR typed_rows = 0) AS failed_rows,
+  raw_rows,
+  typed_rows
+FROM raw
+CROSS JOIN typed;
+
 -- TEST: status_raw_to_silver_projection
+-- Verifies each typed `ai_stream_status` row is projected into silver fact status samples by source UID.
+-- Requirement: non-stateful status projection must be lossless for rows in scope.
 WITH
   typed AS
   (
@@ -132,6 +170,8 @@ FROM
 );
 
 -- TEST: trace_raw_to_silver_projection
+-- Verifies each typed `stream_trace_events` row is projected into silver trace edges by source UID.
+-- Requirement: non-stateful trace projection must be lossless for rows in scope.
 WITH
   typed AS
   (
@@ -163,6 +203,8 @@ FROM
 );
 
 -- TEST: ingest_raw_to_silver_projection
+-- Verifies each typed `stream_ingest_metrics` row is projected into silver ingest samples by source UID.
+-- Requirement: non-stateful ingest projection must be lossless when ingest metrics are present.
 WITH
   typed AS
   (
@@ -194,6 +236,8 @@ FROM
 );
 
 -- TEST: session_final_uniqueness
+-- Verifies `FINAL` semantics yield exactly one latest row per workflow session id.
+-- Requirement: versioned upsert behavior in `fact_workflow_sessions` must converge deterministically.
 WITH window_rows AS
 (
   SELECT workflow_session_id, version
@@ -224,6 +268,8 @@ SELECT
 FROM latest_rows;
 
 -- TEST: workflow_session_has_identifier
+-- Verifies session fact rows never have an empty workflow session id.
+-- Requirement: session identity is mandatory for all downstream joins and scenario diagnostics.
 SELECT
   countIf(workflow_session_id = '') AS failed_rows,
   count() AS total_rows
@@ -231,10 +277,72 @@ FROM livepeer_analytics.fact_workflow_sessions FINAL
 WHERE session_start_ts >= {from_ts:DateTime64(3)}
   AND session_start_ts < {to_ts:DateTime64(3)};
 
+-- TEST: swap_signal_split_consistency
+-- Verifies split swap contract: legacy `swap_count` must equal `confirmed_swap_count`.
+-- Requirement: compatibility field stays confirmed-only while inferred changes are tracked separately.
+SELECT
+  countIf(swap_count != confirmed_swap_count) AS failed_rows,
+  count() AS rows_checked
+FROM livepeer_analytics.fact_workflow_sessions FINAL
+WHERE session_start_ts >= {from_ts:DateTime64(3)}
+  AND session_start_ts < {to_ts:DateTime64(3)};
+
+-- TEST: gold_sessions_use_canonical_orchestrator_identity
+-- Verifies non-empty session orchestrator addresses align with canonical
+-- orchestrator identities observed in network_capabilities for the same window.
+-- Requirement: gold/session facts should expose canonical orchestrator identity,
+-- not hot-wallet/local addresses from source event payloads.
+WITH
+  canonical_capability_wallets AS
+  (
+    SELECT DISTINCT lower(orchestrator_address) AS orchestrator_address
+    FROM livepeer_analytics.network_capabilities
+    WHERE event_timestamp >= {from_ts:DateTime64(3)}
+      AND event_timestamp < {to_ts:DateTime64(3)}
+      AND orchestrator_address != ''
+  ),
+  latest_sessions AS
+  (
+    SELECT
+      workflow_session_id,
+      lower(argMax(orchestrator_address, version)) AS orchestrator_address
+    FROM livepeer_analytics.fact_workflow_sessions
+    WHERE session_start_ts >= {from_ts:DateTime64(3)}
+      AND session_start_ts < {to_ts:DateTime64(3)}
+    GROUP BY workflow_session_id
+  )
+SELECT
+  toUInt64(
+    if(
+      (SELECT count() FROM canonical_capability_wallets) = 0,
+      0,
+      noncanonical_session_orchestrators
+    )
+  ) AS failed_rows,
+  noncanonical_session_orchestrators,
+  session_orchestrators_checked
+FROM
+(
+  SELECT
+    countIf(
+      s.orchestrator_address != ''
+      AND c.orchestrator_address IS NULL
+    ) AS noncanonical_session_orchestrators,
+    countIf(s.orchestrator_address != '') AS session_orchestrators_checked
+  FROM latest_sessions s
+  LEFT JOIN canonical_capability_wallets c
+    ON c.orchestrator_address = s.orchestrator_address
+);
+
 -- TEST: swapped_sessions_have_evidence
+-- Verifies sessions with `swap_count > 0` (confirmed swap signal) have explicit swap evidence in either silver trace edges
+-- (by workflow_session_id) or typed trace events (by stream_id/request_id fallback).
 WITH
   swapped AS (
-    SELECT workflow_session_id
+    SELECT
+      workflow_session_id,
+      stream_id,
+      request_id
     FROM livepeer_analytics.fact_workflow_sessions FINAL
     WHERE session_start_ts >= {from_ts:DateTime64(3)}
       AND session_start_ts < {to_ts:DateTime64(3)}
@@ -257,17 +365,44 @@ WITH
     WHERE edge_ts >= {from_ts:DateTime64(3)}
       AND edge_ts < {to_ts:DateTime64(3)}
     GROUP BY workflow_session_id
+  ),
+  trace_by_ids AS (
+    SELECT
+      stream_id,
+      request_id,
+      max(toUInt8(trace_type = 'orchestrator_swap')) AS has_swap_trace
+    FROM livepeer_analytics.stream_trace_events
+    WHERE event_timestamp >= {from_ts:DateTime64(3)}
+      AND event_timestamp < {to_ts:DateTime64(3)}
+      AND stream_id != ''
+      AND request_id != ''
+    GROUP BY stream_id, request_id
   )
 SELECT
   count() AS failed_rows,
-  count() AS swapped_without_evidence
-FROM swapped s
-LEFT JOIN seg USING (workflow_session_id)
-LEFT JOIN edge USING (workflow_session_id)
-WHERE ifNull(seg.orch_count, 0) <= 1
-  AND ifNull(edge.has_swap_edge, 0) = 0;
+  count() AS swapped_without_evidence,
+  groupArray(failures.workflow_session_id) AS failing_workflow_session_ids,
+  groupArray(concat(failures.stream_id, '|', failures.request_id)) AS failing_stream_request_pairs
+FROM
+(
+  SELECT
+    s.workflow_session_id AS workflow_session_id,
+    s.stream_id AS stream_id,
+    s.request_id AS request_id
+  FROM swapped s
+  LEFT JOIN seg USING (workflow_session_id)
+  LEFT JOIN edge USING (workflow_session_id)
+  LEFT JOIN trace_by_ids t
+    ON t.stream_id = s.stream_id
+   AND t.request_id = s.request_id
+  WHERE ifNull(seg.orch_count, 0) <= 1
+    AND ifNull(edge.has_swap_edge, 0) = 0
+    AND ifNull(t.has_swap_trace, 0) = 0
+) failures;
 
 -- TEST: param_updates_reference_existing_session
+-- Verifies every param update fact references a known workflow session in the same window.
+-- Requirement: no orphaned `fact_workflow_param_updates` rows.
 WITH session_ids AS
 (
   SELECT DISTINCT workflow_session_id
@@ -285,6 +420,8 @@ WHERE pu.update_ts >= {from_ts:DateTime64(3)}
   AND s.workflow_session_id IS NULL;
 
 -- TEST: lifecycle_session_pipeline_model_compatible
+-- Verifies lifecycle attribution keeps pipeline and model labels compatible when both are present.
+-- Requirement: current model/pipeline contract remains internally consistent for emitted sessions.
 -- Guardrail for lifecycle attribution correctness:
 -- when both fields are present, session pipeline label and model_id must match
 -- under current misnomer-compatible contract.
@@ -315,6 +452,8 @@ WHERE session_start_ts >= {from_ts:DateTime64(3)}
   AND session_start_ts < {to_ts:DateTime64(3)};
 
 -- TEST: gpu_view_matches_rollup
+-- Verifies `v_api_gpu_metrics` matches underlying rollup aggregates at the same dimensional grain.
+-- Requirement: serving view must be numerically consistent with rollup source tables.
 SELECT
   toUInt64(ifNull(max_abs_diff_fps, 0) > 0.000001) AS failed_rows,
   joined_rows,
@@ -359,6 +498,8 @@ FROM
 );
 
 -- TEST: sla_view_matches_session_fact
+-- Verifies SLA API view counts match independently recomputed counts from latest session facts.
+-- Requirement: `v_api_sla_compliance` must preserve known/unexcused/swapped semantics.
 WITH
   latest_sessions AS (
     SELECT
@@ -371,7 +512,8 @@ WITH
       argMax(region, version) AS region,
       argMax(known_stream, version) AS known_stream,
       argMax(startup_unexcused, version) AS startup_unexcused,
-      argMax(swap_count, version) AS swap_count
+      argMax(confirmed_swap_count, version) AS confirmed_swap_count,
+      argMax(inferred_orchestrator_change_count, version) AS inferred_orchestrator_change_count
     FROM livepeer_analytics.fact_workflow_sessions
     GROUP BY workflow_session_id
   ),
@@ -385,7 +527,7 @@ WITH
       ifNull(region, '') AS region,
       sum(toUInt64(known_stream)) AS raw_known_sessions,
       sum(toUInt64(startup_unexcused)) AS raw_unexcused_sessions,
-      sum(toUInt64(swap_count > 0)) AS raw_swapped_sessions
+      sum(toUInt64((confirmed_swap_count > 0) OR (inferred_orchestrator_change_count > 0))) AS raw_swapped_sessions
     FROM latest_sessions
     WHERE session_start_ts >= {from_ts:DateTime64(3)}
       AND session_start_ts < {to_ts:DateTime64(3)}
@@ -425,6 +567,8 @@ FROM
 );
 
 -- TEST: sla_ratios_in_bounds
+-- Verifies SLA ratio fields are bounded between 0 and 1.
+-- Requirement: API-facing compliance ratios must remain mathematically valid.
 SELECT
   countIf(success_ratio < 0 OR success_ratio > 1)
   + countIf(no_swap_ratio < 0 OR no_swap_ratio > 1) AS failed_rows,

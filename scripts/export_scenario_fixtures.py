@@ -103,6 +103,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--require-all-scenarios", dest="require_all_scenarios", action="store_true")
     parser.add_argument("--allow-missing-scenarios", dest="require_all_scenarios", action="store_false")
+    parser.add_argument(
+        "--manifest-window-padding-minutes",
+        type=int,
+        default=60,
+        help="Padding added around derived fixture session window in manifest metadata.",
+    )
     parser.set_defaults(require_all_scenarios=True)
     return parser.parse_args()
 
@@ -136,6 +142,9 @@ def get_client(args: argparse.Namespace):
 
 
 def parse_query_blocks(path: Path) -> list[tuple[str, str]]:
+    # Scenario selection SQL is authored as a single file with repeated
+    # `-- QUERY: <name>` markers. We split it here so each block runs
+    # independently and maps to one scenario key in the manifest.
     blocks: list[tuple[str, str]] = []
     current_name: str | None = None
     current_lines: list[str] = []
@@ -172,6 +181,31 @@ def normalize_dt(value: Any) -> datetime | None:
     if isinstance(value, str):
         return parse_utc(value)
     return None
+
+
+def derive_manifest_window_from_sessions(
+    scenarios_manifest: dict[str, Any],
+    fallback_from_ts: datetime,
+    fallback_to_ts: datetime,
+    padding_minutes: int,
+) -> tuple[datetime, datetime]:
+    starts: list[datetime] = []
+    ends: list[datetime] = []
+    for scenario in scenarios_manifest.values():
+        for session in scenario.get("sessions", []):
+            start = normalize_dt(session.get("session_start_ts"))
+            end = normalize_dt(session.get("session_end_ts")) or start
+            if start is None:
+                continue
+            starts.append(start)
+            if end is not None:
+                ends.append(end)
+
+    if not starts:
+        return fallback_from_ts, fallback_to_ts
+
+    pad = timedelta(minutes=max(int(padding_minutes), 0))
+    return min(starts) - pad, max(ends) + pad
 
 
 def to_json_value(value: Any) -> Any:
@@ -241,6 +275,10 @@ def export_session_rows(
     capability_max_rows_per_context: int,
     capability_unrelated_rows: int,
 ) -> dict[str, int]:
+    # We export all rows for a selected workflow session in three passes:
+    # 1) session/fact tables keyed by workflow_session_id,
+    # 2) typed event tables keyed by request_id/stream_id + time window,
+    # 3) capabilities rows aligned to the session's attribution context.
     counts: dict[str, int] = {}
 
     start_bound = session.session_start_ts - timedelta(minutes=padding_minutes)
@@ -297,53 +335,114 @@ def export_session_rows(
                     payload[col] = to_json_value(row[i])
                 out.write(json.dumps(payload, default=str, ensure_ascii=False) + "\n")
 
-        # Pull network_capabilities using orchestrator/gpu from session facts.
-        # These rows do not carry request_id/stream_id, so we align by session context.
-        capability_context_sql = """
-SELECT DISTINCT orchestrator_address, ifNull(gpu_id, '') AS gpu_id
+        # Pull network_capabilities context from two sources:
+        # 1) canonical orchestrator/gpu on lifecycle facts,
+        # 2) hot-wallet addresses seen on typed status/trace rows.
+        # This avoids selecting capability rows that share canonical orch but
+        # use unrelated local_address wallets for the sampled session.
+        session_filters: list[str] = []
+        session_filter_params: dict[str, Any] = {
+            "window_start": start_bound.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+            "window_end": end_bound.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+            "workflow_session_id": session.workflow_session_id,
+        }
+        if session.request_id:
+            session_filters.append("request_id = %(request_id)s")
+            session_filter_params["request_id"] = session.request_id
+        if session.stream_id:
+            session_filters.append("stream_id = %(stream_id)s")
+            session_filter_params["stream_id"] = session.stream_id
+
+        typed_predicate = " OR ".join(session_filters) if session_filters else "0"
+        capability_context_sql = f"""
+SELECT DISTINCT context_type, lookup_wallet, canonical_orchestrator_address, ifNull(gpu_id, '') AS gpu_id
 FROM
 (
-  SELECT orchestrator_address, ifNull(gpu_id, '') AS gpu_id
+  SELECT
+    'canonical' AS context_type,
+    lower(orchestrator_address) AS lookup_wallet,
+    lower(orchestrator_address) AS canonical_orchestrator_address,
+    ifNull(gpu_id, '') AS gpu_id
   FROM livepeer_analytics.fact_workflow_sessions FINAL
   WHERE workflow_session_id = %(workflow_session_id)s
+
   UNION ALL
-  SELECT orchestrator_address, ifNull(gpu_id, '') AS gpu_id
+
+  SELECT
+    'canonical' AS context_type,
+    lower(orchestrator_address) AS lookup_wallet,
+    lower(orchestrator_address) AS canonical_orchestrator_address,
+    ifNull(gpu_id, '') AS gpu_id
   FROM livepeer_analytics.fact_workflow_session_segments FINAL
   WHERE workflow_session_id = %(workflow_session_id)s
+
+  UNION ALL
+
+  SELECT
+    'hot_wallet' AS context_type,
+    lower(orchestrator_address) AS lookup_wallet,
+    '' AS canonical_orchestrator_address,
+    '' AS gpu_id
+  FROM livepeer_analytics.ai_stream_status
+  WHERE event_timestamp >= %(window_start)s AND event_timestamp < %(window_end)s
+    AND ({typed_predicate})
+
+  UNION ALL
+
+  SELECT
+    'hot_wallet' AS context_type,
+    lower(orchestrator_address) AS lookup_wallet,
+    '' AS canonical_orchestrator_address,
+    '' AS gpu_id
+  FROM livepeer_analytics.stream_trace_events
+  WHERE event_timestamp >= %(window_start)s AND event_timestamp < %(window_end)s
+    AND ({typed_predicate})
 )
-WHERE orchestrator_address != ''
+WHERE lookup_wallet != ''
 """
-        ctx_cols, ctx_rows = query_rows(
-            client, capability_context_sql, {"workflow_session_id": session.workflow_session_id}
-        )
+        ctx_cols, ctx_rows = query_rows(client, capability_context_sql, session_filter_params)
         ctx_idx = {name: i for i, name in enumerate(ctx_cols)}
         seen_capability_source_event_ids: set[str] = set()
         capability_context_pairs: set[tuple[str, str]] = set()
         for ctx_row in ctx_rows:
-            orchestrator_address = str(ctx_row[ctx_idx["orchestrator_address"]]).strip()
+            context_type = str(ctx_row[ctx_idx["context_type"]]).strip()
+            lookup_wallet = str(ctx_row[ctx_idx["lookup_wallet"]]).strip().lower()
+            canonical_orchestrator_address = str(ctx_row[ctx_idx["canonical_orchestrator_address"]]).strip().lower()
             gpu_id = str(ctx_row[ctx_idx["gpu_id"]]).strip()
-            if not orchestrator_address:
+            if not lookup_wallet:
                 continue
-            capability_context_pairs.add((orchestrator_address.lower(), gpu_id))
+            if canonical_orchestrator_address:
+                capability_context_pairs.add((canonical_orchestrator_address, gpu_id))
 
             cap_start = start_bound - timedelta(minutes=max(int(capability_window_minutes), 0))
             cap_end = end_bound + timedelta(minutes=max(int(capability_window_minutes), 0))
             base_params = {
-                "orchestrator_address": orchestrator_address,
+                "lookup_wallet": lookup_wallet,
                 "gpu_id": gpu_id,
                 "session_start_ts": session.session_start_ts.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
                 "window_start": cap_start.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
                 "window_end": cap_end.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
                 "global_start": global_from_ts.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
                 "global_end": global_to_ts.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+                "window_start_ms": int(cap_start.timestamp() * 1000),
+                "window_end_ms": int(cap_end.timestamp() * 1000),
+                "global_start_ms": int(global_from_ts.timestamp() * 1000),
+                "global_end_ms": int(global_to_ts.timestamp() * 1000),
                 "cap_limit": max(int(capability_max_rows_per_context), 1),
             }
+            wallet_predicate = (
+                "lower(local_address) = lower(%(lookup_wallet)s)"
+                if context_type == "hot_wallet"
+                else "lower(orchestrator_address) = lower(%(lookup_wallet)s)"
+            )
             capability_sql = f"""
 SELECT *
 FROM livepeer_analytics.{CAPABILITY_TABLE}
-WHERE event_timestamp >= %(window_start)s
-  AND event_timestamp < %(window_end)s
-  AND lower(orchestrator_address) = lower(%(orchestrator_address)s)
+WHERE toUnixTimestamp64Milli(event_timestamp) >= %(global_start_ms)s
+  AND toUnixTimestamp64Milli(event_timestamp) < %(global_end_ms)s
+  AND toUnixTimestamp64Milli(event_timestamp) >= %(window_start_ms)s
+  AND toUnixTimestamp64Milli(event_timestamp) < %(window_end_ms)s
+  AND {wallet_predicate}
   AND (%(gpu_id)s = '' OR ifNull(gpu_id, '') = %(gpu_id)s)
 ORDER BY abs(
     toUnixTimestamp64Milli(event_timestamp)
@@ -354,14 +453,16 @@ LIMIT %(cap_limit)s
 """
             cap_cols, cap_rows = query_rows(client, capability_sql, base_params)
 
-            # Fallback for sparse windows: nearest context row in the manifest window.
+            # Fallback for sparse windows: if the local capability window is empty,
+            # pull the nearest context row from the whole export window so replay
+            # still has at least one mapping row for canonical attribution.
             if not cap_rows:
                 fallback_sql = f"""
 SELECT *
 FROM livepeer_analytics.{CAPABILITY_TABLE}
-WHERE event_timestamp >= %(global_start)s
-  AND event_timestamp < %(global_end)s
-  AND lower(orchestrator_address) = lower(%(orchestrator_address)s)
+WHERE toUnixTimestamp64Milli(event_timestamp) >= %(global_start_ms)s
+  AND toUnixTimestamp64Milli(event_timestamp) < %(global_end_ms)s
+  AND {wallet_predicate}
   AND (%(gpu_id)s = '' OR ifNull(gpu_id, '') = %(gpu_id)s)
 ORDER BY abs(
     toUnixTimestamp64Milli(event_timestamp)
@@ -379,6 +480,10 @@ LIMIT 1
                     continue
                 if source_event_id:
                     seen_capability_source_event_ids.add(source_event_id)
+                row_orch = str(row[cap_idx["orchestrator_address"]]).strip().lower() if "orchestrator_address" in cap_idx else ""
+                row_gpu = str(row[cap_idx["gpu_id"]]).strip() if "gpu_id" in cap_idx else ""
+                if row_orch:
+                    capability_context_pairs.add((row_orch, row_gpu))
 
                 payload = {
                     "__table": CAPABILITY_TABLE,
@@ -391,19 +496,23 @@ LIMIT 1
                 counts[CAPABILITY_TABLE] = counts.get(CAPABILITY_TABLE, 0) + 1
 
         if int(capability_unrelated_rows) > 0:
+            # Optional negative-control rows: include unrelated capabilities so
+            # attribution SQL can be tested against non-matching contexts.
             unrelated_limit = int(capability_unrelated_rows)
             scan_limit = max(unrelated_limit * 50, 50)
             unrelated_sql = f"""
 SELECT *
 FROM livepeer_analytics.{CAPABILITY_TABLE}
-WHERE event_timestamp >= %(global_start)s
-  AND event_timestamp < %(global_end)s
+WHERE toUnixTimestamp64Milli(event_timestamp) >= %(global_start_ms)s
+  AND toUnixTimestamp64Milli(event_timestamp) < %(global_end_ms)s
 ORDER BY event_timestamp DESC
 LIMIT %(scan_limit)s
 """
             unrelated_params = {
                 "global_start": global_from_ts.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
                 "global_end": global_to_ts.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+                "global_start_ms": int(global_from_ts.timestamp() * 1000),
+                "global_end_ms": int(global_to_ts.timestamp() * 1000),
                 "scan_limit": scan_limit,
             }
             cap_cols, cap_rows = query_rows(client, unrelated_sql, unrelated_params)
@@ -523,6 +632,20 @@ def main() -> None:
             )
 
         manifest["scenarios"][scenario_name] = scenario_manifest
+
+    # Keep manifest window aligned to actual exported fixture rows so notebook
+    # and test harness defaults include all promoted sessions.
+    derived_from_ts, derived_to_ts = derive_manifest_window_from_sessions(
+        manifest["scenarios"],
+        fallback_from_ts=from_ts,
+        fallback_to_ts=to_ts,
+        padding_minutes=args.manifest_window_padding_minutes,
+    )
+    manifest["window"] = {"from_ts": derived_from_ts.isoformat(), "to_ts": derived_to_ts.isoformat()}
+    manifest["metadata"] = {
+        "query_window": {"from_ts": from_ts.isoformat(), "to_ts": to_ts.isoformat()},
+        "manifest_window_padding_minutes": int(args.manifest_window_padding_minutes),
+    }
 
     manifest_path = base_out / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")

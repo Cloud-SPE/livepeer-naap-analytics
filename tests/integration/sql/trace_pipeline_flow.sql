@@ -196,7 +196,9 @@ SELECT
   sum(startup_success) AS startup_success_sessions,
   sum(startup_excused) AS startup_excused_sessions,
   sum(startup_unexcused) AS startup_unexcused_sessions,
-  sum(swap_count > 0) AS swapped_sessions,
+  sum(confirmed_swap_count > 0) AS confirmed_swapped_sessions,
+  sum(inferred_orchestrator_change_count > 0) AS inferred_orchestrator_change_sessions,
+  sum((confirmed_swap_count > 0) OR (inferred_orchestrator_change_count > 0)) AS swapped_sessions,
   avg(startup_unexcused) AS unexcused_rate
 FROM livepeer_analytics.fact_workflow_sessions FINAL
 WHERE session_start_ts >= {from_ts:DateTime64(3)}
@@ -298,7 +300,8 @@ WITH
       argMax(region, version) AS region,
       argMax(known_stream, version) AS known_stream,
       argMax(startup_unexcused, version) AS startup_unexcused,
-      argMax(swap_count, version) AS swap_count
+      argMax(confirmed_swap_count, version) AS confirmed_swap_count,
+      argMax(inferred_orchestrator_change_count, version) AS inferred_orchestrator_change_count
     FROM livepeer_analytics.fact_workflow_sessions
     GROUP BY workflow_session_id
   ),
@@ -312,7 +315,7 @@ WITH
       ifNull(region, '') AS region,
       sum(toUInt64(known_stream)) AS raw_known_sessions,
       sum(toUInt64(startup_unexcused)) AS raw_unexcused_sessions,
-      sum(toUInt64(swap_count > 0)) AS raw_swapped_sessions
+      sum(toUInt64((confirmed_swap_count > 0) OR (inferred_orchestrator_change_count > 0))) AS raw_swapped_sessions
     FROM latest_sessions
     WHERE session_start_ts >= {from_ts:DateTime64(3)}
       AND session_start_ts < {to_ts:DateTime64(3)}

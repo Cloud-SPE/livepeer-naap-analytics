@@ -76,6 +76,8 @@ def resolve_window(args: argparse.Namespace) -> tuple[datetime, datetime]:
 
 
 def parse_query_blocks(path: Path) -> list[tuple[str, str]]:
+    # Query packs follow the same marker convention as assertions, but each
+    # block is informational (no pass/fail contract).
     blocks: list[tuple[str, str]] = []
     current_name: str | None = None
     current_lines: list[str] = []
@@ -137,6 +139,7 @@ def main() -> None:
     print("")
 
     client = get_client(args)
+    # Execute in file order so notebook/debug output matches SQL layout.
     for name, sql in blocks:
         print(f"=== {name} ===")
         result = client.query(sql, parameters=params)

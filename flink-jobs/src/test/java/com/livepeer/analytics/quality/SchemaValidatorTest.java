@@ -46,4 +46,28 @@ class SchemaValidatorTest {
         assertFalse(result.valid);
         assertEquals("UNSUPPORTED_VERSION", result.failureClass);
     }
+
+    @Test
+    void networkCapabilitiesAcceptsObjectData() throws Exception {
+        String json = "{\"id\":\"evt-4\",\"type\":\"network_capabilities\",\"timestamp\":1710000000000,\"data\":{\"address\":\"0xabc\"}}";
+        JsonNode node = JsonSupport.MAPPER.readTree(json);
+
+        SchemaValidator validator = new SchemaValidator(Collections.singleton("1"));
+        SchemaValidator.ValidationResult result = validator.validate(node);
+
+        assertTrue(result.valid);
+    }
+
+    @Test
+    void networkCapabilitiesRejectsInvalidScalarData() throws Exception {
+        String json = "{\"id\":\"evt-5\",\"type\":\"network_capabilities\",\"timestamp\":1710000000000,\"data\":\"bad-shape\"}";
+        JsonNode node = JsonSupport.MAPPER.readTree(json);
+
+        SchemaValidator validator = new SchemaValidator(Collections.singleton("1"));
+        SchemaValidator.ValidationResult result = validator.validate(node);
+
+        assertFalse(result.valid);
+        assertEquals("SCHEMA_INVALID", result.failureClass);
+        assertEquals("invalid_data_shape", result.reason);
+    }
 }

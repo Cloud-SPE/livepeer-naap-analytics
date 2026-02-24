@@ -113,7 +113,7 @@ Canonical reference for repository scripts under `scripts/`.
   - `--[no-]capture-logs-on-fail` (default on; writes compose diagnostics to artifacts)
   - `--docker-log-tail <n>` (default `2000`, `0` for full logs)
   - `--pipeline-ready-timeout-seconds <n>` / `--pipeline-ready-poll-seconds <n>`
-  - `--required-connector <name>` (repeatable; defaults include raw ClickHouse + MinIO sinks)
+  - `--required-connector <name>` (repeatable; default is `clickhouse-raw-events-sink`)
   - `--scenario <name>` (repeatable; replay filter)
   - `--kafka-container`, `--kafka-bootstrap-server`, `--kafka-input-topic`
   - `--keep-stack-on-fail`

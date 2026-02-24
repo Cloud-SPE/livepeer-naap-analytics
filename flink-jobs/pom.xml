@@ -380,6 +380,8 @@
                                         <argument>assert_pipeline</argument>
                                         <argument>--stage</argument>
                                         <argument>assert_api</argument>
+                                        <argument>--stage</argument>
+                                        <argument>assert_scenarios</argument>
                                         <argument>--compose-files</argument>
                                         <argument>docker-compose.yml,docker-compose.scenario.yml</argument>
                                         <argument>--keep-stack-on-fail</argument>

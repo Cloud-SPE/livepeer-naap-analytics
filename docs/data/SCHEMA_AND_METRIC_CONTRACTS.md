@@ -124,7 +124,10 @@ Contract rule: additive fields are canonical; clients must recompute ratios/scor
     - `ice connection state failed`
     - `user disconnected`
 - Swap detection:
-  - swapped session if explicit `orchestrator_swap` exists OR unique orchestrator count > 1 in the session.
+  - `confirmed_swap_count`: explicit `orchestrator_swap` trace evidence.
+  - `inferred_orchestrator_change_count`: unique canonical orchestrator count > 1 in the session.
+  - `swap_count` (legacy compatibility): mirrors confirmed swaps (`confirmed_swap_count`).
+  - gold rollups expose both split metrics and also keep `swapped_sessions` as the union of confirmed/inferred.
   - segment boundary opens on orchestrator identity change.
 - GPU/model attribution:
   - enrich by nearest capability snapshot using canonicalized orchestrator identity and model-matched join rules.
@@ -209,6 +212,9 @@ Prod-derived regression tests must cover mixed-model hot-wallet candidate sets, 
 - Canonicalization expectation:
   - `fact_*`, `agg_*`, and `v_api_*` relations persist canonical `orchestrator_address`.
   - `network_capabilities*` relations preserve both canonical and local identity fields for traceability.
+  - Flink attribution lookup should tolerate both identity representations at ingest boundaries:
+    capability context is indexed by both `network_capabilities.local_address` (hot wallet) and
+    `network_capabilities.orchestrator_address` (canonical), while persisted gold outputs remain canonical.
 
 ## Naming and Semantics Invariants
 

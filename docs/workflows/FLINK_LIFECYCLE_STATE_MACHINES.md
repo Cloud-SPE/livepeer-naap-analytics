@@ -105,7 +105,9 @@ Primary logic class: `WorkflowSessionStateMachine`.
 
 ### Swap classification
 
-- swapped if explicit swap signal exists OR unique canonical orchestrator count > 1.
+- `confirmed_swap_count`: incremented only by explicit `orchestrator_swap` signals.
+- `inferred_orchestrator_change_count`: derived from unique canonical orchestrator count > 1.
+- `swap_count` is retained as a compatibility field and mirrors `confirmed_swap_count`.
 
 ## Segment State Machine (`fact_workflow_session_segments`)
 

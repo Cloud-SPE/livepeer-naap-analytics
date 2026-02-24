@@ -123,27 +123,40 @@ public class WorkflowParamUpdateAggregatorFunction extends KeyedBroadcastProcess
         }
         EventPayloads.NetworkCapability cap = capabilityEvent.payload;
         String hotAddress = AddressNormalizer.normalizeOrEmpty(cap.localAddress);
-        if (StringSemantics.isBlank(hotAddress)) {
+        String canonicalAddress = AddressNormalizer.normalizeOrEmpty(cap.orchestratorAddress);
+        if (StringSemantics.isBlank(hotAddress) && StringSemantics.isBlank(canonicalAddress)) {
             return;
         }
         CapabilitySnapshotRef ref = new CapabilitySnapshotRef();
         ref.snapshotTs = cap.eventTimestamp;
-        ref.canonicalOrchestratorAddress = AddressNormalizer.normalizeOrEmpty(cap.orchestratorAddress);
+        ref.canonicalOrchestratorAddress = canonicalAddress;
         ref.orchestratorUrl = cap.orchUri;
         ref.modelId = cap.modelId;
         ref.gpuId = cap.gpuId;
+        // Index by both hot wallet and canonical address so signal lookups work
+        // regardless of which identity variant upstream trace/status emitted.
+        if (!StringSemantics.isBlank(hotAddress)) {
+            upsertCapabilityIndex(ctx, hotAddress, ref, cap.eventTimestamp);
+        }
+        if (!StringSemantics.isBlank(canonicalAddress) && !canonicalAddress.equals(hotAddress)) {
+            upsertCapabilityIndex(ctx, canonicalAddress, ref, cap.eventTimestamp);
+        }
+    }
+
+    private static void upsertCapabilityIndex(Context ctx, String key, CapabilitySnapshotRef ref, long eventTs)
+            throws Exception {
         CapabilitySnapshotBucket bucket = ctx.getBroadcastState(CapabilityBroadcastState.CAPABILITY_STATE_DESCRIPTOR)
-                .get(hotAddress);
+                .get(key);
         if (bucket == null) {
             bucket = new CapabilitySnapshotBucket();
         }
         CapabilityAttributionSelector.upsertCandidate(
                 bucket,
                 ref,
-                cap.eventTimestamp,
+                eventTs,
                 DEFAULT_ATTRIBUTION_TTL_MS,
                 CapabilityAttributionSelector.DEFAULT_MAX_CANDIDATES_PER_WALLET);
-        ctx.getBroadcastState(CapabilityBroadcastState.CAPABILITY_STATE_DESCRIPTOR).put(hotAddress, bucket);
+        ctx.getBroadcastState(CapabilityBroadcastState.CAPABILITY_STATE_DESCRIPTOR).put(key, bucket);
     }
 
     private void applySnapshotAttribution(
@@ -153,6 +166,7 @@ public class WorkflowParamUpdateAggregatorFunction extends KeyedBroadcastProcess
         if (snapshot == null) {
             return;
         }
+        // Canonical-only contract: param-update facts inherit canonical orchestrator identity only.
         if (!StringSemantics.isBlank(snapshot.canonicalOrchestratorAddress)) {
             state.orchestratorAddress = snapshot.canonicalOrchestratorAddress;
         }

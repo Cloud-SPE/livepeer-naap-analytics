@@ -5,6 +5,14 @@
 --   to_ts   DateTime64(3)
 
 -- TEST: scenario_1_clean_success_no_swap_fps_gt_12_exists
+WITH canonical_cap_wallets AS
+(
+  SELECT DISTINCT lower(orchestrator_address) AS wallet
+  FROM livepeer_analytics.network_capabilities
+  WHERE event_timestamp >= {from_ts:DateTime64(3)}
+    AND event_timestamp < {to_ts:DateTime64(3)}
+    AND orchestrator_address != ''
+)
 SELECT
   toUInt64(count() = 0) AS failed_rows,
   count() AS candidates
@@ -28,7 +36,10 @@ FROM
     AND fs.known_stream = 1
     AND fs.startup_success = 1
     AND fs.startup_unexcused = 0
+    -- Scenario 1 assertion remains confirmed-no-swap for fixture stability.
     AND fs.swap_count = 0
+    AND fs.orchestrator_address != ''
+    AND lower(fs.orchestrator_address) IN (SELECT wallet FROM canonical_cap_wallets)
   LIMIT 1
 );
 
@@ -65,6 +76,10 @@ FROM
 );
 
 -- TEST: scenario_3_success_with_swap_exists
+-- Uses combined swap semantics for candidate existence:
+-- confirmed swap signal OR inferred orchestrator-change evidence.
+-- Capability-wallet overlap is intentionally not required for this scenario;
+-- otherwise valid swapped sessions can be hidden by window-misaligned capability snapshots.
 SELECT
   toUInt64(count() = 0) AS failed_rows,
   count() AS candidates
@@ -75,7 +90,7 @@ FROM
   WHERE session_start_ts >= {from_ts:DateTime64(3)}
     AND session_start_ts < {to_ts:DateTime64(3)}
     AND startup_success = 1
-    AND swap_count > 0
+    AND (confirmed_swap_count > 0 OR inferred_orchestrator_change_count > 0)
   LIMIT 1
 );
 

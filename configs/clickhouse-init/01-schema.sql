@@ -658,6 +658,8 @@ CREATE TABLE IF NOT EXISTS fact_workflow_sessions
     startup_excused UInt8,
     startup_unexcused UInt8,
 
+    confirmed_swap_count UInt16,
+    inferred_orchestrator_change_count UInt16,
     swap_count UInt16,
     error_count UInt32,
     excusable_error_count UInt32,
@@ -1105,6 +1107,8 @@ CREATE TABLE IF NOT EXISTS agg_reliability_1h
     success_sessions_state AggregateFunction(sum, UInt64),
     excused_sessions_state AggregateFunction(sum, UInt64),
     unexcused_sessions_state AggregateFunction(sum, UInt64),
+    confirmed_swapped_sessions_state AggregateFunction(sum, UInt64),
+    inferred_orchestrator_change_sessions_state AggregateFunction(sum, UInt64),
     swapped_sessions_state AggregateFunction(sum, UInt64)
 )
     ENGINE = AggregatingMergeTree
@@ -1192,7 +1196,9 @@ SELECT
     sumState(toUInt64(startup_success)) AS success_sessions_state,
     sumState(toUInt64(startup_excused)) AS excused_sessions_state,
     sumState(toUInt64(startup_unexcused)) AS unexcused_sessions_state,
-    sumState(toUInt64(swap_count > 0)) AS swapped_sessions_state
+    sumState(toUInt64(confirmed_swap_count > 0)) AS confirmed_swapped_sessions_state,
+    sumState(toUInt64(inferred_orchestrator_change_count > 0)) AS inferred_orchestrator_change_sessions_state,
+    sumState(toUInt64((confirmed_swap_count > 0) OR (inferred_orchestrator_change_count > 0))) AS swapped_sessions_state
 FROM fact_workflow_sessions
 GROUP BY
     window_start,
@@ -1343,6 +1349,8 @@ rel_1h AS
             argMax(startup_success, version) AS startup_success,
             argMax(startup_excused, version) AS startup_excused,
             argMax(startup_unexcused, version) AS startup_unexcused,
+            argMax(confirmed_swap_count, version) AS confirmed_swap_count,
+            argMax(inferred_orchestrator_change_count, version) AS inferred_orchestrator_change_count,
             argMax(swap_count, version) AS swap_count
         FROM fact_workflow_sessions
         GROUP BY workflow_session_id
@@ -1358,7 +1366,9 @@ rel_1h AS
         sum(toUInt64(startup_success)) AS success_sessions,
         sum(toUInt64(startup_excused)) AS excused_sessions,
         sum(toUInt64(startup_unexcused)) AS unexcused_sessions,
-        sum(toUInt64(swap_count > 0)) AS swapped_sessions
+        sum(toUInt64(confirmed_swap_count > 0)) AS confirmed_swapped_sessions,
+        sum(toUInt64(inferred_orchestrator_change_count > 0)) AS inferred_orchestrator_change_sessions,
+        sum(toUInt64((confirmed_swap_count > 0) OR (inferred_orchestrator_change_count > 0))) AS swapped_sessions
     FROM latest_sessions
     WHERE session_start_ts > toDateTime64('2000-01-01 00:00:00', 3, 'UTC')
     GROUP BY
@@ -1494,6 +1504,8 @@ SELECT
     ifNull(r.success_sessions, toUInt64(0)) AS success_sessions,
     ifNull(r.excused_sessions, toUInt64(0)) AS excused_sessions,
     ifNull(r.unexcused_sessions, toUInt64(0)) AS unexcused_sessions,
+    ifNull(r.confirmed_swapped_sessions, toUInt64(0)) AS confirmed_swapped_sessions,
+    ifNull(r.inferred_orchestrator_change_sessions, toUInt64(0)) AS inferred_orchestrator_change_sessions,
     ifNull(r.swapped_sessions, toUInt64(0)) AS swapped_sessions,
 
     -- Derived rates for API response convenience.
@@ -1564,6 +1576,8 @@ latest_sessions AS
         argMax(orchestrator_address, version) AS orchestrator_address,
         argMax(known_stream, version) AS known_stream,
         argMax(startup_unexcused, version) AS startup_unexcused,
+        argMax(confirmed_swap_count, version) AS confirmed_swap_count,
+        argMax(inferred_orchestrator_change_count, version) AS inferred_orchestrator_change_count,
         argMax(swap_count, version) AS swap_count
     FROM fact_workflow_sessions
     GROUP BY workflow_session_id
@@ -1580,7 +1594,9 @@ demand_1h AS
         sum(toUInt64(known_stream AND orchestrator_address != '')) AS served_sessions,
         sum(toUInt64(known_stream AND orchestrator_address = '')) AS unserved_sessions,
         sum(toUInt64(startup_unexcused)) AS unexcused_sessions,
-        sum(toUInt64(swap_count > 0)) AS swapped_sessions
+        sum(toUInt64(confirmed_swap_count > 0)) AS confirmed_swapped_sessions,
+        sum(toUInt64(inferred_orchestrator_change_count > 0)) AS inferred_orchestrator_change_sessions,
+        sum(toUInt64((confirmed_swap_count > 0) OR (inferred_orchestrator_change_count > 0))) AS swapped_sessions
     FROM latest_sessions
     WHERE session_start_ts > toDateTime64('2000-01-01 00:00:00', 3, 'UTC')
     GROUP BY
@@ -1634,6 +1650,8 @@ SELECT
     ifNull(d.unserved_sessions, toUInt64(0)) AS unserved_sessions,
     ifNull(d.served_sessions, toUInt64(0)) + ifNull(d.unserved_sessions, toUInt64(0)) AS total_demand_sessions,
     ifNull(d.unexcused_sessions, toUInt64(0)) AS unexcused_sessions,
+    ifNull(d.confirmed_swapped_sessions, toUInt64(0)) AS confirmed_swapped_sessions,
+    ifNull(d.inferred_orchestrator_change_sessions, toUInt64(0)) AS inferred_orchestrator_change_sessions,
     ifNull(d.swapped_sessions, toUInt64(0)) AS swapped_sessions,
     -- Proxy for unmet demand (known sessions without orchestrator attribution).
     ifNull(d.unserved_sessions, toUInt64(0)) AS missing_capacity_count,
@@ -1747,6 +1765,8 @@ rel_gpu_1h_raw AS
         gpu_id,
         sumMerge(known_sessions_state) AS known_sessions,
         sumMerge(unexcused_sessions_state) AS unexcused_sessions,
+        sumMerge(confirmed_swapped_sessions_state) AS confirmed_swapped_sessions,
+        sumMerge(inferred_orchestrator_change_sessions_state) AS inferred_orchestrator_change_sessions,
         sumMerge(swapped_sessions_state) AS swapped_sessions
     FROM agg_reliability_1h
     GROUP BY
@@ -1770,6 +1790,8 @@ rel_gpu_1h AS
         nullIf(if(ifNull(r.gpu_id, '') != '', r.gpu_id, ifNull(k.gpu_id, '')), '') AS gpu_id,
         r.known_sessions,
         r.unexcused_sessions,
+        r.confirmed_swapped_sessions,
+        r.inferred_orchestrator_change_sessions,
         r.swapped_sessions
     FROM rel_gpu_1h_raw r
     LEFT JOIN latest_gpu_by_key k
@@ -1878,6 +1900,8 @@ SELECT
 
     ifNull(r.known_sessions, toUInt64(0)) AS known_sessions,
     ifNull(r.unexcused_sessions, toUInt64(0)) AS unexcused_sessions,
+    ifNull(r.confirmed_swapped_sessions, toUInt64(0)) AS confirmed_swapped_sessions,
+    ifNull(r.inferred_orchestrator_change_sessions, toUInt64(0)) AS inferred_orchestrator_change_sessions,
     ifNull(r.swapped_sessions, toUInt64(0)) AS swapped_sessions,
     ifNull(r.unexcused_sessions, toUInt64(0)) AS missing_capacity_count,
 
@@ -1946,6 +1970,8 @@ WITH latest_sessions AS
         argMax(startup_success, version) AS startup_success,
         argMax(startup_excused, version) AS startup_excused,
         argMax(startup_unexcused, version) AS startup_unexcused,
+        argMax(confirmed_swap_count, version) AS confirmed_swap_count,
+        argMax(inferred_orchestrator_change_count, version) AS inferred_orchestrator_change_count,
         argMax(swap_count, version) AS swap_count
     FROM fact_workflow_sessions
     GROUP BY workflow_session_id
@@ -1961,13 +1987,15 @@ SELECT
     sum(toUInt64(startup_success)) AS success_sessions,
     sum(toUInt64(startup_excused)) AS excused_sessions,
     sum(toUInt64(startup_unexcused)) AS unexcused_sessions,
-    sum(toUInt64(swap_count > 0)) AS swapped_sessions,
+    sum(toUInt64(confirmed_swap_count > 0)) AS confirmed_swapped_sessions,
+    sum(toUInt64(inferred_orchestrator_change_count > 0)) AS inferred_orchestrator_change_sessions,
+    sum(toUInt64((confirmed_swap_count > 0) OR (inferred_orchestrator_change_count > 0))) AS swapped_sessions,
     1 - (sum(toUInt64(startup_unexcused)) / nullIf(sum(toUInt64(known_stream)), 0)) AS success_ratio,
-    1 - (sum(toUInt64(swap_count > 0)) / nullIf(sum(toUInt64(known_stream)), 0)) AS no_swap_ratio,
+    1 - (sum(toUInt64((confirmed_swap_count > 0) OR (inferred_orchestrator_change_count > 0))) / nullIf(sum(toUInt64(known_stream)), 0)) AS no_swap_ratio,
     (
         (1 - (sum(toUInt64(startup_unexcused)) / nullIf(sum(toUInt64(known_stream)), 0))) * 0.7
         +
-        (1 - (sum(toUInt64(swap_count > 0)) / nullIf(sum(toUInt64(known_stream)), 0))) * 0.3
+        (1 - (sum(toUInt64((confirmed_swap_count > 0) OR (inferred_orchestrator_change_count > 0))) / nullIf(sum(toUInt64(known_stream)), 0))) * 0.3
     ) * 100 AS sla_score
 FROM latest_sessions
 WHERE session_start_ts > toDateTime64('2000-01-01 00:00:00', 3, 'UTC')

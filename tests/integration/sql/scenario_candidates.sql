@@ -16,11 +16,14 @@ WITH fs_latest AS
     workflow_session_id,
     stream_id,
     request_id,
+    orchestrator_address,
     session_start_ts,
     session_end_ts,
     known_stream,
     startup_success,
     startup_unexcused,
+    confirmed_swap_count,
+    inferred_orchestrator_change_count,
     swap_count
   FROM
   (
@@ -35,6 +38,48 @@ WITH fs_latest AS
       AND session_start_ts < {to_ts:DateTime64(3)}
   )
   WHERE rn = 1
+),
+cap_wallets AS
+(
+  -- Strict contract check for scenario extraction: typed/session identities
+  -- should line up with canonical capability wallets. Avoid fallback joins
+  -- here so normalization regressions surface in notebook output.
+  SELECT DISTINCT lower(orchestrator_address) AS wallet
+  FROM livepeer_analytics.network_capabilities
+  WHERE event_timestamp >= {from_ts:DateTime64(3)}
+    AND event_timestamp < {to_ts:DateTime64(3)}
+    AND orchestrator_address != ''
+),
+wallet_overlap_sessions AS
+(
+  -- Some sessions can miss session-level overlap when attribution is delayed.
+  -- Accept overlap from either the latest session orchestrator or any segment orchestrator
+  -- for the same workflow session so discovery remains stable while preserving canonical checks.
+  SELECT DISTINCT workflow_session_id
+  FROM
+  (
+    SELECT
+      fs.workflow_session_id AS workflow_session_id,
+      lower(fs.orchestrator_address) AS wallet
+    FROM fs_latest fs
+    WHERE fs.orchestrator_address != ''
+    UNION ALL
+    SELECT
+      seg.workflow_session_id AS workflow_session_id,
+      lower(seg.orchestrator_address) AS wallet
+    FROM
+    (
+      SELECT *
+      FROM livepeer_analytics.fact_workflow_session_segments FINAL
+    ) seg
+    INNER JOIN fs_latest fs
+      ON fs.workflow_session_id = seg.workflow_session_id
+    WHERE seg.segment_start_ts >= {from_ts:DateTime64(3)}
+      AND seg.segment_start_ts < {to_ts:DateTime64(3)}
+      AND seg.orchestrator_address != ''
+  ) x
+  INNER JOIN cap_wallets c
+    ON c.wallet = x.wallet
 )
 SELECT
   'scenario_1_clean_success_no_swap_fps_gt_12' AS scenario_name,
@@ -57,6 +102,8 @@ LEFT JOIN
 WHERE fs.known_stream = 1
   AND fs.startup_success = 1
   AND fs.startup_unexcused = 0
+  -- Scenario 1 remains confirmed-no-swap for fixture stability.
+  -- Inferred orchestrator changes are still surfaced as diagnostics.
   AND fs.swap_count = 0
 GROUP BY
   fs.workflow_session_id,
@@ -127,14 +174,19 @@ ORDER BY fs.session_start_ts DESC
 LIMIT {limit_per_scenario:UInt32};
 
 -- QUERY: scenario_3_success_with_swap
+-- Uses combined swap semantics for discovery:
+-- any confirmed swap OR inferred orchestrator-change evidence qualifies as swap.
 WITH fs_latest AS
 (
   SELECT
     workflow_session_id,
     stream_id,
     request_id,
+    orchestrator_address,
     session_start_ts,
     session_end_ts,
+    confirmed_swap_count,
+    inferred_orchestrator_change_count,
     startup_success,
     swap_count
   FROM
@@ -150,6 +202,25 @@ WITH fs_latest AS
       AND session_start_ts < {to_ts:DateTime64(3)}
   )
   WHERE rn = 1
+),
+cap_wallets AS
+(
+  -- Strict contract check for scenario extraction: typed/session identities
+  -- should line up with canonical capability wallets. Avoid fallback joins
+  -- here so normalization regressions surface in notebook output.
+  SELECT DISTINCT lower(orchestrator_address) AS wallet
+  FROM livepeer_analytics.network_capabilities
+  WHERE event_timestamp >= {from_ts:DateTime64(3)}
+    AND event_timestamp < {to_ts:DateTime64(3)}
+    AND orchestrator_address != ''
+),
+wallet_overlap_sessions AS
+(
+  -- NOTE: scenario 3 intentionally does not require capability-wallet overlap.
+  -- Swapped sessions can legitimately appear without in-window capabilities overlap
+  -- in fixture windows; filtering on overlap would hide valid scenario rows.
+  SELECT workflow_session_id
+  FROM fs_latest
 )
 SELECT
   'scenario_3_success_with_swap' AS scenario_name,
@@ -158,6 +229,8 @@ SELECT
   fs.request_id AS request_id,
   fs.session_start_ts AS session_start_ts,
   fs.session_end_ts AS session_end_ts,
+  fs.confirmed_swap_count AS confirmed_swap_count,
+  fs.inferred_orchestrator_change_count AS inferred_orchestrator_change_count,
   fs.swap_count AS swap_count,
   uniqExactIf(seg.orchestrator_address, seg.orchestrator_address != '') AS segment_orchestrators
 FROM fs_latest fs
@@ -168,13 +241,20 @@ LEFT JOIN
 ) seg
   ON seg.workflow_session_id = fs.workflow_session_id
 WHERE fs.startup_success = 1
-  AND fs.swap_count > 0
+  AND (
+    fs.confirmed_swap_count > 0
+    OR fs.inferred_orchestrator_change_count > 0
+    OR fs.swap_count > 0
+  )
+  AND fs.workflow_session_id IN (SELECT workflow_session_id FROM wallet_overlap_sessions)
 GROUP BY
   fs.workflow_session_id,
   fs.stream_id,
   fs.request_id,
   fs.session_start_ts,
   fs.session_end_ts,
+  fs.confirmed_swap_count,
+  fs.inferred_orchestrator_change_count,
   fs.swap_count
 ORDER BY fs.session_start_ts DESC
 LIMIT {limit_per_scenario:UInt32};

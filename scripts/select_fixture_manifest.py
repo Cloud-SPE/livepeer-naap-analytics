@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from datetime import datetime, timedelta, timezone
 
 
 def parse_args() -> argparse.Namespace:
@@ -27,7 +28,45 @@ def parse_args() -> argparse.Namespace:
         default="tests/integration/fixtures/manifest.json",
         help="Stable manifest output path",
     )
+    parser.add_argument(
+        "--manifest-window-padding-minutes",
+        type=int,
+        default=60,
+        help="Padding added around derived fixture session window in promoted manifest.",
+    )
+    parser.add_argument(
+        "--enforce-capability-overlap",
+        action="store_true",
+        help="Drop sessions that fail typed/capability wallet overlap validation.",
+    )
     return parser.parse_args()
+
+
+def _parse_utc(ts: str) -> datetime:
+    dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _derive_window_from_sessions(manifest: dict, padding_minutes: int) -> tuple[str, str] | None:
+    starts: list[datetime] = []
+    ends: list[datetime] = []
+    scenarios = manifest.get("scenarios", {})
+    for scenario in scenarios.values():
+        for session in scenario.get("sessions", []):
+            start_raw = session.get("session_start_ts")
+            end_raw = session.get("session_end_ts")
+            if not start_raw:
+                continue
+            start = _parse_utc(start_raw)
+            end = _parse_utc(end_raw) if end_raw else start
+            starts.append(start)
+            ends.append(end)
+    if not starts:
+        return None
+    pad = timedelta(minutes=max(int(padding_minutes), 0))
+    return (min(starts) - pad).isoformat(), (max(ends) + pad).isoformat()
 
 
 def find_latest_snapshot_manifest(fixtures_root: Path) -> Path:
@@ -37,13 +76,67 @@ def find_latest_snapshot_manifest(fixtures_root: Path) -> Path:
     return candidates[-1]
 
 
+def _wallet_set(rows: list[dict], table: str, field: str) -> set[str]:
+    # Normalized wallet extractor used by overlap validation.
+    wallets: set[str] = set()
+    for row in rows:
+        if row.get("__table") != table:
+            continue
+        raw = str(row.get(field, "")).strip().lower()
+        if raw:
+            wallets.add(raw)
+    return wallets
+
+
+def _session_has_capability_overlap(session_file: Path) -> tuple[bool, dict]:
+    # Defensive attribution guard:
+    # if typed rows expose orchestrator wallets, require at least one matching
+    # canonical capabilities identity row in the same fixture file.
+    # Keep this strict (no fallback to local/hot wallet) so normalization
+    # regressions remain visible in fixture validation outputs.
+    # This catches snapshots where traces/status and capabilities come from
+    # different wallet populations and would produce blank canonical attribution.
+    rows: list[dict] = []
+    for line in session_file.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+
+    typed_wallets = (
+        _wallet_set(rows, "ai_stream_status", "orchestrator_address")
+        | _wallet_set(rows, "stream_trace_events", "orchestrator_address")
+    )
+    cap_wallets = _wallet_set(rows, "network_capabilities", "orchestrator_address")
+    overlap = sorted(typed_wallets & cap_wallets)
+    details = {
+        "typed_wallet_count": len(typed_wallets),
+        "capability_canonical_wallet_count": len(cap_wallets),
+        "overlap_wallet_count": len(overlap),
+        "sample_overlap_wallets": overlap[:5],
+    }
+    # If no typed wallets are present (e.g. no-orchestrator scenario), keep session.
+    if not typed_wallets:
+        return True, details
+    return bool(overlap), details
+
+
 def relativize_session_files(
-    manifest: dict, source_manifest: Path, output_manifest: Path, repo_root: Path
+    manifest: dict,
+    source_manifest: Path,
+    output_manifest: Path,
+    repo_root: Path,
+    padding_minutes: int,
+    enforce_capability_overlap: bool,
 ) -> dict:
     out = dict(manifest)
     output_base = output_manifest.parent.resolve()
     scenarios = out.get("scenarios", {})
-    for scenario in scenarios.values():
+    dropped_sessions: list[dict] = []
+    for scenario_name, scenario in scenarios.items():
         # Normalize and dedupe by relative fixture file path so downstream
         # replay does not publish the same JSONL twice.
         deduped_sessions = []
@@ -69,11 +162,34 @@ def relativize_session_files(
             if rel_file in seen_files:
                 continue
             seen_files.add(rel_file)
+
+            # Enforce attribution quality: sessions with typed orchestrator wallets
+            # must include at least one matching canonical capabilities wallet.
+            valid, details = _session_has_capability_overlap(resolved)
+            if not valid:
+                dropped_sessions.append(
+                    {
+                        "scenario": session.get("scenario_name", scenario_name),
+                        "workflow_session_id": session.get("workflow_session_id", ""),
+                        "file": rel_file,
+                        **details,
+                    }
+                )
+                if enforce_capability_overlap:
+                    continue
+
             session["file"] = rel_file
             deduped_sessions.append(session)
         scenario["sessions"] = deduped_sessions
     out.setdefault("metadata", {})
     out["metadata"]["promoted_from"] = str(source_manifest.resolve().relative_to(output_base))
+    out["metadata"]["dropped_sessions_missing_capability_wallet_overlap"] = dropped_sessions
+    out["metadata"]["capability_overlap_enforced"] = bool(enforce_capability_overlap)
+    derived_window = _derive_window_from_sessions(out, padding_minutes)
+    if derived_window is not None:
+        from_ts, to_ts = derived_window
+        out["window"] = {"from_ts": from_ts, "to_ts": to_ts}
+        out["metadata"]["manifest_window_padding_minutes"] = int(padding_minutes)
     return out
 
 
@@ -92,11 +208,35 @@ def main() -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
 
     manifest = json.loads(source.read_text(encoding="utf-8"))
-    promoted = relativize_session_files(manifest, source, output, repo_root)
+    promoted = relativize_session_files(
+        manifest,
+        source,
+        output,
+        repo_root,
+        padding_minutes=args.manifest_window_padding_minutes,
+        enforce_capability_overlap=args.enforce_capability_overlap,
+    )
     output.write_text(json.dumps(promoted, indent=2), encoding="utf-8")
 
     print(f"Source manifest: {source}")
     print(f"Wrote stable manifest: {output}")
+    dropped = promoted.get("metadata", {}).get("dropped_sessions_missing_capability_wallet_overlap", [])
+    if dropped:
+        label = (
+            "Dropped sessions with typed/capability wallet mismatch"
+            if args.enforce_capability_overlap
+            else "Sessions with typed/capability wallet mismatch (advisory only)"
+        )
+        print(f"{label}: {len(dropped)}")
+        for item in dropped[:10]:
+            print(
+                "  - "
+                f"{item.get('workflow_session_id', '<unknown>')} "
+                f"({item.get('scenario', '<unknown>')}) "
+                f"typed_wallets={item.get('typed_wallet_count', 0)} "
+                f"cap_wallets={item.get('capability_canonical_wallet_count', 0)} "
+                f"overlap={item.get('overlap_wallet_count', 0)}"
+            )
 
 
 if __name__ == "__main__":

@@ -150,6 +150,8 @@ def extract_raw_event(record: dict[str, Any]) -> dict[str, Any] | None:
         return None
 
     if table == "network_capabilities":
+        # network_capabilities fixtures are stored as typed rows; rebuild the
+        # raw envelope expected on Kafka input from typed columns + raw_json.
         raw_json = record.get("raw_json")
         if not isinstance(raw_json, str) or not raw_json.strip():
             return None
@@ -174,6 +176,8 @@ def extract_raw_event(record: dict[str, Any]) -> dict[str, Any] | None:
         }
 
     if table == "streaming_events":
+        # streaming_events rows are already raw-like; preserve their original
+        # envelope shape, normalizing `data` when it is serialized as a string.
         required = ["id", "type", "timestamp", "gateway", "data"]
         if any(k not in record for k in required):
             return None
@@ -268,6 +272,8 @@ def collect_events(files: list[tuple[str, Path]], max_events: int) -> tuple[list
         if max_events > 0 and len(events) >= max_events:
             break
 
+    # Replay in deterministic timestamp order to reduce event-order drift
+    # across local reruns and CI.
     events.sort(key=lambda e: (e.ts_ms, e.scenario, e.source_table))
 
     stats["by_table"] = dict(sorted(stats["by_table"].items()))

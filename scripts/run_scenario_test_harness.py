@@ -54,6 +54,8 @@ STAGES = [
 ]
 
 MODE_STAGES = {
+    # Smoke is intended to be CI-safe but still contract-complete.
+    # Keep this list aligned with notebook-critical assertion suites.
     "smoke": [
         "stack_up",
         "schema_apply",
@@ -64,6 +66,7 @@ MODE_STAGES = {
         "assert_raw_typed",
         "assert_pipeline",
         "assert_api",
+        "assert_scenarios",
         "stack_down",
     ],
     "full": STAGES,
@@ -194,6 +197,9 @@ class Harness:
         return self._manifest_window_cache
 
     def stage_time_window_args(self, lookback_hours: int) -> list[str]:
+        # Deterministic mode for fixture-driven tests:
+        # use manifest window by default so reruns evaluate the exact same data.
+        # Fall back to relative lookback only if manifest metadata is unavailable.
         if self.args.window_source == "manifest":
             try:
                 from_ts, to_ts = self.resolve_manifest_window()
@@ -372,7 +378,8 @@ class Harness:
         for path in self.state_paths:
             self._append_stage_log(stage_log, f"state_path={path}")
 
-        # Ensure containers release file handles before touching bind-mounted directories.
+        # Ensure containers release file handles before touching bind-mounted
+        # directories; otherwise recursive cleanup can intermittently fail.
         down_cmd = self.compose_down_cmd()
         self.run_command(stage, down_cmd, stage_log)
 
@@ -511,13 +518,15 @@ class Harness:
 
             elif stage == "assert_scenarios":
                 json_out = self.stages_dir / "assert_scenarios.json"
+                # Use the same window-source policy as other assertion stages so
+                # scenario checks stay consistent with fixture windows.
+                window_args = self.stage_time_window_args(self.args.scenario_lookback_hours)
                 cmd = [
                     *self.python_prefix,
                     "scripts/run_clickhouse_data_tests.py",
                     "--sql-file",
                     "tests/integration/sql/assertions_scenario_candidates.sql",
-                    "--lookback-hours",
-                    str(self.args.scenario_lookback_hours),
+                    *window_args,
                     "--json-out",
                     str(json_out),
                 ]
@@ -819,10 +828,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--required-connector",
         action="append",
-        default=["clickhouse-raw-events-sink", "minio-raw-events-sink"],
+        # Keep this default aligned with connectors provisioned by connect-init in
+        # docker-compose.scenario.yml. Add extra --required-connector flags only
+        # when those connectors are actually created in the target stack.
+        default=["clickhouse-raw-events-sink"],
         help=(
             "Connector names that must be RUNNING before replay. Repeatable. "
-            "Default: clickhouse-raw-events-sink and minio-raw-events-sink."
+            "Default: clickhouse-raw-events-sink."
         ),
     )
     parser.add_argument("--max-rows", type=int, default=50)

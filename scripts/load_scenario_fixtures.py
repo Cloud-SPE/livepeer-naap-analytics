@@ -65,6 +65,7 @@ def collect_fixture_files(manifest: dict[str, Any], manifest_path: Path) -> list
     for scenario in manifest.get("scenarios", {}).values():
         for session in scenario.get("sessions", []):
             p = Path(session["file"])
+            # Session file paths are stored relative to manifest by default.
             if not p.is_absolute():
                 p = (base_dir / p).resolve()
             files.append(p)
@@ -99,6 +100,7 @@ def load_jsonl_rows(files: list[Path]) -> dict[str, list[dict[str, Any]]]:
                 table = obj.get("__table")
                 if not table:
                     continue
+                # Strip fixture metadata helper columns before insertion.
                 obj.pop("__table", None)
                 obj.pop("__scenario", None)
                 obj.pop("__workflow_session_id", None)
@@ -119,6 +121,8 @@ def insert_rows(client, database: str, table: str, rows: list[dict[str, Any]]) -
     if not insertable_columns:
         return 0
 
+    # Keep inserts tolerant to schema drift: send only columns that exist in
+    # both fixture rows and current table definition.
     available_columns = [c for c in insertable_columns if any(c in r for r in rows)]
     if not available_columns:
         return 0

@@ -103,6 +103,11 @@ public final class EventPayloads {
 
     /**
      * Stateful lifecycle fact at workflow-session grain.
+     *
+     * <p>Swap semantics:
+     * `confirmedSwapCount` tracks explicit swap trace evidence,
+     * `inferredOrchestratorChangeCount` tracks multi-orchestrator sessions,
+     * and legacy `swapCount` mirrors confirmed swaps for compatibility.</p>
      */
     public static class FactWorkflowSession implements java.io.Serializable {
         private static final long serialVersionUID = 1L;
@@ -117,6 +122,8 @@ public final class EventPayloads {
         public long sessionStartTs;
         public Long sessionEndTs;
         public int knownStream, startupSuccess, startupExcused, startupUnexcused;
+        public int confirmedSwapCount;
+        public int inferredOrchestratorChangeCount;
         public int swapCount;
         public long errorCount, excusableErrorCount;
         public Long firstStreamRequestTs, firstProcessedTs, firstPlayableTs;

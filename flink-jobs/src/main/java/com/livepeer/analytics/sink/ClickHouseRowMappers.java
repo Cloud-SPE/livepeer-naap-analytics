@@ -221,6 +221,8 @@ public final class ClickHouseRowMappers {
                 .addInt("startup_success", f.startupSuccess)
                 .addInt("startup_excused", f.startupExcused)
                 .addInt("startup_unexcused", f.startupUnexcused)
+                .addInt("confirmed_swap_count", f.confirmedSwapCount)
+                .addInt("inferred_orchestrator_change_count", f.inferredOrchestratorChangeCount)
                 .addInt("swap_count", f.swapCount)
                 .addLong("error_count", f.errorCount)
                 .addLong("excusable_error_count", f.excusableErrorCount)

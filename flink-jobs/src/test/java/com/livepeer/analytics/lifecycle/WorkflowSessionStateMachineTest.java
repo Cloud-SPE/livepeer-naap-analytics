@@ -36,6 +36,8 @@ class WorkflowSessionStateMachineTest {
         assertEquals(1, fact.knownStream);
         assertEquals(1, fact.startupSuccess);
         assertEquals(0, fact.startupUnexcused);
+        assertEquals(0, fact.confirmedSwapCount);
+        assertEquals(0, fact.inferredOrchestratorChangeCount);
         assertEquals(0, fact.swapCount); // fallback uses canonical identity only
         assertEquals("e1", fact.sourceFirstEventUid);
         assertEquals("e2", fact.sourceLastEventUid);
@@ -144,6 +146,54 @@ class WorkflowSessionStateMachineTest {
         WorkflowSessionStateMachine.applyCapabilityAttribution(state, sameCanonicalB, 2000L, 24L * 60L * 60L * 1000L);
 
         EventPayloads.FactWorkflowSession fact = WorkflowSessionStateMachine.toFact(state);
+        assertEquals(0, fact.confirmedSwapCount);
+        assertEquals(0, fact.inferredOrchestratorChangeCount);
+        assertEquals(0, fact.swapCount);
+    }
+
+    @Test
+    void tracksConfirmedAndInferredSwapSignalsSeparately() {
+        WorkflowSessionAccumulator state = new WorkflowSessionAccumulator();
+
+        LifecycleSignal explicitSwap = signal(LifecycleSignal.SignalType.STREAM_TRACE, 1000L);
+        explicitSwap.workflowSessionId = "s|r";
+        explicitSwap.traceType = "orchestrator_swap";
+        explicitSwap.sourceEventUid = "e1";
+        WorkflowSessionStateMachine.applySignal(state, explicitSwap);
+
+        CapabilitySnapshotRef canonicalA = new CapabilitySnapshotRef();
+        canonicalA.snapshotTs = 1000L;
+        canonicalA.canonicalOrchestratorAddress = "0xcanonical-a";
+        WorkflowSessionStateMachine.applyCapabilityAttribution(state, canonicalA, 1000L, 24L * 60L * 60L * 1000L);
+
+        CapabilitySnapshotRef canonicalB = new CapabilitySnapshotRef();
+        canonicalB.snapshotTs = 2000L;
+        canonicalB.canonicalOrchestratorAddress = "0xcanonical-b";
+        WorkflowSessionStateMachine.applyCapabilityAttribution(state, canonicalB, 2000L, 24L * 60L * 60L * 1000L);
+
+        EventPayloads.FactWorkflowSession fact = WorkflowSessionStateMachine.toFact(state);
+        assertEquals(1, fact.confirmedSwapCount);
+        assertEquals(1, fact.inferredOrchestratorChangeCount);
+        assertEquals(1, fact.swapCount);
+    }
+
+    @Test
+    void inferredOnlyOrchestratorChangeDoesNotIncrementLegacySwapCount() {
+        WorkflowSessionAccumulator state = new WorkflowSessionAccumulator();
+
+        CapabilitySnapshotRef canonicalA = new CapabilitySnapshotRef();
+        canonicalA.snapshotTs = 1000L;
+        canonicalA.canonicalOrchestratorAddress = "0xcanonical-a";
+        WorkflowSessionStateMachine.applyCapabilityAttribution(state, canonicalA, 1000L, 24L * 60L * 60L * 1000L);
+
+        CapabilitySnapshotRef canonicalB = new CapabilitySnapshotRef();
+        canonicalB.snapshotTs = 2000L;
+        canonicalB.canonicalOrchestratorAddress = "0xcanonical-b";
+        WorkflowSessionStateMachine.applyCapabilityAttribution(state, canonicalB, 2000L, 24L * 60L * 60L * 1000L);
+
+        EventPayloads.FactWorkflowSession fact = WorkflowSessionStateMachine.toFact(state);
+        assertEquals(0, fact.confirmedSwapCount);
+        assertEquals(1, fact.inferredOrchestratorChangeCount);
         assertEquals(0, fact.swapCount);
     }
 

@@ -113,6 +113,35 @@ class EventParsersTest {
         assertEquals("a0b048eb-cb94-4639-8f9f-f283a22a154d", event.event.eventId);
     }
 
+    @Test
+    void networkCapabilitiesParsersHandleSingleObjectData() throws Exception {
+        String rawJson = "{\"id\":\"evt-obj-1\",\"type\":\"network_capabilities\",\"timestamp\":1710000000000,\"data\":{\"address\":\"0xabc\",\"local_address\":\"0xabc\",\"orch_uri\":\"https://orch.example\",\"capabilities\":{\"version\":\"0.8.9\",\"capacities\":{\"35\":1},\"constraints\":{\"PerCapability\":{\"35\":{\"models\":{\"streamdiffusion-sdxl\":{\"warm\":true,\"capacity\":1,\"runnerVersion\":\"0.14.1\"}}}}}},\"capabilities_prices\":[{\"pricePerUnit\":2750,\"pixelsPerUnit\":1,\"capability\":35,\"constraint\":\"streamdiffusion-sdxl\"}],\"hardware\":[{\"pipeline\":\"live-video-to-video\",\"model_id\":\"streamdiffusion-sdxl\",\"gpu_info\":{\"0\":{\"id\":\"GPU-1\",\"name\":\"NVIDIA GeForce RTX 4090\",\"major\":8,\"minor\":9,\"memory_free\":1,\"memory_total\":2}}}]}}";
+        JsonNode root = JsonSupport.MAPPER.readTree(rawJson);
+        ValidatedEvent event = buildValidatedEvent(root, rawJson);
+
+        List<EventPayloads.NetworkCapability> snapshots = EventParsers.parseNetworkCapabilities(event);
+        List<EventPayloads.NetworkCapabilityAdvertised> advertised = EventParsers.parseNetworkCapabilitiesAdvertised(event);
+        List<EventPayloads.NetworkCapabilityModelConstraint> constraints = EventParsers.parseNetworkCapabilitiesModelConstraints(event);
+        List<EventPayloads.NetworkCapabilityPrice> prices = EventParsers.parseNetworkCapabilitiesPrices(event);
+
+        assertFalse(snapshots.isEmpty());
+        assertFalse(advertised.isEmpty());
+        assertFalse(constraints.isEmpty());
+        assertFalse(prices.isEmpty());
+    }
+
+    @Test
+    void networkCapabilitiesParsersHandleEmptyArrayData() throws Exception {
+        String rawJson = "{\"id\":\"evt-empty-1\",\"type\":\"network_capabilities\",\"timestamp\":1710000000000,\"data\":[]}";
+        JsonNode root = JsonSupport.MAPPER.readTree(rawJson);
+        ValidatedEvent event = buildValidatedEvent(root, rawJson);
+
+        assertTrue(EventParsers.parseNetworkCapabilities(event).isEmpty());
+        assertTrue(EventParsers.parseNetworkCapabilitiesAdvertised(event).isEmpty());
+        assertTrue(EventParsers.parseNetworkCapabilitiesModelConstraints(event).isEmpty());
+        assertTrue(EventParsers.parseNetworkCapabilitiesPrices(event).isEmpty());
+    }
+
     private static ValidatedEvent buildValidatedEvent(JsonNode root, String rawJson) {
         StreamingEvent event = new StreamingEvent();
         event.eventId = root.path("id").asText("");

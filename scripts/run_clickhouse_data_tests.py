@@ -109,6 +109,8 @@ def resolve_window(args: argparse.Namespace) -> tuple[datetime, datetime]:
 
 
 def parse_sql_tests(path: Path) -> list[SqlTest]:
+    # Parser contract: each `-- TEST:` marker starts a standalone query block.
+    # The harness relies on stable test names and one-row outputs per block.
     tests: list[SqlTest] = []
     current_name: str | None = None
     current_lines: list[str] = []
@@ -171,6 +173,8 @@ def run_test(client, test: SqlTest, parameters: dict[str, Any]) -> TestResult:
             error="Query returned no rows",
         )
 
+    # Only the first row is evaluated by contract; tests must aggregate to one
+    # row with `failed_rows` and optional diagnostics columns.
     first = row_to_dict(result.column_names, result.result_rows[0])
     if "failed_rows" not in first:
         return TestResult(
@@ -249,6 +253,7 @@ def main() -> None:
     }
 
     client = get_client(args)
+    # Execute all tests even if one fails so the report contains full context.
     results = [run_test(client, test, parameters) for test in tests]
     print_results(results, from_ts, to_ts)
 
