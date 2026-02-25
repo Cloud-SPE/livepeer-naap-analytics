@@ -3,8 +3,9 @@
 
 Workflow:
 1) Find scenario candidate sessions using tests/integration/sql/scenario_candidates.sql.
-2) Export related rows across typed + fact tables.
-3) Write JSONL fixtures and manifest metadata.
+2) Discover capability context with typed/fact tables for stable scenario selection.
+3) Export replay payloads from canonical raw table (`streaming_events`) only.
+4) Write JSONL fixtures and manifest metadata.
 """
 
 from __future__ import annotations
@@ -28,24 +29,14 @@ except ImportError:  # pragma: no cover
 DEFAULT_SCENARIO_SQL = "tests/integration/sql/scenario_candidates.sql"
 DEFAULT_OUTPUT_DIR = "tests/integration/fixtures"
 
-SESSION_TABLES = [
-    ("fact_workflow_sessions FINAL", "workflow_session_id"),
-    ("fact_workflow_session_segments FINAL", "workflow_session_id"),
-    ("fact_workflow_param_updates FINAL", "workflow_session_id"),
-    # ("fact_lifecycle_edge_coverage FINAL", "workflow_session_id"),
-    ("fact_stream_status_samples", "workflow_session_id"),
-    ("fact_stream_trace_edges", "workflow_session_id"),
-    ("fact_stream_ingest_samples", "workflow_session_id"),
-]
-
-EVENT_TABLES = [
-    ("ai_stream_status", "event_timestamp"),
-    ("stream_trace_events", "event_timestamp"),
-    ("ai_stream_events", "event_timestamp"),
-    ("stream_ingest_metrics", "event_timestamp"),
-]
-
 CAPABILITY_TABLE = "network_capabilities"
+RAW_STREAMING_EVENTS_TABLE = "streaming_events"
+RAW_CORE_EVENT_TYPES = (
+    "ai_stream_status",
+    "stream_trace",
+    "ai_stream_events",
+    "stream_ingest_metrics",
+)
 
 
 @dataclass
@@ -90,15 +81,49 @@ def parse_args() -> argparse.Namespace:
         "--capability-max-rows-per-context",
         type=int,
         default=2,
-        help="Max network_capabilities rows exported per (orchestrator,gpu) context.",
+        help="Max capability snapshots scanned per (orchestrator,gpu) context when selecting raw network_capabilities ids.",
+    )
+    parser.add_argument(
+        "--capability-precede-session",
+        dest="capability_precede_session",
+        action="store_true",
+        default=False,
+        help=(
+            "Only export capability rows with event_timestamp <= session start when possible "
+            "(default: disabled)."
+        ),
+    )
+    parser.add_argument(
+        "--no-capability-precede-session",
+        dest="capability_precede_session",
+        action="store_false",
+        help="Allow capability rows after session start when selecting context rows.",
+    )
+    parser.add_argument(
+        "--allow-capability-after-session-fallback",
+        action="store_true",
+        default=False,
+        help=(
+            "If no preceding capability is found for a context, allow nearest post-session "
+            "capability fallback."
+        ),
+    )
+    parser.add_argument(
+        "--capability-restrict-to-global-window",
+        action="store_true",
+        default=False,
+        help=(
+            "Restrict capability extraction to --from-ts/--to-ts bounds. Disabled by default "
+            "so preceding-capability mode can include earlier context rows."
+        ),
     )
     parser.add_argument(
         "--capability-unrelated-rows",
         type=int,
         default=0,
         help=(
-            "Optional extra network_capabilities rows per session that do not match "
-            "the session's orchestrator/gpu context."
+            "Optional extra raw network_capabilities source events per session that do not match "
+            "the session orchestrator/gpu context."
         ),
     )
     parser.add_argument("--require-all-scenarios", dest="require_all_scenarios", action="store_true")
@@ -210,7 +235,11 @@ def derive_manifest_window_from_sessions(
 
 def to_json_value(value: Any) -> Any:
     if isinstance(value, datetime):
-        return value.astimezone(timezone.utc).isoformat()
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        else:
+            value = value.astimezone(timezone.utc)
+        return value.isoformat()
     if isinstance(value, (bytes, bytearray)):
         return value.decode("utf-8", errors="replace")
     return value
@@ -273,88 +302,77 @@ def export_session_rows(
     global_to_ts: datetime,
     capability_window_minutes: int,
     capability_max_rows_per_context: int,
+    capability_precede_session: bool,
+    allow_capability_after_session_fallback: bool,
+    capability_restrict_to_global_window: bool,
     capability_unrelated_rows: int,
 ) -> dict[str, int]:
-    # We export all rows for a selected workflow session in three passes:
-    # 1) session/fact tables keyed by workflow_session_id,
-    # 2) typed event tables keyed by request_id/stream_id + time window,
-    # 3) capabilities rows aligned to the session's attribution context.
+    # Fixture JSONL rows are now canonical raw envelopes from `streaming_events`.
+    # Scenario discovery still uses typed/fact tables, but replay source rows are
+    # always raw to preserve production semantics.
     counts: dict[str, int] = {}
 
     start_bound = session.session_start_ts - timedelta(minutes=padding_minutes)
     raw_end = session.session_end_ts or (session.session_start_ts + timedelta(minutes=open_session_minutes))
     end_bound = raw_end + timedelta(minutes=padding_minutes)
 
-    with out_file.open("w", encoding="utf-8") as out:
-        for table_expr, key_col in SESSION_TABLES:
-            table_name = table_expr.split()[0]
-            sql = f"SELECT * FROM livepeer_analytics.{table_expr} WHERE {key_col} = %(workflow_session_id)s"
-            col_names, rows = query_rows(client, sql, {"workflow_session_id": session.workflow_session_id})
-            counts[table_name] = counts.get(table_name, 0) + len(rows)
-            for row in rows:
-                payload = {
-                    "__table": table_name,
-                    "__scenario": session.scenario_name,
-                    "__workflow_session_id": session.workflow_session_id,
+    window_start = start_bound.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    window_end = end_bound.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    global_start_ms = int(global_from_ts.timestamp() * 1000)
+    global_end_ms = int(global_to_ts.timestamp() * 1000)
+    session_start_ms = int(session.session_start_ts.timestamp() * 1000)
+
+    # Pass 1: core raw session events.
+    core_filters: list[str] = []
+    core_params: dict[str, Any] = {"window_start": window_start, "window_end": window_end}
+    if session.request_id:
+        core_filters.append("JSONExtractString(data, 'request_id') = %(request_id)s")
+        core_params["request_id"] = session.request_id
+    if session.stream_id:
+        core_filters.append("JSONExtractString(data, 'stream_id') = %(stream_id)s")
+        core_params["stream_id"] = session.stream_id
+
+    raw_rows: list[dict[str, Any]] = []
+    if core_filters:
+        core_sql = f"""
+SELECT id, type, timestamp, gateway, data
+FROM livepeer_analytics.{RAW_STREAMING_EVENTS_TABLE}
+WHERE event_timestamp >= %(window_start)s
+  AND event_timestamp < %(window_end)s
+  AND type IN {RAW_CORE_EVENT_TYPES}
+  AND ({' OR '.join(core_filters)})
+ORDER BY timestamp ASC, id ASC
+"""
+        cols, rows = query_rows(client, core_sql, core_params)
+        idx = {name: i for i, name in enumerate(cols)}
+        for row in rows:
+            raw_rows.append(
+                {
+                    "id": to_json_value(row[idx["id"]]),
+                    "type": to_json_value(row[idx["type"]]),
+                    "timestamp": to_json_value(row[idx["timestamp"]]),
+                    "gateway": to_json_value(row[idx["gateway"]]),
+                    "data": to_json_value(row[idx["data"]]),
                 }
-                for i, col in enumerate(col_names):
-                    payload[col] = to_json_value(row[i])
-                out.write(json.dumps(payload, default=str, ensure_ascii=False) + "\n")
-
-        for table_name, ts_col in EVENT_TABLES:
-            id_predicates: list[str] = []
-            params: dict[str, Any] = {
-                "window_start": start_bound.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
-                "window_end": end_bound.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
-            }
-            if session.request_id:
-                id_predicates.append("request_id = %(request_id)s")
-                params["request_id"] = session.request_id
-            if session.stream_id:
-                id_predicates.append("stream_id = %(stream_id)s")
-                params["stream_id"] = session.stream_id
-
-            if not id_predicates:
-                counts[table_name] = counts.get(table_name, 0)
-                continue
-
-            sql = (
-                f"SELECT * FROM livepeer_analytics.{table_name} "
-                f"WHERE {ts_col} >= %(window_start)s AND {ts_col} < %(window_end)s "
-                f"AND ({' OR '.join(id_predicates)})"
             )
-            col_names, rows = query_rows(client, sql, params)
-            counts[table_name] = counts.get(table_name, 0) + len(rows)
-            for row in rows:
-                payload = {
-                    "__table": table_name,
-                    "__scenario": session.scenario_name,
-                    "__workflow_session_id": session.workflow_session_id,
-                }
-                for i, col in enumerate(col_names):
-                    payload[col] = to_json_value(row[i])
-                out.write(json.dumps(payload, default=str, ensure_ascii=False) + "\n")
 
-        # Pull network_capabilities context from two sources:
-        # 1) canonical orchestrator/gpu on lifecycle facts,
-        # 2) hot-wallet addresses seen on typed status/trace rows.
-        # This avoids selecting capability rows that share canonical orch but
-        # use unrelated local_address wallets for the sampled session.
-        session_filters: list[str] = []
-        session_filter_params: dict[str, Any] = {
-            "window_start": start_bound.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
-            "window_end": end_bound.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
-            "workflow_session_id": session.workflow_session_id,
-        }
-        if session.request_id:
-            session_filters.append("request_id = %(request_id)s")
-            session_filter_params["request_id"] = session.request_id
-        if session.stream_id:
-            session_filters.append("stream_id = %(stream_id)s")
-            session_filter_params["stream_id"] = session.stream_id
+    # Pass 2: derive capability source ids from scenario context, then fetch raw
+    # network_capabilities envelopes by those ids.
+    session_filters: list[str] = []
+    session_filter_params: dict[str, Any] = {
+        "window_start": window_start,
+        "window_end": window_end,
+        "workflow_session_id": session.workflow_session_id,
+    }
+    if session.request_id:
+        session_filters.append("request_id = %(request_id)s")
+        session_filter_params["request_id"] = session.request_id
+    if session.stream_id:
+        session_filters.append("stream_id = %(stream_id)s")
+        session_filter_params["stream_id"] = session.stream_id
 
-        typed_predicate = " OR ".join(session_filters) if session_filters else "0"
-        capability_context_sql = f"""
+    typed_predicate = " OR ".join(session_filters) if session_filters else "0"
+    capability_context_sql = f"""
 SELECT DISTINCT context_type, lookup_wallet, canonical_orchestrator_address, ifNull(gpu_id, '') AS gpu_id
 FROM
 (
@@ -400,149 +418,198 @@ FROM
 )
 WHERE lookup_wallet != ''
 """
-        ctx_cols, ctx_rows = query_rows(client, capability_context_sql, session_filter_params)
-        ctx_idx = {name: i for i, name in enumerate(ctx_cols)}
-        seen_capability_source_event_ids: set[str] = set()
-        capability_context_pairs: set[tuple[str, str]] = set()
-        for ctx_row in ctx_rows:
-            context_type = str(ctx_row[ctx_idx["context_type"]]).strip()
-            lookup_wallet = str(ctx_row[ctx_idx["lookup_wallet"]]).strip().lower()
-            canonical_orchestrator_address = str(ctx_row[ctx_idx["canonical_orchestrator_address"]]).strip().lower()
-            gpu_id = str(ctx_row[ctx_idx["gpu_id"]]).strip()
-            if not lookup_wallet:
-                continue
-            if canonical_orchestrator_address:
-                capability_context_pairs.add((canonical_orchestrator_address, gpu_id))
+    ctx_cols, ctx_rows = query_rows(client, capability_context_sql, session_filter_params)
+    ctx_idx = {name: i for i, name in enumerate(ctx_cols)}
+    capability_source_event_ids: set[str] = set()
+    capability_context_pairs: set[tuple[str, str]] = set()
 
-            cap_start = start_bound - timedelta(minutes=max(int(capability_window_minutes), 0))
-            cap_end = end_bound + timedelta(minutes=max(int(capability_window_minutes), 0))
-            base_params = {
-                "lookup_wallet": lookup_wallet,
-                "gpu_id": gpu_id,
-                "session_start_ts": session.session_start_ts.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
-                "window_start": cap_start.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
-                "window_end": cap_end.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
-                "global_start": global_from_ts.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
-                "global_end": global_to_ts.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
-                "window_start_ms": int(cap_start.timestamp() * 1000),
-                "window_end_ms": int(cap_end.timestamp() * 1000),
-                "global_start_ms": int(global_from_ts.timestamp() * 1000),
-                "global_end_ms": int(global_to_ts.timestamp() * 1000),
-                "cap_limit": max(int(capability_max_rows_per_context), 1),
-            }
-            wallet_predicate = (
-                "lower(local_address) = lower(%(lookup_wallet)s)"
-                if context_type == "hot_wallet"
-                else "lower(orchestrator_address) = lower(%(lookup_wallet)s)"
-            )
-            capability_sql = f"""
-SELECT *
+    cap_start = start_bound - timedelta(minutes=max(int(capability_window_minutes), 0))
+    cap_end = end_bound + timedelta(minutes=max(int(capability_window_minutes), 0))
+    cap_start_ms = int(cap_start.timestamp() * 1000)
+    cap_end_ms = int(cap_end.timestamp() * 1000)
+    global_capability_predicate = (
+        "toUnixTimestamp64Milli(event_timestamp) >= %(global_start_ms)s "
+        "AND toUnixTimestamp64Milli(event_timestamp) < %(global_end_ms)s"
+        if capability_restrict_to_global_window
+        else "1=1"
+    )
+
+    for ctx_row in ctx_rows:
+        context_type = str(ctx_row[ctx_idx["context_type"]]).strip()
+        lookup_wallet = str(ctx_row[ctx_idx["lookup_wallet"]]).strip().lower()
+        canonical_orchestrator_address = str(ctx_row[ctx_idx["canonical_orchestrator_address"]]).strip().lower()
+        gpu_id = str(ctx_row[ctx_idx["gpu_id"]]).strip()
+        if not lookup_wallet:
+            continue
+        if canonical_orchestrator_address:
+            capability_context_pairs.add((canonical_orchestrator_address, gpu_id))
+
+        base_params = {
+            "lookup_wallet": lookup_wallet,
+            "gpu_id": gpu_id,
+            "session_start_ms": session_start_ms,
+            "window_start_ms": cap_start_ms,
+            "window_end_ms": cap_end_ms,
+            "global_start_ms": global_start_ms,
+            "global_end_ms": global_end_ms,
+            "cap_limit": max(int(capability_max_rows_per_context), 1),
+        }
+        wallet_predicate = (
+            "lower(local_address) = lower(%(lookup_wallet)s)"
+            if context_type == "hot_wallet"
+            else "lower(orchestrator_address) = lower(%(lookup_wallet)s)"
+        )
+        capability_sql = f"""
+SELECT source_event_id, orchestrator_address, ifNull(gpu_id, '') AS gpu_id
 FROM livepeer_analytics.{CAPABILITY_TABLE}
-WHERE toUnixTimestamp64Milli(event_timestamp) >= %(global_start_ms)s
-  AND toUnixTimestamp64Milli(event_timestamp) < %(global_end_ms)s
+WHERE {global_capability_predicate}
   AND toUnixTimestamp64Milli(event_timestamp) >= %(window_start_ms)s
   AND toUnixTimestamp64Milli(event_timestamp) < %(window_end_ms)s
+  {"AND toUnixTimestamp64Milli(event_timestamp) <= %(session_start_ms)s" if capability_precede_session else ""}
   AND {wallet_predicate}
   AND (%(gpu_id)s = '' OR ifNull(gpu_id, '') = %(gpu_id)s)
-ORDER BY abs(
-    toUnixTimestamp64Milli(event_timestamp)
-    - toUnixTimestamp64Milli(parseDateTime64BestEffort(%(session_start_ts)s, 3, 'UTC'))
-  ),
+ORDER BY
+  (
+    %(session_start_ms)s - toUnixTimestamp64Milli(event_timestamp)
+  ) ASC,
   event_timestamp DESC
 LIMIT %(cap_limit)s
 """
-            cap_cols, cap_rows = query_rows(client, capability_sql, base_params)
+        cap_cols, cap_rows = query_rows(client, capability_sql, base_params)
+        cap_idx = {name: i for i, name in enumerate(cap_cols)}
 
-            # Fallback for sparse windows: if the local capability window is empty,
-            # pull the nearest context row from the whole export window so replay
-            # still has at least one mapping row for canonical attribution.
-            if not cap_rows:
-                fallback_sql = f"""
-SELECT *
+        if not cap_rows:
+            fallback_sql = f"""
+SELECT source_event_id, orchestrator_address, ifNull(gpu_id, '') AS gpu_id
 FROM livepeer_analytics.{CAPABILITY_TABLE}
-WHERE toUnixTimestamp64Milli(event_timestamp) >= %(global_start_ms)s
-  AND toUnixTimestamp64Milli(event_timestamp) < %(global_end_ms)s
+WHERE {global_capability_predicate}
+  {"AND toUnixTimestamp64Milli(event_timestamp) <= %(session_start_ms)s" if capability_precede_session else ""}
+  AND {wallet_predicate}
+  AND (%(gpu_id)s = '' OR ifNull(gpu_id, '') = %(gpu_id)s)
+ORDER BY
+  (
+    %(session_start_ms)s - toUnixTimestamp64Milli(event_timestamp)
+  ) ASC,
+  event_timestamp DESC
+LIMIT 1
+"""
+            cap_cols, cap_rows = query_rows(client, fallback_sql, base_params)
+            cap_idx = {name: i for i, name in enumerate(cap_cols)}
+
+        if capability_precede_session and allow_capability_after_session_fallback and not cap_rows:
+            nearest_after_fallback_sql = f"""
+SELECT source_event_id, orchestrator_address, ifNull(gpu_id, '') AS gpu_id
+FROM livepeer_analytics.{CAPABILITY_TABLE}
+WHERE {global_capability_predicate}
   AND {wallet_predicate}
   AND (%(gpu_id)s = '' OR ifNull(gpu_id, '') = %(gpu_id)s)
 ORDER BY abs(
     toUnixTimestamp64Milli(event_timestamp)
-    - toUnixTimestamp64Milli(parseDateTime64BestEffort(%(session_start_ts)s, 3, 'UTC'))
+    - %(session_start_ms)s
   ),
   event_timestamp DESC
 LIMIT 1
 """
-                cap_cols, cap_rows = query_rows(client, fallback_sql, base_params)
-
+            cap_cols, cap_rows = query_rows(client, nearest_after_fallback_sql, base_params)
             cap_idx = {name: i for i, name in enumerate(cap_cols)}
-            for row in cap_rows:
-                source_event_id = str(row[cap_idx.get("source_event_id", -1)]) if "source_event_id" in cap_idx else ""
-                if source_event_id and source_event_id in seen_capability_source_event_ids:
-                    continue
-                if source_event_id:
-                    seen_capability_source_event_ids.add(source_event_id)
-                row_orch = str(row[cap_idx["orchestrator_address"]]).strip().lower() if "orchestrator_address" in cap_idx else ""
-                row_gpu = str(row[cap_idx["gpu_id"]]).strip() if "gpu_id" in cap_idx else ""
-                if row_orch:
-                    capability_context_pairs.add((row_orch, row_gpu))
 
-                payload = {
-                    "__table": CAPABILITY_TABLE,
-                    "__scenario": session.scenario_name,
-                    "__workflow_session_id": session.workflow_session_id,
-                }
-                for i, col in enumerate(cap_cols):
-                    payload[col] = to_json_value(row[i])
-                out.write(json.dumps(payload, default=str, ensure_ascii=False) + "\n")
-                counts[CAPABILITY_TABLE] = counts.get(CAPABILITY_TABLE, 0) + 1
+        for row in cap_rows:
+            source_event_id = str(row[cap_idx["source_event_id"]]).strip() if "source_event_id" in cap_idx else ""
+            if source_event_id:
+                capability_source_event_ids.add(source_event_id)
+            row_orch = str(row[cap_idx["orchestrator_address"]]).strip().lower() if "orchestrator_address" in cap_idx else ""
+            row_gpu = str(row[cap_idx["gpu_id"]]).strip() if "gpu_id" in cap_idx else ""
+            if row_orch:
+                capability_context_pairs.add((row_orch, row_gpu))
 
-        if int(capability_unrelated_rows) > 0:
-            # Optional negative-control rows: include unrelated capabilities so
-            # attribution SQL can be tested against non-matching contexts.
-            unrelated_limit = int(capability_unrelated_rows)
-            scan_limit = max(unrelated_limit * 50, 50)
-            unrelated_sql = f"""
-SELECT *
+    if int(capability_unrelated_rows) > 0:
+        unrelated_limit = int(capability_unrelated_rows)
+        scan_limit = max(unrelated_limit * 50, 50)
+        unrelated_sql = f"""
+SELECT source_event_id, lower(orchestrator_address) AS orchestrator_address, ifNull(gpu_id, '') AS gpu_id
 FROM livepeer_analytics.{CAPABILITY_TABLE}
 WHERE toUnixTimestamp64Milli(event_timestamp) >= %(global_start_ms)s
   AND toUnixTimestamp64Milli(event_timestamp) < %(global_end_ms)s
 ORDER BY event_timestamp DESC
 LIMIT %(scan_limit)s
 """
-            unrelated_params = {
-                "global_start": global_from_ts.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
-                "global_end": global_to_ts.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
-                "global_start_ms": int(global_from_ts.timestamp() * 1000),
-                "global_end_ms": int(global_to_ts.timestamp() * 1000),
-                "scan_limit": scan_limit,
-            }
-            cap_cols, cap_rows = query_rows(client, unrelated_sql, unrelated_params)
-            cap_idx = {name: i for i, name in enumerate(cap_cols)}
-            added_unrelated = 0
-            for row in cap_rows:
-                source_event_id = str(row[cap_idx.get("source_event_id", -1)]) if "source_event_id" in cap_idx else ""
-                if source_event_id and source_event_id in seen_capability_source_event_ids:
-                    continue
+        cap_cols, cap_rows = query_rows(
+            client,
+            unrelated_sql,
+            {"global_start_ms": global_start_ms, "global_end_ms": global_end_ms, "scan_limit": scan_limit},
+        )
+        cap_idx = {name: i for i, name in enumerate(cap_cols)}
+        added_unrelated = 0
+        for row in cap_rows:
+            source_event_id = str(row[cap_idx["source_event_id"]]).strip() if "source_event_id" in cap_idx else ""
+            if not source_event_id or source_event_id in capability_source_event_ids:
+                continue
+            row_orch = str(row[cap_idx["orchestrator_address"]]).strip().lower() if "orchestrator_address" in cap_idx else ""
+            row_gpu = str(row[cap_idx["gpu_id"]]).strip() if "gpu_id" in cap_idx else ""
+            if (row_orch, row_gpu) in capability_context_pairs:
+                continue
+            capability_source_event_ids.add(source_event_id)
+            added_unrelated += 1
+            if added_unrelated >= unrelated_limit:
+                break
 
-                row_orch = str(row[cap_idx["orchestrator_address"]]).strip().lower() if "orchestrator_address" in cap_idx else ""
-                row_gpu = str(row[cap_idx["gpu_id"]]).strip() if "gpu_id" in cap_idx else ""
-                if (row_orch, row_gpu) in capability_context_pairs:
-                    continue
-
-                if source_event_id:
-                    seen_capability_source_event_ids.add(source_event_id)
-
-                payload = {
-                    "__table": CAPABILITY_TABLE,
-                    "__scenario": session.scenario_name,
-                    "__workflow_session_id": session.workflow_session_id,
+    for source_event_id in sorted(capability_source_event_ids):
+        raw_cap_sql = f"""
+SELECT id, type, timestamp, gateway, data
+FROM livepeer_analytics.{RAW_STREAMING_EVENTS_TABLE}
+WHERE type = 'network_capabilities'
+  AND id = %(event_id)s
+ORDER BY timestamp ASC
+"""
+        cols, rows = query_rows(client, raw_cap_sql, {"event_id": source_event_id})
+        idx = {name: i for i, name in enumerate(cols)}
+        for row in rows:
+            raw_rows.append(
+                {
+                    "id": to_json_value(row[idx["id"]]),
+                    "type": to_json_value(row[idx["type"]]),
+                    "timestamp": to_json_value(row[idx["timestamp"]]),
+                    "gateway": to_json_value(row[idx["gateway"]]),
+                    "data": to_json_value(row[idx["data"]]),
                 }
-                for i, col in enumerate(cap_cols):
-                    payload[col] = to_json_value(row[i])
-                out.write(json.dumps(payload, default=str, ensure_ascii=False) + "\n")
-                counts[CAPABILITY_TABLE] = counts.get(CAPABILITY_TABLE, 0) + 1
-                added_unrelated += 1
-                if added_unrelated >= unrelated_limit:
-                    break
+            )
+
+    # Write deduped raw rows in stable timestamp order.
+    unique_rows: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
+    for row in raw_rows:
+        key = (
+            str(row.get("id", "")),
+            str(row.get("type", "")),
+            str(row.get("timestamp", "")),
+            str(row.get("gateway", "")),
+            json.dumps(row.get("data"), sort_keys=True, ensure_ascii=False) if isinstance(row.get("data"), (dict, list)) else str(row.get("data", "")),
+        )
+        unique_rows[key] = row
+
+    ordered_rows = sorted(
+        unique_rows.values(),
+        key=lambda r: (int(r.get("timestamp", 0)) if str(r.get("timestamp", "")).isdigit() else 0, str(r.get("id", ""))),
+    )
+
+    counts["streaming_events"] = len(ordered_rows)
+    for row in ordered_rows:
+        event_type = str(row.get("type", "")).strip()
+        if event_type:
+            counts[f"streaming_events:{event_type}"] = counts.get(f"streaming_events:{event_type}", 0) + 1
+
+    with out_file.open("w", encoding="utf-8") as out:
+        for row in ordered_rows:
+            payload = {
+                "__table": RAW_STREAMING_EVENTS_TABLE,
+                "__scenario": session.scenario_name,
+                "__workflow_session_id": session.workflow_session_id,
+                "id": row.get("id"),
+                "type": row.get("type"),
+                "timestamp": row.get("timestamp"),
+                "gateway": row.get("gateway"),
+                "data": row.get("data"),
+            }
+            out.write(json.dumps(payload, default=str, ensure_ascii=False) + "\n")
 
     return counts
 
@@ -616,6 +683,9 @@ def main() -> None:
                 global_to_ts=to_ts,
                 capability_window_minutes=args.capability_window_minutes,
                 capability_max_rows_per_context=args.capability_max_rows_per_context,
+                capability_precede_session=args.capability_precede_session,
+                allow_capability_after_session_fallback=args.allow_capability_after_session_fallback,
+                capability_restrict_to_global_window=args.capability_restrict_to_global_window,
                 capability_unrelated_rows=args.capability_unrelated_rows,
             )
 
@@ -645,6 +715,7 @@ def main() -> None:
     manifest["metadata"] = {
         "query_window": {"from_ts": from_ts.isoformat(), "to_ts": to_ts.isoformat()},
         "manifest_window_padding_minutes": int(args.manifest_window_padding_minutes),
+        "fixture_event_source": "streaming_events",
     }
 
     manifest_path = base_out / "manifest.json"

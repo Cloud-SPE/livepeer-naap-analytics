@@ -86,3 +86,7 @@ curl -X POST http://YOUR_FLINK_SERVER:8081/jars/<new_jarid>/run \
      -H "Content-Type: application/json" \
      -d '{"entryClass":"com.livepeer.analytics.pipeline.StreamingEventsToClickHouse","parallelism":1,"savepointPath":"/opt/flink/storage/savepoints/<savepoint-id>"}'
 ```
+
+## Historical Replay Note (Flink vs Raw Ingest)
+
+Flink redeploy/savepoint recovery does **not** reset Kafka Connect sink offsets.  See the replay runbook for how to do this.

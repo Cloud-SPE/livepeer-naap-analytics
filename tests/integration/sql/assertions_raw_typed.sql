@@ -67,13 +67,15 @@ FROM
 );
 
 -- TEST: raw_typed_core_1to1_parity
--- This is intentionally strict (raw row count vs typed row count). If replayed
--- fixtures contain duplicate raw event IDs, Flink dedup keeps typed rows lower
--- than raw rows and this check fails even when parsing is healthy.
+-- Dedup-aware parity: compare typed rows to distinct raw source event IDs.
+-- Replayed fixtures can contain duplicate raw IDs across runs; those should not
+-- force typed parity failures when Flink dedup correctly suppresses duplicates.
 SELECT
-  countIf(typed_rows != raw_rows) AS failed_rows,
+  countIf(typed_rows != raw_distinct_ids) AS failed_rows,
   sum(raw_rows) AS total_raw_rows,
-  sum(accepted_rows_est) AS total_accepted_rows_est,
+  sum(raw_distinct_ids) AS total_raw_distinct_ids,
+  sum(raw_duplicate_rows) AS total_raw_duplicate_rows,
+  sum(accepted_rows_est) AS total_accepted_rows_est_distinct,
   sum(typed_rows) AS total_typed_rows,
   sum(dlq_rows) AS total_dlq_rows,
   sum(quarantine_rows) AS total_quarantine_rows
@@ -81,9 +83,11 @@ FROM
 (
   SELECT
     ifNull(r.raw_rows, 0) AS raw_rows,
+    ifNull(r.raw_distinct_ids, 0) AS raw_distinct_ids,
+    greatest(ifNull(r.raw_rows, 0) - ifNull(r.raw_distinct_ids, 0), 0) AS raw_duplicate_rows,
     ifNull(d.dlq_rows, 0) AS dlq_rows,
     ifNull(q.quarantine_rows, 0) AS quarantine_rows,
-    greatest(ifNull(r.raw_rows, 0) - ifNull(d.dlq_rows, 0) - ifNull(q.quarantine_rows, 0), 0) AS accepted_rows_est,
+    greatest(ifNull(r.raw_distinct_ids, 0) - ifNull(d.dlq_rows, 0) - ifNull(q.quarantine_rows, 0), 0) AS accepted_rows_est,
     ifNull(t.typed_rows, 0) AS typed_rows
   FROM
   (
@@ -94,7 +98,10 @@ FROM
   ) tm
   LEFT JOIN
   (
-    SELECT type AS event_type, count() AS raw_rows
+    SELECT
+      type AS event_type,
+      count() AS raw_rows,
+      uniqExact(id) AS raw_distinct_ids
     FROM livepeer_analytics.streaming_events
     WHERE event_timestamp >= {from_ts:DateTime64(3)}
       AND event_timestamp < {to_ts:DateTime64(3)}
@@ -147,8 +154,8 @@ FROM
 );
 
 -- TEST: raw_typed_network_capabilities_expected_in_window
--- Fixture runs are expected to replay network_capabilities. If this returns 0,
--- the replay/fixture window likely drifted from the capability event timestamps.
+-- Fixture runs replay canonical raw `streaming_events` rows. If this returns
+-- 0, fixture extraction/replay likely missed capability context rows.
 SELECT
   toUInt64(raw_rows = 0) AS failed_rows,
   raw_rows

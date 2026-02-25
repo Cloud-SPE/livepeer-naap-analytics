@@ -87,3 +87,37 @@ The replay job reads from `events.dlq.streaming_events.v1`, adds `__replay` meta
 
 - The main quality gate uses dedup state TTL; ensure your replay window fits inside the configured TTL.
 - Non-JSON payloads are skipped by replay and remain in DLQ for manual handling.
+- Kafka Connect raw sink offsets are independent from Flink job state:
+  - raw `streaming_events` is written by Connect, not Flink.
+  - sink consumer-group commits live in Kafka `__consumer_offsets`.
+  - Connect internal state lives in `_connect-offsets` and is not reset by Flink redeploy/savepoint restore.
+  - If you expect historical replay to repopulate raw + typed windows, include an explicit Connect offset rewind/reset plan for `clickhouse-raw-events-sink` (or run a dedicated backfill connector).
+
+### Quick Offset Reset (Raw Sink Replay)
+
+Use this for full historical raw replay of topic `streaming_events` into ClickHouse raw table:
+
+```bash
+# 1) pause connector
+curl -sS -X PUT http://localhost:8083/connectors/clickhouse-raw-events-sink/pause
+
+(alternatively stop the Connect container)
+
+# 2) inspect connect groups
+docker exec -it live-video-to-video-kafka /opt/kafka/bin/kafka-consumer-groups.sh \
+  --bootstrap-server kafka:9092 --list | grep connect
+
+# 3) reset sink group offsets to earliest
+docker exec -it live-video-to-video-kafka /opt/kafka/bin/kafka-consumer-groups.sh \
+  --bootstrap-server kafka:9092 \
+  --group <CONNECT_GROUP_ID> \
+  --topic streaming_events \
+  --reset-offsets --to-earliest --execute
+
+# 4) resume connector
+curl -sS -X PUT http://localhost:8083/connectors/clickhouse-raw-events-sink/resume
+
+(alternatively start the Connect container)
+```
+
+Run during maintenance windows; this can re-ingest large volumes and create duplicate raw rows in at-least-once mode.

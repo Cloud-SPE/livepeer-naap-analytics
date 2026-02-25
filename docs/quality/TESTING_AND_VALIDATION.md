@@ -30,6 +30,7 @@
 - Scenario assertions:
   - `uv run --project tools/python python scripts/run_clickhouse_data_tests.py --sql-file tests/integration/sql/assertions_scenario_candidates.sql --lookback-hours 720`
   - Note: `scenario_4_success_with_param_updates_exists` is currently informational (non-blocking) until param-update source rows are present in production.
+  - Note: if `scenario_3_success_with_swap_exists` fails while replay and raw/typed tests pass, first check fixture coverage (`tests/integration/fixtures/manifest.json`) before debugging parser logic.
 - One-shot integration run:
   - `tests/integration/run_all.sh`
 
@@ -58,8 +59,9 @@ Any add/rename/remove of a `-- TEST:` block must co-update this section in the s
 | `swapped_sessions_have_evidence` | `swap_count > 0` (confirmed swaps) has supporting explicit swap evidence from trace/segments. | Check swap evidence via both `fact_stream_trace_edges` and `stream_trace_events` by `(stream_id,request_id)`. |
 | `param_updates_reference_existing_session` | Param-update facts must reference a known session in-window. | Left join `fact_workflow_param_updates` to latest sessions and inspect orphan IDs. |
 | `lifecycle_session_pipeline_model_compatible` | Session `pipeline` and `model_id` remain contract-compatible when both set. | Inspect attribution selection and model labeling paths for mismatched values. |
-| `gpu_view_matches_rollup` | GPU API view numerically matches rollup aggregate source. | Recompute rollup grain join on `(window, orch, pipeline, model, gpu, region)`. |
-| `sla_view_matches_session_fact` | SLA API counts match independent recomputation from session facts. | Compare known/unexcused/swapped counts per hour+dimension between raw and API view. |
+| `gpu_view_matches_rollup` | GPU API view numerically matches rollup aggregate source and key overlap is non-empty when both sides have rows. | Check `rollup_rows`, `view_rows`, `joined_rows`, `rollup_only_keys`, `view_only_keys`, then inspect key completeness diagnostics (`*_empty_*_rows`). |
+| `network_demand_view_matches_rollup` | Network demand API view numerically matches recomputed hourly perf+demand aggregates and key overlap is non-empty when both sides have rows. | Check `rollup_rows`, `view_rows`, `joined_rows`, then inspect key coverage (`rollup_only_keys`/`view_only_keys`) and total diff diagnostics. |
+| `sla_view_matches_session_fact` | SLA API counts match independent recomputation from session facts and key overlap is non-empty when both sides have rows. | Check `raw_rows`, `view_rows`, `joined_rows`, then compare known/unexcused/swapped diff totals and key coverage. |
 | `sla_ratios_in_bounds` | SLA ratios are bounded to valid probability range `[0,1]`. | Inspect denominator/guard conditions in `v_api_sla_compliance`. |
 
 ## Scenario Harness Stages
@@ -194,6 +196,54 @@ Policy:
 - Fixture load for test database:
   - `scripts/load_scenario_fixtures.py`
 
+### Raw-First Fixture Contract
+
+- Fixture JSONL replay rows must come from canonical raw ingress only:
+  - `__table = streaming_events`
+- Scenario discovery still uses `tests/integration/sql/scenario_candidates.sql` against typed/fact tables.
+- Capability context selection still uses typed capability snapshots to find relevant source ids, but replay payloads are fetched from raw `streaming_events(type='network_capabilities')`.
+- `scripts/replay_scenario_events.py` replays raw `streaming_events` rows only (no typed `network_capabilities` reconstruction path).
+
+Recommended export command:
+
+```bash
+uv run --project tools/python python scripts/export_scenario_fixtures.py \
+  --host clickhouse.livepeer.cloud \
+  --port 8123 \
+  --database livepeer_analytics \
+  --user analytics_user \
+  --password analytics_password \
+  --from-ts 2026-02-18T00:00:00Z \
+  --to-ts 2026-02-25T23:59:59Z \
+  --limit-per-scenario 3 \
+  --capability-precede-session \
+  --allow-missing-scenarios
+```
+
+### Scenario Candidate Discovery
+
+- Notebook section:
+  - `docs/reports/notebook/FLINK_DATA_TRACE_AND_INTEGRATION_TESTS.ipynb` -> `Scenario Candidate Discovery`
+- Required review in that section:
+  - `scenario_3_success_with_swap` candidate counts (must be non-zero for blocking `assert_scenarios` runs).
+  - `scenario_4_success_with_param_updates` candidate counts (track as availability signal; non-blocking until promoted to gate).
+  - `scenario_5_out_of_category_baseline` candidate counts (sampled fallback/fallout population; non-blocking).
+  - `scenario_5` should be interpreted as a sampled subset of notebook `fallout_df` sessions.
+- Pre-run fixture gate:
+  - `jq '.scenarios | {scenario_3:(.scenario_3_success_with_swap.sessions|length),scenario_4:(.scenario_4_success_with_param_updates.sessions|length),scenario_5:(.scenario_5_out_of_category_baseline.sessions|length)}' tests/integration/fixtures/manifest.json`
+  - If scenario 3 is zero, refresh fixtures from production before running full scenario assertions.
+- Additional fixture sanity gate (raw-first):
+  - `rg --no-filename '"__table":"[^"]+"' tests/integration/fixtures/prod_snapshot_* | sort -u`
+  - Expected replay rows should resolve to `streaming_events` only.
+
+### Trace Pack Validation (Sections 06-09)
+
+- In notebook trace-pack sections `06_rollup_population` through `09_sla_view_parity`, do not expect 1:1 counts vs sections `01-05`.
+- Use grain-aligned reconciliation sourced from canonical assertions:
+  - `tests/integration/sql/assertions_pipeline.sql`
+  - checks: `gpu_view_matches_rollup`, `network_demand_view_matches_rollup`, `sla_view_matches_session_fact`
+- Treat notebook totals as diagnostics; treat assertion SQL parity results as contract verdicts.
+
 ## Run Notebook Against Scenario Test Output
 
 Use this when you want notebook results to reflect the same local dataset produced by the scenario harness.
@@ -215,6 +265,9 @@ Use this when you want notebook results to reflect the same local dataset produc
 
 4. Launch notebook with those env vars:
    - `uv run --project tools/python jupyter lab`
+   - Optional startup defaults for display mode:
+     - `export NB_SHOW_DEBUG=1`
+     - `export NB_SHOW_0609_DEBUG=1`
 
 5. In notebook:
    - restart kernel
@@ -225,6 +278,18 @@ Use this when you want notebook results to reflect the same local dataset produc
 Notes:
 - If notebook still shows old FAIL rows, outputs are stale; rerun cells or run all from top.
 - Harness smoke defaults to `stack_down --volumes`, so persisted DB state is removed at end. For reproducible analysis, use run artifact windows and rerun assertions against current local stack.
+
+### Notebook Display Modes
+
+- Button-first controls (recommended):
+  - Use top-of-notebook toggle buttons:
+    - `Mode: Compact | Debug`
+    - `06-09: Auto | Force Debug 06-09`
+  - After changing a toggle, rerun the affected section cells.
+- Optional startup defaults via env vars:
+  - `NB_SHOW_DEBUG=0|1`
+  - `NB_SHOW_0609_DEBUG=0|1`
+  - Env vars only set initial toggle state; notebook buttons control mode during analysis.
 
 ## Quality Gate Signals to Watch
 

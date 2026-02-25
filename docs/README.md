@@ -15,6 +15,7 @@ This repository uses a map-first documentation model for human and agent collabo
 - Code reuse and normalization guidelines: `docs/workflows/CODE_REUSE_AND_NORMALIZATION_GUIDELINES.md`
 - Flink lifecycle state machines: `docs/workflows/FLINK_LIFECYCLE_STATE_MACHINES.md`
 - GPU attribution multi-candidate implementation plan: `docs/workflows/GPU_ATTRIBUTION_MULTI_CANDIDATE_PLAN.md`
+- Capability enrichment ordering plan: `docs/workflows/CAPABILITY_ENRICHMENT_ORDERING_PLAN.md`
 - Doc inventory and migration map: `docs/references/DOC_INVENTORY_AND_MIGRATION_MAP.md`
 - Consolidation review and next steps: `docs/references/DOC_CONSOLIDATION_PLAN.md`
 - Canonical issues backlog: `docs/references/ISSUES_BACKLOG.md`
