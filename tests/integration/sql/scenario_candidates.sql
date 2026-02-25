@@ -174,8 +174,10 @@ ORDER BY fs.session_start_ts DESC
 LIMIT {limit_per_scenario:UInt32};
 
 -- QUERY: scenario_3_success_with_swap
--- Uses combined swap semantics for discovery:
+-- Uses current swap semantics for discovery:
 -- any confirmed swap OR inferred orchestrator-change evidence qualifies as swap.
+-- Intentionally excludes legacy swap_count-only rows so replayed fixtures and
+-- notebook discovery remain stable under current lifecycle contracts.
 WITH fs_latest AS
 (
   SELECT
@@ -244,7 +246,6 @@ WHERE fs.startup_success = 1
   AND (
     fs.confirmed_swap_count > 0
     OR fs.inferred_orchestrator_change_count > 0
-    OR fs.swap_count > 0
   )
   AND fs.workflow_session_id IN (SELECT workflow_session_id FROM wallet_overlap_sessions)
 GROUP BY

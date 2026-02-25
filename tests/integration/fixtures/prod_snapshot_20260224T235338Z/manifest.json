@@ -1,0 +1,163 @@
+{
+  "generated_at": "2026-02-24T23:53:38.556922+00:00",
+  "window": {
+    "from_ts": "2026-02-24T22:46:07.905000+00:00",
+    "to_ts": "2026-02-25T00:52:16.349000+00:00"
+  },
+  "source": {
+    "host": "clickhouse.livepeer.cloud",
+    "port": 8123,
+    "database": "livepeer_analytics",
+    "scenario_sql": "tests/integration/sql/scenario_candidates.sql"
+  },
+  "scenarios": {
+    "scenario_1_clean_success_no_swap_fps_gt_12": {
+      "candidate_count": 3,
+      "sessions": [
+        {
+          "workflow_session_id": "aiJobTesterStream-1771976986371086932|19706dd4",
+          "stream_id": "aiJobTesterStream-1771976986371086932",
+          "request_id": "19706dd4",
+          "session_start_ts": "2026-02-24T23:49:51.307000+00:00",
+          "session_end_ts": "2026-02-24T23:50:35.828000+00:00",
+          "file": "scenario_1_clean_success_no_swap_fps_gt_12/aiJobTesterStream-1771976986371086932_19706dd4.jsonl",
+          "table_counts": {
+            "fact_workflow_sessions": 1,
+            "fact_workflow_session_segments": 1,
+            "fact_workflow_param_updates": 0,
+            "fact_stream_status_samples": 4,
+            "fact_stream_trace_edges": 7,
+            "fact_stream_ingest_samples": 0,
+            "ai_stream_status": 4,
+            "stream_trace_events": 7,
+            "ai_stream_events": 1,
+            "stream_ingest_metrics": 0,
+            "network_capabilities": 8
+          }
+        },
+        {
+          "workflow_session_id": "aiJobTesterStream-1771976810964917445|aebafe77",
+          "stream_id": "aiJobTesterStream-1771976810964917445",
+          "request_id": "aebafe77",
+          "session_start_ts": "2026-02-24T23:46:55.515000+00:00",
+          "session_end_ts": "2026-02-24T23:47:40.729000+00:00",
+          "file": "scenario_1_clean_success_no_swap_fps_gt_12/aiJobTesterStream-1771976810964917445_aebafe77.jsonl",
+          "table_counts": {
+            "fact_workflow_sessions": 1,
+            "fact_workflow_session_segments": 1,
+            "fact_workflow_param_updates": 0,
+            "fact_stream_status_samples": 4,
+            "fact_stream_trace_edges": 7,
+            "fact_stream_ingest_samples": 0,
+            "ai_stream_status": 4,
+            "stream_trace_events": 7,
+            "ai_stream_events": 1,
+            "stream_ingest_metrics": 0,
+            "network_capabilities": 10
+          }
+        },
+        {
+          "workflow_session_id": "aiJobTesterStream-1771976762954588419|e565fe91",
+          "stream_id": "aiJobTesterStream-1771976762954588419",
+          "request_id": "e565fe91",
+          "session_start_ts": "2026-02-24T23:46:07.905000+00:00",
+          "session_end_ts": "2026-02-24T23:46:53.070000+00:00",
+          "file": "scenario_1_clean_success_no_swap_fps_gt_12/aiJobTesterStream-1771976762954588419_e565fe91.jsonl",
+          "table_counts": {
+            "fact_workflow_sessions": 1,
+            "fact_workflow_session_segments": 1,
+            "fact_workflow_param_updates": 0,
+            "fact_stream_status_samples": 4,
+            "fact_stream_trace_edges": 7,
+            "fact_stream_ingest_samples": 0,
+            "ai_stream_status": 4,
+            "stream_trace_events": 7,
+            "ai_stream_events": 1,
+            "stream_ingest_metrics": 0,
+            "network_capabilities": 9
+          }
+        }
+      ]
+    },
+    "scenario_2_no_orchestrator_then_closed": {
+      "candidate_count": 3,
+      "sessions": [
+        {
+          "workflow_session_id": "aiJobTesterStream-1771977131554948242|474b04d5",
+          "stream_id": "aiJobTesterStream-1771977131554948242",
+          "request_id": "474b04d5",
+          "session_start_ts": "2026-02-24T23:52:16.247000+00:00",
+          "session_end_ts": "2026-02-24T23:52:16.349000+00:00",
+          "file": "scenario_2_no_orchestrator_then_closed/aiJobTesterStream-1771977131554948242_474b04d5.jsonl",
+          "table_counts": {
+            "fact_workflow_sessions": 2,
+            "fact_workflow_session_segments": 1,
+            "fact_workflow_param_updates": 0,
+            "fact_stream_status_samples": 0,
+            "fact_stream_trace_edges": 3,
+            "fact_stream_ingest_samples": 0,
+            "ai_stream_status": 0,
+            "stream_trace_events": 3,
+            "ai_stream_events": 2,
+            "stream_ingest_metrics": 0
+          }
+        },
+        {
+          "workflow_session_id": "aiJobTesterStream-1771977124030944376|7dc25b96",
+          "stream_id": "aiJobTesterStream-1771977124030944376",
+          "request_id": "7dc25b96",
+          "session_start_ts": "2026-02-24T23:52:08.814000+00:00",
+          "session_end_ts": "2026-02-24T23:52:11.239000+00:00",
+          "file": "scenario_2_no_orchestrator_then_closed/aiJobTesterStream-1771977124030944376_7dc25b96.jsonl",
+          "table_counts": {
+            "fact_workflow_sessions": 2,
+            "fact_workflow_session_segments": 1,
+            "fact_workflow_param_updates": 0,
+            "fact_stream_status_samples": 0,
+            "fact_stream_trace_edges": 3,
+            "fact_stream_ingest_samples": 0,
+            "ai_stream_status": 0,
+            "stream_trace_events": 3,
+            "ai_stream_events": 2,
+            "stream_ingest_metrics": 0
+          }
+        },
+        {
+          "workflow_session_id": "aiJobTesterStream-1771977082183975805|d4bf23f7",
+          "stream_id": "aiJobTesterStream-1771977082183975805",
+          "request_id": "d4bf23f7",
+          "session_start_ts": "2026-02-24T23:51:27.095000+00:00",
+          "session_end_ts": "2026-02-24T23:51:27.398000+00:00",
+          "file": "scenario_2_no_orchestrator_then_closed/aiJobTesterStream-1771977082183975805_d4bf23f7.jsonl",
+          "table_counts": {
+            "fact_workflow_sessions": 2,
+            "fact_workflow_session_segments": 1,
+            "fact_workflow_param_updates": 0,
+            "fact_stream_status_samples": 0,
+            "fact_stream_trace_edges": 3,
+            "fact_stream_ingest_samples": 0,
+            "ai_stream_status": 0,
+            "stream_trace_events": 3,
+            "ai_stream_events": 2,
+            "stream_ingest_metrics": 0
+          }
+        }
+      ]
+    },
+    "scenario_3_success_with_swap": {
+      "candidate_count": 0,
+      "sessions": []
+    },
+    "scenario_4_success_with_param_updates": {
+      "candidate_count": 0,
+      "sessions": []
+    }
+  },
+  "metadata": {
+    "query_window": {
+      "from_ts": "2026-02-24T00:00:00+00:00",
+      "to_ts": "2026-02-26T00:00:00+00:00"
+    },
+    "manifest_window_padding_minutes": 60
+  }
+}
