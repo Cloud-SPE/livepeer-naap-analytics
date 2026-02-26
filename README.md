@@ -2,6 +2,10 @@
 
 This project provides a real-time data pipeline for monitoring and analyzing **Livepeer Network-as-a-Product (NaaP)** metrics. It ingests streaming events from a Livepeer gateway, processes them using Apache Flink, and stores the analytics in ClickHouse for visualization via Grafana.
 
+[![CI PR Smoke](https://github.com/livepeer/livepeer-naap-analytics/actions/workflows/ci-pr-smoke.yml/badge.svg)](https://github.com/livepeer/livepeer-naap-analytics/actions/workflows/ci-pr-smoke.yml)
+[![CI Nightly Full](https://github.com/livepeer/livepeer-naap-analytics/actions/workflows/ci-nightly-full.yml/badge.svg)](https://github.com/livepeer/livepeer-naap-analytics/actions/workflows/ci-nightly-full.yml)
+[![CI Manual Deep Verify](https://github.com/livepeer/livepeer-naap-analytics/actions/workflows/ci-manual-deep-verify.yml/badge.svg)](https://github.com/livepeer/livepeer-naap-analytics/actions/workflows/ci-manual-deep-verify.yml)
+
 ## Documentation and Agent Navigation
 
 - Quick agent map: `AGENTS.md`

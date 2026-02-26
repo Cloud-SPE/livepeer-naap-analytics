@@ -36,6 +36,32 @@
 - One-shot integration run:
   - `tests/integration/run_all.sh`
 
+## GitHub CI Split
+
+Use a split CI strategy to balance confidence and runtime:
+
+1. PR required checks (`CI PR Smoke`):
+   - `cd flink-jobs && mvn test`
+   - Reduced docker integration smoke via harness stages:
+     - `stack_up`, `schema_apply`, `pipeline_ready`, `replay_events`, `pipeline_wait`
+     - `assert_raw_typed`, `assert_pipeline`, `assert_api`
+     - `stack_down`
+   - Scenario candidate assertions are intentionally excluded from PR smoke.
+
+2. Nightly/full checks (`CI Nightly Full`):
+   - Full harness run (`--mode full`) including query pack and scenario assertions.
+   - Uploads full artifacts for drift and long-window diagnostics.
+
+3. Manual deep verification (`CI Manual Deep Verify`):
+   - `workflow_dispatch` with mode and window controls.
+   - Use for on-demand investigation or release validation.
+
+Workflow files:
+
+- `.github/workflows/ci-pr-smoke.yml`
+- `.github/workflows/ci-nightly-full.yml`
+- `.github/workflows/ci-manual-deep-verify.yml`
+
 ## Pipeline Assertions Requirement Map
 
 Reference SQL: `tests/integration/sql/assertions_pipeline.sql`

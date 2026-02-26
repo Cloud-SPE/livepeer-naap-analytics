@@ -1,0 +1,119 @@
+name: CI Manual Deep Verify
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Harness mode
+        required: true
+        default: full
+        type: choice
+        options:
+          - smoke
+          - full
+      window_source:
+        description: Assertion/query window source
+        required: true
+        default: manifest
+        type: choice
+        options:
+          - manifest
+          - lookback
+      lookback_hours:
+        description: Main lookback hours (used when window_source=lookback)
+        required: false
+        default: "24"
+      scenario_lookback_hours:
+        description: Scenario lookback hours
+        required: false
+        default: "720"
+
+jobs:
+  deep-verify:
+    name: Manual Deep Verification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Docker Compose Version
+        run: docker compose version
+
+      - name: Run Harness (Manual Deep Verify)
+        run: |
+          python3 tests/python/scripts/run_scenario_test_harness.py \
+            --mode "${{ inputs.mode }}" \
+            --compose-files docker-compose.yml,docker-compose.scenario.yml \
+            --down-volumes \
+            --window-source "${{ inputs.window_source }}" \
+            --lookback-hours "${{ inputs.lookback_hours }}" \
+            --scenario-lookback-hours "${{ inputs.scenario_lookback_hours }}" \
+            --python-runner uv
+
+      - name: Write Deep Verify Summary
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path("artifacts/test-runs")
+          runs = sorted([p for p in root.glob("*") if p.is_dir()])
+          if not runs:
+              print("No harness run artifacts found.")
+              raise SystemExit(0)
+
+          latest = runs[-1]
+          summary_path = latest / "summary.json"
+          if not summary_path.exists():
+              print(f"Summary missing: {summary_path}")
+              raise SystemExit(0)
+
+          payload = json.loads(summary_path.read_text(encoding="utf-8"))
+          results = payload.get("results", [])
+          total = len(results)
+          failed = sum(1 for r in results if r.get("status") != "passed")
+          passed = total - failed
+
+          lines = []
+          lines.append("## Manual Deep Verify Summary")
+          lines.append("")
+          lines.append(f"- run_id: `{payload.get('run_id', latest.name)}`")
+          lines.append(f"- passed stages: `{passed}`")
+          lines.append(f"- failed stages: `{failed}`")
+          lines.append("")
+          lines.append("| Stage | Status | Duration (s) |")
+          lines.append("|---|---|---:|")
+          for r in results:
+              lines.append(f"| `{r.get('stage','')}` | `{r.get('status','')}` | {r.get('duration_sec',0):.2f} |")
+
+          summary = Path.home() / "summary.md"
+          summary.write_text("\n".join(lines) + "\n", encoding="utf-8")
+          print(summary.read_text(encoding="utf-8"))
+          PY
+          cat ~/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Harness Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: manual-deep-verify-artifacts
+          path: artifacts/test-runs/
+          if-no-files-found: ignore
