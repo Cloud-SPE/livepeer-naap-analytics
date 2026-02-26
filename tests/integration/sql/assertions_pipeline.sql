@@ -108,6 +108,81 @@ FROM livepeer_analytics.fact_workflow_sessions
 WHERE session_start_ts >= {from_ts:DateTime64(3)}
   AND session_start_ts < {to_ts:DateTime64(3)};
 
+-- TEST: core_raw_to_silver_gold_nonempty
+-- Verifies core event flow has accepted raw rows and non-empty downstream silver/gold coverage.
+-- Requirement: prevent false-green runs where all core events are rejected into DLQ/quarantine.
+WITH
+  raw_core AS
+  (
+    SELECT uniqExact(id) AS raw_distinct_ids
+    FROM livepeer_analytics.streaming_events
+    WHERE type IN ('ai_stream_status', 'stream_trace', 'ai_stream_events', 'stream_ingest_metrics')
+      AND event_timestamp >= {from_ts:DateTime64(3)}
+      AND event_timestamp < {to_ts:DateTime64(3)}
+  ),
+  rejected_core AS
+  (
+    SELECT uniqExact(event_id) AS rejected_distinct_ids
+    FROM
+    (
+      SELECT event_id
+      FROM livepeer_analytics.streaming_events_dlq
+      WHERE event_type IN ('ai_stream_status', 'stream_trace', 'ai_stream_events', 'stream_ingest_metrics')
+        AND ifNull(event_timestamp, source_record_timestamp) >= {from_ts:DateTime64(3)}
+        AND ifNull(event_timestamp, source_record_timestamp) < {to_ts:DateTime64(3)}
+
+      UNION ALL
+
+      SELECT event_id
+      FROM livepeer_analytics.streaming_events_quarantine
+      WHERE event_type IN ('ai_stream_status', 'stream_trace', 'ai_stream_events', 'stream_ingest_metrics')
+        AND ifNull(event_timestamp, source_record_timestamp) >= {from_ts:DateTime64(3)}
+        AND ifNull(event_timestamp, source_record_timestamp) < {to_ts:DateTime64(3)}
+    )
+    WHERE event_id != ''
+  ),
+  silver_core AS
+  (
+    SELECT
+      (SELECT count() FROM livepeer_analytics.fact_stream_status_samples WHERE sample_ts >= {from_ts:DateTime64(3)} AND sample_ts < {to_ts:DateTime64(3)}) AS status_rows,
+      (SELECT count() FROM livepeer_analytics.fact_stream_trace_edges WHERE edge_ts >= {from_ts:DateTime64(3)} AND edge_ts < {to_ts:DateTime64(3)}) AS trace_rows
+  ),
+  gold_core AS
+  (
+    SELECT count() AS session_rows
+    FROM livepeer_analytics.fact_workflow_sessions
+    WHERE session_start_ts >= {from_ts:DateTime64(3)}
+      AND session_start_ts < {to_ts:DateTime64(3)}
+  )
+SELECT
+  toUInt64(
+    raw_distinct_ids = 0
+    OR accepted_distinct_ids_est = 0
+    OR status_rows = 0
+    OR trace_rows = 0
+    OR session_rows = 0
+  ) AS failed_rows,
+  raw_distinct_ids,
+  rejected_distinct_ids,
+  accepted_distinct_ids_est,
+  status_rows,
+  trace_rows,
+  session_rows
+FROM
+(
+  SELECT
+    raw_core.raw_distinct_ids AS raw_distinct_ids,
+    rejected_core.rejected_distinct_ids AS rejected_distinct_ids,
+    greatest(raw_core.raw_distinct_ids - rejected_core.rejected_distinct_ids, 0) AS accepted_distinct_ids_est,
+    silver_core.status_rows AS status_rows,
+    silver_core.trace_rows AS trace_rows,
+    gold_core.session_rows AS session_rows
+  FROM raw_core
+  CROSS JOIN rejected_core
+  CROSS JOIN silver_core
+  CROSS JOIN gold_core
+);
+
 -- TEST: network_capabilities_raw_and_typed_present
 -- Verifies network capabilities events are present in both raw and typed layers.
 -- Requirement: fixture windows intended for attribution must include parseable capabilities coverage.

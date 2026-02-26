@@ -76,6 +76,7 @@ Any add/rename/remove of a `-- TEST:` block must co-update this section in the s
 | `capability_dimension_mvs_present` | Required capability MVs exist in ClickHouse. | Check `system.tables` for missing MV names and confirm schema init was applied. |
 | `capability_dimensions_projecting` | Capability source tables project into dimension snapshot tables. | Compare row counts between `network_capabilities*` and `dim_orchestrator_capability_*` tables in-window. |
 | `session_fact_present` | Sessionization emits `fact_workflow_sessions` rows. | Confirm lifecycle operators are running and replay produced stream trace/status rows. |
+| `core_raw_to_silver_gold_nonempty` | Core flow has non-zero accepted raw rows and non-empty silver+gold facts. | Compare core raw distinct IDs vs DLQ/quarantine distinct IDs, then verify status/trace silver rows and session fact rows are non-zero. |
 | `network_capabilities_raw_and_typed_present` | Capabilities are present both raw and typed for attribution windows. | Check `streaming_events(type='network_capabilities')` vs `network_capabilities` parse output. |
 | `status_raw_to_silver_projection` | Typed status rows are losslessly projected to silver status fact. | Join typed/silver by `cityHash64(raw_json)` source UID and inspect missing rows. |
 | `trace_raw_to_silver_projection` | Typed trace rows are losslessly projected to silver trace edges. | Join typed/silver by `cityHash64(raw_json)` source UID and inspect missing rows. |

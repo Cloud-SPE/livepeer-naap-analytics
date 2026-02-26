@@ -28,16 +28,16 @@ FROM
   (
     SELECT event_type, count() AS dlq_rows
     FROM livepeer_analytics.streaming_events_dlq
-    WHERE source_record_timestamp >= {from_ts:DateTime64(3)}
-      AND source_record_timestamp < {to_ts:DateTime64(3)}
+    WHERE ifNull(event_timestamp, source_record_timestamp) >= {from_ts:DateTime64(3)}
+      AND ifNull(event_timestamp, source_record_timestamp) < {to_ts:DateTime64(3)}
     GROUP BY event_type
   ) d ON r.event_type = d.event_type
   LEFT JOIN
   (
     SELECT event_type, count() AS quarantine_rows
     FROM livepeer_analytics.streaming_events_quarantine
-    WHERE source_record_timestamp >= {from_ts:DateTime64(3)}
-      AND source_record_timestamp < {to_ts:DateTime64(3)}
+    WHERE ifNull(event_timestamp, source_record_timestamp) >= {from_ts:DateTime64(3)}
+      AND ifNull(event_timestamp, source_record_timestamp) < {to_ts:DateTime64(3)}
     GROUP BY event_type
   ) q ON r.event_type = q.event_type
 );
@@ -53,15 +53,15 @@ FROM
     (
       SELECT count()
       FROM livepeer_analytics.streaming_events_dlq
-      WHERE source_record_timestamp >= {from_ts:DateTime64(3)}
-        AND source_record_timestamp < {to_ts:DateTime64(3)}
+      WHERE ifNull(event_timestamp, source_record_timestamp) >= {from_ts:DateTime64(3)}
+        AND ifNull(event_timestamp, source_record_timestamp) < {to_ts:DateTime64(3)}
         AND event_type IN ('ai_stream_status', 'stream_trace', 'ai_stream_events', 'stream_ingest_metrics')
     ) AS dlq_rows,
     (
       SELECT count()
       FROM livepeer_analytics.streaming_events_quarantine
-      WHERE source_record_timestamp >= {from_ts:DateTime64(3)}
-        AND source_record_timestamp < {to_ts:DateTime64(3)}
+      WHERE ifNull(event_timestamp, source_record_timestamp) >= {from_ts:DateTime64(3)}
+        AND ifNull(event_timestamp, source_record_timestamp) < {to_ts:DateTime64(3)}
         AND event_type IN ('ai_stream_status', 'stream_trace', 'ai_stream_events', 'stream_ingest_metrics')
     ) AS quarantine_rows
 );
@@ -111,16 +111,16 @@ FROM
   (
     SELECT event_type, count() AS dlq_rows
     FROM livepeer_analytics.streaming_events_dlq
-    WHERE source_record_timestamp >= {from_ts:DateTime64(3)}
-      AND source_record_timestamp < {to_ts:DateTime64(3)}
+    WHERE ifNull(event_timestamp, source_record_timestamp) >= {from_ts:DateTime64(3)}
+      AND ifNull(event_timestamp, source_record_timestamp) < {to_ts:DateTime64(3)}
     GROUP BY event_type
   ) d ON tm.event_type = d.event_type
   LEFT JOIN
   (
     SELECT event_type, count() AS quarantine_rows
     FROM livepeer_analytics.streaming_events_quarantine
-    WHERE source_record_timestamp >= {from_ts:DateTime64(3)}
-      AND source_record_timestamp < {to_ts:DateTime64(3)}
+    WHERE ifNull(event_timestamp, source_record_timestamp) >= {from_ts:DateTime64(3)}
+      AND ifNull(event_timestamp, source_record_timestamp) < {to_ts:DateTime64(3)}
     GROUP BY event_type
   ) q ON tm.event_type = q.event_type
   LEFT JOIN
@@ -189,16 +189,16 @@ WITH
     SELECT count() AS dlq_rows
     FROM livepeer_analytics.streaming_events_dlq
     WHERE event_type = 'network_capabilities'
-      AND source_record_timestamp >= {from_ts:DateTime64(3)}
-      AND source_record_timestamp < {to_ts:DateTime64(3)}
+      AND ifNull(event_timestamp, source_record_timestamp) >= {from_ts:DateTime64(3)}
+      AND ifNull(event_timestamp, source_record_timestamp) < {to_ts:DateTime64(3)}
   ),
   quarantine AS
   (
     SELECT count() AS quarantine_rows
     FROM livepeer_analytics.streaming_events_quarantine
     WHERE event_type = 'network_capabilities'
-      AND source_record_timestamp >= {from_ts:DateTime64(3)}
-      AND source_record_timestamp < {to_ts:DateTime64(3)}
+      AND ifNull(event_timestamp, source_record_timestamp) >= {from_ts:DateTime64(3)}
+      AND ifNull(event_timestamp, source_record_timestamp) < {to_ts:DateTime64(3)}
   ),
   typed AS
   (
