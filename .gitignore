@@ -56,7 +56,8 @@ data/minio/streaming-events/topics/streaming_events/partition=**
 data/flink/tmp/checkpoints/.gitkeep
 data/flink/tmp/savepoints/.gitkeep
 data/kafka/.gitkeep
-tools/python/.venv/
+tests/python/.venv/
 artifacts/test-runs/
 scripts/__pycache__/
+tests/python/scripts/__pycache__/
 **/.ipynb_checkpoints/

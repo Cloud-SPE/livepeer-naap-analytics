@@ -9,7 +9,7 @@ This file is a short operating map for AI agents and humans. Treat `docs/` as th
 - Build Flink job: `cd flink-jobs && mvn -q -DskipTests package`
 - Run Flink unit/contract tests: `cd flink-jobs && mvn test`
 - Run ClickHouse integration assertions: `tests/integration/run_all.sh`
-- Run query trace pack: `uv run --project tools/python python scripts/run_clickhouse_query_pack.py --lookback-hours 24`
+- Run query trace pack: `uv run --project tests/python python tests/python/scripts/run_clickhouse_query_pack.py --lookback-hours 24`
 - Run docs inventory: `scripts/docs_inventory.sh`
 - Validate markdown links: `scripts/docs_link_check.sh`
 
@@ -115,12 +115,12 @@ Use this checklist for any change that can alter schema, semantics, serving view
 2. Run deterministic checks in this order:
    - `cd flink-jobs && mvn test`
    - `tests/integration/run_all.sh`
-   - `uv run --project tools/python python scripts/run_clickhouse_query_pack.py --lookback-hours 24`
+   - `uv run --project tests/python python tests/python/scripts/run_clickhouse_query_pack.py --lookback-hours 24`
 3. Keep assertion SQL and assertion-map docs synchronized:
    - `tests/integration/sql/assertions_pipeline.sql`
    - `docs/quality/TESTING_AND_VALIDATION.md` (Pipeline Assertions Requirement Map)
 4. Keep notebook diagnostics aligned with contract semantics:
-   - `docs/reports/notebook/FLINK_DATA_TRACE_AND_INTEGRATION_TESTS.ipynb`
+   - `tests/python/notebooks/FLINK_DATA_TRACE_AND_INTEGRATION_TESTS.ipynb`
 5. If any check cannot be run, explicitly record what was skipped and residual risk in PR notes.
 
 ## Boundaries

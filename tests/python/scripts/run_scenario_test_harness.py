@@ -2,9 +2,9 @@
 """Run stage-based integration harness for scenario validation.
 
 This harness is intentionally thin and reuses existing SQL/script entry points:
-- scripts/replay_scenario_events.py
-- scripts/run_clickhouse_query_pack.py
-- scripts/run_clickhouse_data_tests.py
+- tests/python/scripts/replay_scenario_events.py
+- tests/python/scripts/run_clickhouse_query_pack.py
+- tests/python/scripts/run_clickhouse_data_tests.py
 
 Outputs are written under artifacts/test-runs/<run_id>/:
 - harness.log                 (top-level execution log)
@@ -94,7 +94,7 @@ class Harness:
 
     def __init__(self, args: argparse.Namespace) -> None:
         self.args = args
-        self.repo_root = Path(__file__).resolve().parent.parent
+        self.repo_root = Path(__file__).resolve().parents[3]
         self.run_id = args.run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         self.run_dir = (self.repo_root / args.artifacts_root / self.run_id).resolve()
         self.stages_dir = self.run_dir / "stages"
@@ -121,11 +121,11 @@ class Harness:
 
     def _resolve_python_prefix(self, runner: str) -> list[str]:
         if runner == "uv":
-            return ["uv", "run", "--project", "tools/python", "python"]
+            return ["uv", "run", "--project", "tests/python", "python"]
         if runner == "python":
             return [sys.executable]
         if shutil.which("uv"):
-            return ["uv", "run", "--project", "tools/python", "python"]
+            return ["uv", "run", "--project", "tests/python", "python"]
         return [sys.executable]
 
     def _resolve_state_paths(self, requested: list[str] | None) -> list[Path]:
@@ -433,7 +433,7 @@ class Harness:
 
                 cmd = [
                     *self.python_prefix,
-                    "scripts/replay_scenario_events.py",
+                    "tests/python/scripts/replay_scenario_events.py",
                     "--manifest",
                     str(manifest),
                     "--kafka-container",
@@ -463,7 +463,7 @@ class Harness:
                 window_args = self.stage_time_window_args(self.args.lookback_hours)
                 cmd = [
                     *self.python_prefix,
-                    "scripts/run_clickhouse_query_pack.py",
+                    "tests/python/scripts/run_clickhouse_query_pack.py",
                     *window_args,
                     "--max-rows",
                     str(self.args.max_rows),
@@ -476,7 +476,7 @@ class Harness:
                 window_args = self.stage_time_window_args(self.args.lookback_hours)
                 cmd = [
                     *self.python_prefix,
-                    "scripts/run_clickhouse_data_tests.py",
+                    "tests/python/scripts/run_clickhouse_data_tests.py",
                     "--sql-file",
                     "tests/integration/sql/assertions_pipeline.sql",
                     *window_args,
@@ -491,7 +491,7 @@ class Harness:
                 window_args = self.stage_time_window_args(self.args.lookback_hours)
                 cmd = [
                     *self.python_prefix,
-                    "scripts/run_clickhouse_data_tests.py",
+                    "tests/python/scripts/run_clickhouse_data_tests.py",
                     "--sql-file",
                     "tests/integration/sql/assertions_raw_typed.sql",
                     *window_args,
@@ -506,7 +506,7 @@ class Harness:
                 window_args = self.stage_time_window_args(self.args.lookback_hours)
                 cmd = [
                     *self.python_prefix,
-                    "scripts/run_clickhouse_data_tests.py",
+                    "tests/python/scripts/run_clickhouse_data_tests.py",
                     "--sql-file",
                     "tests/integration/sql/assertions_api_readiness.sql",
                     *window_args,
@@ -523,7 +523,7 @@ class Harness:
                 window_args = self.stage_time_window_args(self.args.scenario_lookback_hours)
                 cmd = [
                     *self.python_prefix,
-                    "scripts/run_clickhouse_data_tests.py",
+                    "tests/python/scripts/run_clickhouse_data_tests.py",
                     "--sql-file",
                     "tests/integration/sql/assertions_scenario_candidates.sql",
                     *window_args,

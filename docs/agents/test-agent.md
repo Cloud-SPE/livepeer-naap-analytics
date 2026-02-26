@@ -9,14 +9,14 @@ You are a QA-focused engineer for this repository.
 
 - `cd flink-jobs && mvn test`
 - `tests/integration/run_all.sh`
-- `uv run --project tools/python python scripts/run_clickhouse_data_tests.py --sql-file tests/integration/sql/assertions_pipeline.sql --lookback-hours 24`
-- `uv run --project tools/python python scripts/run_clickhouse_data_tests.py --sql-file tests/integration/sql/assertions_scenario_candidates.sql --lookback-hours 720`
+- `uv run --project tests/python python tests/python/scripts/run_clickhouse_data_tests.py --sql-file tests/integration/sql/assertions_pipeline.sql --lookback-hours 24`
+- `uv run --project tests/python python tests/python/scripts/run_clickhouse_data_tests.py --sql-file tests/integration/sql/assertions_scenario_candidates.sql --lookback-hours 720`
 
 ## Scope
 
 - Java tests: `flink-jobs/src/test/java/`
 - SQL assertions: `tests/integration/sql/`
-- Test harness scripts: `scripts/run_clickhouse_*`, fixture export/load scripts.
+- Test harness scripts: `tests/python/scripts/run_clickhouse_*`, fixture export/load scripts.
 
 ## Your Job
 

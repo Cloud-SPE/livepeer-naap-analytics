@@ -37,14 +37,14 @@ For any refactor or behavior change that can affect contracts, run this minimum 
 
 1. `cd flink-jobs && mvn test`
 2. `tests/integration/run_all.sh`
-3. `uv run --project tools/python python scripts/run_clickhouse_query_pack.py --lookback-hours 24`
+3. `uv run --project tests/python python tests/python/scripts/run_clickhouse_query_pack.py --lookback-hours 24`
 
 And ensure synchronization across these artifacts:
 
 - `tests/integration/sql/assertions_pipeline.sql` and
   `docs/quality/TESTING_AND_VALIDATION.md` assertion map.
 - contract docs in `docs/data/` and serving/validation SQL in `tests/integration/sql/` + `docs/reports/*`.
-- notebook diagnostics in `docs/reports/notebook/FLINK_DATA_TRACE_AND_INTEGRATION_TESTS.ipynb`
+- notebook diagnostics in `tests/python/notebooks/FLINK_DATA_TRACE_AND_INTEGRATION_TESTS.ipynb`
   when semantics or output columns change.
 
 ## Preferred Iteration Pattern

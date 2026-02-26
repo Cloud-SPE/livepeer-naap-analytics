@@ -28,5 +28,5 @@ Canonical backlog for agent-facing debugging tools that reduce repeated manual t
 
 ## Notes
 
-- Existing building blocks to reuse first: `scripts/run_clickhouse_query_pack.py`, `scripts/run_clickhouse_data_tests.py`, and `scripts/run_scenario_test_harness.py`.
+- Existing building blocks to reuse first: `tests/python/scripts/run_clickhouse_query_pack.py`, `tests/python/scripts/run_clickhouse_data_tests.py`, and `tests/python/scripts/run_scenario_test_harness.py`.
 - Prefer thin orchestration layers over duplicate query logic.

@@ -23,12 +23,14 @@
 - Scenario integration harness (smoke, debug/persistent):
   - `cd flink-jobs && mvn -Pscenario-it-smoke-debug verify`
 - Query trace pack:
-  - `uv run --project tools/python python scripts/run_clickhouse_query_pack.py --lookback-hours 24`
+  - `uv run --project tests/python python tests/python/scripts/run_clickhouse_query_pack.py --lookback-hours 24`
 - Pipeline assertions:
-  - `uv run --project tools/python python scripts/run_clickhouse_data_tests.py --sql-file tests/integration/sql/assertions_raw_typed.sql --lookback-hours 24`
-  - `uv run --project tools/python python scripts/run_clickhouse_data_tests.py --sql-file tests/integration/sql/assertions_pipeline.sql --lookback-hours 24`
+  - `uv run --project tests/python python tests/python/scripts/run_clickhouse_data_tests.py --sql-file tests/integration/sql/assertions_raw_typed.sql --lookback-hours 24`
+  - `uv run --project tests/python python tests/python/scripts/run_clickhouse_data_tests.py --sql-file tests/integration/sql/assertions_pipeline.sql --lookback-hours 24`
+- API readiness assertions:
+  - `uv run --project tests/python python tests/python/scripts/run_clickhouse_data_tests.py --sql-file tests/integration/sql/assertions_api_readiness.sql --lookback-hours 24`
 - Scenario assertions:
-  - `uv run --project tools/python python scripts/run_clickhouse_data_tests.py --sql-file tests/integration/sql/assertions_scenario_candidates.sql --lookback-hours 720`
+  - `uv run --project tests/python python tests/python/scripts/run_clickhouse_data_tests.py --sql-file tests/integration/sql/assertions_scenario_candidates.sql --lookback-hours 720`
   - Note: `scenario_4_success_with_param_updates_exists` is currently informational (non-blocking) until param-update source rows are present in production.
   - Note: if `scenario_3_success_with_swap_exists` fails while replay and raw/typed tests pass, first check fixture coverage (`tests/integration/fixtures/manifest.json`) before debugging parser logic.
 - One-shot integration run:
@@ -59,6 +61,17 @@ Any add/rename/remove of a `-- TEST:` block must co-update this section in the s
 | `swapped_sessions_have_evidence` | `swap_count > 0` (confirmed swaps) has supporting explicit swap evidence from trace/segments. | Check swap evidence via both `fact_stream_trace_edges` and `stream_trace_events` by `(stream_id,request_id)`. |
 | `param_updates_reference_existing_session` | Param-update facts must reference a known session in-window. | Left join `fact_workflow_param_updates` to latest sessions and inspect orphan IDs. |
 | `lifecycle_session_pipeline_model_compatible` | Session `pipeline` and `model_id` remain contract-compatible when both set. | Inspect attribution selection and model labeling paths for mismatched values. |
+| `latest_sessions_vs_segment_session_ids` | Distinct segmented session ids do not exceed latest session ids. | Compare latest session selection logic vs segment fact time filtering in-window. |
+| `raw_session_rows_vs_latest_sessions` | Raw session rows are never fewer than latest-per-session rows. | Inspect `fact_workflow_sessions` versioning/upserts and replay window boundaries. |
+| `segment_rows_vs_segment_session_ids` | Segment row count is always >= distinct segment session ids. | Check segment emission completeness and any segment-level dedup/drop behavior. |
+| `mixed_known_stream_versions` | Mixed `known_stream` versions are allowed, but regressive `1 -> 0` transitions fail. | Inspect per-session version history ordered by `version` for regressive transitions. |
+| `agg_stream_performance_1m_matches_status_samples` | `agg_stream_performance_1m` is lossless/numerically consistent with `fact_stream_status_samples` at 1-minute grain. | Compare key coverage first (`expected_only_keys`/`rollup_only_keys`), then session/stream/sample and FPS diffs. |
+| `gpu_view_covers_healthy_attributed_session_keys` | Successful attributable session keys are represented in `v_api_gpu_metrics`. | Check missing key examples and verify fallback attribution fields (`model_id/gpu_id/region`) for those sessions. |
+| `demand_has_rows_for_all_session_hours` | Every session hour is represented in `v_api_network_demand`. | Inspect missing `window_start` hours and check demand view filters/materialization lag. |
+| `gpu_count_delta_explained_by_key_overlap` | GPU view-vs-rollup row delta must equal net key-overlap delta. | Compare `row_delta` vs `overlap_delta`; investigate unexpected key proliferation/drop. |
+| `network_demand_counts_aligned_to_rollup` | Demand view keyspace/counts strictly align with recomputed rollup+demand keyspace. | Inspect `rollup_only_keys`/`view_only_keys` first, then demand/perf key derivation. |
+| `sla_counts_aligned_to_raw_latest_sessions` | SLA view keyspace/counts strictly align with latest-session recompute keyspace. | Inspect `raw_only_keys`/`view_only_keys`; verify latest-session dedup and hour bucketing. |
+| `view_count_grain_ordering` | Informational grain-ordering check: demand rows should usually be <= GPU/SLA row counts. | Treat WARN as diagnostic unless accompanied by blocking parity failures. |
 | `gpu_view_matches_rollup` | GPU API view numerically matches rollup aggregate source and key overlap is non-empty when both sides have rows. | Check `rollup_rows`, `view_rows`, `joined_rows`, `rollup_only_keys`, `view_only_keys`, then inspect key completeness diagnostics (`*_empty_*_rows`). |
 | `network_demand_view_matches_rollup` | Network demand API view numerically matches recomputed hourly perf+demand aggregates and key overlap is non-empty when both sides have rows. | Check `rollup_rows`, `view_rows`, `joined_rows`, then inspect key coverage (`rollup_only_keys`/`view_only_keys`) and total diff diagnostics. |
 | `sla_view_matches_session_fact` | SLA API counts match independent recomputation from session facts and key overlap is non-empty when both sides have rows. | Check `raw_rows`, `view_rows`, `joined_rows`, then compare known/unexcused/swapped diff totals and key coverage. |
@@ -71,7 +84,7 @@ Default behavior is full-stack replay via Kafka -> Flink -> ClickHouse assertion
 (not direct ClickHouse fixture insertion).
 
 - Script:
-  - `scripts/run_scenario_test_harness.py`
+  - `tests/python/scripts/run_scenario_test_harness.py`
 - Stage list:
   - `stack_up`
   - `schema_apply`
@@ -83,9 +96,9 @@ Default behavior is full-stack replay via Kafka -> Flink -> ClickHouse assertion
   - `assert_scenarios`
   - `stack_down`
 - Run one stage for debugging:
-  - `python scripts/run_scenario_test_harness.py --stage assert_pipeline`
+  - `python tests/python/scripts/run_scenario_test_harness.py --stage assert_pipeline`
 - Keep stack running after failure:
-  - `python scripts/run_scenario_test_harness.py --mode full --keep-stack-on-fail`
+  - `python tests/python/scripts/run_scenario_test_harness.py --mode full --keep-stack-on-fail`
 
 ### Smoke vs Smoke-Debug
 
@@ -139,7 +152,7 @@ Use this sequence for shared-helper refactors:
 4. Run integration assertions:
    - `tests/integration/run_all.sh`
 5. Run query-pack validation:
-   - `uv run --project tools/python python scripts/run_clickhouse_query_pack.py --lookback-hours 24`
+   - `uv run --project tests/python python tests/python/scripts/run_clickhouse_query_pack.py --lookback-hours 24`
 
 ## Contract Drift Checklist (Generalized)
 
@@ -154,9 +167,10 @@ Apply this checklist to any refactor/change that can affect schema, lifecycle se
 3. Run the minimum validation gate:
    - `cd flink-jobs && mvn test`
    - `tests/integration/run_all.sh`
-   - `uv run --project tools/python python scripts/run_clickhouse_query_pack.py --lookback-hours 24`
+   - `uv run --project tests/python python tests/python/scripts/run_clickhouse_query_pack.py --lookback-hours 24`
 4. If semantics or output fields changed, re-check notebook cells and saved outputs:
-   - `docs/reports/notebook/FLINK_DATA_TRACE_AND_INTEGRATION_TESTS.ipynb`
+   - `tests/python/notebooks/INTEGRATION_EXEC_SUMMARY.ipynb`
+   - `tests/python/notebooks/FLINK_DATA_TRACE_AND_INTEGRATION_TESTS.ipynb`
 5. If any step is skipped, document the gap and risk in PR notes.
 
 ## Data Quality Contract
@@ -180,8 +194,8 @@ Apply this checklist to any refactor/change that can affect schema, lifecycle se
 |---|---|---|
 | Metrics validation SQL | `docs/reports/METRICS_VALIDATION_QUERIES.sql` | KPI/contract query pack |
 | Ops validation SQL | `docs/reports/OPS_ACTIVITY_VALIDATION_QUERIES.sql` | Operational quality checks |
-| End-to-end trace notebook | `docs/reports/notebook/FLINK_DATA_TRACE_AND_INTEGRATION_TESTS.ipynb` | Scenario trace walkthroughs |
-| JSONL validation input | `scripts/livepeer_samples.jsonl` | Replayable sample event inputs |
+| Executive summary notebook | `tests/python/notebooks/INTEGRATION_EXEC_SUMMARY.ipynb` | High-level PASS/FAIL review |
+| End-to-end trace notebook | `tests/python/notebooks/FLINK_DATA_TRACE_AND_INTEGRATION_TESTS.ipynb` | Scenario trace walkthroughs |
 
 Policy:
 - Keep `docs/reports/*` as dated evidence artifacts.
@@ -190,11 +204,11 @@ Policy:
 ## Notebook + Fixture Workflow
 
 - Notebook environment:
-  - `tools/python/README.md`
+  - `tests/python/README.md`
 - Production fixture export:
-  - `scripts/export_scenario_fixtures.py`
+  - `tests/python/scripts/export_scenario_fixtures.py`
 - Fixture load for test database:
-  - `scripts/load_scenario_fixtures.py`
+  - `tests/python/scripts/load_scenario_fixtures.py`
 
 ### Raw-First Fixture Contract
 
@@ -202,12 +216,12 @@ Policy:
   - `__table = streaming_events`
 - Scenario discovery still uses `tests/integration/sql/scenario_candidates.sql` against typed/fact tables.
 - Capability context selection still uses typed capability snapshots to find relevant source ids, but replay payloads are fetched from raw `streaming_events(type='network_capabilities')`.
-- `scripts/replay_scenario_events.py` replays raw `streaming_events` rows only (no typed `network_capabilities` reconstruction path).
+- `tests/python/scripts/replay_scenario_events.py` replays raw `streaming_events` rows only (no typed `network_capabilities` reconstruction path).
 
 Recommended export command:
 
 ```bash
-uv run --project tools/python python scripts/export_scenario_fixtures.py \
+uv run --project tests/python python tests/python/scripts/export_scenario_fixtures.py \
   --host clickhouse.livepeer.cloud \
   --port 8123 \
   --database livepeer_analytics \
@@ -223,7 +237,7 @@ uv run --project tools/python python scripts/export_scenario_fixtures.py \
 ### Scenario Candidate Discovery
 
 - Notebook section:
-  - `docs/reports/notebook/FLINK_DATA_TRACE_AND_INTEGRATION_TESTS.ipynb` -> `Scenario Candidate Discovery`
+  - `tests/python/notebooks/FLINK_DATA_TRACE_AND_INTEGRATION_TESTS.ipynb` -> `Scenario Candidate Discovery`
 - Required review in that section:
   - `scenario_3_success_with_swap` candidate counts (must be non-zero for blocking `assert_scenarios` runs).
   - `scenario_4_success_with_param_updates` candidate counts (track as availability signal; non-blocking until promoted to gate).
@@ -264,7 +278,7 @@ Use this when you want notebook results to reflect the same local dataset produc
    - copy `from_ts` and `to_ts`
 
 4. Launch notebook with those env vars:
-   - `uv run --project tools/python jupyter lab`
+   - `uv run --project tests/python jupyter lab`
    - Optional startup defaults for display mode:
      - `export NB_SHOW_DEBUG=1`
      - `export NB_SHOW_0609_DEBUG=1`
@@ -300,6 +314,7 @@ Notes:
 
 ## Deep References
 
-- `docs/reports/notebook/FLINK_DATA_TRACE_AND_INTEGRATION_TESTS.ipynb`
+- `tests/python/notebooks/FLINK_DATA_TRACE_AND_INTEGRATION_TESTS.ipynb`
+- `tests/python/notebooks/INTEGRATION_EXEC_SUMMARY.ipynb`
 - `docs/quality/DATA_QUALITY.md`
 - `docs/reports/JAVA_CODEBASE_ASSESSMENT.md`

@@ -244,5 +244,5 @@ Prod-derived regression tests must cover mixed-model hot-wallet candidate sets, 
 
 - Validation query packs: `docs/reports/METRICS_VALIDATION_QUERIES.sql`
 - Ops validation query packs: `docs/reports/OPS_ACTIVITY_VALIDATION_QUERIES.sql`
-- End-to-end trace notebook: `docs/reports/notebook/FLINK_DATA_TRACE_AND_INTEGRATION_TESTS.ipynb`
+- End-to-end trace notebook: `tests/python/notebooks/FLINK_DATA_TRACE_AND_INTEGRATION_TESTS.ipynb`
 - Canonical testing guide: `docs/quality/TESTING_AND_VALIDATION.md`

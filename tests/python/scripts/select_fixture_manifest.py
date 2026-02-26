@@ -278,7 +278,7 @@ def relativize_session_files(
 
 def main() -> None:
     args = parse_args()
-    repo_root = Path(__file__).resolve().parent.parent
+    repo_root = Path(__file__).resolve().parents[3]
     fixtures_root = (repo_root / "tests/integration/fixtures").resolve()
 
     source = Path(args.source).resolve() if args.source else find_latest_snapshot_manifest(fixtures_root)

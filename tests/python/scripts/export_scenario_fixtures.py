@@ -149,7 +149,7 @@ def require_client() -> None:
     if clickhouse_connect is None:
         print(
             "Missing dependency: clickhouse_connect. Run via uv project: "
-            "uv run --project tools/python python scripts/export_scenario_fixtures.py ...",
+            "uv run --project tests/python python tests/python/scripts/export_scenario_fixtures.py ...",
             file=sys.stderr,
         )
         sys.exit(1)

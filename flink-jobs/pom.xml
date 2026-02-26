@@ -289,7 +289,7 @@
                                     <workingDirectory>${project.basedir}/..</workingDirectory>
                                     <executable>python3</executable>
                                     <arguments>
-                                        <argument>scripts/run_scenario_test_harness.py</argument>
+                                        <argument>tests/python/scripts/run_scenario_test_harness.py</argument>
                                         <argument>--mode</argument>
                                         <argument>${scenario.harness.mode}</argument>
                                         <argument>--compose-files</argument>
@@ -325,7 +325,7 @@
                                     <workingDirectory>${project.basedir}/..</workingDirectory>
                                     <executable>python3</executable>
                                     <arguments>
-                                        <argument>scripts/run_scenario_test_harness.py</argument>
+                                        <argument>tests/python/scripts/run_scenario_test_harness.py</argument>
                                         <argument>--mode</argument>
                                         <argument>${scenario.harness.mode}</argument>
                                         <argument>--compose-files</argument>
@@ -361,7 +361,7 @@
                                     <workingDirectory>${project.basedir}/..</workingDirectory>
                                     <executable>python3</executable>
                                     <arguments>
-                                        <argument>scripts/run_scenario_test_harness.py</argument>
+                                        <argument>tests/python/scripts/run_scenario_test_harness.py</argument>
                                         <argument>--stage</argument>
                                         <argument>stack_up</argument>
                                         <argument>--stage</argument>

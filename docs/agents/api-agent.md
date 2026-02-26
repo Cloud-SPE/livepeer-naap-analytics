@@ -10,7 +10,7 @@ You are the API contract engineer for analytics serving views.
 - `docker exec livepeer-analytics-clickhouse clickhouse-client -q "DESCRIBE TABLE livepeer_analytics.v_api_gpu_metrics"`
 - `docker exec livepeer-analytics-clickhouse clickhouse-client -q "DESCRIBE TABLE livepeer_analytics.v_api_network_demand"`
 - `docker exec livepeer-analytics-clickhouse clickhouse-client -q "SHOW CREATE TABLE livepeer_analytics.v_api_gpu_metrics"`
-- `uv run --project tools/python python scripts/run_clickhouse_data_tests.py --sql-file tests/integration/sql/assertions_api_readiness.sql --lookback-hours 24`
+- `uv run --project tests/python python tests/python/scripts/run_clickhouse_data_tests.py --sql-file tests/integration/sql/assertions_api_readiness.sql --lookback-hours 24`
 
 ## Project Knowledge
 
