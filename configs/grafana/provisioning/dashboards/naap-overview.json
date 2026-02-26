@@ -22,324 +22,22 @@
   "links": [],
   "panels": [
     {
-      "datasource": {
-        "type": "grafana-clickhouse-datasource",
-        "uid": "clickhouse"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "barWidthFactor": 0.6,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "showValues": false,
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": 0
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
+      "collapsed": false,
       "gridPos": {
-        "h": 8,
-        "w": 12,
+        "h": 1,
+        "w": 24,
         "x": 0,
         "y": 0
       },
-      "id": 8,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "hideZeros": false,
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "pluginVersion": "12.3.1",
-      "targets": [
-        {
-          "editorType": "sql",
-          "format": 1,
-          "meta": {
-            "builderOptions": {
-              "columns": [],
-              "database": "",
-              "limit": 1000,
-              "mode": "list",
-              "queryType": "table",
-              "table": ""
-            }
-          },
-          "pluginVersion": "4.12.0",
-          "queryType": "table",
-          "rawSql": "SELECT\n    toStartOfInterval(event_timestamp, INTERVAL 1 HOUR) AS t,\n    orchestrator,\n    capability,\n    -- Extract only digits, then convert to Decimal\n    sum(toDecimal128(extract(face_value, '^(\\d+)'), 0)) / 1e18 AS total_revenue_eth\nFROM livepeer_analytics.payment_events\nWHERE $__timeFilter(event_timestamp)\nGROUP BY t, orchestrator, capability\nORDER BY t ASC",
-          "refId": "A"
-        }
-      ],
-      "title": "Revenue Analysis (Gateway Tickets)",
-      "type": "timeseries"
+      "id": 100,
+      "panels": [],
+      "title": "Summary",
+      "type": "row"
     },
     {
       "datasource": {
         "type": "grafana-clickhouse-datasource",
-        "uid": "clickhouse"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "barWidthFactor": 0.6,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "showValues": false,
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": 0
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 0
-      },
-      "id": 10,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "hideZeros": false,
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "pluginVersion": "12.3.1",
-      "targets": [
-        {
-          "editorType": "sql",
-          "format": 1,
-          "meta": {
-            "builderOptions": {
-              "columns": [],
-              "database": "",
-              "limit": 1000,
-              "mode": "list",
-              "queryType": "table",
-              "table": ""
-            }
-          },
-          "pluginVersion": "4.12.0",
-          "queryType": "table",
-          "rawSql": "SELECT\n    toStartOfInterval(event_timestamp, INTERVAL 1 HOUR) AS t,\n    orchestrator,\n    capability,\n    -- Extract only digits, then convert to Decimal\n    avg(toDecimal128(extract(price, '^(\\d+)'), 0)) AS avg_price_per_pixel\nFROM livepeer_analytics.payment_events\nWHERE $__timeFilter(event_timestamp)\nGROUP BY t, orchestrator, capability\nORDER BY t ASC",
-          "refId": "A"
-        }
-      ],
-      "title": "Pricing Analysis(Gateway Tickets)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "grafana-clickhouse-datasource",
-        "uid": "clickhouse"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "barWidthFactor": 0.6,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "showValues": false,
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": 0
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 8
-      },
-      "id": 9,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "hideZeros": false,
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "pluginVersion": "12.3.1",
-      "targets": [
-        {
-          "editorType": "sql",
-          "format": 1,
-          "meta": {
-            "builderOptions": {
-              "columns": [],
-              "database": "",
-              "limit": 1000,
-              "mode": "list",
-              "queryType": "table",
-              "table": ""
-            }
-          },
-          "pluginVersion": "4.12.0",
-          "queryType": "table",
-          "rawSql": "WITH request_latencies AS (\n    SELECT\n        request_id,\n        orchestrator_address,\n        min(event_timestamp) as start_time,\n        -- Calculate ms diff between first and last trace for this ID\n        dateDiff('millisecond', min(data_timestamp), max(data_timestamp)) AS latency_ms\n    FROM livepeer_analytics.stream_trace_events\n    WHERE $__timeFilter(event_timestamp)\n    GROUP BY request_id, orchestrator_address\n)\nSELECT\n    toStartOfInterval(start_time, INTERVAL 5 MINUTE) AS t,\n    orchestrator_address,\n    avg(latency_ms) AS avg_e2e_latency_ms\nFROM request_latencies\nGROUP BY t, orchestrator_address\nORDER BY t ASC",
-          "refId": "A"
-        }
-      ],
-      "title": "End-to-End (e2e) Stream Latency",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "grafana-clickhouse-datasource",
-        "uid": "clickhouse"
+        "uid": "${clickhouse_ds}"
       },
       "fieldConfig": {
         "defaults": {
@@ -351,24 +49,53 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": 0
+                "color": "red",
+                "value": null
               },
               {
-                "color": "red",
+                "color": "yellow",
+                "value": 8
+              },
+              {
+                "color": "green",
                 "value": 15
               }
             ]
           },
-          "unit": "fps"
+          "unit": "none"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Orchestrator Address"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "string"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Avg FPS"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "fps"
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 8
+        "h": 6,
+        "w": 6,
+        "x": 0,
+        "y": 1
       },
       "id": 2,
       "options": {
@@ -391,19 +118,12 @@
         {
           "datasource": {
             "type": "grafana-clickhouse-datasource",
-            "uid": "clickhouse"
+            "uid": "${clickhouse_ds}"
           },
           "editorType": "sql",
           "format": 1,
-          "meta": {
-            "builderOptions": {
-              "fields": [],
-              "limit": 100,
-              "mode": "list"
-            }
-          },
           "queryType": "sql",
-          "rawSql": "SELECT\n  avg(output_fps) as current_fps\nFROM livepeer_analytics.ai_stream_status\nWHERE event_timestamp >= now() - INTERVAL 5 MINUTE",
+          "rawSql": "SELECT ifNull(avg(output_fps), 0) AS current_fps FROM livepeer_analytics.ai_stream_status WHERE event_timestamp >= now() - INTERVAL 15 MINUTE AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), lower(orchestrator_address)))",
           "refId": "A"
         }
       ],
@@ -413,33 +133,12 @@
     {
       "datasource": {
         "type": "grafana-clickhouse-datasource",
-        "uid": "clickhouse"
+        "uid": "${clickhouse_ds}"
       },
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "fillOpacity": 80,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineWidth": 1,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
           },
           "mappings": [],
           "thresholds": {
@@ -448,112 +147,89 @@
               {
                 "color": "green",
                 "value": 0
-              },
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Orchestrator Address"
+            },
+            "properties": [
               {
-                "color": "red",
-                "value": 80
+                "id": "unit",
+                "value": "string"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Avg FPS"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "fps"
               }
             ]
           }
-        },
-        "overrides": []
+        ]
       },
       "gridPos": {
-        "h": 10,
-        "w": 24,
-        "x": 0,
-        "y": 16
+        "h": 6,
+        "w": 6,
+        "x": 6,
+        "y": 1
       },
-      "id": 7,
+      "id": 101,
       "options": {
         "barRadius": 0,
-        "barWidth": 0.97,
-        "fullHighlight": false,
-        "groupWidth": 0.7,
+        "barWidth": 0.85,
+        "groupWidth": 0.8,
         "legend": {
-          "calcs": [],
-          "displayMode": "list",
+          "displayMode": "hidden",
           "placement": "bottom",
-          "showLegend": true
+          "showLegend": false
         },
         "orientation": "horizontal",
-        "showValue": "auto",
+        "showValue": "always",
         "stacking": "none",
         "tooltip": {
           "hideZeros": false,
           "mode": "single",
           "sort": "none"
-        },
-        "xTickLabelRotation": 0,
-        "xTickLabelSpacing": 0
+        }
       },
       "pluginVersion": "12.3.1",
       "targets": [
         {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
           "editorType": "sql",
           "format": 1,
-          "meta": {
-            "builderOptions": {
-              "columns": [],
-              "database": "",
-              "limit": 1000,
-              "mode": "list",
-              "queryType": "table",
-              "table": ""
-            }
-          },
-          "pluginVersion": "4.12.0",
-          "queryType": "table",
-          "rawSql": "SELECT\n    orchestrator_address,\n    avg(output_fps) as mean_fps\nFROM livepeer_analytics.ai_stream_status\nWHERE $__timeFilter(event_timestamp)\nGROUP BY orchestrator_address\nORDER BY mean_fps DESC\nLIMIT 10",
+          "queryType": "sql",
+          "rawSql": "SELECT timeframe, avg_fps FROM (SELECT 1 AS sort_key, '1 day' AS timeframe, ifNull(avg(output_fps), 0) AS avg_fps FROM livepeer_analytics.ai_stream_status WHERE event_timestamp >= now() - INTERVAL 1 DAY AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), lower(orchestrator_address))) UNION ALL SELECT 2 AS sort_key, '1 week' AS timeframe, ifNull(avg(output_fps), 0) AS avg_fps FROM livepeer_analytics.ai_stream_status WHERE event_timestamp >= now() - INTERVAL 7 DAY AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), lower(orchestrator_address))) UNION ALL SELECT 3 AS sort_key, '1 month' AS timeframe, ifNull(avg(output_fps), 0) AS avg_fps FROM livepeer_analytics.ai_stream_status WHERE event_timestamp >= now() - INTERVAL 30 DAY AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), lower(orchestrator_address)))) ORDER BY sort_key",
           "refId": "A"
         }
       ],
-      "title": "Top 10 Orchestrators by Avg FPS (Bar Chart)",
+      "title": "Average FPS by Window (1d / 1w / 1m)",
       "type": "barchart"
     },
     {
       "datasource": {
         "type": "grafana-clickhouse-datasource",
-        "uid": "clickhouse"
+        "uid": "${clickhouse_ds}"
       },
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "barWidthFactor": 0.6,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "showValues": false,
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
           },
           "mappings": [],
           "thresholds": {
@@ -562,13 +238,178 @@
               {
                 "color": "green",
                 "value": 0
-              },
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Orchestrator Address"
+            },
+            "properties": [
               {
-                "color": "red",
-                "value": 80
+                "id": "unit",
+                "value": "string"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Active Streams"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
               }
             ]
           }
+        ]
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 12,
+        "y": 1
+      },
+      "id": 102,
+      "options": {
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true,
+        "sizing": "auto"
+      },
+      "pluginVersion": "12.3.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT uniqExact(lower(orchestrator_address)) AS active_orchestrators_24h FROM livepeer_analytics.ai_stream_status WHERE event_timestamp >= now() - INTERVAL 24 HOUR AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), lower(orchestrator_address)))",
+          "refId": "A"
+        }
+      ],
+      "title": "Active Orchestrators (24h)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 18,
+        "y": 1
+      },
+      "id": 103,
+      "options": {
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true,
+        "sizing": "auto"
+      },
+      "pluginVersion": "12.3.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "WITH latest_gpu AS (SELECT gpu_id, argMax(lower(orchestrator_address), snapshot_ts) AS orchestrator_address, argMax(model_id, snapshot_ts) AS model_id, max(snapshot_ts) AS latest_snapshot_ts FROM livepeer_analytics.dim_orchestrator_capability_snapshots WHERE ifNull(gpu_id, '') != '' GROUP BY gpu_id) SELECT uniqExact(gpu_id) AS known_gpus FROM latest_gpu WHERE latest_snapshot_ts >= now() - INTERVAL 15 MINUTE AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), model_id)) AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orchestrator_address))",
+          "refId": "A"
+        }
+      ],
+      "title": "Known GPUs (active 15m)",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 7
+      },
+      "id": 104,
+      "panels": [],
+      "title": "Economics",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "decimals": 6,
+          "custom": {
+            "axisLabel": "ETH / hour",
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "short"
         },
         "overrides": []
       },
@@ -576,13 +417,15 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 26
+        "y": 8
       },
-      "id": 5,
+      "id": 8,
       "options": {
         "legend": {
-          "calcs": [],
-          "displayMode": "list",
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
           "placement": "bottom",
           "showLegend": true
         },
@@ -597,29 +440,18 @@
         {
           "editorType": "sql",
           "format": 1,
-          "meta": {
-            "builderOptions": {
-              "columns": [],
-              "database": "",
-              "limit": 1000,
-              "mode": "list",
-              "queryType": "table",
-              "table": ""
-            }
-          },
-          "pluginVersion": "4.12.0",
           "queryType": "table",
-          "rawSql": "SELECT\n    window_start as t,\n    orchestrator_address,\n    stddevPopMerge(stddev_fps_state) / avgMerge(avg_fps_state) as jitter_coeff\nFROM livepeer_analytics.mv_jitter_stats\nWHERE $__timeFilter(window_start)\nGROUP BY t, orchestrator_address",
+          "rawSql": "SELECT time, sum(revenue_eth) AS total_revenue_eth FROM (SELECT toStartOfInterval(window_start, INTERVAL 1 HOUR) AS time, sum(if(fee_payment_eth > 1000000000, fee_payment_eth / 1000000000000000000.0, fee_payment_eth)) AS revenue_eth FROM livepeer_analytics.v_api_network_demand WHERE $__timeFilter(window_start) GROUP BY time UNION ALL SELECT toStartOfInterval(now(), INTERVAL 1 HOUR) AS time, toFloat64(0) AS revenue_eth) GROUP BY time ORDER BY time",
           "refId": "A"
         }
       ],
-      "title": "Jitter Coefficient by Orchestrator",
+      "title": "Revenue Analysis (Gateway Tickets)",
       "type": "timeseries"
     },
     {
       "datasource": {
         "type": "grafana-clickhouse-datasource",
-        "uid": "clickhouse"
+        "uid": "${clickhouse_ds}"
       },
       "fieldConfig": {
         "defaults": {
@@ -627,38 +459,11 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "barWidthFactor": 0.6,
+            "axisLabel": "gwei / megapixel",
             "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "showValues": false,
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never"
           },
           "mappings": [],
           "thresholds": {
@@ -667,13 +472,10 @@
               {
                 "color": "green",
                 "value": 0
-              },
-              {
-                "color": "red",
-                "value": 80
               }
             ]
-          }
+          },
+          "unit": "short"
         },
         "overrides": []
       },
@@ -681,13 +483,15 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 26
+        "y": 8
       },
-      "id": 6,
+      "id": 10,
       "options": {
         "legend": {
-          "calcs": [],
-          "displayMode": "list",
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
           "placement": "bottom",
           "showLegend": true
         },
@@ -702,29 +506,18 @@
         {
           "editorType": "sql",
           "format": 1,
-          "meta": {
-            "builderOptions": {
-              "columns": [],
-              "database": "",
-              "limit": 1000,
-              "mode": "list",
-              "queryType": "table",
-              "table": ""
-            }
-          },
-          "pluginVersion": "4.12.0",
           "queryType": "table",
-          "rawSql": "SELECT\n    toStartOfInterval(event_timestamp, INTERVAL 5 MINUTE) AS t,\n    orchestrator_address,\n    avg(output_fps) AS avg_fps\nFROM livepeer_analytics.ai_stream_status\nWHERE $__timeFilter(event_timestamp)\nGROUP BY t, orchestrator_address\nORDER BY t ASC",
+          "rawSql": "SELECT toStartOfInterval(event_timestamp, INTERVAL 1 HOUR) AS time, pipeline, avg(toFloat64(price_per_unit) * 1000000.0 / greatest(toFloat64(ifNull(pixels_per_unit, 1)), 1.0) / 1000000000.0) AS quoted_price_gwei_per_mp FROM livepeer_analytics.network_capabilities WHERE $__timeFilter(event_timestamp) AND price_per_unit IS NOT NULL AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), model_id)) AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), lower(orchestrator_address))) GROUP BY time, pipeline ORDER BY time",
           "refId": "A"
         }
       ],
-      "title": "FPS Average by Orchestrator (5-min intervals)",
+      "title": "Pricing Analysis(Gateway Tickets)",
       "type": "timeseries"
     },
     {
       "datasource": {
         "type": "grafana-clickhouse-datasource",
-        "uid": "clickhouse"
+        "uid": "${clickhouse_ds}"
       },
       "fieldConfig": {
         "defaults": {
@@ -749,47 +542,22 @@
             ]
           }
         },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "real_orch_address"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 392
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "display_name"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 378
-              }
-            ]
-          }
-        ]
+        "overrides": []
       },
       "gridPos": {
-        "h": 9,
+        "h": 8,
         "w": 24,
         "x": 0,
-        "y": 34
+        "y": 16
       },
-      "id": 4,
+      "id": 105,
       "options": {
         "cellHeight": "sm",
         "showHeader": true,
         "sortBy": [
           {
-            "desc": false,
-            "displayName": "active_streams"
+            "desc": true,
+            "displayName": "Quote Time"
           }
         ]
       },
@@ -798,47 +566,1370 @@
         {
           "datasource": {
             "type": "grafana-clickhouse-datasource",
-            "uid": "clickhouse"
+            "uid": "${clickhouse_ds}"
           },
           "editorType": "sql",
           "format": 1,
-          "meta": {
-            "builderOptions": {
-              "columns": [],
-              "database": "",
-              "limit": 100,
-              "mode": "list",
-              "queryType": "table",
-              "table": ""
-            }
-          },
-          "pluginVersion": "4.12.0",
           "queryType": "table",
-          "rawSql": "SELECT\n    -- Use the official URI from capabilities, fallback to the event URL\n    coalesce(nullIf(nc.orch_uri, ''), s.orchestrator_url) AS display_uri,\n    count(DISTINCT s.stream_id) AS active_streams,\n    avg(s.output_fps) AS avg_fps,\n    quantile(0.95)(s.output_fps) AS p95_fps,\n    sum(s.restart_count) AS total_restarts\nFROM livepeer_analytics.ai_stream_status AS s\n         LEFT JOIN livepeer_analytics.network_capabilities AS nc\n                   ON s.orchestrator_url = nc.orch_uri\nWHERE s.event_timestamp >= now() - INTERVAL 24 HOUR\nGROUP BY display_uri\nORDER BY active_streams DESC\nLIMIT 10",
+          "rawSql": "WITH latest_quotes AS (SELECT lower(nc.orchestrator_address) AS orchestrator_address, nc.pipeline AS pipeline, nc.model_id AS model_id, argMax(nc.price_per_unit, nc.event_timestamp) AS latest_price_per_unit, argMax(nc.pixels_per_unit, nc.event_timestamp) AS latest_pixels_per_unit, max(nc.event_timestamp) AS latest_quote_ts FROM livepeer_analytics.network_capabilities nc WHERE nc.price_per_unit IS NOT NULL AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), nc.model_id)) AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), lower(nc.orchestrator_address))) GROUP BY orchestrator_address, pipeline, model_id) SELECT latest_quote_ts AS \"Quote Time\", pipeline AS \"Pipeline\", orchestrator_address AS \"Orchestrator\", model_id AS \"Model\", round(toFloat64(latest_price_per_unit) * 1000000.0 / greatest(toFloat64(ifNull(latest_pixels_per_unit, 1)), 1.0) / 1000000000.0, 4) AS \"Price (gwei/MP)\" FROM latest_quotes ORDER BY latest_quote_ts DESC, \"Price (gwei/MP)\" DESC LIMIT 20",
+          "refId": "A"
+        }
+      ],
+      "title": "Latest Quoted Prices by Orchestrator",
+      "type": "table"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
+      "id": 106,
+      "panels": [],
+      "title": "Latency & Throughput",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "seconds",
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 25
+      },
+      "id": 9,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.3.1",
+      "targets": [
+        {
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT toStartOfInterval(window_start, INTERVAL 1 HOUR) AS time, avg(e2e_latency_ms) / 1000.0 AS avg_e2e_latency_s, quantileTDigest(0.95)(e2e_latency_ms) / 1000.0 AS p95_e2e_latency_s FROM livepeer_analytics.v_api_gpu_metrics WHERE $__timeFilter(window_start) AND e2e_latency_ms IS NOT NULL AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), model_id)) AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), lower(orchestrator_address))) GROUP BY time ORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "title": "End-to-End (e2e) Stream Latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "fps",
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "fps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 25
+      },
+      "id": 6,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.3.1",
+      "targets": [
+        {
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "WITH top_orch AS (SELECT lower(orchestrator_address) AS orchestrator_address FROM livepeer_analytics.ai_stream_status WHERE $__timeFilter(event_timestamp) GROUP BY orchestrator_address ORDER BY avg(output_fps) DESC LIMIT 8), labels AS (SELECT lower(orchestrator_address) AS orchestrator_address, argMax(orchestrator_url, latest_snapshot_ts) AS orchestrator_url FROM livepeer_analytics.dim_orchestrator_capability_current GROUP BY orchestrator_address) SELECT toStartOfInterval(s.event_timestamp, INTERVAL 5 MINUTE) AS time, coalesce(nullIf(labels.orchestrator_url, ''), lower(s.orchestrator_address)) AS orchestrator, avg(s.output_fps) AS avg_fps FROM livepeer_analytics.ai_stream_status s LEFT JOIN labels ON labels.orchestrator_address = lower(s.orchestrator_address) WHERE $__timeFilter(s.event_timestamp) AND (((('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '')) AND lower(s.orchestrator_address) IN (SELECT orchestrator_address FROM top_orch)) OR ('${orchestrator:csv}' != '__all' AND '${orchestrator:csv}' != '' AND has(splitByChar(',', '${orchestrator:csv}'), lower(s.orchestrator_address)))) GROUP BY time, orchestrator ORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "title": "FPS Average by Orchestrator (5-min intervals)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "ratio",
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 0.3
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 33
+      },
+      "id": 5,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.3.1",
+      "targets": [
+        {
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "WITH top_orch AS (SELECT lower(orchestrator_address) AS orchestrator_address FROM livepeer_analytics.mv_jitter_stats WHERE $__timeFilter(window_start) GROUP BY orchestrator_address ORDER BY avgMerge(avg_fps_state) DESC LIMIT 8), labels AS (SELECT lower(orchestrator_address) AS orchestrator_address, argMax(orchestrator_url, latest_snapshot_ts) AS orchestrator_url FROM livepeer_analytics.dim_orchestrator_capability_current GROUP BY orchestrator_address) SELECT s.window_start AS time, coalesce(nullIf(labels.orchestrator_url, ''), lower(s.orchestrator_address)) AS orchestrator, stddevPopMerge(s.stddev_fps_state) / nullIf(avgMerge(s.avg_fps_state), 0) AS jitter_coeff FROM livepeer_analytics.mv_jitter_stats s LEFT JOIN labels ON labels.orchestrator_address = lower(s.orchestrator_address) WHERE $__timeFilter(s.window_start) AND (((('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '')) AND lower(s.orchestrator_address) IN (SELECT orchestrator_address FROM top_orch)) OR ('${orchestrator:csv}' != '__all' AND '${orchestrator:csv}' != '' AND has(splitByChar(',', '${orchestrator:csv}'), lower(s.orchestrator_address)))) GROUP BY time, orchestrator ORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "title": "Jitter Coefficient by Orchestrator",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "fps",
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "fps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 33
+      },
+      "id": 107,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.3.1",
+      "targets": [
+        {
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT toStartOfInterval(window_start, INTERVAL 1 HOUR) AS time, pipeline, avg(avg_output_fps) AS avg_fps FROM livepeer_analytics.v_api_network_demand WHERE $__timeFilter(window_start) GROUP BY time, pipeline ORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "title": "Network FPS by Pipeline (1h avg)",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 41
+      },
+      "id": 108,
+      "panels": [],
+      "title": "Orchestrator Drilldown",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "fps",
+            "fillOpacity": 80,
+            "lineWidth": 1
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Orchestrator Address"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "string"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Avg FPS"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "fps"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 42
+      },
+      "id": 7,
+      "options": {
+        "barRadius": 0,
+        "barWidth": 0.95,
+        "groupWidth": 0.7,
+        "legend": {
+          "calcs": [],
+          "displayMode": "hidden",
+          "placement": "bottom",
+          "showLegend": false
+        },
+        "orientation": "vertical",
+        "showValue": "never",
+        "stacking": "none",
+        "xField": "Orchestrator Address",
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.3.1",
+      "targets": [
+        {
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT lower(s.orchestrator_address) AS \"Orchestrator Address\", avg(s.output_fps) AS \"Avg FPS\" FROM livepeer_analytics.ai_stream_status s WHERE $__timeFilter(s.event_timestamp) AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), lower(s.orchestrator_address))) GROUP BY \"Orchestrator Address\" ORDER BY \"Avg FPS\" DESC LIMIT 10",
+          "refId": "A"
+        }
+      ],
+      "title": "Top 10 Orchestrators by Avg FPS (Bar Chart)",
+      "type": "barchart",
+      "transformations": [
+        {
+          "id": "filterFieldsByName",
+          "options": {
+            "include": {
+              "names": [
+                "Orchestrator Address",
+                "Avg FPS"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "footer": {
+              "reducers": []
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 42
+      },
+      "id": 4,
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Active Streams"
+          }
+        ]
+      },
+      "pluginVersion": "12.3.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "WITH fps AS (SELECT lower(orchestrator_address) AS orchestrator_address, pipeline, countDistinct(stream_id) AS active_streams, avg(output_fps) AS avg_fps, quantileTDigest(0.95)(output_fps) AS p95_fps, sum(restart_count) AS total_restarts FROM livepeer_analytics.ai_stream_status WHERE event_timestamp >= now() - INTERVAL 24 HOUR AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), lower(orchestrator_address))) GROUP BY orchestrator_address, pipeline), lat AS (SELECT lower(orchestrator_address) AS orchestrator_address, pipeline, avg(e2e_latency_ms) / 1000.0 AS avg_e2e_latency_s, quantileTDigest(0.95)(e2e_latency_ms) / 1000.0 AS p95_e2e_latency_s FROM livepeer_analytics.v_api_gpu_metrics WHERE window_start >= now() - INTERVAL 24 HOUR AND e2e_latency_ms IS NOT NULL AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), model_id)) AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), lower(orchestrator_address))) GROUP BY orchestrator_address, pipeline) SELECT fps.orchestrator_address AS \"Orchestrator\", fps.pipeline AS \"Pipeline\", fps.active_streams AS \"Active Streams\", round(fps.avg_fps, 2) AS \"Avg FPS\", round(fps.p95_fps, 2) AS \"P95 FPS\", round(ifNull(lat.avg_e2e_latency_s, 0), 2) AS \"Avg E2E Latency (s)\", round(ifNull(lat.p95_e2e_latency_s, 0), 2) AS \"P95 E2E Latency (s)\", fps.total_restarts AS \"Restarts (24h)\" FROM fps LEFT JOIN lat ON lat.orchestrator_address = fps.orchestrator_address AND lat.pipeline = fps.pipeline ORDER BY fps.active_streams DESC, fps.avg_fps DESC LIMIT 20",
           "refId": "A"
         }
       ],
       "title": "Top Orchestrators (Last Day)",
       "type": "table"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 51
+      },
+      "id": 109,
+      "panels": [],
+      "title": "GPU Inventory",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "GPU count",
+            "fillOpacity": 80,
+            "lineWidth": 1
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Orchestrator Address"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "string"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Active Streams"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 52
+      },
+      "id": 110,
+      "options": {
+        "barRadius": 0,
+        "barWidth": 0.95,
+        "groupWidth": 0.7,
+        "legend": {
+          "displayMode": "hidden",
+          "placement": "bottom",
+          "showLegend": false
+        },
+        "orientation": "horizontal",
+        "showValue": "never",
+        "stacking": "none",
+        "xField": "Orchestrator Address",
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.3.1",
+      "targets": [
+        {
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "WITH latest_gpu AS (SELECT gpu_id, argMax(lower(orchestrator_address), snapshot_ts) AS orchestrator_address, argMax(gpu_name, snapshot_ts) AS gpu_name, argMax(model_id, snapshot_ts) AS model_id, max(snapshot_ts) AS latest_snapshot_ts FROM livepeer_analytics.dim_orchestrator_capability_snapshots WHERE ifNull(gpu_id, '') != '' GROUP BY gpu_id) SELECT ifNull(gpu_name, 'unknown') AS gpu_type, countDistinct(gpu_id) AS gpu_count FROM latest_gpu WHERE latest_snapshot_ts >= now() - INTERVAL 24 HOUR AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), model_id)) AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orchestrator_address)) GROUP BY gpu_type ORDER BY gpu_count DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "GPU Count by Type",
+      "type": "barchart"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "footer": {
+              "reducers": []
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 8,
+        "y": 52
+      },
+      "id": 111,
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Latest Snapshot"
+          }
+        ]
+      },
+      "pluginVersion": "12.3.1",
+      "targets": [
+        {
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "WITH latest_gpu AS (SELECT gpu_id, argMax(lower(orchestrator_address), snapshot_ts) AS orchestrator_address, argMax(gpu_name, snapshot_ts) AS gpu_name, argMax(gpu_memory_total, snapshot_ts) AS gpu_memory_total, argMax(pipeline, snapshot_ts) AS pipeline, argMax(model_id, snapshot_ts) AS model_id, max(snapshot_ts) AS latest_snapshot_ts FROM livepeer_analytics.dim_orchestrator_capability_snapshots WHERE ifNull(gpu_id, '') != '' GROUP BY gpu_id) SELECT latest_snapshot_ts AS \"Latest Snapshot\", pipeline AS \"Pipeline\", latest_gpu.orchestrator_address AS \"Orchestrator\", model_id AS \"Model\", gpu_id AS \"GPU ID\", gpu_name AS \"GPU Type\", round(toFloat64(ifNull(gpu_memory_total, 0)) / 1073741824.0, 1) AS \"GPU Memory (GB)\" FROM latest_gpu WHERE latest_snapshot_ts >= now() - INTERVAL 24 HOUR AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), model_id)) AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orchestrator_address)) ORDER BY latest_snapshot_ts DESC LIMIT 50",
+          "refId": "A"
+        }
+      ],
+      "title": "GPU Inventory (Latest Snapshots)",
+      "type": "table"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 60
+      },
+      "id": 112,
+      "panels": [],
+      "title": "Live Flow",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "green",
+                "value": 10
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 5,
+        "x": 0,
+        "y": 61
+      },
+      "id": 116,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "12.3.1",
+      "targets": [
+        {
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT toFloat64(countDistinct(stream_id)) AS value FROM livepeer_analytics.ai_stream_status WHERE event_timestamp >= now() - INTERVAL 15 MINUTE AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), lower(orchestrator_address)))",
+          "refId": "A"
+        }
+      ],
+      "title": "Active Streams (15m)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "green",
+                "value": 10
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 5,
+        "x": 5,
+        "y": 61
+      },
+      "id": 118,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "12.3.1",
+      "targets": [
+        {
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT toFloat64(uniqExact(lower(orchestrator_address))) AS value FROM livepeer_analytics.ai_stream_status WHERE event_timestamp >= now() - INTERVAL 24 HOUR AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), lower(orchestrator_address)))",
+          "refId": "A"
+        }
+      ],
+      "title": "Active Orchestrators (24h)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "green",
+                "value": 10
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 10,
+        "y": 61
+      },
+      "id": 119,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "12.3.1",
+      "targets": [
+        {
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT toFloat64(uniqExact(gpu_id)) AS value FROM (SELECT gpu_id, argMax(model_id, snapshot_ts) AS model_id, argMax(lower(orchestrator_address), snapshot_ts) AS orchestrator_address, max(snapshot_ts) AS latest_snapshot_ts FROM livepeer_analytics.dim_orchestrator_capability_snapshots WHERE ifNull(gpu_id, '') != '' GROUP BY gpu_id) g WHERE latest_snapshot_ts >= now() - INTERVAL 15 MINUTE AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), model_id)) AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orchestrator_address))",
+          "refId": "A"
+        }
+      ],
+      "title": "Active GPUs (15m)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "green",
+                "value": 10
+              }
+            ]
+          },
+          "unit": "fps",
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 5,
+        "x": 14,
+        "y": 61
+      },
+      "id": 120,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "12.3.1",
+      "targets": [
+        {
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT toFloat64(ifNull(avg(output_fps),0)) AS value FROM livepeer_analytics.ai_stream_status WHERE event_timestamp >= now() - INTERVAL 15 MINUTE AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), lower(orchestrator_address)))",
+          "refId": "A"
+        }
+      ],
+      "title": "Network FPS (15m avg)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "green",
+                "value": 10
+              }
+            ]
+          },
+          "unit": "s",
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 5,
+        "x": 19,
+        "y": 61
+      },
+      "id": 121,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "12.3.1",
+      "targets": [
+        {
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT toFloat64(ifNull(avg(e2e_latency_ms),0))/1000.0 AS value FROM livepeer_analytics.v_api_gpu_metrics WHERE window_start >= now() - INTERVAL 1 HOUR AND e2e_latency_ms IS NOT NULL AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), model_id)) AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), lower(orchestrator_address)))",
+          "refId": "A"
+        }
+      ],
+      "title": "E2E Latency (1h avg)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "footer": {
+              "reducers": []
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 74
+      },
+      "id": 117,
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Active Streams (15m)"
+          }
+        ]
+      },
+      "pluginVersion": "12.3.1",
+      "targets": [
+        {
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "refId": "A",
+          "rawSql": "SELECT 'gateway' AS \"From\", lower(orchestrator_address) AS \"To Orchestrator\", ifNull(nullIf(pipeline, ''), 'unknown') AS \"Pipeline\", countDistinct(stream_id) AS \"Active Streams (15m)\", round(avg(output_fps), 2) AS \"Avg FPS\" FROM livepeer_analytics.ai_stream_status WHERE event_timestamp >= now() - INTERVAL 15 MINUTE AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), lower(orchestrator_address))) GROUP BY \"From\", \"To Orchestrator\", \"Pipeline\" ORDER BY \"Active Streams (15m)\" DESC, \"Avg FPS\" DESC LIMIT 50"
+        }
+      ],
+      "title": "Gateway -> Orchestrator -> Pipeline Paths (15m)",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "events/min",
+            "drawStyle": "line",
+            "fillOpacity": 24,
+            "lineWidth": 2,
+            "showPoints": "never",
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 66
+      },
+      "id": 113,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.3.1",
+      "targets": [
+        {
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT toStartOfInterval(ts, INTERVAL 1 MINUTE) AS time, stage, count() AS events_per_minute FROM (SELECT s.event_timestamp AS ts, 'Status Samples' AS stage FROM livepeer_analytics.ai_stream_status s WHERE $__timeFilter(s.event_timestamp) AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), lower(s.orchestrator_address))) UNION ALL SELECT t.event_timestamp AS ts, 'Trace Events' AS stage FROM livepeer_analytics.stream_trace_events t WHERE $__timeFilter(t.event_timestamp) AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), lower(t.orchestrator_address))) UNION ALL SELECT n.event_timestamp AS ts, 'Capability Updates' AS stage FROM livepeer_analytics.network_capabilities n WHERE $__timeFilter(n.event_timestamp) AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), lower(n.orchestrator_address)))) GROUP BY time, stage ORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "title": "Stage Throughput (Events/Minute)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "active streams",
+            "fillOpacity": 80,
+            "lineWidth": 1
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Orchestrator Address"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "string"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Active Streams"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 66
+      },
+      "id": 114,
+      "options": {
+        "barRadius": 0,
+        "barWidth": 0.95,
+        "groupWidth": 0.7,
+        "legend": {
+          "displayMode": "hidden",
+          "placement": "bottom",
+          "showLegend": false
+        },
+        "orientation": "vertical",
+        "showValue": "never",
+        "stacking": "none",
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        },
+        "xField": "Orchestrator Address"
+      },
+      "pluginVersion": "12.3.1",
+      "targets": [
+        {
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT lower(s.orchestrator_address) AS \"Orchestrator Address\", countDistinct(s.stream_id) AS \"Active Streams\" FROM livepeer_analytics.ai_stream_status s WHERE s.event_timestamp >= now() - INTERVAL 15 MINUTE AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), lower(s.orchestrator_address))) GROUP BY \"Orchestrator Address\" ORDER BY \"Active Streams\" DESC LIMIT 12",
+          "refId": "A"
+        }
+      ],
+      "title": "Active Streams by Orchestrator (15m)",
+      "type": "barchart",
+      "transformations": [
+        {
+          "id": "filterFieldsByName",
+          "options": {
+            "include": {
+              "names": [
+                "Orchestrator Address",
+                "Active Streams"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "footer": {
+              "reducers": []
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 82
+      },
+      "id": 115,
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Time"
+          }
+        ]
+      },
+      "pluginVersion": "12.3.1",
+      "targets": [
+        {
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT ts AS \"Time\", stage AS \"Stage\", pipeline AS \"Pipeline\", orchestrator AS \"Orchestrator Address\", stream_id AS \"Stream ID\", request_id AS \"Request ID\" FROM (SELECT s.event_timestamp AS ts, 'status' AS stage, s.pipeline AS pipeline, lower(s.orchestrator_address) AS orchestrator, s.stream_id AS stream_id, s.request_id AS request_id FROM livepeer_analytics.ai_stream_status s WHERE s.event_timestamp >= now() - INTERVAL 30 MINUTE AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), lower(s.orchestrator_address))) UNION ALL SELECT t.event_timestamp AS ts, t.trace_type AS stage, '' AS pipeline, lower(t.orchestrator_address) AS orchestrator, t.stream_id AS stream_id, t.request_id AS request_id FROM livepeer_analytics.stream_trace_events t WHERE t.event_timestamp >= now() - INTERVAL 30 MINUTE AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), lower(t.orchestrator_address))) UNION ALL SELECT n.event_timestamp AS ts, 'capability' AS stage, n.pipeline AS pipeline, lower(n.orchestrator_address) AS orchestrator, '' AS stream_id, '' AS request_id FROM livepeer_analytics.network_capabilities n WHERE n.event_timestamp >= now() - INTERVAL 30 MINUTE AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), lower(n.orchestrator_address)))) ORDER BY ts DESC LIMIT 100",
+          "refId": "A"
+        }
+      ],
+      "title": "Live Event Tape (last 30m)",
+      "type": "table"
     }
   ],
   "preload": false,
-  "refresh": "5s",
+  "refresh": "10s",
   "schemaVersion": 42,
   "tags": [
     "naap",
     "livepeer"
   ],
   "templating": {
-    "list": []
+    "list": [
+      {
+        "name": "clickhouse_ds",
+        "label": "Datasource",
+        "type": "datasource",
+        "query": "grafana-clickhouse-datasource",
+        "refresh": 1,
+        "current": {
+          "selected": true,
+          "text": "ClickHouse Prod",
+          "value": "clickhouse_prod"
+        }
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "__all"
+        },
+        "allValue": "__all",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "${clickhouse_ds}"
+        },
+        "definition": "SELECT DISTINCT model_id FROM livepeer_analytics.dim_orchestrator_capability_current WHERE ifNull(model_id,'') != '' ORDER BY model_id",
+        "includeAll": true,
+        "label": "Model",
+        "multi": true,
+        "name": "model",
+        "options": [],
+        "query": "SELECT DISTINCT model_id FROM livepeer_analytics.dim_orchestrator_capability_current WHERE ifNull(model_id,'') != '' ORDER BY model_id",
+        "refresh": 2,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "__all"
+        },
+        "allValue": "__all",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "${clickhouse_ds}"
+        },
+        "definition": "SELECT lower(orchestrator_address) AS __text, lower(orchestrator_address) AS __value FROM livepeer_analytics.dim_orchestrator_capability_current GROUP BY lower(orchestrator_address) ORDER BY __text",
+        "includeAll": true,
+        "label": "Orchestrator",
+        "multi": true,
+        "name": "orchestrator",
+        "options": [],
+        "query": "SELECT lower(orchestrator_address) AS __text, lower(orchestrator_address) AS __value FROM livepeer_analytics.dim_orchestrator_capability_current GROUP BY lower(orchestrator_address) ORDER BY __text",
+        "refresh": 2,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
   },
   "time": {
-    "from": "2026-01-23T02:01:50.608Z",
-    "to": "2026-01-25T02:01:50.608Z"
+    "from": "now-30d",
+    "to": "now"
   },
   "timepicker": {},
   "timezone": "utc",
   "title": "Naap: Orchestrator Performance Overview",
   "uid": "naap-overview",
-  "version": 1
+  "version": 100
 }

@@ -8,9 +8,311 @@
   "links": [],
   "panels": [
     {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 100,
+      "panels": [],
+      "title": "Summary",
+      "type": "row"
+    },
+    {
       "datasource": {
         "type": "grafana-clickhouse-datasource",
-        "uid": "clickhouse"
+        "uid": "${clickhouse_ds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 10
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 1
+      },
+      "id": 10,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT count() AS dlq_last_hour FROM livepeer_analytics.streaming_events_dlq WHERE ingestion_timestamp >= now() - INTERVAL 1 HOUR AND ('${event_type:raw}' = '$__all' OR '${event_type:raw}' = '' OR event_type IN (${event_type:sqlstring}))",
+          "refId": "A"
+        }
+      ],
+      "title": "DLQ Events (Last 1h)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 10
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 6,
+        "y": 1
+      },
+      "id": 11,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT count() AS quarantine_last_hour FROM livepeer_analytics.streaming_events_quarantine WHERE ingestion_timestamp >= now() - INTERVAL 1 HOUR AND ('${event_type:raw}' = '$__all' OR '${event_type:raw}' = '' OR event_type IN (${event_type:sqlstring}))",
+          "refId": "A"
+        }
+      ],
+      "title": "Quarantine Events (Last 1h)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 10
+              },
+              {
+                "color": "red",
+                "value": 100
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 12,
+        "y": 1
+      },
+      "id": 12,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT count() AS dlq_last_day FROM livepeer_analytics.streaming_events_dlq WHERE ingestion_timestamp >= now() - INTERVAL 24 HOUR AND ('${event_type:raw}' = '$__all' OR '${event_type:raw}' = '' OR event_type IN (${event_type:sqlstring}))",
+          "refId": "A"
+        }
+      ],
+      "title": "DLQ Events (Last 24h)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 10
+              },
+              {
+                "color": "red",
+                "value": 100
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 18,
+        "y": 1
+      },
+      "id": 13,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT count() AS quarantine_last_day FROM livepeer_analytics.streaming_events_quarantine WHERE ingestion_timestamp >= now() - INTERVAL 24 HOUR AND ('${event_type:raw}' = '$__all' OR '${event_type:raw}' = '' OR event_type IN (${event_type:sqlstring}))",
+          "refId": "A"
+        }
+      ],
+      "title": "Quarantine Events (Last 24h)",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 6
+      },
+      "id": 101,
+      "panels": [],
+      "title": "Trends",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
       },
       "fieldConfig": {
         "defaults": {
@@ -26,27 +328,48 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              {"color": "green", "value": null},
-              {"color": "red", "value": 10}
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 10
+              }
             ]
           },
           "unit": "ops"
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 7
+      },
       "id": 1,
       "options": {
-        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true},
-        "tooltip": {"mode": "single"}
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single"
+        }
       },
       "targets": [
         {
-          "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse"},
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
           "editorType": "sql",
           "format": 1,
           "queryType": "sql",
-          "rawSql": "SELECT toStartOfInterval(ingestion_timestamp, INTERVAL 1 MINUTE) AS time, count() AS dlq_count FROM livepeer_analytics.streaming_events_dlq WHERE $__timeFilter(ingestion_timestamp) GROUP BY time ORDER BY time"
+          "rawSql": "SELECT time, sum(dlq_count) AS dlq_count FROM (SELECT toStartOfInterval(ingestion_timestamp, INTERVAL 1 MINUTE) AS time, count() AS dlq_count FROM livepeer_analytics.streaming_events_dlq WHERE $__timeFilter(ingestion_timestamp) AND ('${event_type:raw}' = '$__all' OR '${event_type:raw}' = '' OR event_type IN (${event_type:sqlstring})) GROUP BY time UNION ALL SELECT toStartOfInterval(now(), INTERVAL 1 MINUTE) AS time, toUInt64(0) AS dlq_count) GROUP BY time ORDER BY time",
+          "refId": "A"
         }
       ],
       "title": "DLQ Volume (per minute)",
@@ -55,7 +378,7 @@
     {
       "datasource": {
         "type": "grafana-clickhouse-datasource",
-        "uid": "clickhouse"
+        "uid": "${clickhouse_ds}"
       },
       "fieldConfig": {
         "defaults": {
@@ -71,73 +394,263 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              {"color": "green", "value": null},
-              {"color": "yellow", "value": 50}
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              }
             ]
           },
           "unit": "ops"
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 7
+      },
       "id": 2,
       "options": {
-        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true},
-        "tooltip": {"mode": "single"}
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single"
+        }
       },
       "targets": [
         {
-          "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse"},
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
           "editorType": "sql",
           "format": 1,
           "queryType": "sql",
-          "rawSql": "SELECT toStartOfInterval(ingestion_timestamp, INTERVAL 1 MINUTE) AS time, count() AS quarantine_count FROM livepeer_analytics.streaming_events_quarantine WHERE $__timeFilter(ingestion_timestamp) GROUP BY time ORDER BY time"
+          "rawSql": "SELECT time, sum(quarantine_count) AS quarantine_count FROM (SELECT toStartOfInterval(ingestion_timestamp, INTERVAL 1 MINUTE) AS time, count() AS quarantine_count FROM livepeer_analytics.streaming_events_quarantine WHERE $__timeFilter(ingestion_timestamp) AND ('${event_type:raw}' = '$__all' OR '${event_type:raw}' = '' OR event_type IN (${event_type:sqlstring})) GROUP BY time UNION ALL SELECT toStartOfInterval(now(), INTERVAL 1 MINUTE) AS time, toUInt64(0) AS quarantine_count) GROUP BY time ORDER BY time",
+          "refId": "A"
         }
       ],
       "title": "Quarantine Volume (per minute)",
       "type": "timeseries"
     },
     {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 15
+      },
+      "id": 102,
+      "panels": [],
+      "title": "Breakdown",
+      "type": "row"
+    },
+    {
       "datasource": {
         "type": "grafana-clickhouse-datasource",
-        "uid": "clickhouse"
+        "uid": "${clickhouse_ds}"
       },
       "fieldConfig": {
         "defaults": {
-          "custom": {"align": "auto"}
+          "custom": {
+            "align": "auto"
+          }
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
       "id": 3,
       "options": {
         "showHeader": true
       },
       "targets": [
         {
-          "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse"},
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
           "editorType": "sql",
           "format": 0,
           "queryType": "sql",
-          "rawSql": "SELECT failure_reason, count() AS total FROM livepeer_analytics.streaming_events_dlq WHERE $__timeFilter(ingestion_timestamp) GROUP BY failure_reason ORDER BY total DESC LIMIT 10"
+          "rawSql": "SELECT failure_stage, failure_class, failure_reason, failure_details, count() AS total FROM livepeer_analytics.streaming_events_dlq WHERE $__timeFilter(ingestion_timestamp) AND ('${event_type:raw}' = '$__all' OR '${event_type:raw}' = '' OR event_type IN (${event_type:sqlstring})) GROUP BY failure_stage, failure_class, failure_reason, failure_details ORDER BY total DESC LIMIT 20",
+          "refId": "A"
         }
       ],
       "title": "Top DLQ Failure Reasons",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "fillOpacity": 80,
+            "lineWidth": 1
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "id": 4,
+      "options": {
+        "barRadius": 0,
+        "barWidth": 0.95,
+        "groupWidth": 0.7,
+        "legend": {
+          "displayMode": "hidden",
+          "placement": "bottom",
+          "showLegend": false
+        },
+        "orientation": "horizontal",
+        "showValue": "always",
+        "stacking": "none",
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT event_type, count() AS total_failures FROM livepeer_analytics.streaming_events_dlq WHERE $__timeFilter(ingestion_timestamp) AND ('${event_type:raw}' = '$__all' OR '${event_type:raw}' = '' OR event_type IN (${event_type:sqlstring})) GROUP BY event_type ORDER BY total_failures DESC LIMIT 15",
+          "refId": "A"
+        }
+      ],
+      "title": "DLQ Failures by Event Type",
+      "type": "barchart"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
+      "id": 5,
+      "options": {
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 0,
+          "queryType": "sql",
+          "rawSql": "SELECT ingestion_timestamp, source_table, event_type, failure_stage, failure_class, failure_reason FROM (SELECT ingestion_timestamp, 'dlq' AS source_table, event_type, failure_stage, failure_class, failure_reason FROM livepeer_analytics.streaming_events_dlq WHERE $__timeFilter(ingestion_timestamp) AND ('${event_type:raw}' = '$__all' OR '${event_type:raw}' = '' OR event_type IN (${event_type:sqlstring})) UNION ALL SELECT ingestion_timestamp, 'quarantine' AS source_table, event_type, failure_stage, failure_class, failure_reason FROM livepeer_analytics.streaming_events_quarantine WHERE $__timeFilter(ingestion_timestamp) AND ('${event_type:raw}' = '$__all' OR '${event_type:raw}' = '' OR event_type IN (${event_type:sqlstring}))) ORDER BY ingestion_timestamp DESC LIMIT 50",
+          "refId": "A"
+        }
+      ],
+      "title": "Recent DLQ/Quarantine Samples",
       "type": "table"
     }
   ],
   "refresh": "30s",
   "schemaVersion": 39,
-  "tags": ["quality", "dlq"],
+  "tags": [
+    "quality",
+    "dlq"
+  ],
   "templating": {
-    "list": []
+    "list": [
+      {
+        "name": "clickhouse_ds",
+        "label": "Datasource",
+        "type": "datasource",
+        "query": "grafana-clickhouse-datasource",
+        "refresh": 1,
+        "current": {
+          "selected": true,
+          "text": "ClickHouse Prod",
+          "value": "clickhouse_prod"
+        }
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "${clickhouse_ds}"
+        },
+        "definition": "SELECT DISTINCT event_type FROM (SELECT event_type FROM livepeer_analytics.streaming_events_dlq UNION ALL SELECT event_type FROM livepeer_analytics.streaming_events_quarantine) WHERE event_type != '' ORDER BY event_type",
+        "includeAll": true,
+        "label": "Event Type",
+        "multi": true,
+        "name": "event_type",
+        "options": [],
+        "query": "SELECT DISTINCT event_type FROM (SELECT event_type FROM livepeer_analytics.streaming_events_dlq UNION ALL SELECT event_type FROM livepeer_analytics.streaming_events_quarantine) WHERE event_type != '' ORDER BY event_type",
+        "refresh": 2,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
   },
   "time": {
-    "from": "now-6h",
+    "from": "now-24h",
     "to": "now"
   },
   "timepicker": {},
-  "timezone": "",
+  "timezone": "utc",
   "title": "Quality Gate - DLQ & Quarantine",
-  "version": 1
+  "version": 2
 }
