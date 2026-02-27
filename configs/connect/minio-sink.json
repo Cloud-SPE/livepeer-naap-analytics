@@ -1,0 +1,22 @@
+{
+  "name": "minio-raw-events-sink",
+  "config": {
+    "connector.class": "io.confluent.connect.s3.S3SinkConnector",
+    "tasks.max": "2",
+    "topics": "streaming_events",
+    "s3.bucket.name": "streaming-events",
+    "s3.region": "us-east-1",
+    "store.url": "http://minio:9000",
+    "aws.access.key.id": "minioadmin",
+    "aws.secret.access.key": "m1n104dm1n",
+    "flush.size": "100",
+    "rotate.interval.ms": "300000",
+    "storage.class": "io.confluent.connect.s3.storage.S3Storage",
+    "format.class": "io.confluent.connect.s3.format.json.JsonFormat",
+    "partitioner.class": "io.confluent.connect.storage.partitioner.DefaultPartitioner",
+    "schema.compatibility": "NONE",
+    "errors.tolerance": "all",
+    "errors.log.enable": "true",
+    "errors.log.include.messages": "true"
+  }
+}

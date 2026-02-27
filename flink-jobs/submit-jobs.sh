@@ -1,65 +1,94 @@
 #!/bin/bash
-
 set -e
 
-FLINK_JOBMANAGER="flink-jobmanager:8081"
-JAR_DIR="/opt/flink/usrlib"
+echo "===================================\n"
+echo "Livepeer Analytics - Flink Job Redeployment\n"
+echo "Flink Version: 1.20.3\n"
+echo "===================================\n"
 
-# Function to wait for JobManager to be ready
-wait_for_jobmanager() {
-    echo "Waiting for Flink JobManager to be ready..."
-    for i in {1..30}; do
-        if curl -s "http://${FLINK_JOBMANAGER}/overview" > /dev/null 2>&1; then
-            echo "JobManager is ready!"
-            return 0
+JOB_MANAGER_RPC_ADDRESS="${FLINK_JOBMANAGER_HOST:-flink-jobmanager}"
+JOB_MANAGER_ALT_ADDRESS="${FLINK_JOBMANAGER_ALT_HOST:-livepeer-analytics-flink-jobmanager}"
+JOB_MANAGER_PORT="${FLINK_JOBMANAGER_PORT:-8081}"
+JOB_MANAGER_URL="$JOB_MANAGER_RPC_ADDRESS:$JOB_MANAGER_PORT"
+JAR_STABLE="/opt/flink/usrlib/livepeer-analytics-flink.jar"
+JAR_GLOB="/opt/flink/usrlib/livepeer-analytics-flink-*.jar"
+# This must match the string in env.execute() in your Java code
+JOB_NAME="Livepeer Analytics Java 1.20"
+
+JAR_PATH=""
+if [ -f "$JAR_STABLE" ]; then
+    JAR_PATH="$JAR_STABLE"
+else
+    JAR_PATH=$(ls -1t $JAR_GLOB 2>/dev/null | grep -v "/original-" | head -n 1 || true)
+fi
+if [ -z "$JAR_PATH" ] || [ ! -f "$JAR_PATH" ]; then
+    echo "ERROR: JAR file not found. Tried stable path $JAR_STABLE and glob $JAR_GLOB"
+    echo "Contents of /opt/flink/usrlib:"
+    ls -lah /opt/flink/usrlib || true
+    exit 1
+fi
+echo "Using JAR: $JAR_PATH"
+
+# Wait for a reachable JobManager endpoint (service DNS can lag during startup).
+echo "Waiting for Flink JobManager endpoint..."
+MAX_ATTEMPTS=24
+ATTEMPT=1
+RESOLVED=0
+while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
+    for CANDIDATE in "$JOB_MANAGER_RPC_ADDRESS" "$JOB_MANAGER_ALT_ADDRESS"; do
+        CANDIDATE_URL="$CANDIDATE:$JOB_MANAGER_PORT"
+        if /opt/flink/bin/flink list -m "$CANDIDATE_URL" >/dev/null 2>&1; then
+            JOB_MANAGER_RPC_ADDRESS="$CANDIDATE"
+            JOB_MANAGER_URL="$CANDIDATE_URL"
+            RESOLVED=1
+            break
         fi
-        echo "Attempt $i: JobManager not ready yet, waiting..."
-        sleep 2
     done
-    echo "ERROR: JobManager failed to start within timeout"
-    return 1
-}
+    if [ $RESOLVED -eq 1 ]; then
+        break
+    fi
+    echo "JobManager not reachable yet (attempt $ATTEMPT/$MAX_ATTEMPTS), retrying in 5s..."
+    ATTEMPT=$((ATTEMPT + 1))
+    sleep 5
+done
 
-# Function to check if a job is already running
-job_exists() {
-    local job_name=$1
-    curl -s "http://${FLINK_JOBMANAGER}/jobs/overview" | grep -q "\"name\":\"${job_name}\""
-}
-
-# Wait for JobManager
-wait_for_jobmanager
-
-# Find the JAR file
-JAR_FILE=$(find ${JAR_DIR} -name "*assembly*.jar" -type f | head -n 1)
-
-if [ -z "$JAR_FILE" ]; then
-    echo "ERROR: No JAR file found in ${JAR_DIR}"
-    ls -la ${JAR_DIR}
+if [ $RESOLVED -ne 1 ]; then
+    echo "ERROR: Could not reach Flink JobManager via $JOB_MANAGER_RPC_ADDRESS:$JOB_MANAGER_PORT or $JOB_MANAGER_ALT_ADDRESS:$JOB_MANAGER_PORT"
     exit 1
 fi
 
-echo "Found JAR: ${JAR_FILE}"
+echo "Using JobManager endpoint: $JOB_MANAGER_URL"
 
-# Submit Job 1: Streaming Events to ClickHouse
-JOB_NAME="StreamingEventsToClickHouse"
-if job_exists "$JOB_NAME"; then
-    echo "Job '$JOB_NAME' is already running, skipping submission"
+# 1. Identify and stop existing jobs with the same name
+echo "Checking for existing jobs named: $JOB_NAME..."
+EXISTING_JOB_IDS=$(/opt/flink/bin/flink list -m "$JOB_MANAGER_URL" | grep "$JOB_NAME" | grep "RUNNING" | awk '{print $4}')
+
+if [ -z "$EXISTING_JOB_IDS" ]; then
+    echo "No existing running jobs found."
 else
-    echo "Submitting job: $JOB_NAME"
-
-    # KEY FIX: Explicitly set the JobManager address
-    /opt/flink/bin/flink run \
-        -d \
-        -m ${FLINK_JOBMANAGER} \
-        -c com.livepeer.analytics.StreamingEventsToClickHouse \
-        "$JAR_FILE"
-
-    if [ $? -eq 0 ]; then
-        echo "Job '$JOB_NAME' submitted successfully"
-    else
-        echo "ERROR: Failed to submit job '$JOB_NAME'"
-        exit 1
-    fi
+    for JOB_ID in $EXISTING_JOB_IDS; do
+        echo "Stopping existing job ID: $JOB_ID..."
+        /opt/flink/bin/flink cancel -m "$JOB_MANAGER_URL" "$JOB_ID"
+    done
+    # Optional: wait a few seconds for resources to clear
+    sleep 2
 fi
 
-echo "All jobs submitted!"
+# 2. Submit the new job
+echo "Submitting new job to Flink cluster ($JOB_MANAGER_RPC_ADDRESS)..."
+/opt/flink/bin/flink run \
+    -m "$JOB_MANAGER_URL" \
+    -d \
+    -c com.livepeer.analytics.pipeline.StreamingEventsToClickHouse \
+    "$JAR_PATH"
+
+EXIT_CODE=$?
+
+echo ""
+if [ $EXIT_CODE -eq 0 ]; then
+    echo "Job deployed successfully!"
+    echo "View the Flink UI at: http://localhost:8081"
+else
+    echo "Job submission failed with exit code: $EXIT_CODE"
+    exit $EXIT_CODE
+fi

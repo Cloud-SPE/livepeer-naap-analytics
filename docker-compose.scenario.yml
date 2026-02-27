@@ -1,0 +1,133 @@
+services:
+  flink-maven-cache-init:
+    image: alpine:3.20
+    container_name: livepeer-analytics-flink-maven-cache-init
+    user: "0:0"
+    command: >
+      sh -c "
+        mkdir -p /m2/repository &&
+        chown -R ${LOCAL_UID:-1000}:${LOCAL_GID:-1000} /m2 &&
+        chmod -R u+rwX,g+rwX /m2
+      "
+    volumes:
+      - livepeer-analytics-flink-maven-cache:/m2
+    init: true
+
+  flink-builder:
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
+    depends_on:
+      flink-maven-cache-init:
+        condition: service_completed_successfully
+      flink-state-init:
+        condition: service_completed_successfully
+    command: >
+      bash -lc "
+        set -euo pipefail;
+        echo 'Building Flink jobs (scenario mode)...';
+        mvn -q -Duser.home=/tmp -Dmaven.repo.local=/tmp/.m2/repository help:evaluate -Dexpression=settings.localRepository -DforceStdout;
+        mvn -Duser.home=/tmp -Dmaven.repo.local=/tmp/.m2/repository -DcreateDependencyReducedPom=false clean package;
+        echo 'Build complete. Copying JAR to output volume...';
+        mkdir -p /build/output;
+        JAR_PATH=$$(ls -1t /build/target/livepeer-analytics-flink-*.jar 2>/dev/null | grep -v '/original-' | head -n 1 || true);
+        if [ -z \"$$JAR_PATH\" ]; then
+          echo 'ERROR: No Flink job JAR found in /build/target';
+          ls -lah /build/target || true;
+          exit 1;
+        fi;
+        cp \"$$JAR_PATH\" /build/output/livepeer-analytics-flink.jar;
+        cp \"$$JAR_PATH\" /build/output/;
+        ls -lh /build/output/;
+      "
+    volumes:
+      - ./flink-jobs:/build
+      - ./configs/clickhouse-init:/configs/clickhouse-init:ro
+      - livepeer-analytics-flink-maven-cache:/tmp/.m2
+      - scenario-flink-usrlib:/build/output
+
+  flink-state-init:
+    image: alpine:3.20
+    container_name: livepeer-analytics-flink-state-init
+    user: "0:0"
+    command: >
+      sh -c "
+        mkdir -p /flink-tmp/checkpoints /flink-tmp/savepoints &&
+        mkdir -p /tmp/flink-checkpoints /tmp/flink-savepoints &&
+        mkdir -p /flink-usrlib &&
+        chmod -R 777 /flink-tmp /tmp/flink-checkpoints /tmp/flink-savepoints /flink-usrlib
+      "
+    volumes:
+      - scenario-flink-tmp:/flink-tmp
+      - scenario-flink-checkpoints:/tmp/flink-checkpoints
+      - scenario-flink-savepoints:/tmp/flink-savepoints
+      - scenario-flink-usrlib:/flink-usrlib
+    init: true
+
+  gateway:
+    volumes:
+      - scenario-gateway-state:/data
+
+  kafka:
+    volumes:
+      - scenario-kafka-state:/var/lib/kafka/data
+
+  flink-jobmanager:
+    user: "0:0"
+    depends_on:
+      flink-builder:
+        condition: service_completed_successfully
+      kafka:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      flink-state-init:
+        condition: service_completed_successfully
+    volumes:
+      - scenario-flink-tmp:/flink-tmp
+      - scenario-flink-usrlib:/opt/flink/usrlib
+      - ./configs/flink/log4j.properties:/opt/flink/conf/log4j-console.properties:ro
+
+  flink-taskmanager:
+    user: "0:0"
+    depends_on:
+      flink-jobmanager:
+        condition: service_started
+      flink-state-init:
+        condition: service_completed_successfully
+    volumes:
+      - scenario-flink-checkpoints:/tmp/flink-checkpoints
+      - scenario-flink-savepoints:/tmp/flink-savepoints
+      - scenario-flink-usrlib:/opt/flink/usrlib
+      - ./configs/flink/log4j.properties:/opt/flink/conf/log4j-console.properties:ro
+
+  flink-job-submitter:
+    volumes:
+      - scenario-flink-usrlib:/opt/flink/usrlib
+      - ./flink-jobs/:/jobs/
+
+  clickhouse:
+    volumes:
+      - scenario-clickhouse-state:/var/lib/clickhouse
+      - ./configs/clickhouse-users:/etc/clickhouse-server/users.d
+      - ./configs/clickhouse-init:/docker-entrypoint-initdb.d
+
+  minio:
+    volumes:
+      - scenario-minio-state:/data
+
+  grafana:
+    volumes:
+      - scenario-grafana-state:/var/lib/grafana
+      - ./configs/grafana/provisioning:/etc/grafana/provisioning
+
+volumes:
+  livepeer-analytics-flink-maven-cache:
+    external: true
+  scenario-flink-usrlib:
+  scenario-gateway-state:
+  scenario-kafka-state:
+  scenario-flink-tmp:
+  scenario-flink-checkpoints:
+  scenario-flink-savepoints:
+  scenario-clickhouse-state:
+  scenario-minio-state:
+  scenario-grafana-state:

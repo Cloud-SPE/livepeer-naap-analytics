@@ -16,3 +16,19 @@ datasources:
       password: analytics_password
     isDefault: true
     editable: true
+
+  - name: ClickHouse Prod
+    type: grafana-clickhouse-datasource
+    uid: clickhouse_prod
+    jsonData:
+      host: clickhouse.livepeer.cloud
+      port: 8123
+      defaultDatabase: livepeer_analytics
+      defaultTable: ai_stream_status
+      protocol: http
+      secure: false
+      username: analytics_user
+    secureJsonData:
+      password: analytics_password
+    isDefault: false
+    editable: true

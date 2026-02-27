@@ -1,0 +1,47 @@
+services:
+  gateway:
+    image: livepeer/go-livepeer:latest
+    container_name: naap-ai-gateway
+    volumes:
+      - naap_gateway-lpData:/data
+  # ports:
+  #   - 5937:5937
+  #   - 7280:7280
+
+    command: ["-gateway",
+              "-orchAddr=${ORCH_SERVICE_ADDR}",
+              "-rtmpAddr=naap-ai-gateway:1937",
+              "-httpAddr=naap-ai-gateway:5937",
+              "-cliAddr=naap-ai-gateway:5935",
+              "-httpIngest=true",
+              "-v=6",
+              "-network=arbitrum-one-mainnet",
+              "-blockPollingInterval=20",
+              "-ethUrl=${ARB_ETH_URL}",
+              "-ethPassword=/data/eth-secret.txt",
+              "-ethKeystorePath=/data/",
+              "-dataDir=/data/tmp",
+              "-monitor",
+              "-kafkaBootstrapServers=kafka:9092",
+              "-kafkaGatewayTopic=streaming_events" ]
+  mediamtx:
+    image: livepeerci/mediamtx
+    container_name: naap-ai-mediamtx
+    volumes:
+      - naap_mediamtx_config:/etc/mediamtx
+    environment:
+      - MTX_WEBRTCADDITIONALHOSTS=${HOST}
+    ports:
+      # - 8890:8890
+      # - 9997:9997
+      - 1935:1935
+volumes:
+  naap_gateway-lpData:
+    external: true
+  naap_mediamtx_config:
+    external: true
+
+networks:
+  default:
+    name: livepeer-tester-network
+    external: true

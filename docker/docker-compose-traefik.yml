@@ -1,0 +1,30 @@
+services:
+  traefik:
+    image: traefik:v3.6.7
+    container_name: traefik
+    restart: unless-stopped
+    environment:
+      - CLOUDFLARE_EMAIL=YOUR_CF_EMAIL
+      - CF_API_KEY=YOUR_CF_API_KEY
+    networks:
+      - livepeer-tester-network
+    ports:
+      - "443:443"
+      - "8443:8443"
+    volumes:
+      - traefik_config:/etc/traefik
+      - traefik_certs:/ssl-certs/
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik_logs:/var/log/traefik/
+
+volumes:
+  traefik_logs:
+    external: true
+  traefik_certs:
+    external: true
+  traefik_config:
+    external: true
+
+networks:
+  livepeer-tester-network:
+    external: true

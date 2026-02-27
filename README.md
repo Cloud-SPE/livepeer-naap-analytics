@@ -1,150 +1,122 @@
 # Livepeer NaaP Analytics
 
-This project provides a real-time data pipeline for monitoring and analyzing **Livepeer Network-as-a-Product (NaaP)** metrics. It ingests streaming events from a Livepeer gateway, processes them using Apache Flink, and stores the analytics in ClickHouse for visualization via Grafana.
+[![CI Nightly Full](https://github.com/Cloud-SPE/livepeer-naap-analytics/actions/workflows/ci-nightly-full.yml/badge.svg)](https://github.com/Cloud-SPE/livepeer-naap-analytics/actions/workflows/ci-nightly-full.yml)
+[![CI PR Smoke](https://github.com/Cloud-SPE/livepeer-naap-analytics/actions/workflows/ci-pr-smoke.yml/badge.svg)](https://github.com/Cloud-SPE/livepeer-naap-analytics/actions/workflows/ci-pr-smoke.yml)
 
-## 📂 Project Artifacts
+Operator-first analytics pipeline for Livepeer NaaP telemetry. This project ingests gateway events, validates and transforms them with Flink, stores them in ClickHouse, and exposes contract-tested serving views so operators and contributors can reason about capability coverage, performance, and capacity/demand behavior.
 
-### 🏗️ Infrastructure & Orchestration
+## What This Project Offers
 
-* **`docker-compose.yml`**: The primary orchestration file that spins up the entire stack, including the gateway, Kafka, Flink, ClickHouse, and Grafana.
-* **`Dockerfile.webapp`**: A multi-stage Dockerfile used to build the Stream Test UI and serve it via a Caddy webserver.
-* **`Caddyfile`**: Configuration for the Caddy webserver, handling reverse proxying for the AI runner, orchestrator, and Kafka SSE API.
-* **`.env.template`**: A template for environment variables required for the gateway and network settings.
+- A validated raw -> typed -> silver -> gold analytics pipeline.
+- Contract assertions for lifecycle semantics, projection parity, and API readiness.
+- Reproducible local stack for debugging and integration checks.
+- Notebook and SQL tooling for quick status review and deep-dive tracing.
 
-### 🛠️ Stream Processing (Apache Flink)
+## Quick Start by Task
 
-* **`StreamingEventsToClickHouse.scala`**: The core Scala application that consumes raw JSON from Kafka, parses it, and routes it to specific ClickHouse tables.
-* **`build.sbt` & `build.properties**`: Configuration files for the Scala Build Tool (SBT) used to compile the Flink job.
-* **`plugins.sbt`**: Adds the `sbt-assembly` plugin to create "fat" JARs for Flink deployment.
-* **`submit-jobs.sh`**: A shell script that automates the submission of the compiled JAR to the Flink JobManager.
+| Task | Run/Read This First | Then |
+|---|---|---|
+| Bring up local analytics stack | `docker compose up -d && docker compose ps` | `docs/operations/RUNBOOKS_AND_RELEASE.md` |
+| Validate pipeline health quickly | `cd flink-jobs && mvn test` | `tests/integration/run_all.sh` |
+| Review high-level PASS/FAIL | `uv run --project tests/python jupyter lab tests/python/notebooks/INTEGRATION_EXEC_SUMMARY.ipynb` | `tests/python/notebooks/FLINK_DATA_TRACE_AND_INTEGRATION_TESTS.ipynb` |
+| Debug a specific failing contract | `docs/quality/TESTING_AND_VALIDATION.md` | `tests/integration/sql/assertions_*.sql` |
+| Understand architecture/data model | `docs/architecture/SYSTEM_OVERVIEW.md` | `docs/data/SCHEMA_AND_METRIC_CONTRACTS.md` |
 
-### 📊 Storage & Visualization
+## Scope and Limits
 
-* **`01-schema.sql`**: SQL initialization script that defines the ClickHouse database schema and materialized views for metrics like FPS and ingest quality.
-* **`default-user.xml`**: Configures the `analytics_user` with necessary permissions in ClickHouse.
-* **`clickhouse.yml` & `dashboard.yml**`: Grafana provisioning files to automatically configure the ClickHouse datasource and dashboard folders.
-* **`naap-overview.json`**: A pre-configured Grafana dashboard for real-time NaaP performance monitoring.
+- Coverage is limited to gateways/configurations sending data to this Kafka ingest path.
+- This does not monitor all Livepeer network activity out of the box.
+- Payment and onchain analytics are not complete yet and are not a current quality gate.
+- Grafana exists locally, but dashboard refresh is planned to match the latest metrics/monitoring model.
 
-### 📡 Gateway & Ingest
+## Quickstart (Local, 5-10 Minutes)
 
-* **`mediamtx.yml`**: Configuration for the MediaMTX server, which handles WebRTC/RTMP ingest and egress.
-* **`index.html`**: A simple event source viewer for testing Kafka messages via the Zilla SSE API.
+Prerequisites:
 
-## 🚀 Getting Started
+- Docker + Docker Compose on a modern laptop/CPU.
+- Optional: Cloudflare Zero Trust tunnel if you want remote access to local web apps.
 
-### 1. Prerequisites
-
-Ensure you have **Docker** and **Docker Compose** installed.
-
-### 2. Create Required Directory Structure
-
-Ensure the following directories exist in your project root:
+### 1) Start the stack
 
 ```bash
-# Create Kafka data directory
-mkdir -p data/kafka
-
-# Create Flink checkpoint and savepoint directories
-mkdir -p data/flink/tmp/checkpoints
-mkdir -p data/flink/tmp/savepoints
-
-# Ensure other data directories exist
-mkdir -p data/gateway
-mkdir -p data/clickhouse
-mkdir -p data/grafana
-
-chmod -Rf 777 data/flink/tmp/
+docker compose up -d
+docker compose ps
 ```
 
-### 3. Environment Setup
-
-Create a `.env` file from the provided template:
+### 2) Run smoke validation
 
 ```bash
-cp .env.template .env
-
+cd flink-jobs && mvn test
+cd ..
+tests/integration/run_all.sh
 ```
 
-Edit `.env` and provide your specific network details (e.g., `HOST_IP`, `ARB_ETH_URL`).
+Expected result:
 
-### 4. Gateway Credentials
+- Java tests pass.
+- Integration SQL packs report `0` failures for current fixture window/smoke scenario.
 
-Add your Livepeer credentials to the `data/gateway` folder:
+### 3) Inspect current activity
 
-*Note: the private key must be in a text file called `eth-secret.txt`*
-
-* `eth-secret.txt` (containing your private key in plain text)
-* `key.json` (your Ethereum keystore file)
-
-### 5. Run the Application
-
-Start the entire stack using Docker Compose:
+Quick trace pack:
 
 ```bash
-docker compose up
-
+uv run --project tests/python python tests/python/scripts/run_clickhouse_query_pack.py --lookback-hours 24
 ```
 
-This will automatically build the Flink job, initialize the ClickHouse schema, and start all monitoring services.
-
-## 🔗 Service Endpoints
-
-Once running, the following interfaces are available:
-
-*Note: Since the Stream Test UI has a requirement for HTTPS, ideally run the webserver behind a cloudflare tunnel for proper HTTPS support*
-
-* **Stream Test UI**: [http://localhost:8088/](https://www.google.com/search?q=http://localhost:8088/)
-* **Grafana Dashboards**: [http://localhost:3000/](https://www.google.com/search?q=http://localhost:3000/) (Default: `admin/admin`)
-* **ClickHouse UI**: [http://localhost:8123/dashboard](https://www.google.com/search?q=http://localhost:8123/dashboard) (User: `analytics_user` / Pass: `analytics_password`)
-* **Flink Manager**: [http://localhost:8081/](https://www.google.com/search?q=http://localhost:8081/)
-* **Kafka UI (Kafbat)**: [http://localhost:8080/ui](https://www.google.com/search?q=http://localhost:8080/ui)
-
----
-
-## 🛠️ Troubleshooting & Permissions
-
-If you encounter errors where containers (specifically Kafka or Flink) are crashing or "permission denied" errors appear in the logs, it is likely because the host-mounted data directories do not have the correct permissions.
-
-### 1. Fix Permissions (chmod)
-
-To ensure the Docker containers can read and write to these folders regardless of the internal container user, apply full permissions to the `data` tree:
+Executive PASS/FAIL notebook:
 
 ```bash
-# Apply recursive permissions to the entire data folder
-chmod -R 777 data/
-
+uv run --project tests/python jupyter lab tests/python/notebooks/INTEGRATION_EXEC_SUMMARY.ipynb
 ```
 
-### 2. Verification
-
-You can verify the setup by running:
+Deep-dive trace notebook:
 
 ```bash
-ls -la data/flink/tmp
-
+uv run --project tests/python jupyter lab tests/python/notebooks/FLINK_DATA_TRACE_AND_INTEGRATION_TESTS.ipynb
 ```
 
-You should see `drwxrwxrwx` for both `checkpoints` and `savepoints`.
+## CI and Quality Gates
 
----
+- PR gate (`CI PR Smoke`): Java tests + reduced docker integration smoke.
+- Nightly (`CI Nightly Full`): full harness with richer diagnostics artifacts.
+- Manual (`CI Manual Deep Verify`): on-demand full/smoke runs with window controls.
 
-### Updated "Run the Project" Sequence
+Primary quality contracts live in:
 
-For a smooth first-time setup, the recommended command sequence is:
+- `tests/integration/sql/assertions_pipeline.sql`
+- `tests/integration/sql/assertions_api_readiness.sql`
+- `tests/integration/sql/assertions_raw_typed.sql`
+- `docs/quality/TESTING_AND_VALIDATION.md`
 
-1. `cp .env.template .env` (and edit values)
-2. `mkdir -p data/kafka data/flink/tmp/checkpoints data/flink/tmp/savepoints`
-3. `chmod -R 777 data/`
-4. `docker compose up`
----
+## Local Endpoints
 
-## 🛠️ Build Tester UI (optional)
-`DockerFile.webapp` is used by requires the checking out of Brad's live-video-to-video app
+- Stream test UI: `http://localhost:8088/`
+- Grafana: `http://localhost:3000/`
+- ClickHouse: `http://localhost:8123/dashboard`
+- Flink UI: `http://localhost:8081/`
 
-```
-git clone https://github.com/ad-astra-video/livepeer-app-pipelines.git
-cd livepeer-app-pipelines/livep-video-to-video
-git checkout 6e83149a09c74d316948d142758fa3dad7c8fc39
-ocker build -t tztcloud/livepeer-rtav-test-ui:latest -f Dockerfile.webapp .
-```
+## Where To Go Next
 
+| Task | Start Here | Then Use |
+|---|---|---|
+| Understand architecture/data flow | `docs/architecture/SYSTEM_OVERVIEW.md` | `docs/data/SCHEMA_AND_METRIC_CONTRACTS.md` |
+| Run and interpret validation | `docs/quality/TESTING_AND_VALIDATION.md` | `tests/integration/sql/*.sql` |
+| Deploy/replay operations | `docs/operations/RUNBOOKS_AND_RELEASE.md` | `docs/operations/REPLAY_RUNBOOK.md` |
+| Contributor workflow | `docs/workflows/ENGINEERING_WORKFLOW.md` | `AGENTS.md` |
+
+## Documentation
+
+- Canonical docs index: `docs/README.md`
+- Agent/operator quick map: `AGENTS.md`
+
+## Agent Navigation
+
+- Operator/developer entry map: `AGENTS.md`
+- Canonical docs index: `docs/README.md`
+- Specialized guides:
+  - Docs updates: `docs/agents/docs-agent.md`
+  - Test/validation changes: `docs/agents/test-agent.md`
+  - API/serving checks: `docs/agents/api-agent.md`
+  - Deployment/runbook tasks: `docs/agents/dev-deploy-agent.md`
+  - Security and linting: `docs/agents/security-agent.md`, `docs/agents/lint-agent.md`
