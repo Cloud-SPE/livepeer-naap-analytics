@@ -38,6 +38,17 @@ public class WorkflowSessionAggregatorFunction extends KeyedBroadcastProcessFunc
     private static final long DEFAULT_ATTRIBUTION_TTL_MS = 24L * 60L * 60L * 1000L;
 
     private transient ValueState<WorkflowSessionAccumulator> sessionState;
+    private final PipelineModelResolver.Mode resolverMode;
+
+    public WorkflowSessionAggregatorFunction() {
+        this(PipelineModelResolver.Mode.LEGACY_MISNAMED);
+    }
+
+    public WorkflowSessionAggregatorFunction(PipelineModelResolver.Mode resolverMode) {
+        this.resolverMode = resolverMode == null
+                ? PipelineModelResolver.Mode.LEGACY_MISNAMED
+                : resolverMode;
+    }
 
     @Override
     public void open(Configuration parameters) {
@@ -66,24 +77,44 @@ public class WorkflowSessionAggregatorFunction extends KeyedBroadcastProcessFunc
             state.workflowSessionId = signal.workflowSessionId;
         }
 
-        // Lookup capability by the observed hot-wallet identity in the signal.
+        // Resolve model compatibility context first, then lookup capability by hot-wallet identity.
         CapabilitySnapshotRef snapshot = null;
         String hotKey = AddressNormalizer.normalizeOrEmpty(signal.orchestratorAddress);
-        // Critical: use persisted session pipeline when signal pipeline is empty (common for
-        // trace edges). Passing empty pipeline reopens mixed-model selection drift.
-        String attributionPipeline = StringSemantics.firstNonBlank(signal.pipeline, state.pipeline);
+        PipelineModelResolver.Resolution preSelection = PipelineModelResolver.resolve(
+                resolverMode,
+                signal,
+                state.pipeline,
+                state.modelId,
+                null);
+        String modelHint = preSelection.compatibilityModelHint;
         if (!StringSemantics.isBlank(hotKey)) {
             CapabilitySnapshotBucket bucket =
                     ctx.getBroadcastState(CapabilityBroadcastState.CAPABILITY_STATE_DESCRIPTOR).get(hotKey);
             snapshot = CapabilityAttributionSelector.selectBestCandidate(
                     bucket,
-                    attributionPipeline,
+                    modelHint,
                     signal.signalTimestamp,
                     DEFAULT_ATTRIBUTION_TTL_MS);
         }
 
+        PipelineModelResolver.Resolution resolved = PipelineModelResolver.resolve(
+                resolverMode,
+                signal,
+                state.pipeline,
+                state.modelId,
+                snapshot);
+        if (!StringSemantics.isBlank(resolved.pipeline)) {
+            signal.pipeline = resolved.pipeline;
+        }
+
         // Apply deterministic state transitions and attribution in a fixed order.
         WorkflowSessionStateMachine.applySignal(state, signal);
+        if (!StringSemantics.isBlank(resolved.pipeline)) {
+            state.pipeline = resolved.pipeline;
+        }
+        if (!StringSemantics.isBlank(resolved.modelId)) {
+            state.modelId = resolved.modelId;
+        }
         WorkflowSessionStateMachine.applyCapabilityAttribution(
                 state,
                 snapshot,
@@ -118,6 +149,7 @@ public class WorkflowSessionAggregatorFunction extends KeyedBroadcastProcessFunc
         ref.snapshotTs = cap.eventTimestamp;
         ref.canonicalOrchestratorAddress = canonicalAddress;
         ref.orchestratorUrl = cap.orchUri;
+        ref.pipeline = cap.pipeline;
         ref.modelId = cap.modelId;
         ref.gpuId = cap.gpuId;
         // Index by both hot wallet and canonical address so signal lookups work

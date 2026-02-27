@@ -282,7 +282,7 @@ classified AS (
 )
 SELECT
     countIf(known_stream = 1) AS known_stream_sessions,
-    countIf(known_stream = 1 AND startup_status = 'success') AS success_sessions,
+    countIf(known_stream = 1 AND startup_status = 'success') AS startup_success_sessions,
     countIf(known_stream = 1 AND startup_status = 'excused') AS excused_sessions,
     countIf(known_stream = 1 AND startup_status = 'unexcused') AS unexcused_sessions,
     countIf(known_stream = 1 AND startup_status = 'unexcused') / nullIf(countIf(known_stream = 1), 0) AS unexcused_failure_rate
@@ -574,7 +574,8 @@ SELECT
   'v_api_gpu_metrics' AS view_name,
   count() AS rows_total,
   countIf(orchestrator_address = '' OR orchestrator_address IS NULL) AS rows_missing_orchestrator,
-  countIf(pipeline = '' OR pipeline IS NULL) AS rows_missing_pipeline
+  countIf(pipeline = '' OR pipeline IS NULL) AS rows_missing_pipeline,
+  countIf(model_id = '' OR model_id IS NULL) AS rows_missing_model
 FROM livepeer_analytics.v_api_gpu_metrics
 WHERE window_start >= from_ts AND window_start < to_ts
 UNION ALL
@@ -582,7 +583,8 @@ SELECT
   'v_api_network_demand' AS view_name,
   count() AS rows_total,
   countIf(gateway = '' OR gateway IS NULL) AS rows_missing_gateway,
-  countIf(pipeline = '' OR pipeline IS NULL) AS rows_missing_pipeline
+  countIf(pipeline = '' OR pipeline IS NULL) AS rows_missing_pipeline,
+  countIf(model_id = '' OR model_id IS NULL) AS rows_missing_model
 FROM livepeer_analytics.v_api_network_demand
 WHERE window_start >= from_ts AND window_start < to_ts
 UNION ALL
@@ -590,7 +592,8 @@ SELECT
   'v_api_sla_compliance' AS view_name,
   count() AS rows_total,
   countIf(orchestrator_address = '' OR orchestrator_address IS NULL) AS rows_missing_orchestrator,
-  countIf(pipeline = '' OR pipeline IS NULL) AS rows_missing_pipeline
+  countIf(pipeline = '' OR pipeline IS NULL) AS rows_missing_pipeline,
+  countIf(model_id = '' OR model_id IS NULL) AS rows_missing_model
 FROM livepeer_analytics.v_api_sla_compliance
 WHERE window_start >= from_ts AND window_start < to_ts;
 

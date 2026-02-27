@@ -393,5 +393,45 @@
                 </plugins>
             </build>
         </profile>
+        <profile>
+            <id>scenario-it-assert-only</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <version>3.5.0</version>
+                        <executions>
+                            <execution>
+                                <id>run-scenario-harness-assert-only</id>
+                                <phase>validate</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <workingDirectory>${project.basedir}/..</workingDirectory>
+                                    <executable>python3</executable>
+                                    <arguments>
+                                        <argument>tests/python/scripts/run_scenario_test_harness.py</argument>
+                                        <argument>--stage</argument>
+                                        <argument>query_pack</argument>
+                                        <argument>--stage</argument>
+                                        <argument>assert_raw_typed</argument>
+                                        <argument>--stage</argument>
+                                        <argument>assert_pipeline</argument>
+                                        <argument>--stage</argument>
+                                        <argument>assert_api</argument>
+                                        <argument>--stage</argument>
+                                        <argument>assert_scenarios</argument>
+                                        <argument>--compose-files</argument>
+                                        <argument>docker-compose.yml,docker-compose.scenario.yml</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
     </profiles>
 </project>

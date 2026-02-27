@@ -651,7 +651,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT toStartOfInterval(window_start, INTERVAL 1 HOUR) AS time, avg(e2e_latency_ms) / 1000.0 AS avg_e2e_latency_s, quantileTDigest(0.95)(e2e_latency_ms) / 1000.0 AS p95_e2e_latency_s FROM livepeer_analytics.v_api_gpu_metrics WHERE $__timeFilter(window_start) AND e2e_latency_ms IS NOT NULL AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), model_id)) AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), lower(orchestrator_address))) GROUP BY time ORDER BY time",
+          "rawSql": "SELECT toStartOfInterval(window_start, INTERVAL 1 HOUR) AS time, sum(e2e_latency_ms * toFloat64(valid_e2e_latency_count)) / nullIf(sum(toFloat64(valid_e2e_latency_count)), 0) / 1000.0 AS avg_e2e_latency_s, quantileTDigest(0.95)(e2e_latency_ms) / 1000.0 AS p95_e2e_latency_s FROM livepeer_analytics.v_api_gpu_metrics WHERE $__timeFilter(window_start) AND e2e_latency_ms IS NOT NULL AND valid_e2e_latency_count > 0 AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), model_id)) AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), lower(orchestrator_address))) GROUP BY time ORDER BY time",
           "refId": "A"
         }
       ],
@@ -856,7 +856,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT toStartOfInterval(window_start, INTERVAL 1 HOUR) AS time, pipeline, avg(avg_output_fps) AS avg_fps FROM livepeer_analytics.v_api_network_demand WHERE $__timeFilter(window_start) GROUP BY time, pipeline ORDER BY time",
+          "rawSql": "SELECT toStartOfInterval(window_start, INTERVAL 1 HOUR) AS time, pipeline, if(sum(total_inference_minutes) > 0, sum(avg_output_fps * total_inference_minutes) / sum(total_inference_minutes), avg(avg_output_fps)) AS avg_fps FROM livepeer_analytics.v_api_network_demand WHERE $__timeFilter(window_start) GROUP BY time, pipeline ORDER BY time",
           "refId": "A"
         }
       ],
@@ -1040,7 +1040,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "WITH fps AS (SELECT lower(orchestrator_address) AS orchestrator_address, pipeline, countDistinct(stream_id) AS active_streams, avg(output_fps) AS avg_fps, quantileTDigest(0.95)(output_fps) AS p95_fps, sum(restart_count) AS total_restarts FROM livepeer_analytics.ai_stream_status WHERE event_timestamp >= now() - INTERVAL 24 HOUR AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), lower(orchestrator_address))) GROUP BY orchestrator_address, pipeline), lat AS (SELECT lower(orchestrator_address) AS orchestrator_address, pipeline, avg(e2e_latency_ms) / 1000.0 AS avg_e2e_latency_s, quantileTDigest(0.95)(e2e_latency_ms) / 1000.0 AS p95_e2e_latency_s FROM livepeer_analytics.v_api_gpu_metrics WHERE window_start >= now() - INTERVAL 24 HOUR AND e2e_latency_ms IS NOT NULL AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), model_id)) AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), lower(orchestrator_address))) GROUP BY orchestrator_address, pipeline) SELECT fps.orchestrator_address AS \"Orchestrator\", fps.pipeline AS \"Pipeline\", fps.active_streams AS \"Active Streams\", round(fps.avg_fps, 2) AS \"Avg FPS\", round(fps.p95_fps, 2) AS \"P95 FPS\", round(ifNull(lat.avg_e2e_latency_s, 0), 2) AS \"Avg E2E Latency (s)\", round(ifNull(lat.p95_e2e_latency_s, 0), 2) AS \"P95 E2E Latency (s)\", fps.total_restarts AS \"Restarts (24h)\" FROM fps LEFT JOIN lat ON lat.orchestrator_address = fps.orchestrator_address AND lat.pipeline = fps.pipeline ORDER BY fps.active_streams DESC, fps.avg_fps DESC LIMIT 20",
+          "rawSql": "WITH fps AS (SELECT lower(orchestrator_address) AS orchestrator_address, pipeline, countDistinct(stream_id) AS active_streams, avg(output_fps) AS avg_fps, quantileTDigest(0.95)(output_fps) AS p95_fps, sum(restart_count) AS total_restarts FROM livepeer_analytics.ai_stream_status WHERE event_timestamp >= now() - INTERVAL 24 HOUR AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), lower(orchestrator_address))) GROUP BY orchestrator_address, pipeline), lat AS (SELECT lower(orchestrator_address) AS orchestrator_address, sum(e2e_latency_ms * toFloat64(valid_e2e_latency_count)) / nullIf(sum(toFloat64(valid_e2e_latency_count)), 0) / 1000.0 AS avg_e2e_latency_s, quantileTDigest(0.95)(e2e_latency_ms) / 1000.0 AS p95_e2e_latency_s FROM livepeer_analytics.v_api_gpu_metrics WHERE window_start >= now() - INTERVAL 24 HOUR AND e2e_latency_ms IS NOT NULL AND valid_e2e_latency_count > 0 AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), model_id)) AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), lower(orchestrator_address))) GROUP BY orchestrator_address) SELECT fps.orchestrator_address AS \"Orchestrator\", fps.pipeline AS \"Pipeline\", fps.active_streams AS \"Active Streams\", round(fps.avg_fps, 2) AS \"Avg FPS\", round(fps.p95_fps, 2) AS \"P95 FPS\", round(ifNull(lat.avg_e2e_latency_s, 0), 2) AS \"Avg E2E Latency (s)\", round(ifNull(lat.p95_e2e_latency_s, 0), 2) AS \"P95 E2E Latency (s)\", fps.total_restarts AS \"Restarts (24h)\" FROM fps LEFT JOIN lat ON lat.orchestrator_address = fps.orchestrator_address ORDER BY fps.active_streams DESC, fps.avg_fps DESC LIMIT 20",
           "refId": "A"
         }
       ],
@@ -1551,7 +1551,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "sql",
-          "rawSql": "SELECT toFloat64(ifNull(avg(e2e_latency_ms),0))/1000.0 AS value FROM livepeer_analytics.v_api_gpu_metrics WHERE window_start >= now() - INTERVAL 1 HOUR AND e2e_latency_ms IS NOT NULL AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), model_id)) AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), lower(orchestrator_address)))",
+          "rawSql": "SELECT toFloat64(ifNull(sum(e2e_latency_ms * toFloat64(valid_e2e_latency_count)) / nullIf(sum(toFloat64(valid_e2e_latency_count)), 0), 0)) / 1000.0 AS value FROM livepeer_analytics.v_api_gpu_metrics WHERE window_start >= now() - INTERVAL 1 HOUR AND e2e_latency_ms IS NOT NULL AND valid_e2e_latency_count > 0 AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), model_id)) AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), lower(orchestrator_address)))",
           "refId": "A"
         }
       ],

@@ -303,7 +303,8 @@ CREATE TABLE IF NOT EXISTS network_capabilities
 )
     ENGINE = ReplacingMergeTree(event_timestamp)
         PARTITION BY toYYYYMM(event_date)
-        ORDER BY (orchestrator_address, orch_uri, model_id, event_timestamp)
+        -- Preserve per-GPU capability rows emitted for the same orchestrator/model event.
+        ORDER BY (orchestrator_address, orch_uri, pipeline, model_id, ifNull(gpu_id, ''), ifNull(capability_id, 0), event_timestamp, source_event_id)
         TTL event_date + INTERVAL 90 DAY DELETE
         SETTINGS index_granularity = 8192;
 
@@ -441,6 +442,7 @@ CREATE TABLE IF NOT EXISTS fact_stream_trace_edges
     orchestrator_url String,
 
     pipeline String,
+    model_id Nullable(String),
 
     trace_type LowCardinality(String),
     trace_category LowCardinality(String),
@@ -495,6 +497,7 @@ WITH cap_lookup AS
 (
     SELECT
         lower(local_address) AS hot_wallet,
+        argMax(pipeline, event_timestamp) AS capability_pipeline,
         model_id AS capability_model_id,
         argMax(lower(orchestrator_address), event_timestamp) AS canonical_orchestrator_address,
         argMax(orch_uri, event_timestamp) AS canonical_orchestrator_url,
@@ -522,7 +525,12 @@ SELECT
         nullIf(canonical_orchestrator_url, ''),
         s.orchestrator_url
     ) AS orchestrator_url,
-    s.pipeline,
+    if(
+        nullIf(latest_snapshot_ts, toDateTime64(0, 3, 'UTC')) IS NOT NULL
+            AND abs(dateDiff('millisecond', nullIf(latest_snapshot_ts, toDateTime64(0, 3, 'UTC')), s.event_timestamp)) <= 86400000,
+        ifNull(nullIf(capability_pipeline, ''), ''),
+        ''
+    ) AS pipeline,
     nullIf(
         if(
             nullIf(latest_snapshot_ts, toDateTime64(0, 3, 'UTC')) IS NOT NULL
@@ -572,7 +580,9 @@ WITH cap_lookup AS
 (
     SELECT
         lower(local_address) AS hot_wallet,
-        argMax(lower(orchestrator_address), event_timestamp) AS canonical_orchestrator_address
+        argMax(lower(orchestrator_address), event_timestamp) AS canonical_orchestrator_address,
+        argMax(pipeline, event_timestamp) AS capability_pipeline,
+        argMax(model_id, event_timestamp) AS capability_model_id
     FROM network_capabilities
     WHERE local_address != ''
       AND orchestrator_address != ''
@@ -591,7 +601,8 @@ SELECT
     '' AS gateway,
     ifNull(nullIf(c.canonical_orchestrator_address, ''), '') AS orchestrator_address,
     t.orchestrator_url,
-    '' AS pipeline,
+    ifNull(nullIf(c.capability_pipeline, ''), '') AS pipeline,
+    nullIf(c.capability_model_id, '') AS model_id,
     t.trace_type,
     multiIf(
         startsWith(t.trace_type, 'gateway_'), 'gateway',
@@ -755,6 +766,7 @@ CREATE TABLE IF NOT EXISTS fact_lifecycle_edge_coverage
     stream_id String,
     request_id String,
     pipeline String,
+    model_id Nullable(String),
     gateway String,
     orchestrator_address String,
     trace_type LowCardinality(String),
@@ -845,7 +857,9 @@ CREATE TABLE IF NOT EXISTS dim_orchestrator_capability_snapshots
 )
     ENGINE = ReplacingMergeTree(snapshot_ts)
         PARTITION BY toYYYYMM(snapshot_date)
-        ORDER BY (orchestrator_address, model_id, snapshot_ts)
+        -- Preserve per-GPU snapshot rows; do not collapse multiple GPUs that share
+        -- orchestrator/model/timestamp in the same capability event.
+        ORDER BY (orchestrator_address, pipeline, model_id, capability_id, ifNull(gpu_id, ''), snapshot_ts, source_event_uid)
         TTL snapshot_date + INTERVAL 365 DAY DELETE
         SETTINGS index_granularity = 8192;
 
@@ -1104,7 +1118,7 @@ CREATE TABLE IF NOT EXISTS agg_reliability_1h
     region Nullable(String),
 
     known_sessions_state AggregateFunction(sum, UInt64),
-    success_sessions_state AggregateFunction(sum, UInt64),
+    startup_success_sessions_state AggregateFunction(sum, UInt64),
     excused_sessions_state AggregateFunction(sum, UInt64),
     unexcused_sessions_state AggregateFunction(sum, UInt64),
     confirmed_swapped_sessions_state AggregateFunction(sum, UInt64),
@@ -1193,7 +1207,7 @@ SELECT
     region,
 
     sumState(toUInt64(known_stream)) AS known_sessions_state,
-    sumState(toUInt64(startup_success)) AS success_sessions_state,
+    sumState(toUInt64(startup_success)) AS startup_success_sessions_state,
     sumState(toUInt64(startup_excused)) AS excused_sessions_state,
     sumState(toUInt64(startup_unexcused)) AS unexcused_sessions_state,
     sumState(toUInt64(confirmed_swap_count > 0)) AS confirmed_swapped_sessions_state,
@@ -1309,7 +1323,7 @@ perf_1h AS
             if(
                 ifNull(s.model_id, '') != '',
                 s.model_id,
-                if(ifNull(k.model_id, '') != '', k.model_id, s.pipeline)
+                ifNull(k.model_id, '')
             ),
             ''
         ) AS model_id,
@@ -1363,7 +1377,7 @@ rel_1h AS
         gpu_id,
         region,
         sum(toUInt64(known_stream)) AS known_sessions,
-        sum(toUInt64(startup_success)) AS success_sessions,
+        sum(toUInt64(startup_success)) AS startup_success_sessions,
         sum(toUInt64(startup_excused)) AS excused_sessions,
         sum(toUInt64(startup_unexcused)) AS unexcused_sessions,
         sum(toUInt64(confirmed_swap_count > 0)) AS confirmed_swapped_sessions,
@@ -1409,7 +1423,7 @@ lat_1h AS
             if(
                 ifNull(l.model_id, '') != '',
                 l.model_id,
-                if(ifNull(k.model_id, '') != '', k.model_id, if(ifNull(l.pipeline, '') != '', l.pipeline, ifNull(k.pipeline, '')))
+                ifNull(k.model_id, '')
             ),
             ''
         ) AS model_id,
@@ -1501,7 +1515,7 @@ SELECT
     ifNull(l.valid_e2e_latency_count, toUInt64(0)) AS valid_e2e_latency_count,
 
     ifNull(r.known_sessions, toUInt64(0)) AS known_sessions,
-    ifNull(r.success_sessions, toUInt64(0)) AS success_sessions,
+    ifNull(r.startup_success_sessions, toUInt64(0)) AS startup_success_sessions,
     ifNull(r.excused_sessions, toUInt64(0)) AS excused_sessions,
     ifNull(r.unexcused_sessions, toUInt64(0)) AS unexcused_sessions,
     ifNull(r.confirmed_swapped_sessions, toUInt64(0)) AS confirmed_swapped_sessions,
@@ -1543,28 +1557,9 @@ WHERE b.orchestrator_address != ''
   AND ifNull(b.gpu_id, '') != '';
 
 CREATE OR REPLACE VIEW v_api_network_demand AS
--- Grain: 1 row per (hour, gateway, region, pipeline).
+-- Grain: 1 row per (hour, gateway, region, pipeline, model_id).
 -- Purpose: primary serving view for /network/demand.
-WITH perf_1h AS
-(
-    -- Hourly usage/performance rollup derived from 1-minute performance aggregates.
-    SELECT
-        toStartOfInterval(window_start, INTERVAL 1 HOUR) AS window_start,
-        gateway,
-        region,
-        pipeline,
-        uniqExactMerge(sessions_uniq_state) AS total_sessions,
-        uniqExactMerge(streams_uniq_state) AS total_streams,
-        countMerge(sample_count_state) / 60.0 AS total_inference_minutes,
-        avgMerge(output_fps_avg_state) AS avg_output_fps
-    FROM agg_stream_performance_1m
-    GROUP BY
-        window_start,
-        gateway,
-        region,
-        pipeline
-),
-latest_sessions AS
+WITH latest_sessions AS
 (
     -- Last-write-wins session snapshot for demand/reliability counters.
     SELECT
@@ -1573,6 +1568,7 @@ latest_sessions AS
         argMax(gateway, version) AS gateway,
         argMax(region, version) AS region,
         argMax(pipeline, version) AS pipeline,
+        argMax(model_id, version) AS model_id,
         argMax(orchestrator_address, version) AS orchestrator_address,
         argMax(known_stream, version) AS known_stream,
         argMax(startup_unexcused, version) AS startup_unexcused,
@@ -1582,6 +1578,50 @@ latest_sessions AS
     FROM fact_workflow_sessions
     GROUP BY workflow_session_id
 ),
+perf_pipeline_fallback AS
+(
+    -- For empty status pipeline values, only backfill when session evidence yields
+    -- a single unambiguous pipeline at (hour,gateway,region,model_id) grain.
+    SELECT
+        toStartOfInterval(session_start_ts, INTERVAL 1 HOUR) AS window_start,
+        gateway,
+        ifNull(region, '') AS region,
+        ifNull(model_id, '') AS model_id,
+        if(
+            countDistinctIf(pipeline, pipeline != '') = 1,
+            anyIf(pipeline, pipeline != ''),
+            ''
+        ) AS pipeline_fallback
+    FROM latest_sessions
+    WHERE session_start_ts > toDateTime64('2000-01-01 00:00:00', 3, 'UTC')
+    GROUP BY window_start, gateway, region, model_id
+),
+perf_1h AS
+(
+    -- Hourly usage/performance rollup with canonical pipeline fallback for empty status rows.
+    SELECT
+        toStartOfInterval(p.window_start, INTERVAL 1 HOUR) AS window_start,
+        p.gateway,
+        ifNull(p.region, '') AS region,
+        if(p.pipeline != '', p.pipeline, ifNull(f.pipeline_fallback, '')) AS pipeline,
+        ifNull(p.model_id, '') AS model_id,
+        uniqExactMerge(p.sessions_uniq_state) AS total_sessions,
+        uniqExactMerge(p.streams_uniq_state) AS total_streams,
+        countMerge(p.sample_count_state) / 60.0 AS total_inference_minutes,
+        avgMerge(p.output_fps_avg_state) AS avg_output_fps
+    FROM agg_stream_performance_1m p
+    LEFT JOIN perf_pipeline_fallback f
+        ON f.window_start = toStartOfInterval(p.window_start, INTERVAL 1 HOUR)
+       AND f.gateway = p.gateway
+       AND f.region = ifNull(p.region, '')
+       AND f.model_id = ifNull(p.model_id, '')
+    GROUP BY
+        window_start,
+        p.gateway,
+        region,
+        pipeline,
+        model_id
+),
 demand_1h AS
 (
     -- Served vs unserved demand split from session facts.
@@ -1590,6 +1630,7 @@ demand_1h AS
         gateway,
         region,
         pipeline,
+        model_id,
         sum(toUInt64(known_stream)) AS known_sessions,
         sum(toUInt64(known_stream AND orchestrator_address != '')) AS served_sessions,
         sum(toUInt64(known_stream AND orchestrator_address = '')) AS unserved_sessions,
@@ -1603,7 +1644,8 @@ demand_1h AS
         window_start,
         gateway,
         region,
-        pipeline
+        pipeline,
+        model_id
 ),
 latest_session_by_request AS
 (
@@ -1611,7 +1653,8 @@ latest_session_by_request AS
         request_id,
         argMax(gateway, version) AS gateway,
         argMax(region, version) AS region,
-        argMax(pipeline, version) AS pipeline
+        argMax(pipeline, version) AS pipeline,
+        argMax(model_id, version) AS model_id
     FROM fact_workflow_sessions
     WHERE request_id != ''
     GROUP BY request_id
@@ -1624,6 +1667,7 @@ fees_1h AS
         s.gateway,
         s.region,
         s.pipeline,
+        s.model_id,
         sum(toFloat64OrZero(p.face_value)) / 1000000000000000000.0 AS fee_payment_eth
     FROM payment_events p
     INNER JOIN latest_session_by_request s ON s.request_id = p.request_id
@@ -1631,7 +1675,8 @@ fees_1h AS
         window_start,
         s.gateway,
         s.region,
-        s.pipeline
+        s.pipeline,
+        s.model_id
 )
 SELECT
     -- Core serving keys
@@ -1639,6 +1684,7 @@ SELECT
     p.gateway AS gateway,
     p.region AS region,
     p.pipeline AS pipeline,
+    p.model_id AS model_id,
 
     p.total_streams,
     p.total_sessions,
@@ -1663,11 +1709,13 @@ LEFT JOIN demand_1h d
    AND d.gateway = p.gateway
    AND ifNull(d.region, '') = ifNull(p.region, '')
    AND d.pipeline = p.pipeline
+   AND ifNull(d.model_id, '') = ifNull(p.model_id, '')
 LEFT JOIN fees_1h f
     ON f.window_start = p.window_start
    AND f.gateway = p.gateway
    AND ifNull(f.region, '') = ifNull(p.region, '')
-   AND f.pipeline = p.pipeline;
+   AND f.pipeline = p.pipeline
+   AND ifNull(f.model_id, '') = ifNull(p.model_id, '');
 
 CREATE OR REPLACE VIEW v_api_network_demand_by_gpu AS
 -- Grain: 1 row per (hour, gateway, orchestrator, region, pipeline, model_id, gpu_id).
@@ -1953,7 +2001,7 @@ GROUP BY
 HAVING status_samples >= 10;
 
 CREATE OR REPLACE VIEW v_api_sla_compliance AS
--- Grain: 1 row per (hour, orchestrator, pipeline, model_id, gpu_id, region).
+-- Grain: 1 row per attributed (hour, orchestrator, pipeline, model_id, gpu_id, region).
 -- Purpose: serving view for /sla/compliance and reliability joins.
 WITH latest_sessions AS
 (
@@ -1984,7 +2032,7 @@ SELECT
     gpu_id,
     region,
     sum(toUInt64(known_stream)) AS known_sessions,
-    sum(toUInt64(startup_success)) AS success_sessions,
+    sum(toUInt64(startup_success)) AS startup_success_sessions,
     sum(toUInt64(startup_excused)) AS excused_sessions,
     sum(toUInt64(startup_unexcused)) AS unexcused_sessions,
     sum(toUInt64(confirmed_swap_count > 0)) AS confirmed_swapped_sessions,
@@ -1999,6 +2047,7 @@ SELECT
     ) * 100 AS sla_score
 FROM latest_sessions
 WHERE session_start_ts > toDateTime64('2000-01-01 00:00:00', 3, 'UTC')
+  AND orchestrator_address != ''
 GROUP BY
     window_start,
     orchestrator_address,

@@ -22,6 +22,7 @@ import com.livepeer.analytics.lifecycle.WorkflowParamUpdateAggregatorFunction;
 import com.livepeer.analytics.lifecycle.WorkflowSessionAggregatorFunction;
 import com.livepeer.analytics.lifecycle.WorkflowSessionSegmentAggregatorFunction;
 import com.livepeer.analytics.lifecycle.WorkflowLatencyDerivation;
+import com.livepeer.analytics.lifecycle.PipelineModelResolver;
 import com.livepeer.analytics.model.EventPayloads;
 import com.livepeer.analytics.model.KafkaInboundRecord;
 import com.livepeer.analytics.model.ParsedEvent;
@@ -68,8 +69,10 @@ public class StreamingEventsToClickHouse {
         env.enableCheckpointing(60000);
 
         QualityGateConfig config = QualityGateConfig.fromEnv();
+        PipelineModelResolver.Mode pipelineModelMode = PipelineModelResolver.modeFromEnvironment();
         LOG.info("Starting quality gate with inputTopic={}, dlqTopic={}, quarantineTopic={}",
                 config.inputTopic, config.dlqTopic, config.quarantineTopic);
+        LOG.info("Pipeline/model resolver mode={}", pipelineModelMode);
 
         KafkaSource<KafkaInboundRecord> kafkaSource = KafkaSource.<KafkaInboundRecord>builder()
                 .setBootstrapServers(config.kafkaBootstrap)
@@ -202,7 +205,7 @@ public class StreamingEventsToClickHouse {
         SingleOutputStreamOperator<ParsedEvent<EventPayloads.FactWorkflowSession>> workflowSessionsStream = lifecycleSignals
                 .keyBy(signal -> signal.workflowSessionId)
                 .connect(capabilityBroadcast)
-                .process(new WorkflowSessionAggregatorFunction())
+                .process(new WorkflowSessionAggregatorFunction(pipelineModelMode))
                 .returns(new TypeHint<ParsedEvent<EventPayloads.FactWorkflowSession>>() {})
                 .name("Sessionize: Workflow Sessions");
 
@@ -216,14 +219,14 @@ public class StreamingEventsToClickHouse {
         SingleOutputStreamOperator<ParsedEvent<EventPayloads.FactWorkflowSessionSegment>> workflowSessionSegmentsStream = lifecycleSignals
                 .keyBy(signal -> signal.workflowSessionId)
                 .connect(capabilityBroadcast)
-                .process(new WorkflowSessionSegmentAggregatorFunction())
+                .process(new WorkflowSessionSegmentAggregatorFunction(pipelineModelMode))
                 .returns(new TypeHint<ParsedEvent<EventPayloads.FactWorkflowSessionSegment>>() {})
                 .name("Sessionize: Workflow Session Segments");
 
         SingleOutputStreamOperator<ParsedEvent<EventPayloads.FactWorkflowParamUpdate>> workflowParamUpdatesStream = lifecycleSignals
                 .keyBy(signal -> signal.workflowSessionId)
                 .connect(capabilityBroadcast)
-                .process(new WorkflowParamUpdateAggregatorFunction())
+                .process(new WorkflowParamUpdateAggregatorFunction(pipelineModelMode))
                 .returns(new TypeHint<ParsedEvent<EventPayloads.FactWorkflowParamUpdate>>() {})
                 .name("Sessionize: Workflow Param Updates");
 
@@ -496,6 +499,8 @@ public class StreamingEventsToClickHouse {
         signal.streamId = parsed.payload.streamId;
         signal.requestId = parsed.payload.requestId;
         signal.pipeline = parsed.payload.pipeline;
+        signal.pipelineHint = parsed.payload.pipeline;
+        signal.modelHint = parsed.payload.pipeline;
         signal.gateway = parsed.payload.gateway;
         signal.orchestratorAddress = parsed.payload.orchestratorAddress;
         signal.orchestratorUrl = parsed.payload.orchestratorUrl;
@@ -530,6 +535,8 @@ public class StreamingEventsToClickHouse {
         signal.streamId = parsed.payload.streamId;
         signal.requestId = parsed.payload.requestId;
         signal.pipeline = parsed.payload.pipeline;
+        signal.pipelineHint = parsed.payload.pipeline;
+        signal.modelHint = parsed.payload.pipeline;
         signal.aiEventType = parsed.payload.eventType;
         signal.message = parsed.payload.message;
         signal.sourceEventUid = sourceEventUid(parsed.event);

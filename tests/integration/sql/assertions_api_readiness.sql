@@ -88,6 +88,27 @@ FROM livepeer_analytics.v_api_network_demand
 WHERE window_start >= {from_ts:DateTime64(3)}
   AND window_start < {to_ts:DateTime64(3)};
 
+-- TEST: network_demand_required_columns_present
+SELECT
+  toUInt64(countIf(is_present = 0) > 0) AS failed_rows,
+  groupArrayIf(column_name, is_present = 0) AS missing_columns
+FROM
+(
+  SELECT
+    required.column_name,
+    toUInt8(count(c.name) > 0) AS is_present
+  FROM
+  (
+    SELECT 'model_id' AS column_name
+    UNION ALL SELECT 'pipeline'
+  ) required
+  LEFT JOIN system.columns c
+    ON c.database = 'livepeer_analytics'
+   AND c.table = 'v_api_network_demand'
+   AND c.name = required.column_name
+  GROUP BY required.column_name
+);
+
 -- TEST: network_demand_by_gpu_hourly_grain
 SELECT
   toUInt64(countIf(toMinute(window_start) != 0) > 0) AS failed_rows,
@@ -216,6 +237,7 @@ raw_rollup AS
   FROM latest_sessions
   WHERE session_start_ts >= {from_ts:DateTime64(3)}
     AND session_start_ts < {to_ts:DateTime64(3)}
+    AND orchestrator_address != ''
   GROUP BY window_start, orchestrator_address, pipeline, model_id, gpu_id, region
 ),
 api_rollup AS

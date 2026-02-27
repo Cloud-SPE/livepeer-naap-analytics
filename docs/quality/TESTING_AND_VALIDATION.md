@@ -22,6 +22,8 @@
   - `cd flink-jobs && mvn -Pscenario-it-smoke verify`
 - Scenario integration harness (smoke, debug/persistent):
   - `cd flink-jobs && mvn -Pscenario-it-smoke-debug verify`
+- Scenario assertions/query-pack only (reuse existing stack and data; no replay/reset):
+  - `cd flink-jobs && mvn -Pscenario-it-assert-only validate`
 - Query trace pack:
   - `uv run --project tests/python python tests/python/scripts/run_clickhouse_query_pack.py --lookback-hours 24`
 - Pipeline assertions:
@@ -75,6 +77,8 @@ Any add/rename/remove of a `-- TEST:` block must co-update this section in the s
 | `raw_events_present` | Core raw/typed ingress objects have data in-window. | Confirm assertion `from_ts`/`to_ts` matches replay window and fixture manifest window. |
 | `capability_dimension_mvs_present` | Required capability MVs exist in ClickHouse. | Check `system.tables` for missing MV names and confirm schema init was applied. |
 | `capability_dimensions_projecting` | Capability source tables project into dimension snapshot tables. | Compare row counts between `network_capabilities*` and `dim_orchestrator_capability_*` tables in-window. |
+| `capability_snapshot_gpu_coverage` | Capability snapshot dimensions do not lose per-event GPU coverage from typed capabilities. | Compare distinct GPU counts per `(source_event_id, orchestrator, pipeline, model_id)` and fail when snapshot GPU count is lower than typed capabilities. |
+| `capability_prices_key_multiplicity_guard` | Capability prices remain unique at current key grain. | Check duplicate groups for `(source_event_id, orchestrator, capability_id, event_timestamp)` in `network_capabilities_prices`; duplicates indicate potential collapse risk with current key contract. |
 | `session_fact_present` | Sessionization emits `fact_workflow_sessions` rows. | Confirm lifecycle operators are running and replay produced stream trace/status rows. |
 | `core_raw_to_silver_gold_nonempty` | Core flow has non-zero accepted raw rows and non-empty silver+gold facts. | Compare core raw distinct IDs vs DLQ/quarantine distinct IDs, then verify status/trace silver rows and session fact rows are non-zero. |
 | `network_capabilities_raw_and_typed_present` | Capabilities are present both raw and typed for attribution windows. | Check `streaming_events(type='network_capabilities')` vs `network_capabilities` parse output. |
@@ -87,7 +91,11 @@ Any add/rename/remove of a `-- TEST:` block must co-update this section in the s
 | `gold_sessions_use_canonical_orchestrator_identity` | Gold/session orchestrator identity is canonical (not hot-wallet/local). | Compare session `orchestrator_address` to canonical `network_capabilities.orchestrator_address` in-window. |
 | `swapped_sessions_have_evidence` | `swap_count > 0` (confirmed swaps) has supporting explicit swap evidence from trace/segments. | Check swap evidence via both `fact_stream_trace_edges` and `stream_trace_events` by `(stream_id,request_id)`. |
 | `param_updates_reference_existing_session` | Param-update facts must reference a known session in-window. | Left join `fact_workflow_param_updates` to latest sessions and inspect orphan IDs. |
-| `lifecycle_session_pipeline_model_compatible` | Session `pipeline` and `model_id` remain contract-compatible when both set. | Inspect attribution selection and model labeling paths for mismatched values. |
+| `lifecycle_session_pipeline_model_compatible` | Attributed sessions keep `pipeline` and `model_id` semantically distinct when both set (`pipeline` workflow class, `model_id` model label). | Inspect lifecycle resolver mode, capability attribution selection, and canonical field assignment paths. |
+| `session_to_segment_pipeline_model_consistency` | Segment rows keep model identity consistent with their parent attributed session (`segment` currently exposes `model_id` but not `pipeline`). | Compare latest session `model_id` vs latest segment `model_id` by `workflow_session_id`/`segment_index`; inspect missing comparable model rows. |
+| `session_to_latency_pipeline_model_consistency` | Latency samples preserve canonical session `pipeline` and `model_id`. | Compare latest `fact_workflow_latency_samples` fields against latest session fields by `workflow_session_id`. |
+| `session_to_status_projection_consistency` | Status silver rows remain semantically aligned to lifecycle session `pipeline` and `model_id`, including non-empty canonical pipeline coverage for attributed sessions (allowing model-aligned fallback when raw status pipeline is blank). | Join `fact_stream_status_samples` to latest sessions by `workflow_session_id`; inspect mismatch counts and `missing_status_pipeline_rows`. |
+| `trace_edge_pipeline_model_coverage` | Each attributed session has at least one trace-edge row with non-empty `pipeline` and `model_id`. | Aggregate `fact_stream_trace_edges` by `workflow_session_id` and inspect sessions with no joinable (`pipeline`,`model_id`) edge. |
 | `latest_sessions_vs_segment_session_ids` | Distinct segmented session ids do not exceed latest session ids. | Compare latest session selection logic vs segment fact time filtering in-window. |
 | `raw_session_rows_vs_latest_sessions` | Raw session rows are never fewer than latest-per-session rows. | Inspect `fact_workflow_sessions` versioning/upserts and replay window boundaries. |
 | `segment_rows_vs_segment_session_ids` | Segment row count is always >= distinct segment session ids. | Check segment emission completeness and any segment-level dedup/drop behavior. |
@@ -96,12 +104,16 @@ Any add/rename/remove of a `-- TEST:` block must co-update this section in the s
 | `gpu_view_covers_healthy_attributed_session_keys` | Successful attributable session keys are represented in `v_api_gpu_metrics`. | Check missing key examples and verify fallback attribution fields (`model_id/gpu_id/region`) for those sessions. |
 | `demand_has_rows_for_all_session_hours` | Every session hour is represented in `v_api_network_demand`. | Inspect missing `window_start` hours and check demand view filters/materialization lag. |
 | `gpu_count_delta_explained_by_key_overlap` | GPU view-vs-rollup row delta must equal net key-overlap delta. | Compare `row_delta` vs `overlap_delta`; investigate unexpected key proliferation/drop. |
-| `network_demand_counts_aligned_to_rollup` | Demand view keyspace/counts strictly align with recomputed rollup+demand keyspace. | Inspect `rollup_only_keys`/`view_only_keys` first, then demand/perf key derivation. |
-| `sla_counts_aligned_to_raw_latest_sessions` | SLA view keyspace/counts strictly align with latest-session recompute keyspace. | Inspect `raw_only_keys`/`view_only_keys`; verify latest-session dedup and hour bucketing. |
-| `view_count_grain_ordering` | Informational grain-ordering check: demand rows should usually be <= GPU/SLA row counts. | Treat WARN as diagnostic unless accompanied by blocking parity failures. |
+| `network_demand_counts_aligned_to_rollup` | Demand view keyspace/counts strictly align with recomputed rollup+demand keyspace at `(hour,gateway,region,pipeline,model_id)` grain. | Inspect `rollup_only_keys`/`view_only_keys` first, then demand/perf key derivation and model-key normalization. |
+| `network_demand_model_split_conservation` | Model-grain demand rows conserve totals when re-aggregated to pipeline grain. | Compare pipeline-baseline recompute versus re-aggregated `v_api_network_demand` totals and key coverage. |
+| `network_demand_join_multiplicity_guard` | Demand parity keyspaces are unique at model grain (1:1 joinable). | Check duplicate key counts on both expected rollup keys and API keys for `(hour,gateway,region,pipeline,model_id)`. |
+| `network_demand_pipeline_join_inflation_guard` | Informational guard for naive pipeline-only joins against model-grain demand rows. | If `status='WARN'`, consumer joins must include `model_id` or pre-aggregate before joining. |
+| `preexisting_grain_drift_baseline_gpu_sla` | Existing model-aware views (`v_api_gpu_metrics`, `v_api_sla_compliance`) conserve totals when collapsed to pipeline grain. | Compare pipeline-collapsed view totals with independent rollup/session recomputes. |
+| `sla_counts_aligned_to_raw_latest_sessions` | SLA view keyspace/counts strictly align with latest-session recompute keyspace for attributed sessions (`orchestrator_address != ''`). | Inspect `raw_only_keys`/`view_only_keys`; verify latest-session dedup, attribution filter, and hour bucketing. |
+| `view_count_grain_ordering` | Informational grain-ordering check across serving views. | Treat WARN as diagnostic unless accompanied by blocking parity failures. |
 | `gpu_view_matches_rollup` | GPU API view numerically matches rollup aggregate source and key overlap is non-empty when both sides have rows. | Check `rollup_rows`, `view_rows`, `joined_rows`, `rollup_only_keys`, `view_only_keys`, then inspect key completeness diagnostics (`*_empty_*_rows`). |
-| `network_demand_view_matches_rollup` | Network demand API view numerically matches recomputed hourly perf+demand aggregates and key overlap is non-empty when both sides have rows. | Check `rollup_rows`, `view_rows`, `joined_rows`, then inspect key coverage (`rollup_only_keys`/`view_only_keys`) and total diff diagnostics. |
-| `sla_view_matches_session_fact` | SLA API counts match independent recomputation from session facts and key overlap is non-empty when both sides have rows. | Check `raw_rows`, `view_rows`, `joined_rows`, then compare known/unexcused/swapped diff totals and key coverage. |
+| `network_demand_view_matches_rollup` | Network demand API view numerically matches recomputed hourly perf+demand aggregates at model-aware demand grain. | Check `rollup_rows`, `view_rows`, `joined_rows`, then inspect key coverage (`rollup_only_keys`/`view_only_keys`) and total diff diagnostics (including empty model diagnostics). |
+| `sla_view_matches_session_fact` | SLA API counts match independent recomputation from session facts for attributed sessions and key overlap is non-empty when both sides have rows. | Check `raw_rows`, `view_rows`, `joined_rows`, then compare known/unexcused/swapped diff totals and key coverage. |
 | `sla_ratios_in_bounds` | SLA ratios are bounded to valid probability range `[0,1]`. | Inspect denominator/guard conditions in `v_api_sla_compliance`. |
 
 ## Scenario Harness Stages

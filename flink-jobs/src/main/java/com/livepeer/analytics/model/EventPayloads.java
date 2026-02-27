@@ -198,6 +198,7 @@ public final class EventPayloads {
         public String streamId;
         public String requestId;
         public String pipeline;
+        public String modelId;
         public String gateway;
         public String orchestratorAddress;
         public String traceType;
