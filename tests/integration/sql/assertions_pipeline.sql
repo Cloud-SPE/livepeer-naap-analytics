@@ -1572,18 +1572,24 @@ WITH
       AND session_start_ts < {to_ts:DateTime64(3)}
     GROUP BY window_start, gateway, region, pipeline, model_id
   ),
+  keys_1h AS
+  (
+    SELECT window_start, gateway, region, pipeline, model_id
+    FROM perf_1h
+    UNION DISTINCT
+    SELECT window_start, gateway, region, pipeline, model_id
+    FROM demand_1h
+  ),
   expected AS
   (
     SELECT
-      p.rollup_marker AS expected_marker,
-      p.window_start,
-      p.gateway,
-      p.region,
-      p.pipeline,
-      p.model_id
-    FROM perf_1h p
-    LEFT JOIN demand_1h d
-      USING (window_start, gateway, region, pipeline, model_id)
+      toNullable(1) AS expected_marker,
+      k.window_start AS window_start,
+      k.gateway AS gateway,
+      k.region AS region,
+      k.pipeline AS pipeline,
+      k.model_id AS model_id
+    FROM keys_1h k
   ),
   api AS
   (
@@ -1973,27 +1979,45 @@ WITH
       AND session_start_ts < {to_ts:DateTime64(3)}
     GROUP BY window_start, gateway, region, pipeline, model_id
   ),
+  keys_1h AS
+  (
+    SELECT window_start, gateway, region, pipeline, model_id
+    FROM perf_1h
+    UNION DISTINCT
+    SELECT window_start, gateway, region, pipeline, model_id
+    FROM demand_1h
+  ),
   expected AS
   (
     SELECT
-      p.rollup_marker AS expected_marker,
-      p.window_start,
-      p.gateway,
-      p.region,
-      p.pipeline,
-      p.model_id,
-      p.total_sessions,
-      p.total_streams,
-      p.total_inference_minutes,
+      toNullable(1) AS expected_marker,
+      k.window_start AS window_start,
+      k.gateway AS gateway,
+      k.region AS region,
+      k.pipeline AS pipeline,
+      k.model_id AS model_id,
+      ifNull(p.total_sessions, toUInt64(0)) AS total_sessions,
+      ifNull(p.total_streams, toUInt64(0)) AS total_streams,
+      ifNull(p.total_inference_minutes, 0.0) AS total_inference_minutes,
       p.avg_output_fps,
       ifNull(d.known_sessions, toUInt64(0)) AS known_sessions,
       ifNull(d.served_sessions, toUInt64(0)) AS served_sessions,
       ifNull(d.unserved_sessions, toUInt64(0)) AS unserved_sessions,
       ifNull(d.unexcused_sessions, toUInt64(0)) AS unexcused_sessions,
       ifNull(d.swapped_sessions, toUInt64(0)) AS swapped_sessions
-    FROM perf_1h p
+    FROM keys_1h k
+    LEFT JOIN perf_1h p
+      ON p.window_start = k.window_start
+     AND p.gateway = k.gateway
+     AND p.region = k.region
+     AND p.pipeline = k.pipeline
+     AND p.model_id = k.model_id
     LEFT JOIN demand_1h d
-      USING (window_start, gateway, region, pipeline, model_id)
+      ON d.window_start = k.window_start
+     AND d.gateway = k.gateway
+     AND d.region = k.region
+     AND d.pipeline = k.pipeline
+     AND d.model_id = k.model_id
   ),
   api AS
   (
@@ -2034,7 +2058,11 @@ WITH
       sum(abs(toInt64(e.swapped_sessions) - toInt64(a.swapped_sessions))) AS total_diff_swapped_sessions
     FROM expected e
     INNER JOIN api a
-      USING (window_start, gateway, region, pipeline, model_id)
+      ON a.window_start = e.window_start
+     AND a.gateway = e.gateway
+     AND a.region = e.region
+     AND a.pipeline = e.pipeline
+     AND a.model_id = e.model_id
   ),
   coverage AS
   (
@@ -2046,14 +2074,22 @@ WITH
         SELECT count()
         FROM expected e
         LEFT JOIN api a
-          USING (window_start, gateway, region, pipeline, model_id)
+          ON a.window_start = e.window_start
+         AND a.gateway = e.gateway
+         AND a.region = e.region
+         AND a.pipeline = e.pipeline
+         AND a.model_id = e.model_id
         WHERE a.api_marker IS NULL
       ) AS rollup_only_keys,
       (
         SELECT count()
         FROM api a
         LEFT JOIN expected e
-          USING (window_start, gateway, region, pipeline, model_id)
+          ON e.window_start = a.window_start
+         AND e.gateway = a.gateway
+         AND e.region = a.region
+         AND e.pipeline = a.pipeline
+         AND e.model_id = a.model_id
         WHERE e.expected_marker IS NULL
       ) AS view_only_keys,
       (SELECT countIf(gateway = '') FROM expected) AS rollup_empty_gateway_rows,

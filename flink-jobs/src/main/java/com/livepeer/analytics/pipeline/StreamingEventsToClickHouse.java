@@ -518,6 +518,7 @@ public class StreamingEventsToClickHouse {
         signal.ingestTimestamp = parsed.event.timestamp;
         signal.streamId = parsed.payload.streamId;
         signal.requestId = parsed.payload.requestId;
+        signal.gateway = parsed.event.gateway;
         signal.orchestratorAddress = parsed.payload.orchestratorAddress;
         signal.orchestratorUrl = parsed.payload.orchestratorUrl;
         signal.traceType = parsed.payload.traceType;
@@ -534,6 +535,7 @@ public class StreamingEventsToClickHouse {
         signal.ingestTimestamp = parsed.event.timestamp;
         signal.streamId = parsed.payload.streamId;
         signal.requestId = parsed.payload.requestId;
+        signal.gateway = parsed.event.gateway;
         signal.pipeline = parsed.payload.pipeline;
         signal.pipelineHint = parsed.payload.pipeline;
         signal.modelHint = parsed.payload.pipeline;

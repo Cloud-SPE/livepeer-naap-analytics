@@ -50,6 +50,7 @@ Primary schema source: `configs/clickhouse-init/01-schema.sql`.
 - `v_api_gpu_metrics`: hour-level orchestrator/pipeline/model/GPU grain.
 - `v_api_network_demand`: hour-level gateway/region/pipeline/model grain.
 - `v_api_sla_compliance`: hour-level attributed orchestrator/pipeline/model/GPU grain (`orchestrator_address != ''`).
+  - `v_api_network_demand` keyspace is the union of perf and session-demand keys, so demand-only (no status/perf samples) rows must still appear with zero perf counters.
 
 Contract rule: additive fields are canonical; clients must recompute ratios/scores when re-rolling windows.
 

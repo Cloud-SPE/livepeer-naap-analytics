@@ -1628,9 +1628,9 @@ demand_1h AS
     SELECT
         toStartOfInterval(session_start_ts, INTERVAL 1 HOUR) AS window_start,
         gateway,
-        region,
+        ifNull(region, '') AS region,
         pipeline,
-        model_id,
+        ifNull(model_id, '') AS model_id,
         sum(toUInt64(known_stream)) AS known_sessions,
         sum(toUInt64(known_stream AND orchestrator_address != '')) AS served_sessions,
         sum(toUInt64(known_stream AND orchestrator_address = '')) AS unserved_sessions,
@@ -1646,6 +1646,15 @@ demand_1h AS
         region,
         pipeline,
         model_id
+),
+keys_1h AS
+(
+    -- Preserve demand-only session hours/keys even when no perf/status samples exist.
+    SELECT window_start, gateway, region, pipeline, model_id
+    FROM perf_1h
+    UNION DISTINCT
+    SELECT window_start, gateway, region, pipeline, model_id
+    FROM demand_1h
 ),
 latest_session_by_request AS
 (
@@ -1680,15 +1689,15 @@ fees_1h AS
 )
 SELECT
     -- Core serving keys
-    p.window_start AS window_start,
-    p.gateway AS gateway,
-    p.region AS region,
-    p.pipeline AS pipeline,
-    p.model_id AS model_id,
+    k.window_start AS window_start,
+    k.gateway AS gateway,
+    k.region AS region,
+    k.pipeline AS pipeline,
+    k.model_id AS model_id,
 
-    p.total_streams,
-    p.total_sessions,
-    p.total_inference_minutes,
+    ifNull(p.total_streams, toUInt64(0)) AS total_streams,
+    ifNull(p.total_sessions, toUInt64(0)) AS total_sessions,
+    ifNull(p.total_inference_minutes, 0.0) AS total_inference_minutes,
     p.avg_output_fps,
 
     ifNull(d.known_sessions, toUInt64(0)) AS known_sessions,
@@ -1703,19 +1712,25 @@ SELECT
     ifNull(d.unserved_sessions, toUInt64(0)) AS missing_capacity_count,
     ifNull(1 - (d.unexcused_sessions / nullIf(d.known_sessions, 0)), 0) AS success_ratio,
     ifNull(f.fee_payment_eth, 0.0) AS fee_payment_eth
-FROM perf_1h p
+FROM keys_1h k
+LEFT JOIN perf_1h p
+    ON p.window_start = k.window_start
+   AND p.gateway = k.gateway
+   AND p.region = k.region
+   AND p.pipeline = k.pipeline
+   AND p.model_id = k.model_id
 LEFT JOIN demand_1h d
-    ON d.window_start = p.window_start
-   AND d.gateway = p.gateway
-   AND ifNull(d.region, '') = ifNull(p.region, '')
-   AND d.pipeline = p.pipeline
-   AND ifNull(d.model_id, '') = ifNull(p.model_id, '')
+    ON d.window_start = k.window_start
+   AND d.gateway = k.gateway
+   AND d.region = k.region
+   AND d.pipeline = k.pipeline
+   AND d.model_id = k.model_id
 LEFT JOIN fees_1h f
-    ON f.window_start = p.window_start
-   AND f.gateway = p.gateway
-   AND ifNull(f.region, '') = ifNull(p.region, '')
-   AND f.pipeline = p.pipeline
-   AND ifNull(f.model_id, '') = ifNull(p.model_id, '');
+    ON f.window_start = k.window_start
+   AND f.gateway = k.gateway
+   AND ifNull(f.region, '') = k.region
+   AND f.pipeline = k.pipeline
+   AND ifNull(f.model_id, '') = k.model_id;
 
 CREATE OR REPLACE VIEW v_api_network_demand_by_gpu AS
 -- Grain: 1 row per (hour, gateway, orchestrator, region, pipeline, model_id, gpu_id).

@@ -1854,6 +1854,416 @@
       ],
       "title": "Live Event Tape (last 30m)",
       "type": "table"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 92
+      },
+      "id": 122,
+      "panels": [],
+      "title": "Demand vs Supply Match",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "sessions/hour",
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "lineWidth": 1,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 93
+      },
+      "id": 123,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.3.1",
+      "targets": [
+        {
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT time, sum(served_sessions) AS served_sessions, sum(unserved_sessions) AS unserved_sessions FROM (SELECT toStartOfInterval(window_start, INTERVAL 1 HOUR) AS time, served_sessions, unserved_sessions FROM livepeer_analytics.v_api_network_demand WHERE $__timeFilter(window_start) AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(model_id, '')))) GROUP BY time ORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "title": "Served vs Unserved Demand (1h)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "ratio",
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 93
+      },
+      "id": 124,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.3.1",
+      "targets": [
+        {
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT time, if(sum(total_demand_sessions) > 0, sum(unserved_sessions) / sum(total_demand_sessions), toFloat64(0)) AS unmet_demand_rate, if(sum(known_sessions) > 0, sum(served_sessions) / sum(known_sessions), toFloat64(0)) AS supply_match_rate FROM (SELECT toStartOfInterval(window_start, INTERVAL 1 HOUR) AS time, total_demand_sessions, known_sessions, served_sessions, unserved_sessions FROM livepeer_analytics.v_api_network_demand WHERE $__timeFilter(window_start) AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(model_id, '')))) GROUP BY time ORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "title": "Unmet Demand and Supply Match Rates",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "footer": {
+              "reducers": []
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 101
+      },
+      "id": 125,
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Unserved Sessions"
+          }
+        ]
+      },
+      "pluginVersion": "12.3.1",
+      "targets": [
+        {
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT ifNull(pipeline, '') AS \"Pipeline\", ifNull(model_id, '') AS \"Model\", ifNull(region, '') AS \"Region\", ifNull(gateway, '') AS \"Gateway\", sum(unserved_sessions) AS \"Unserved Sessions\", sum(total_demand_sessions) AS \"Total Demand Sessions\", if(sum(total_demand_sessions) > 0, sum(unserved_sessions) / sum(total_demand_sessions), toFloat64(0)) AS \"Unmet Rate\" FROM livepeer_analytics.v_api_network_demand WHERE $__timeFilter(window_start) AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(model_id, ''))) GROUP BY \"Pipeline\", \"Model\", \"Region\", \"Gateway\" HAVING \"Unserved Sessions\" > 0 ORDER BY \"Unserved Sessions\" DESC LIMIT 30",
+          "refId": "A"
+        }
+      ],
+      "title": "Top Unmet Demand Keys",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "sessions/hour",
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 109
+      },
+      "id": 126,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.3.1",
+      "targets": [
+        {
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT time, gateway_series, sum(served_sessions) AS served_sessions, sum(unserved_sessions) AS unserved_sessions FROM (SELECT toStartOfInterval(window_start, INTERVAL 1 HOUR) AS time, if(gateway = '', 'unknown_gateway', gateway) AS gateway_series, served_sessions, unserved_sessions FROM livepeer_analytics.v_api_network_demand WHERE $__timeFilter(window_start) AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(model_id, '')))) GROUP BY time, gateway_series ORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "title": "Served vs Unserved by Gateway (1h)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "footer": {
+              "reducers": []
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 109
+      },
+      "id": 127,
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Unserved Sessions"
+          }
+        ]
+      },
+      "pluginVersion": "12.3.1",
+      "targets": [
+        {
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT if(gateway = '', 'unknown_gateway', gateway) AS \"Gateway\", sum(known_sessions) AS \"Known Sessions\", sum(served_sessions) AS \"Served Sessions\", sum(unserved_sessions) AS \"Unserved Sessions\", if(sum(total_demand_sessions) > 0, sum(unserved_sessions) / sum(total_demand_sessions), toFloat64(0)) AS \"Unmet Rate\", if(sum(known_sessions) > 0, sum(served_sessions) / sum(known_sessions), toFloat64(0)) AS \"Supply Match Rate\" FROM livepeer_analytics.v_api_network_demand WHERE $__timeFilter(window_start) AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(model_id, ''))) GROUP BY \"Gateway\" ORDER BY \"Unserved Sessions\" DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Gateway Supply/Demand Summary",
+      "type": "table"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 117
+      },
+      "id": 128,
+      "panels": [],
+      "title": "Prompt & Parameter Popularity",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "footer": {
+              "reducers": []
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 118
+      },
+      "id": 129,
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Usage Count"
+          }
+        ]
+      },
+      "pluginVersion": "12.3.1",
+      "targets": [
+        {
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT leftUTF8(ifNull(nullIf(trimBoth(prompt_text), ''), ifNull(nullIf(trimBoth(JSONExtractString(JSONExtractRaw(JSONExtractRaw(JSONExtractRaw(raw_json, 'data'), 'inference_status'), 'last_params'), 'prompt')), ''), 'default prompt used')), 120) AS \"Prompt\", ifNull(nullIf(pipeline, ''), 'unknown') AS \"Pipeline\", if(prompt_width = 0 OR prompt_height = 0, 'default', concat(toString(prompt_width), 'x', toString(prompt_height))) AS \"Resolution\", if(ifNull(JSONExtractRaw(JSONExtractRaw(JSONExtractRaw(raw_json, 'data'), 'inference_status'), 'last_params'), '{}') = '{}', 'default', leftUTF8(ifNull(JSONExtractRaw(JSONExtractRaw(JSONExtractRaw(raw_json, 'data'), 'inference_status'), 'last_params'), '{}'), 240)) AS \"Last Params\", count() AS \"Usage Count\", uniqExact(stream_id) AS \"Distinct Streams\" FROM livepeer_analytics.ai_stream_status WHERE $__timeFilter(event_timestamp) AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), pipeline)) AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), lower(orchestrator_address))) GROUP BY \"Prompt\", \"Pipeline\", \"Resolution\", \"Last Params\" ORDER BY \"Usage Count\" DESC LIMIT 30",
+          "refId": "A"
+        }
+      ],
+      "title": "Top Prompts and Inference Params",
+      "type": "table"
     }
   ],
   "preload": false,
@@ -1931,5 +2341,5 @@
   "timezone": "utc",
   "title": "Naap: Orchestrator Performance Overview",
   "uid": "naap-overview",
-  "version": 100
+  "version": 107
 }
