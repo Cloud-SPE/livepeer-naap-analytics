@@ -28,6 +28,8 @@ FROM
   (
     SELECT workflow_session_id
     FROM livepeer_analytics.fact_stream_status_samples
+    WHERE sample_ts >= {from_ts:DateTime64(3)}
+      AND sample_ts < {to_ts:DateTime64(3)}
     GROUP BY workflow_session_id
     HAVING avg(output_fps) > 12
   ) fps USING (workflow_session_id)
@@ -182,6 +184,8 @@ FROM
   (
     SELECT workflow_session_id, avg(output_fps) AS avg_output_fps
     FROM livepeer_analytics.fact_stream_status_samples
+    WHERE sample_ts >= {from_ts:DateTime64(3)}
+      AND sample_ts < {to_ts:DateTime64(3)}
     GROUP BY workflow_session_id
   ),
   trace_flags AS

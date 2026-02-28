@@ -174,11 +174,13 @@ FROM
 -- In preserve-state runs, DLQ rows may accumulate faster than raw rows in the
 -- selected window, so accepted_rows_est can clamp to 0 even when valid typed
 -- rows exist for a raw source event. Guard against impossible lineage instead:
--- typed distinct source ids must not exceed raw source events.
+-- typed distinct source ids must not exceed distinct raw source events.
 WITH
   raw AS
   (
-    SELECT count() AS raw_rows
+    SELECT
+      count() AS raw_rows,
+      uniqExact(id) AS raw_distinct_ids
     FROM livepeer_analytics.streaming_events
     WHERE type = 'network_capabilities'
       AND event_timestamp >= {from_ts:DateTime64(3)}
@@ -211,9 +213,10 @@ WITH
   )
 SELECT
   toUInt64(
-    typed_distinct_source_events > raw_rows
+    typed_distinct_source_events > raw_distinct_ids
   ) AS failed_rows,
   raw_rows,
+  raw_distinct_ids,
   dlq_rows,
   quarantine_rows,
   accepted_rows_est,
@@ -224,6 +227,7 @@ FROM
 (
   SELECT
     raw.raw_rows AS raw_rows,
+    raw.raw_distinct_ids AS raw_distinct_ids,
     dlq.dlq_rows AS dlq_rows,
     quarantine.quarantine_rows AS quarantine_rows,
     greatest(raw.raw_rows - dlq.dlq_rows - quarantine.quarantine_rows, 0) AS accepted_rows_est,

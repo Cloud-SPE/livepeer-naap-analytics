@@ -147,12 +147,14 @@ WITH
      AND d.model_id = r.model_id
   )
 SELECT
-  toUInt64(if(raw_rows = 0, 0, loss_rows > 0 OR missing_dim_keys > 0)) AS failed_rows,
+  toUInt64(if(raw_rows = 0, 0, loss_rows > 0 OR expansion_rows > 0 OR missing_dim_keys > 0)) AS failed_rows,
   raw_rows,
   dim_rows,
   loss_rows,
+  expansion_rows,
   missing_dim_keys,
-  total_gpu_deficit
+  total_gpu_deficit,
+  total_gpu_surplus
 FROM
 (
   SELECT
@@ -164,13 +166,22 @@ FROM
       WHERE dim_gpu_count < raw_gpu_count
     ) AS loss_rows,
     (
+      SELECT count()
+      FROM joined
+      WHERE dim_gpu_count > raw_gpu_count
+    ) AS expansion_rows,
+    (
       SELECT countIf(missing_dim_key = 1)
       FROM joined
     ) AS missing_dim_keys,
     (
       SELECT ifNull(sum(greatest(toInt64(raw_gpu_count) - toInt64(dim_gpu_count), 0)), 0)
       FROM joined
-    ) AS total_gpu_deficit
+    ) AS total_gpu_deficit,
+    (
+      SELECT ifNull(sum(greatest(toInt64(dim_gpu_count) - toInt64(raw_gpu_count), 0)), 0)
+      FROM joined
+    ) AS total_gpu_surplus
 );
 
 -- TEST: capability_prices_key_multiplicity_guard
@@ -312,101 +323,215 @@ CROSS JOIN typed;
 
 -- TEST: status_raw_to_silver_projection
 -- Verifies each typed `ai_stream_status` row is projected into silver fact status samples by source UID.
--- Requirement: non-stateful status projection must be lossless for rows in scope.
+-- Requirement: non-stateful status projection must preserve both coverage and per-UID multiplicity.
 WITH
   typed AS
   (
-    SELECT toString(cityHash64(raw_json)) AS source_event_uid
+    SELECT
+      toString(cityHash64(raw_json)) AS source_event_uid,
+      count() AS typed_rows_per_uid
     FROM livepeer_analytics.ai_stream_status
     WHERE event_timestamp >= {from_ts:DateTime64(3)}
       AND event_timestamp < {to_ts:DateTime64(3)}
+    GROUP BY source_event_uid
   ),
   silver AS
   (
-    SELECT source_event_uid
+    SELECT
+      source_event_uid,
+      count() AS silver_rows_per_uid
     FROM livepeer_analytics.fact_stream_status_samples
     WHERE sample_ts >= {from_ts:DateTime64(3)}
       AND sample_ts < {to_ts:DateTime64(3)}
+    GROUP BY source_event_uid
+  ),
+  joined AS
+  (
+    SELECT
+      t.source_event_uid,
+      t.typed_rows_per_uid,
+      ifNull(s.silver_rows_per_uid, toUInt64(0)) AS silver_rows_per_uid
+    FROM typed t
+    LEFT JOIN silver s USING (source_event_uid)
   )
 SELECT
-  toUInt64(if(typed_rows = 0, 0, missing_in_silver)) AS failed_rows,
-  typed_rows,
-  projected_rows,
-  missing_in_silver
+  toUInt64(
+    if(
+      typed_keys = 0 AND silver_keys = 0,
+      0,
+      missing_in_silver > 0 OR multiplicity_mismatch > 0 OR silver_only_keys > 0
+    )
+  ) AS failed_rows,
+  typed_keys,
+  silver_keys,
+  missing_in_silver,
+  multiplicity_mismatch,
+  silver_only_keys,
+  total_row_deficit,
+  total_row_excess
 FROM
 (
   SELECT
-    count() AS typed_rows,
-    countIf(s.source_event_uid IS NOT NULL) AS projected_rows,
-    countIf(s.source_event_uid IS NULL) AS missing_in_silver
-  FROM typed t
-  LEFT JOIN silver s USING (source_event_uid)
+    (SELECT count() FROM typed) AS typed_keys,
+    (SELECT count() FROM silver) AS silver_keys,
+    (SELECT countIf(silver_rows_per_uid = 0) FROM joined) AS missing_in_silver,
+    (SELECT countIf(silver_rows_per_uid != typed_rows_per_uid) FROM joined) AS multiplicity_mismatch,
+    (
+      SELECT count()
+      FROM silver s
+      LEFT JOIN typed t USING (source_event_uid)
+      WHERE t.source_event_uid IS NULL
+    ) AS silver_only_keys,
+    (
+      SELECT ifNull(sum(greatest(toInt64(typed_rows_per_uid) - toInt64(silver_rows_per_uid), 0)), 0)
+      FROM joined
+    ) AS total_row_deficit,
+    (
+      SELECT ifNull(sum(greatest(toInt64(silver_rows_per_uid) - toInt64(typed_rows_per_uid), 0)), 0)
+      FROM joined
+    ) AS total_row_excess
 );
 
 -- TEST: trace_raw_to_silver_projection
 -- Verifies each typed `stream_trace_events` row is projected into silver trace edges by source UID.
--- Requirement: non-stateful trace projection must be lossless for rows in scope.
+-- Requirement: non-stateful trace projection must preserve both coverage and per-UID multiplicity.
 WITH
   typed AS
   (
-    SELECT toString(cityHash64(raw_json)) AS source_event_uid
+    SELECT
+      toString(cityHash64(raw_json)) AS source_event_uid,
+      count() AS typed_rows_per_uid
     FROM livepeer_analytics.stream_trace_events
     WHERE event_timestamp >= {from_ts:DateTime64(3)}
       AND event_timestamp < {to_ts:DateTime64(3)}
+    GROUP BY source_event_uid
   ),
   silver AS
   (
-    SELECT source_event_uid
+    SELECT
+      source_event_uid,
+      count() AS silver_rows_per_uid
     FROM livepeer_analytics.fact_stream_trace_edges
     WHERE edge_ts >= {from_ts:DateTime64(3)}
       AND edge_ts < {to_ts:DateTime64(3)}
+    GROUP BY source_event_uid
+  ),
+  joined AS
+  (
+    SELECT
+      t.source_event_uid,
+      t.typed_rows_per_uid,
+      ifNull(s.silver_rows_per_uid, toUInt64(0)) AS silver_rows_per_uid
+    FROM typed t
+    LEFT JOIN silver s USING (source_event_uid)
   )
 SELECT
-  toUInt64(if(typed_rows = 0, 0, missing_in_silver)) AS failed_rows,
-  typed_rows,
-  projected_rows,
-  missing_in_silver
+  toUInt64(
+    if(
+      typed_keys = 0 AND silver_keys = 0,
+      0,
+      missing_in_silver > 0 OR multiplicity_mismatch > 0 OR silver_only_keys > 0
+    )
+  ) AS failed_rows,
+  typed_keys,
+  silver_keys,
+  missing_in_silver,
+  multiplicity_mismatch,
+  silver_only_keys,
+  total_row_deficit,
+  total_row_excess
 FROM
 (
   SELECT
-    count() AS typed_rows,
-    countIf(s.source_event_uid IS NOT NULL) AS projected_rows,
-    countIf(s.source_event_uid IS NULL) AS missing_in_silver
-  FROM typed t
-  LEFT JOIN silver s USING (source_event_uid)
+    (SELECT count() FROM typed) AS typed_keys,
+    (SELECT count() FROM silver) AS silver_keys,
+    (SELECT countIf(silver_rows_per_uid = 0) FROM joined) AS missing_in_silver,
+    (SELECT countIf(silver_rows_per_uid != typed_rows_per_uid) FROM joined) AS multiplicity_mismatch,
+    (
+      SELECT count()
+      FROM silver s
+      LEFT JOIN typed t USING (source_event_uid)
+      WHERE t.source_event_uid IS NULL
+    ) AS silver_only_keys,
+    (
+      SELECT ifNull(sum(greatest(toInt64(typed_rows_per_uid) - toInt64(silver_rows_per_uid), 0)), 0)
+      FROM joined
+    ) AS total_row_deficit,
+    (
+      SELECT ifNull(sum(greatest(toInt64(silver_rows_per_uid) - toInt64(typed_rows_per_uid), 0)), 0)
+      FROM joined
+    ) AS total_row_excess
 );
 
 -- TEST: ingest_raw_to_silver_projection
 -- Verifies each typed `stream_ingest_metrics` row is projected into silver ingest samples by source UID.
--- Requirement: non-stateful ingest projection must be lossless when ingest metrics are present.
+-- Requirement: non-stateful ingest projection must preserve both coverage and per-UID multiplicity when ingest metrics are present.
 WITH
   typed AS
   (
-    SELECT toString(cityHash64(raw_json)) AS source_event_uid
+    SELECT
+      toString(cityHash64(raw_json)) AS source_event_uid,
+      count() AS typed_rows_per_uid
     FROM livepeer_analytics.stream_ingest_metrics
     WHERE event_timestamp >= {from_ts:DateTime64(3)}
       AND event_timestamp < {to_ts:DateTime64(3)}
+    GROUP BY source_event_uid
   ),
   silver AS
   (
-    SELECT source_event_uid
+    SELECT
+      source_event_uid,
+      count() AS silver_rows_per_uid
     FROM livepeer_analytics.fact_stream_ingest_samples
     WHERE sample_ts >= {from_ts:DateTime64(3)}
       AND sample_ts < {to_ts:DateTime64(3)}
+    GROUP BY source_event_uid
+  ),
+  joined AS
+  (
+    SELECT
+      t.source_event_uid,
+      t.typed_rows_per_uid,
+      ifNull(s.silver_rows_per_uid, toUInt64(0)) AS silver_rows_per_uid
+    FROM typed t
+    LEFT JOIN silver s USING (source_event_uid)
   )
 SELECT
-  toUInt64(if(typed_rows = 0, 0, missing_in_silver)) AS failed_rows,
-  typed_rows,
-  projected_rows,
-  missing_in_silver
+  toUInt64(
+    if(
+      typed_keys = 0 AND silver_keys = 0,
+      0,
+      missing_in_silver > 0 OR multiplicity_mismatch > 0 OR silver_only_keys > 0
+    )
+  ) AS failed_rows,
+  typed_keys,
+  silver_keys,
+  missing_in_silver,
+  multiplicity_mismatch,
+  silver_only_keys,
+  total_row_deficit,
+  total_row_excess
 FROM
 (
   SELECT
-    count() AS typed_rows,
-    countIf(s.source_event_uid IS NOT NULL) AS projected_rows,
-    countIf(s.source_event_uid IS NULL) AS missing_in_silver
-  FROM typed t
-  LEFT JOIN silver s USING (source_event_uid)
+    (SELECT count() FROM typed) AS typed_keys,
+    (SELECT count() FROM silver) AS silver_keys,
+    (SELECT countIf(silver_rows_per_uid = 0) FROM joined) AS missing_in_silver,
+    (SELECT countIf(silver_rows_per_uid != typed_rows_per_uid) FROM joined) AS multiplicity_mismatch,
+    (
+      SELECT count()
+      FROM silver s
+      LEFT JOIN typed t USING (source_event_uid)
+      WHERE t.source_event_uid IS NULL
+    ) AS silver_only_keys,
+    (
+      SELECT ifNull(sum(greatest(toInt64(typed_rows_per_uid) - toInt64(silver_rows_per_uid), 0)), 0)
+      FROM joined
+    ) AS total_row_deficit,
+    (
+      SELECT ifNull(sum(greatest(toInt64(silver_rows_per_uid) - toInt64(typed_rows_per_uid), 0)), 0)
+      FROM joined
+    ) AS total_row_excess
 );
 
 -- TEST: session_final_uniqueness
@@ -575,14 +700,12 @@ FROM
 ) failures;
 
 -- TEST: param_updates_reference_existing_session
--- Verifies every param update fact references a known workflow session in the same window.
+-- Verifies every param update fact references a known workflow session id.
 -- Requirement: no orphaned `fact_workflow_param_updates` rows.
 WITH session_ids AS
 (
   SELECT DISTINCT workflow_session_id
   FROM livepeer_analytics.fact_workflow_sessions FINAL
-  WHERE session_start_ts >= {from_ts:DateTime64(3)}
-    AND session_start_ts < {to_ts:DateTime64(3)}
 )
 SELECT
   count() AS failed_rows,
@@ -1635,23 +1758,41 @@ FROM
 );
 
 -- TEST: gpu_view_matches_rollup
--- Verifies `v_api_gpu_metrics` matches underlying rollup aggregates at the same dimensional grain.
--- Requirement: serving view must be numerically consistent with rollup source tables.
+-- Verifies `v_api_gpu_metrics` matches independently recomputed perf aggregates
+-- from status facts at the same dimensional grain.
+-- Requirement: serving view must be numerically consistent with perf-backed
+-- attributable GPU keys after canonical fallback normalization.
 WITH
+  latest_session_keys AS
+  (
+    SELECT
+      workflow_session_id,
+      argMax(orchestrator_address, version) AS orchestrator_address,
+      argMax(pipeline, version) AS pipeline,
+      ifNull(argMax(model_id, version), '') AS model_id,
+      ifNull(argMax(gpu_id, version), '') AS gpu_id,
+      ifNull(argMax(region, version), '') AS region
+    FROM livepeer_analytics.fact_workflow_sessions
+    GROUP BY workflow_session_id
+  ),
   rollup AS
   (
     SELECT
       toNullable(1) AS rollup_marker,
-      toStartOfInterval(window_start, INTERVAL 1 HOUR) AS window_start,
-      orchestrator_address,
-      pipeline,
-      ifNull(model_id, '') AS model_id,
-      ifNull(gpu_id, '') AS gpu_id,
-      ifNull(region, '') AS region,
-      avgMerge(output_fps_avg_state) AS avg_output_fps
-    FROM livepeer_analytics.agg_stream_performance_1m
-    WHERE window_start >= {from_ts:DateTime64(3)}
-      AND window_start < {to_ts:DateTime64(3)}
+      toStartOfInterval(s.sample_ts, INTERVAL 1 HOUR) AS window_start,
+      if(s.orchestrator_address != '', s.orchestrator_address, ifNull(k.orchestrator_address, '')) AS orchestrator_address,
+      if(s.pipeline != '', s.pipeline, ifNull(k.pipeline, '')) AS pipeline,
+      if(ifNull(s.model_id, '') != '', s.model_id, ifNull(k.model_id, '')) AS model_id,
+      if(ifNull(s.gpu_id, '') != '', s.gpu_id, ifNull(k.gpu_id, '')) AS gpu_id,
+      if(ifNull(s.region, '') != '', s.region, ifNull(k.region, '')) AS region,
+      avg(s.output_fps) AS avg_output_fps
+    FROM livepeer_analytics.fact_stream_status_samples s
+    LEFT JOIN latest_session_keys k
+      ON k.workflow_session_id = s.workflow_session_id
+    WHERE s.sample_ts >= {from_ts:DateTime64(3)}
+      AND s.sample_ts < {to_ts:DateTime64(3)}
+      AND if(s.orchestrator_address != '', s.orchestrator_address, ifNull(k.orchestrator_address, '')) != ''
+      AND if(ifNull(s.gpu_id, '') != '', s.gpu_id, ifNull(k.gpu_id, '')) != ''
     GROUP BY window_start, orchestrator_address, pipeline, model_id, gpu_id, region
   ),
   api AS
@@ -1668,6 +1809,7 @@ WITH
     FROM livepeer_analytics.v_api_gpu_metrics
     WHERE window_start >= {from_ts:DateTime64(3)}
       AND window_start < {to_ts:DateTime64(3)}
+      AND status_samples > 0
   ),
   joined AS
   (
@@ -1729,11 +1871,14 @@ WITH
 SELECT
   toUInt64(
     (rollup_rows > 0 AND view_rows > 0 AND joined_rows = 0)
+    OR rollup_only_keys > 0
+    OR view_only_keys > 0
     OR (joined_rows > 0 AND ifNull(max_abs_diff_fps, 0) > 0.000001)
   ) AS failed_rows,
   multiIf(
     rollup_rows = 0 AND view_rows = 0, 'EMPTY_BOTH',
     rollup_rows > 0 AND view_rows > 0 AND joined_rows = 0, 'NO_OVERLAP_BOTH_NONEMPTY',
+    rollup_only_keys > 0 OR view_only_keys > 0, 'KEY_MISMATCH',
     joined_rows > 0 AND ifNull(max_abs_diff_fps, 0) > 0.000001, 'VALUE_MISMATCH_WITH_OVERLAP',
     'PASS'
   ) AS failure_mode,
@@ -1934,6 +2079,8 @@ WITH
 SELECT
   toUInt64(
     (rollup_rows > 0 AND view_rows > 0 AND joined_rows = 0)
+    OR rollup_only_keys > 0
+    OR view_only_keys > 0
     OR (joined_rows > 0 AND (
       ifNull(max_abs_diff_fps, 0) > 0.000001
       OR ifNull(max_abs_diff_minutes, 0) > 0.000001
@@ -1949,6 +2096,7 @@ SELECT
   multiIf(
     rollup_rows = 0 AND view_rows = 0, 'EMPTY_BOTH',
     rollup_rows > 0 AND view_rows > 0 AND joined_rows = 0, 'NO_OVERLAP_BOTH_NONEMPTY',
+    rollup_only_keys > 0 OR view_only_keys > 0, 'KEY_MISMATCH',
     joined_rows > 0 AND (
       ifNull(max_abs_diff_fps, 0) > 0.000001
       OR ifNull(max_abs_diff_minutes, 0) > 0.000001
@@ -2281,7 +2429,7 @@ FROM naive_join
 CROSS JOIN safe_total;
 
 -- TEST: preexisting_grain_drift_baseline_gpu_sla
--- Verifies existing model-grain views conserve totals when collapsed to pipeline grain.
+-- Verifies existing model-grain views conserve totals and keyspace when collapsed to pipeline grain.
 -- Requirement: detect pre-existing drift in model-aware views independent of demand changes.
 WITH
   gpu_rollup_pipeline AS
@@ -2364,18 +2512,46 @@ WITH
   )
 SELECT
   toUInt64(
-    gpu_status_sample_diff > 0
+    gpu_rollup_only_keys > 0
+    OR gpu_view_only_keys > 0
+    OR gpu_status_sample_diff > 0
+    OR sla_raw_only_keys > 0
+    OR sla_view_only_keys > 0
     OR sla_known_diff > 0
     OR sla_unexcused_diff > 0
     OR sla_swapped_diff > 0
   ) AS failed_rows,
+  gpu_rollup_rows,
+  gpu_view_rows,
+  gpu_rollup_only_keys,
+  gpu_view_only_keys,
   gpu_status_sample_diff,
+  sla_raw_rows,
+  sla_view_rows,
+  sla_raw_only_keys,
+  sla_view_only_keys,
   sla_known_diff,
   sla_unexcused_diff,
   sla_swapped_diff
 FROM
 (
   SELECT
+    (SELECT count() FROM gpu_rollup_pipeline) AS gpu_rollup_rows,
+    (SELECT count() FROM gpu_view_pipeline) AS gpu_view_rows,
+    (
+      SELECT count()
+      FROM gpu_rollup_pipeline r
+      LEFT JOIN gpu_view_pipeline v
+        USING (window_start, orchestrator_address, pipeline)
+      WHERE v.window_start IS NULL
+    ) AS gpu_rollup_only_keys,
+    (
+      SELECT count()
+      FROM gpu_view_pipeline v
+      LEFT JOIN gpu_rollup_pipeline r
+        USING (window_start, orchestrator_address, pipeline)
+      WHERE r.window_start IS NULL
+    ) AS gpu_view_only_keys,
     ifNull(sum(abs(toInt64(r.expected_status_samples) - toInt64(v.view_status_samples))), 0) AS gpu_status_sample_diff
   FROM gpu_rollup_pipeline r
   INNER JOIN gpu_view_pipeline v
@@ -2384,6 +2560,22 @@ FROM
 CROSS JOIN
 (
   SELECT
+    (SELECT count() FROM sla_raw_pipeline) AS sla_raw_rows,
+    (SELECT count() FROM sla_view_pipeline) AS sla_view_rows,
+    (
+      SELECT count()
+      FROM sla_raw_pipeline r
+      LEFT JOIN sla_view_pipeline v
+        USING (window_start, orchestrator_address, pipeline)
+      WHERE v.window_start IS NULL
+    ) AS sla_raw_only_keys,
+    (
+      SELECT count()
+      FROM sla_view_pipeline v
+      LEFT JOIN sla_raw_pipeline r
+        USING (window_start, orchestrator_address, pipeline)
+      WHERE r.window_start IS NULL
+    ) AS sla_view_only_keys,
     ifNull(sum(abs(toInt64(r.raw_known_sessions) - toInt64(v.view_known_sessions))), 0) AS sla_known_diff,
     ifNull(sum(abs(toInt64(r.raw_unexcused_sessions) - toInt64(v.view_unexcused_sessions))), 0) AS sla_unexcused_diff,
     ifNull(sum(abs(toInt64(r.raw_swapped_sessions) - toInt64(v.view_swapped_sessions))), 0) AS sla_swapped_diff
@@ -2448,11 +2640,14 @@ WITH
 SELECT
   toUInt64(
     (raw_rows > 0 AND view_rows > 0 AND joined_rows = 0)
+    OR raw_only_keys > 0
+    OR view_only_keys > 0
     OR (joined_rows > 0 AND (total_known_diff > 0 OR total_unexcused_diff > 0 OR total_swapped_diff > 0))
   ) AS failed_rows,
   multiIf(
     raw_rows = 0 AND view_rows = 0, 'EMPTY_BOTH',
     raw_rows > 0 AND view_rows > 0 AND joined_rows = 0, 'NO_OVERLAP_BOTH_NONEMPTY',
+    raw_only_keys > 0 OR view_only_keys > 0, 'KEY_MISMATCH',
     joined_rows > 0 AND (total_known_diff > 0 OR total_unexcused_diff > 0 OR total_swapped_diff > 0), 'VALUE_MISMATCH_WITH_OVERLAP',
     'PASS'
   ) AS failure_mode,

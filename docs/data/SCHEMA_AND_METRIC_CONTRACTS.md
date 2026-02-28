@@ -47,7 +47,7 @@ Primary schema source: `configs/clickhouse-init/01-schema.sql`.
 
 ## API Serving Grains
 
-- `v_api_gpu_metrics`: minute-level orchestrator/pipeline/model/GPU grain.
+- `v_api_gpu_metrics`: hour-level orchestrator/pipeline/model/GPU grain.
 - `v_api_network_demand`: hour-level gateway/region/pipeline/model grain.
 - `v_api_sla_compliance`: hour-level attributed orchestrator/pipeline/model/GPU grain (`orchestrator_address != ''`).
 
@@ -70,35 +70,6 @@ Contract rule: additive fields are canonical; clients must recompute ratios/scor
   - `/network/demand` -> `v_api_network_demand` (+ GPU supply slice via `v_api_network_demand_by_gpu`)
     - consumer join rule: include `model_id` on model-aware joins, or pre-aggregate by pipeline before joining to pipeline-grain datasets.
   - `/sla/compliance` -> `v_api_sla_compliance`
-
-## API View Column Meanings
-
-- `v_api_gpu_metrics`
-  - `known_sessions`: sessions in startup denominator (`known_stream = 1`).
-  - `startup_success_sessions`: sessions with playable startup signal (`gateway_receive_few_processed_segments`).
-  - `excused_sessions`: known sessions without startup success, but excused by policy.
-  - `unexcused_sessions`: known sessions without startup success and not excused.
-  - `failure_rate`: `unexcused_sessions / known_sessions`.
-  - `swap_rate`: `swapped_sessions / known_sessions`.
-
-- `v_api_network_demand`
-  - `total_streams`: unique stream IDs observed in performance rollups at view grain.
-  - `total_sessions`: unique workflow sessions observed in performance rollups at view grain.
-  - `known_sessions`: demand denominator from latest session facts (`known_stream = 1`).
-  - `served_sessions`: known sessions with non-empty orchestrator attribution.
-  - `unserved_sessions`: known sessions without orchestrator attribution.
-  - `total_demand_sessions`: `served_sessions + unserved_sessions`.
-  - `missing_capacity_count`: alias of `unserved_sessions` (capacity proxy).
-  - `success_ratio`: `1 - (unexcused_sessions / known_sessions)` (startup compliance ratio).
-
-- `v_api_sla_compliance`
-  - `known_sessions`: sessions in startup denominator (`known_stream = 1`).
-  - `startup_success_sessions`: sessions with playable startup signal (`gateway_receive_few_processed_segments`).
-  - `excused_sessions`: known sessions without startup success, but excused by policy.
-  - `unexcused_sessions`: known sessions without startup success and not excused.
-  - `success_ratio`: `1 - (unexcused_sessions / known_sessions)` (startup compliance ratio).
-  - `no_swap_ratio`: `1 - (swapped_sessions / known_sessions)`.
-  - `sla_score`: weighted score `0.7 * success_ratio + 0.3 * no_swap_ratio`, scaled to 0-100.
 
 ## Raw-to-Fact and Execution Contract
 
