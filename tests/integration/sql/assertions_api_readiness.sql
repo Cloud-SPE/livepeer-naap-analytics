@@ -88,6 +88,27 @@ FROM livepeer_analytics.v_api_network_demand
 WHERE window_start >= {from_ts:DateTime64(3)}
   AND window_start < {to_ts:DateTime64(3)};
 
+-- TEST: network_demand_required_columns_present
+SELECT
+  toUInt64(countIf(is_present = 0) > 0) AS failed_rows,
+  groupArrayIf(column_name, is_present = 0) AS missing_columns
+FROM
+(
+  SELECT
+    required.column_name,
+    toUInt8(count(c.name) > 0) AS is_present
+  FROM
+  (
+    SELECT 'model_id' AS column_name
+    UNION ALL SELECT 'pipeline'
+  ) required
+  LEFT JOIN system.columns c
+    ON c.database = 'livepeer_analytics'
+   AND c.table = 'v_api_network_demand'
+   AND c.name = required.column_name
+  GROUP BY required.column_name
+);
+
 -- TEST: network_demand_by_gpu_hourly_grain
 SELECT
   toUInt64(countIf(toMinute(window_start) != 0) > 0) AS failed_rows,
@@ -207,16 +228,17 @@ raw_rollup AS
     toStartOfInterval(session_start_ts, INTERVAL 1 HOUR) AS window_start,
     orchestrator_address,
     pipeline,
-    ifNull(model_id, '') AS model_id,
-    ifNull(gpu_id, '') AS gpu_id,
-    ifNull(region, '') AS region,
+    ifNull(model_id, '') AS model_id_key,
+    ifNull(gpu_id, '') AS gpu_id_key,
+    ifNull(region, '') AS region_key,
     sum(toUInt64(known_stream)) AS known_sessions,
     sum(toUInt64(startup_unexcused)) AS unexcused_sessions,
     sum(toUInt64((confirmed_swap_count > 0) OR (inferred_orchestrator_change_count > 0))) AS swapped_sessions
   FROM latest_sessions
   WHERE session_start_ts >= {from_ts:DateTime64(3)}
     AND session_start_ts < {to_ts:DateTime64(3)}
-  GROUP BY window_start, orchestrator_address, pipeline, model_id, gpu_id, region
+    AND orchestrator_address != ''
+  GROUP BY window_start, orchestrator_address, pipeline, model_id_key, gpu_id_key, region_key
 ),
 api_rollup AS
 (
@@ -224,9 +246,9 @@ api_rollup AS
     window_start,
     orchestrator_address,
     pipeline,
-    ifNull(model_id, '') AS model_id,
-    ifNull(gpu_id, '') AS gpu_id,
-    ifNull(region, '') AS region,
+    ifNull(model_id, '') AS model_id_key,
+    ifNull(gpu_id, '') AS gpu_id_key,
+    ifNull(region, '') AS region_key,
     known_sessions,
     unexcused_sessions,
     swapped_sessions
@@ -236,11 +258,67 @@ api_rollup AS
 )
 SELECT
   toUInt64(
-    sum(abs(r.known_sessions - a.known_sessions))
-    + sum(abs(r.unexcused_sessions - a.unexcused_sessions))
-    + sum(abs(r.swapped_sessions - a.swapped_sessions)) > 0
+    (raw_rows > 0 AND view_rows > 0 AND joined_rows = 0)
+    OR raw_only_keys > 0
+    OR view_only_keys > 0
+    OR (
+      joined_rows > 0
+      AND (
+        total_known_diff > 0
+        OR total_unexcused_diff > 0
+        OR total_swapped_diff > 0
+      )
+    )
   ) AS failed_rows,
-  count() AS joined_rows
-FROM raw_rollup r
-INNER JOIN api_rollup a
-  USING (window_start, orchestrator_address, pipeline, model_id, gpu_id, region);
+  raw_rows,
+  view_rows,
+  joined_rows,
+  raw_only_keys,
+  view_only_keys,
+  total_known_diff,
+  total_unexcused_diff,
+  total_swapped_diff
+FROM
+(
+  SELECT
+    (SELECT count() FROM raw_rollup) AS raw_rows,
+    (SELECT count() FROM api_rollup) AS view_rows,
+    (
+      SELECT count()
+      FROM raw_rollup r
+      INNER JOIN api_rollup a
+        USING (window_start, orchestrator_address, pipeline, model_id_key, gpu_id_key, region_key)
+    ) AS joined_rows,
+    (
+      SELECT count()
+      FROM raw_rollup r
+      LEFT JOIN api_rollup a
+        USING (window_start, orchestrator_address, pipeline, model_id_key, gpu_id_key, region_key)
+      WHERE a.window_start IS NULL
+    ) AS raw_only_keys,
+    (
+      SELECT count()
+      FROM api_rollup a
+      LEFT JOIN raw_rollup r
+        USING (window_start, orchestrator_address, pipeline, model_id_key, gpu_id_key, region_key)
+      WHERE r.window_start IS NULL
+    ) AS view_only_keys,
+    (
+      SELECT ifNull(sum(abs(r.known_sessions - a.known_sessions)), 0)
+      FROM raw_rollup r
+      INNER JOIN api_rollup a
+        USING (window_start, orchestrator_address, pipeline, model_id_key, gpu_id_key, region_key)
+    ) AS total_known_diff,
+    (
+      SELECT ifNull(sum(abs(r.unexcused_sessions - a.unexcused_sessions)), 0)
+      FROM raw_rollup r
+      INNER JOIN api_rollup a
+        USING (window_start, orchestrator_address, pipeline, model_id_key, gpu_id_key, region_key)
+    ) AS total_unexcused_diff,
+    (
+      SELECT ifNull(sum(abs(r.swapped_sessions - a.swapped_sessions)), 0)
+      FROM raw_rollup r
+      INNER JOIN api_rollup a
+        USING (window_start, orchestrator_address, pipeline, model_id_key, gpu_id_key, region_key)
+    ) AS total_swapped_diff
+);

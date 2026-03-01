@@ -11,7 +11,7 @@ public class CapabilitySnapshotRef implements Serializable {
     public long snapshotTs;
     public String canonicalOrchestratorAddress;
     public String orchestratorUrl;
+    public String pipeline;
     public String modelId;
     public String gpuId;
 }
-

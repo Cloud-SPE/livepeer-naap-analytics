@@ -478,6 +478,7 @@ WITH
       gateway,
       ifNull(region, '') AS region,
       pipeline,
+      ifNull(model_id, '') AS model_id,
       uniqExactMerge(sessions_uniq_state) AS total_sessions,
       uniqExactMerge(streams_uniq_state) AS total_streams,
       countMerge(sample_count_state) / 60.0 AS total_inference_minutes,
@@ -485,7 +486,7 @@ WITH
     FROM livepeer_analytics.agg_stream_performance_1m
     WHERE window_start >= {from_ts:DateTime64(3)}
       AND window_start < {to_ts:DateTime64(3)}
-    GROUP BY window_start, gateway, region, pipeline
+    GROUP BY window_start, gateway, region, pipeline, model_id
   ),
   latest_sessions AS
   (
@@ -495,6 +496,7 @@ WITH
       argMax(gateway, version) AS gateway,
       ifNull(argMax(region, version), '') AS region,
       argMax(pipeline, version) AS pipeline,
+      ifNull(argMax(model_id, version), '') AS model_id,
       argMax(orchestrator_address, version) AS orchestrator_address,
       argMax(known_stream, version) AS known_stream,
       argMax(startup_unexcused, version) AS startup_unexcused,
@@ -510,6 +512,7 @@ WITH
       gateway,
       region,
       pipeline,
+      model_id,
       sum(toUInt64(known_stream)) AS known_sessions,
       sum(toUInt64(known_stream AND orchestrator_address != '')) AS served_sessions,
       sum(toUInt64(known_stream AND orchestrator_address = '')) AS unserved_sessions,
@@ -518,7 +521,7 @@ WITH
     FROM latest_sessions
     WHERE session_start_ts >= {from_ts:DateTime64(3)}
       AND session_start_ts < {to_ts:DateTime64(3)}
-    GROUP BY window_start, gateway, region, pipeline
+    GROUP BY window_start, gateway, region, pipeline, model_id
   ),
   expected AS
   (
@@ -528,6 +531,7 @@ WITH
       p.gateway,
       p.region,
       p.pipeline,
+      p.model_id,
       p.total_sessions,
       p.total_streams,
       p.total_inference_minutes,
@@ -539,7 +543,7 @@ WITH
       ifNull(d.swapped_sessions, toUInt64(0)) AS swapped_sessions
     FROM perf_1h p
     LEFT JOIN demand_1h d
-      USING (window_start, gateway, region, pipeline)
+      USING (window_start, gateway, region, pipeline, model_id)
   ),
   api AS
   (
@@ -549,6 +553,7 @@ WITH
       gateway,
       ifNull(region, '') AS region,
       pipeline,
+      ifNull(model_id, '') AS model_id,
       total_sessions,
       total_streams,
       total_inference_minutes,
@@ -579,7 +584,7 @@ WITH
       sum(abs(toInt64(e.swapped_sessions) - toInt64(a.swapped_sessions))) AS total_diff_swapped_sessions
     FROM expected e
     INNER JOIN api a
-      USING (window_start, gateway, region, pipeline)
+      USING (window_start, gateway, region, pipeline, model_id)
   )
 SELECT
   multiIf(
@@ -624,14 +629,14 @@ FROM
       SELECT count()
       FROM expected e
       LEFT JOIN api a
-        USING (window_start, gateway, region, pipeline)
+        USING (window_start, gateway, region, pipeline, model_id)
       WHERE a.api_marker IS NULL
     ) AS rollup_only_keys,
     (
       SELECT count()
       FROM api a
       LEFT JOIN expected e
-        USING (window_start, gateway, region, pipeline)
+        USING (window_start, gateway, region, pipeline, model_id)
       WHERE e.expected_marker IS NULL
     ) AS view_only_keys,
     (SELECT mean_abs_diff_fps FROM joined) AS mean_abs_diff_fps,

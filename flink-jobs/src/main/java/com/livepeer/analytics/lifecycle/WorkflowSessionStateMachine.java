@@ -38,6 +38,7 @@ public final class WorkflowSessionStateMachine {
         state.streamId = StringSemantics.firstNonBlank(state.streamId, signal.streamId);
         state.requestId = StringSemantics.firstNonBlank(state.requestId, signal.requestId);
         state.pipeline = StringSemantics.firstNonBlank(state.pipeline, signal.pipeline);
+        state.modelId = StringSemantics.blankToNull(StringSemantics.firstNonBlank(state.modelId, signal.modelHint));
         state.workflowId = StringSemantics.firstNonBlank(state.workflowId, state.pipeline, "ai_live_video_stream");
         state.gateway = StringSemantics.firstNonBlank(state.gateway, signal.gateway);
         if (!StringSemantics.isBlank(signal.orchestratorUrl)) {

@@ -19,12 +19,13 @@
 
 | API Endpoint | Backing View | Canonical Grain | Core Additive Fields | Core Derived Fields | Status |
 |---|---|---|---|---|---|
-| `/gpu/metrics` | `v_api_gpu_metrics` | 1h (serving rollups may expose finer windows) | `status_samples`, `known_sessions`, `success_sessions`, `excused_sessions`, `unexcused_sessions`, `swapped_sessions` | `avg_output_fps`, `p95_output_fps`, `jitter_coeff_fps`, `failure_rate`, `swap_rate` | In progress |
-| `/network/demand` | `v_api_network_demand` | 1h | `total_streams`, `total_sessions`, `total_inference_minutes`, `known_sessions`, `unexcused_sessions`, `swapped_sessions`, `missing_capacity_count`, `fee_payment_eth` | `avg_output_fps`, `success_ratio` | In progress |
-| `/sla/compliance` | `v_api_sla_compliance` | 1h | `known_sessions`, `success_sessions`, `excused_sessions`, `unexcused_sessions`, `swapped_sessions` | `success_ratio`, `no_swap_ratio`, `sla_score` | In progress |
+| `/gpu/metrics` | `v_api_gpu_metrics` | 1h (serving rollups may expose finer windows) | `status_samples`, `known_sessions`, `startup_success_sessions`, `excused_sessions`, `unexcused_sessions`, `swapped_sessions` | `avg_output_fps`, `p95_output_fps`, `jitter_coeff_fps`, `failure_rate`, `swap_rate` | In progress |
+| `/network/demand` | `v_api_network_demand` | 1h `(gateway, region, pipeline, model_id)` | `total_streams`, `total_sessions`, `total_inference_minutes`, `known_sessions`, `unexcused_sessions`, `swapped_sessions`, `missing_capacity_count`, `fee_payment_eth` | `avg_output_fps`, `success_ratio` | Live |
+| `/sla/compliance` | `v_api_sla_compliance` | 1h | `known_sessions`, `startup_success_sessions`, `excused_sessions`, `unexcused_sessions`, `swapped_sessions` | `success_ratio`, `no_swap_ratio`, `sla_score` | In progress |
 
 Notes:
 - API payloads should remain rollup-safe: recompute ratios/scores from additive fields for larger windows.
+- `v_api_network_demand` is now model-aware; downstream consumers must include `model_id` in joins or pre-aggregate to pipeline grain before joining to pipeline-only datasets.
 - `/datasets` remains out of scope.
 
 ## Transformation Mapping (Trace -> Status -> Metrics)

@@ -9,6 +9,7 @@ This file is a short operating map for AI agents and humans. Treat `docs/` as th
 - Build Flink job: `cd flink-jobs && mvn -q -DskipTests package`
 - Run Flink unit/contract tests: `cd flink-jobs && mvn test`
 - Run ClickHouse integration assertions: `tests/integration/run_all.sh`
+- Re-run scenario assertions only (no replay/reset): `cd flink-jobs && mvn -Pscenario-it-assert-only validate`
 - Run query trace pack: `uv run --project tests/python python tests/python/scripts/run_clickhouse_query_pack.py --lookback-hours 24`
 - Run docs inventory: `scripts/docs_inventory.sh`
 - Validate markdown links: `scripts/docs_link_check.sh`

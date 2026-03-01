@@ -11,7 +11,7 @@ import com.livepeer.analytics.util.StringSemantics;
  * Utility for bounded capability-candidate maintenance and deterministic attribution selection.
  *
  * <p>Selection contract (do not weaken without regression updates):
- * - Compatibility first: when pipeline context is available, incompatible model candidates must
+ * - Compatibility first: when model-hint context is available, incompatible model candidates must
  *   be ignored, even if they are temporally closer/fresher.
  * - Freshness second: among compatible candidates, prefer exact timestamp, then nearest prior
  *   within TTL, then nearest within TTL.
@@ -47,7 +47,7 @@ public final class CapabilityAttributionSelector {
 
     public static CapabilitySnapshotRef selectBestCandidate(
             CapabilitySnapshotBucket bucket,
-            String pipeline,
+            String modelHint,
             long signalTs,
             long ttlMs) {
         if (bucket == null || bucket.byModelKey.isEmpty()) {
@@ -58,10 +58,10 @@ public final class CapabilityAttributionSelector {
         CapabilitySnapshotRef best = null;
         CandidateScore bestScore = null;
         for (CapabilitySnapshotRef candidate : candidates) {
-            if (candidate == null || !isSnapshotModelCompatible(pipeline, candidate.modelId)) {
+            if (candidate == null || !isSnapshotModelCompatible(modelHint, candidate.modelId)) {
                 continue;
             }
-            CandidateScore score = CandidateScore.of(candidate, pipeline, signalTs, ttlMs);
+            CandidateScore score = CandidateScore.of(candidate, modelHint, signalTs, ttlMs);
             if (bestScore == null || score.compareTo(bestScore) < 0) {
                 best = candidate;
                 bestScore = score;
@@ -103,11 +103,11 @@ public final class CapabilityAttributionSelector {
         return modelKey(candidate.modelId) + "|" + candidate.snapshotTs;
     }
 
-    private static boolean isSnapshotModelCompatible(String pipeline, String snapshotModelId) {
-        if (StringSemantics.isBlank(pipeline) || StringSemantics.isBlank(snapshotModelId)) {
+    private static boolean isSnapshotModelCompatible(String modelHint, String snapshotModelId) {
+        if (StringSemantics.isBlank(modelHint) || StringSemantics.isBlank(snapshotModelId)) {
             return true;
         }
-        return pipeline.trim().equalsIgnoreCase(snapshotModelId.trim());
+        return modelHint.trim().equalsIgnoreCase(snapshotModelId.trim());
     }
 
     private static final class CandidateScore implements Comparable<CandidateScore> {
@@ -130,10 +130,10 @@ public final class CapabilityAttributionSelector {
             this.modelKey = modelKey;
         }
 
-        static CandidateScore of(CapabilitySnapshotRef candidate, String pipeline, long signalTs, long ttlMs) {
+        static CandidateScore of(CapabilitySnapshotRef candidate, String modelHint, long signalTs, long ttlMs) {
             long delta = Math.abs(signalTs - candidate.snapshotTs);
-            int compatibility = (!StringSemantics.isBlank(pipeline) && !StringSemantics.isBlank(candidate.modelId)
-                    && pipeline.trim().equalsIgnoreCase(candidate.modelId.trim())) ? 0 : 1;
+            int compatibility = (!StringSemantics.isBlank(modelHint) && !StringSemantics.isBlank(candidate.modelId)
+                    && modelHint.trim().equalsIgnoreCase(candidate.modelId.trim())) ? 0 : 1;
             int freshness;
             if (delta == 0) {
                 freshness = 0;

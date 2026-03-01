@@ -98,6 +98,116 @@ SELECT
 FROM raw_rows
 CROSS JOIN dim_rows;
 
+-- TEST: capability_snapshot_gpu_coverage
+-- Verifies capability snapshot dimensions preserve per-event GPU coverage from typed capabilities.
+-- Requirement: per `(source_event_id, orchestrator, pipeline, model_id)` GPU cardinality must match.
+WITH
+  raw_gpu AS
+  (
+    SELECT
+      source_event_id AS source_event_uid,
+      lower(orchestrator_address) AS orchestrator_address,
+      pipeline,
+      model_id,
+      countDistinctIf(gpu_id, ifNull(gpu_id, '') != '') AS raw_gpu_count
+    FROM livepeer_analytics.network_capabilities
+    WHERE event_timestamp >= {from_ts:DateTime64(3)}
+      AND event_timestamp < {to_ts:DateTime64(3)}
+    GROUP BY source_event_uid, orchestrator_address, pipeline, model_id
+    HAVING raw_gpu_count > 0
+  ),
+  dim_gpu AS
+  (
+    SELECT
+      source_event_uid,
+      lower(orchestrator_address) AS orchestrator_address,
+      pipeline,
+      model_id,
+      countDistinctIf(gpu_id, ifNull(gpu_id, '') != '') AS dim_gpu_count
+    FROM livepeer_analytics.dim_orchestrator_capability_snapshots
+    WHERE snapshot_ts >= {from_ts:DateTime64(3)}
+      AND snapshot_ts < {to_ts:DateTime64(3)}
+    GROUP BY source_event_uid, orchestrator_address, pipeline, model_id
+  ),
+  joined AS
+  (
+    SELECT
+      r.source_event_uid,
+      r.orchestrator_address,
+      r.pipeline,
+      r.model_id,
+      r.raw_gpu_count,
+      ifNull(d.dim_gpu_count, toUInt64(0)) AS dim_gpu_count,
+      toUInt8(d.source_event_uid IS NULL) AS missing_dim_key
+    FROM raw_gpu r
+    LEFT JOIN dim_gpu d
+      ON d.source_event_uid = r.source_event_uid
+     AND d.orchestrator_address = r.orchestrator_address
+     AND d.pipeline = r.pipeline
+     AND d.model_id = r.model_id
+  )
+SELECT
+  toUInt64(if(raw_rows = 0, 0, loss_rows > 0 OR expansion_rows > 0 OR missing_dim_keys > 0)) AS failed_rows,
+  raw_rows,
+  dim_rows,
+  loss_rows,
+  expansion_rows,
+  missing_dim_keys,
+  total_gpu_deficit,
+  total_gpu_surplus
+FROM
+(
+  SELECT
+    (SELECT count() FROM raw_gpu) AS raw_rows,
+    (SELECT count() FROM dim_gpu) AS dim_rows,
+    (
+      SELECT count()
+      FROM joined
+      WHERE dim_gpu_count < raw_gpu_count
+    ) AS loss_rows,
+    (
+      SELECT count()
+      FROM joined
+      WHERE dim_gpu_count > raw_gpu_count
+    ) AS expansion_rows,
+    (
+      SELECT countIf(missing_dim_key = 1)
+      FROM joined
+    ) AS missing_dim_keys,
+    (
+      SELECT ifNull(sum(greatest(toInt64(raw_gpu_count) - toInt64(dim_gpu_count), 0)), 0)
+      FROM joined
+    ) AS total_gpu_deficit,
+    (
+      SELECT ifNull(sum(greatest(toInt64(dim_gpu_count) - toInt64(raw_gpu_count), 0)), 0)
+      FROM joined
+    ) AS total_gpu_surplus
+);
+
+-- TEST: capability_prices_key_multiplicity_guard
+-- Verifies price rows remain unique at current serving key grain.
+-- Requirement: no duplicate price rows per `(source_event_id, orchestrator, capability_id, event_timestamp)`.
+WITH duplicate_groups AS
+(
+  SELECT
+    source_event_id,
+    lower(orchestrator_address) AS orchestrator_address,
+    capability_id,
+    event_timestamp,
+    count() AS rows_in_group
+  FROM livepeer_analytics.network_capabilities_prices
+  WHERE event_timestamp >= {from_ts:DateTime64(3)}
+    AND event_timestamp < {to_ts:DateTime64(3)}
+  GROUP BY source_event_id, orchestrator_address, capability_id, event_timestamp
+  HAVING rows_in_group > 1
+)
+SELECT
+  toUInt64(count() > 0) AS failed_rows,
+  count() AS duplicate_groups,
+  ifNull(sum(rows_in_group), 0) AS duplicate_rows,
+  ifNull(max(rows_in_group), 0) AS max_rows_in_group
+FROM duplicate_groups;
+
 -- TEST: session_fact_present
 -- Verifies lifecycle session fact rows exist in the window.
 -- Requirement: Flink sessionization must emit `fact_workflow_sessions` for the replayed fixture period.
@@ -213,101 +323,215 @@ CROSS JOIN typed;
 
 -- TEST: status_raw_to_silver_projection
 -- Verifies each typed `ai_stream_status` row is projected into silver fact status samples by source UID.
--- Requirement: non-stateful status projection must be lossless for rows in scope.
+-- Requirement: non-stateful status projection must preserve both coverage and per-UID multiplicity.
 WITH
   typed AS
   (
-    SELECT toString(cityHash64(raw_json)) AS source_event_uid
+    SELECT
+      toString(cityHash64(raw_json)) AS source_event_uid,
+      count() AS typed_rows_per_uid
     FROM livepeer_analytics.ai_stream_status
     WHERE event_timestamp >= {from_ts:DateTime64(3)}
       AND event_timestamp < {to_ts:DateTime64(3)}
+    GROUP BY source_event_uid
   ),
   silver AS
   (
-    SELECT source_event_uid
+    SELECT
+      source_event_uid,
+      count() AS silver_rows_per_uid
     FROM livepeer_analytics.fact_stream_status_samples
     WHERE sample_ts >= {from_ts:DateTime64(3)}
       AND sample_ts < {to_ts:DateTime64(3)}
+    GROUP BY source_event_uid
+  ),
+  joined AS
+  (
+    SELECT
+      t.source_event_uid,
+      t.typed_rows_per_uid,
+      ifNull(s.silver_rows_per_uid, toUInt64(0)) AS silver_rows_per_uid
+    FROM typed t
+    LEFT JOIN silver s USING (source_event_uid)
   )
 SELECT
-  toUInt64(if(typed_rows = 0, 0, missing_in_silver)) AS failed_rows,
-  typed_rows,
-  projected_rows,
-  missing_in_silver
+  toUInt64(
+    if(
+      typed_keys = 0 AND silver_keys = 0,
+      0,
+      missing_in_silver > 0 OR multiplicity_mismatch > 0 OR silver_only_keys > 0
+    )
+  ) AS failed_rows,
+  typed_keys,
+  silver_keys,
+  missing_in_silver,
+  multiplicity_mismatch,
+  silver_only_keys,
+  total_row_deficit,
+  total_row_excess
 FROM
 (
   SELECT
-    count() AS typed_rows,
-    countIf(s.source_event_uid IS NOT NULL) AS projected_rows,
-    countIf(s.source_event_uid IS NULL) AS missing_in_silver
-  FROM typed t
-  LEFT JOIN silver s USING (source_event_uid)
+    (SELECT count() FROM typed) AS typed_keys,
+    (SELECT count() FROM silver) AS silver_keys,
+    (SELECT countIf(silver_rows_per_uid = 0) FROM joined) AS missing_in_silver,
+    (SELECT countIf(silver_rows_per_uid != typed_rows_per_uid) FROM joined) AS multiplicity_mismatch,
+    (
+      SELECT count()
+      FROM silver s
+      LEFT JOIN typed t USING (source_event_uid)
+      WHERE t.source_event_uid IS NULL
+    ) AS silver_only_keys,
+    (
+      SELECT ifNull(sum(greatest(toInt64(typed_rows_per_uid) - toInt64(silver_rows_per_uid), 0)), 0)
+      FROM joined
+    ) AS total_row_deficit,
+    (
+      SELECT ifNull(sum(greatest(toInt64(silver_rows_per_uid) - toInt64(typed_rows_per_uid), 0)), 0)
+      FROM joined
+    ) AS total_row_excess
 );
 
 -- TEST: trace_raw_to_silver_projection
 -- Verifies each typed `stream_trace_events` row is projected into silver trace edges by source UID.
--- Requirement: non-stateful trace projection must be lossless for rows in scope.
+-- Requirement: non-stateful trace projection must preserve both coverage and per-UID multiplicity.
 WITH
   typed AS
   (
-    SELECT toString(cityHash64(raw_json)) AS source_event_uid
+    SELECT
+      toString(cityHash64(raw_json)) AS source_event_uid,
+      count() AS typed_rows_per_uid
     FROM livepeer_analytics.stream_trace_events
     WHERE event_timestamp >= {from_ts:DateTime64(3)}
       AND event_timestamp < {to_ts:DateTime64(3)}
+    GROUP BY source_event_uid
   ),
   silver AS
   (
-    SELECT source_event_uid
+    SELECT
+      source_event_uid,
+      count() AS silver_rows_per_uid
     FROM livepeer_analytics.fact_stream_trace_edges
     WHERE edge_ts >= {from_ts:DateTime64(3)}
       AND edge_ts < {to_ts:DateTime64(3)}
+    GROUP BY source_event_uid
+  ),
+  joined AS
+  (
+    SELECT
+      t.source_event_uid,
+      t.typed_rows_per_uid,
+      ifNull(s.silver_rows_per_uid, toUInt64(0)) AS silver_rows_per_uid
+    FROM typed t
+    LEFT JOIN silver s USING (source_event_uid)
   )
 SELECT
-  toUInt64(if(typed_rows = 0, 0, missing_in_silver)) AS failed_rows,
-  typed_rows,
-  projected_rows,
-  missing_in_silver
+  toUInt64(
+    if(
+      typed_keys = 0 AND silver_keys = 0,
+      0,
+      missing_in_silver > 0 OR multiplicity_mismatch > 0 OR silver_only_keys > 0
+    )
+  ) AS failed_rows,
+  typed_keys,
+  silver_keys,
+  missing_in_silver,
+  multiplicity_mismatch,
+  silver_only_keys,
+  total_row_deficit,
+  total_row_excess
 FROM
 (
   SELECT
-    count() AS typed_rows,
-    countIf(s.source_event_uid IS NOT NULL) AS projected_rows,
-    countIf(s.source_event_uid IS NULL) AS missing_in_silver
-  FROM typed t
-  LEFT JOIN silver s USING (source_event_uid)
+    (SELECT count() FROM typed) AS typed_keys,
+    (SELECT count() FROM silver) AS silver_keys,
+    (SELECT countIf(silver_rows_per_uid = 0) FROM joined) AS missing_in_silver,
+    (SELECT countIf(silver_rows_per_uid != typed_rows_per_uid) FROM joined) AS multiplicity_mismatch,
+    (
+      SELECT count()
+      FROM silver s
+      LEFT JOIN typed t USING (source_event_uid)
+      WHERE t.source_event_uid IS NULL
+    ) AS silver_only_keys,
+    (
+      SELECT ifNull(sum(greatest(toInt64(typed_rows_per_uid) - toInt64(silver_rows_per_uid), 0)), 0)
+      FROM joined
+    ) AS total_row_deficit,
+    (
+      SELECT ifNull(sum(greatest(toInt64(silver_rows_per_uid) - toInt64(typed_rows_per_uid), 0)), 0)
+      FROM joined
+    ) AS total_row_excess
 );
 
 -- TEST: ingest_raw_to_silver_projection
 -- Verifies each typed `stream_ingest_metrics` row is projected into silver ingest samples by source UID.
--- Requirement: non-stateful ingest projection must be lossless when ingest metrics are present.
+-- Requirement: non-stateful ingest projection must preserve both coverage and per-UID multiplicity when ingest metrics are present.
 WITH
   typed AS
   (
-    SELECT toString(cityHash64(raw_json)) AS source_event_uid
+    SELECT
+      toString(cityHash64(raw_json)) AS source_event_uid,
+      count() AS typed_rows_per_uid
     FROM livepeer_analytics.stream_ingest_metrics
     WHERE event_timestamp >= {from_ts:DateTime64(3)}
       AND event_timestamp < {to_ts:DateTime64(3)}
+    GROUP BY source_event_uid
   ),
   silver AS
   (
-    SELECT source_event_uid
+    SELECT
+      source_event_uid,
+      count() AS silver_rows_per_uid
     FROM livepeer_analytics.fact_stream_ingest_samples
     WHERE sample_ts >= {from_ts:DateTime64(3)}
       AND sample_ts < {to_ts:DateTime64(3)}
+    GROUP BY source_event_uid
+  ),
+  joined AS
+  (
+    SELECT
+      t.source_event_uid,
+      t.typed_rows_per_uid,
+      ifNull(s.silver_rows_per_uid, toUInt64(0)) AS silver_rows_per_uid
+    FROM typed t
+    LEFT JOIN silver s USING (source_event_uid)
   )
 SELECT
-  toUInt64(if(typed_rows = 0, 0, missing_in_silver)) AS failed_rows,
-  typed_rows,
-  projected_rows,
-  missing_in_silver
+  toUInt64(
+    if(
+      typed_keys = 0 AND silver_keys = 0,
+      0,
+      missing_in_silver > 0 OR multiplicity_mismatch > 0 OR silver_only_keys > 0
+    )
+  ) AS failed_rows,
+  typed_keys,
+  silver_keys,
+  missing_in_silver,
+  multiplicity_mismatch,
+  silver_only_keys,
+  total_row_deficit,
+  total_row_excess
 FROM
 (
   SELECT
-    count() AS typed_rows,
-    countIf(s.source_event_uid IS NOT NULL) AS projected_rows,
-    countIf(s.source_event_uid IS NULL) AS missing_in_silver
-  FROM typed t
-  LEFT JOIN silver s USING (source_event_uid)
+    (SELECT count() FROM typed) AS typed_keys,
+    (SELECT count() FROM silver) AS silver_keys,
+    (SELECT countIf(silver_rows_per_uid = 0) FROM joined) AS missing_in_silver,
+    (SELECT countIf(silver_rows_per_uid != typed_rows_per_uid) FROM joined) AS multiplicity_mismatch,
+    (
+      SELECT count()
+      FROM silver s
+      LEFT JOIN typed t USING (source_event_uid)
+      WHERE t.source_event_uid IS NULL
+    ) AS silver_only_keys,
+    (
+      SELECT ifNull(sum(greatest(toInt64(typed_rows_per_uid) - toInt64(silver_rows_per_uid), 0)), 0)
+      FROM joined
+    ) AS total_row_deficit,
+    (
+      SELECT ifNull(sum(greatest(toInt64(silver_rows_per_uid) - toInt64(typed_rows_per_uid), 0)), 0)
+      FROM joined
+    ) AS total_row_excess
 );
 
 -- TEST: session_final_uniqueness
@@ -476,14 +700,12 @@ FROM
 ) failures;
 
 -- TEST: param_updates_reference_existing_session
--- Verifies every param update fact references a known workflow session in the same window.
+-- Verifies every param update fact references a known workflow session id.
 -- Requirement: no orphaned `fact_workflow_param_updates` rows.
 WITH session_ids AS
 (
   SELECT DISTINCT workflow_session_id
   FROM livepeer_analytics.fact_workflow_sessions FINAL
-  WHERE session_start_ts >= {from_ts:DateTime64(3)}
-    AND session_start_ts < {to_ts:DateTime64(3)}
 )
 SELECT
   count() AS failed_rows,
@@ -495,18 +717,18 @@ WHERE pu.update_ts >= {from_ts:DateTime64(3)}
   AND s.workflow_session_id IS NULL;
 
 -- TEST: lifecycle_session_pipeline_model_compatible
--- Verifies lifecycle attribution keeps pipeline and model labels compatible when both are present.
--- Requirement: current model/pipeline contract remains internally consistent for emitted sessions.
--- Guardrail for lifecycle attribution correctness:
--- when both fields are present, session pipeline label and model_id must match
--- under current misnomer-compatible contract.
+-- Verifies lifecycle attribution keeps pipeline/model semantics separated when both are present.
+-- Requirement: canonical contract uses `pipeline` as workflow type and `model_id` as model label.
+-- Guardrail for semantic correctness:
+-- when both fields are present, pipeline and model_id should not collapse to the same label.
 WITH latest_sessions AS
 (
   SELECT
     workflow_session_id,
     argMax(session_start_ts, version) AS session_start_ts,
     argMax(pipeline, version) AS pipeline,
-    argMax(model_id, version) AS model_id
+    argMax(model_id, version) AS model_id,
+    argMax(gpu_attribution_method, version) AS gpu_attribution_method
   FROM livepeer_analytics.fact_workflow_sessions
   GROUP BY workflow_session_id
 )
@@ -514,17 +736,312 @@ SELECT
   toUInt64(countIf(
     pipeline != ''
     AND ifNull(model_id, '') != ''
-    AND lowerUTF8(pipeline) != lowerUTF8(ifNull(model_id, ''))
+    AND gpu_attribution_method != 'none'
+    AND lowerUTF8(pipeline) = lowerUTF8(ifNull(model_id, ''))
   ) > 0) AS failed_rows,
   countIf(
     pipeline != ''
     AND ifNull(model_id, '') != ''
-    AND lowerUTF8(pipeline) != lowerUTF8(ifNull(model_id, ''))
-  ) AS mismatched_rows,
+    AND gpu_attribution_method != 'none'
+    AND lowerUTF8(pipeline) = lowerUTF8(ifNull(model_id, ''))
+  ) AS collapsed_semantic_rows,
+  countIf(gpu_attribution_method = 'none') AS unattributed_rows,
   count() AS rows_checked
 FROM latest_sessions
 WHERE session_start_ts >= {from_ts:DateTime64(3)}
   AND session_start_ts < {to_ts:DateTime64(3)};
+
+-- TEST: session_to_segment_pipeline_model_consistency
+-- Verifies session<->segment model identity is consistent for attributed sessions.
+-- Requirement: segment facts inherit the same model identity as their parent session.
+-- Note: `fact_workflow_session_segments` does not currently expose `pipeline`, so this
+-- assertion enforces model consistency and reports comparable-row coverage.
+WITH
+  latest_sessions AS
+  (
+    SELECT
+      workflow_session_id,
+      argMax(session_start_ts, version) AS session_start_ts,
+      ifNull(argMax(model_id, version), '') AS model_id,
+      argMax(gpu_attribution_method, version) AS gpu_attribution_method
+    FROM livepeer_analytics.fact_workflow_sessions
+    GROUP BY workflow_session_id
+  ),
+  latest_segments AS
+  (
+    SELECT
+      workflow_session_id,
+      segment_index,
+      argMax(segment_start_ts, version) AS segment_start_ts,
+      ifNull(argMax(model_id, version), '') AS model_id
+    FROM livepeer_analytics.fact_workflow_session_segments
+    GROUP BY workflow_session_id, segment_index
+  )
+SELECT
+  toUInt64(session_segment_model_mismatches > 0) AS failed_rows,
+  session_segment_model_mismatches,
+  rows_checked,
+  unattributed_rows,
+  comparable_rows,
+  missing_segment_model_rows
+FROM
+(
+  SELECT
+    countIf(
+      s.gpu_attribution_method != 'none'
+      AND s.model_id != ''
+      AND seg.model_id != ''
+      AND lowerUTF8(seg.model_id) != lowerUTF8(s.model_id)
+    ) AS session_segment_model_mismatches,
+    count() AS rows_checked,
+    countIf(s.gpu_attribution_method = 'none') AS unattributed_rows,
+    countIf(
+      s.gpu_attribution_method != 'none'
+      AND s.model_id != ''
+      AND seg.model_id != ''
+    ) AS comparable_rows,
+    countIf(
+      s.gpu_attribution_method != 'none'
+      AND s.model_id != ''
+      AND seg.model_id = ''
+    ) AS missing_segment_model_rows
+  FROM latest_segments seg
+  INNER JOIN latest_sessions s USING (workflow_session_id)
+  WHERE s.session_start_ts >= {from_ts:DateTime64(3)}
+    AND s.session_start_ts < {to_ts:DateTime64(3)}
+    AND seg.segment_start_ts >= {from_ts:DateTime64(3)}
+    AND seg.segment_start_ts < {to_ts:DateTime64(3)}
+);
+
+-- TEST: session_to_latency_pipeline_model_consistency
+-- Verifies latency facts align with session pipeline/model identity for attributed sessions.
+-- Requirement: latency lifecycle snapshots preserve canonical workflow+model semantics.
+WITH
+  latest_sessions AS
+  (
+    SELECT
+      workflow_session_id,
+      argMax(session_start_ts, version) AS session_start_ts,
+      argMax(pipeline, version) AS pipeline,
+      ifNull(argMax(model_id, version), '') AS model_id,
+      argMax(gpu_attribution_method, version) AS gpu_attribution_method
+    FROM livepeer_analytics.fact_workflow_sessions
+    GROUP BY workflow_session_id
+  ),
+  latest_latency AS
+  (
+    SELECT
+      workflow_session_id,
+      argMax(sample_ts, version) AS sample_ts,
+      argMax(pipeline, version) AS pipeline,
+      ifNull(argMax(model_id, version), '') AS model_id
+    FROM livepeer_analytics.fact_workflow_latency_samples
+    GROUP BY workflow_session_id
+  )
+SELECT
+  toUInt64(pipeline_mismatch_rows > 0 OR model_mismatch_rows > 0) AS failed_rows,
+  pipeline_mismatch_rows,
+  model_mismatch_rows,
+  rows_checked,
+  comparable_pipeline_rows,
+  comparable_model_rows,
+  missing_latency_rows
+FROM
+(
+  SELECT
+    countIf(
+      s.gpu_attribution_method != 'none'
+      AND l.workflow_session_id != ''
+      AND s.pipeline != ''
+      AND l.pipeline != ''
+      AND lowerUTF8(l.pipeline) != lowerUTF8(s.pipeline)
+    ) AS pipeline_mismatch_rows,
+    countIf(
+      s.gpu_attribution_method != 'none'
+      AND l.workflow_session_id != ''
+      AND s.model_id != ''
+      AND l.model_id != ''
+      AND lowerUTF8(l.model_id) != lowerUTF8(s.model_id)
+    ) AS model_mismatch_rows,
+    countIf(
+      s.gpu_attribution_method != 'none'
+      AND l.workflow_session_id != ''
+    ) AS rows_checked,
+    countIf(
+      s.gpu_attribution_method != 'none'
+      AND l.workflow_session_id != ''
+      AND s.pipeline != ''
+      AND l.pipeline != ''
+    ) AS comparable_pipeline_rows,
+    countIf(
+      s.gpu_attribution_method != 'none'
+      AND l.workflow_session_id != ''
+      AND s.model_id != ''
+      AND l.model_id != ''
+    ) AS comparable_model_rows,
+    countIf(
+      s.gpu_attribution_method != 'none'
+      AND l.workflow_session_id = ''
+    ) AS missing_latency_rows
+  FROM latest_sessions s
+  LEFT JOIN latest_latency l USING (workflow_session_id)
+  WHERE s.session_start_ts >= {from_ts:DateTime64(3)}
+    AND s.session_start_ts < {to_ts:DateTime64(3)}
+    AND (l.sample_ts >= {from_ts:DateTime64(3)} AND l.sample_ts < {to_ts:DateTime64(3)} OR l.workflow_session_id = '')
+);
+
+-- TEST: session_to_status_projection_consistency
+-- Verifies status samples keep canonical session pipeline/model identity and preserve
+-- non-empty canonical pipeline for attributed sessions.
+-- Requirement: silver status projection remains semantically aligned with lifecycle session facts.
+WITH
+  latest_sessions AS
+  (
+    SELECT
+      workflow_session_id,
+      argMax(session_start_ts, version) AS session_start_ts,
+      argMax(pipeline, version) AS pipeline,
+      ifNull(argMax(model_id, version), '') AS model_id,
+      argMax(gpu_attribution_method, version) AS gpu_attribution_method
+    FROM livepeer_analytics.fact_workflow_sessions
+    GROUP BY workflow_session_id
+  ),
+  status_rows AS
+  (
+    SELECT
+      workflow_session_id,
+      pipeline,
+      ifNull(model_id, '') AS model_id,
+      sample_ts
+    FROM livepeer_analytics.fact_stream_status_samples
+    WHERE sample_ts >= {from_ts:DateTime64(3)}
+      AND sample_ts < {to_ts:DateTime64(3)}
+  ),
+  status_rows_resolved AS
+  (
+    SELECT
+      st.workflow_session_id,
+      st.sample_ts,
+      st.model_id AS status_model_id,
+      st.pipeline AS status_pipeline,
+      s.pipeline AS session_pipeline,
+      s.model_id AS session_model_id,
+      s.gpu_attribution_method,
+      if(
+        st.pipeline != '',
+        st.pipeline,
+        if(
+          st.model_id != ''
+          AND s.model_id != ''
+          AND lowerUTF8(st.model_id) = lowerUTF8(s.model_id),
+          s.pipeline,
+          ''
+        )
+      ) AS resolved_status_pipeline
+    FROM status_rows st
+    INNER JOIN latest_sessions s USING (workflow_session_id)
+    WHERE s.session_start_ts >= {from_ts:DateTime64(3)}
+      AND s.session_start_ts < {to_ts:DateTime64(3)}
+  )
+SELECT
+  toUInt64(pipeline_mismatch_rows > 0 OR model_mismatch_rows > 0 OR missing_status_pipeline_rows > 0) AS failed_rows,
+  pipeline_mismatch_rows,
+  model_mismatch_rows,
+  missing_status_pipeline_rows,
+  rows_checked,
+  comparable_pipeline_rows,
+  comparable_model_rows
+FROM
+(
+  SELECT
+    countIf(
+      gpu_attribution_method != 'none'
+      AND resolved_status_pipeline != ''
+      AND session_pipeline != ''
+      AND lowerUTF8(resolved_status_pipeline) != lowerUTF8(session_pipeline)
+    ) AS pipeline_mismatch_rows,
+    countIf(
+      gpu_attribution_method != 'none'
+      AND status_model_id != ''
+      AND session_model_id != ''
+      AND lowerUTF8(status_model_id) != lowerUTF8(session_model_id)
+    ) AS model_mismatch_rows,
+    countIf(
+      gpu_attribution_method != 'none'
+      AND session_pipeline != ''
+      AND resolved_status_pipeline = ''
+    ) AS missing_status_pipeline_rows,
+    count() AS rows_checked,
+    countIf(
+      gpu_attribution_method != 'none'
+      AND resolved_status_pipeline != ''
+      AND session_pipeline != ''
+    ) AS comparable_pipeline_rows,
+    countIf(
+      gpu_attribution_method != 'none'
+      AND status_model_id != ''
+      AND session_model_id != ''
+    ) AS comparable_model_rows
+  FROM status_rows_resolved
+);
+
+-- TEST: trace_edge_pipeline_model_coverage
+-- Verifies attributed sessions have trace-edge coverage with non-empty pipeline/model.
+-- Requirement: trace-edge facts must provide at least one joinable pipeline+model edge
+-- per attributed session in-window.
+WITH
+  latest_sessions AS
+  (
+    SELECT
+      workflow_session_id,
+      argMax(session_start_ts, version) AS session_start_ts,
+      argMax(gpu_attribution_method, version) AS gpu_attribution_method,
+      argMax(pipeline, version) AS session_pipeline,
+      ifNull(argMax(model_id, version), '') AS session_model_id
+    FROM livepeer_analytics.fact_workflow_sessions
+    GROUP BY workflow_session_id
+  ),
+  attributed_sessions AS
+  (
+    SELECT workflow_session_id
+    FROM latest_sessions
+    WHERE session_start_ts >= {from_ts:DateTime64(3)}
+      AND session_start_ts < {to_ts:DateTime64(3)}
+      AND gpu_attribution_method != 'none'
+      AND session_pipeline != ''
+      AND session_model_id != ''
+  ),
+  trace_rows AS
+  (
+    SELECT
+      workflow_session_id,
+      pipeline,
+      ifNull(model_id, '') AS model_id,
+      edge_ts
+    FROM livepeer_analytics.fact_stream_trace_edges
+    WHERE edge_ts >= {from_ts:DateTime64(3)}
+      AND edge_ts < {to_ts:DateTime64(3)}
+  ),
+  coverage AS
+  (
+    SELECT
+      s.workflow_session_id AS workflow_session_id,
+      max(toUInt8(t.pipeline != '' AND t.model_id != '')) AS has_joinable_edge
+    FROM attributed_sessions s
+    LEFT JOIN trace_rows t USING (workflow_session_id)
+    GROUP BY s.workflow_session_id
+  )
+SELECT
+  toUInt64(if(attributed_sessions_checked = 0, 0, uncovered_sessions > 0)) AS failed_rows,
+  uncovered_sessions,
+  attributed_sessions_checked
+FROM
+(
+  SELECT
+    countIf(has_joinable_edge = 0) AS uncovered_sessions,
+    count() AS attributed_sessions_checked
+  FROM coverage
+);
 
 -- TEST: latest_sessions_vs_segment_session_ids
 -- Verifies distinct session ids in segments do not exceed latest session ids.
@@ -998,19 +1515,6 @@ FROM counts;
 -- Verifies demand view has strict key/count alignment with recomputed rollup+demand keys.
 -- Requirement: expected and served keyspaces must match at network demand grain.
 WITH
-  perf_1h AS
-  (
-    SELECT
-      toNullable(1) AS rollup_marker,
-      toStartOfInterval(window_start, INTERVAL 1 HOUR) AS window_start,
-      gateway,
-      ifNull(region, '') AS region,
-      pipeline
-    FROM livepeer_analytics.agg_stream_performance_1m
-    WHERE window_start >= {from_ts:DateTime64(3)}
-      AND window_start < {to_ts:DateTime64(3)}
-    GROUP BY window_start, gateway, region, pipeline
-  ),
   latest_sessions AS
   (
     SELECT
@@ -1018,9 +1522,42 @@ WITH
       argMax(session_start_ts, version) AS session_start_ts,
       argMax(gateway, version) AS gateway,
       ifNull(argMax(region, version), '') AS region,
-      argMax(pipeline, version) AS pipeline
+      argMax(pipeline, version) AS pipeline,
+      ifNull(argMax(model_id, version), '') AS model_id
     FROM livepeer_analytics.fact_workflow_sessions
     GROUP BY workflow_session_id
+  ),
+  perf_pipeline_fallback AS
+  (
+    SELECT
+      toStartOfInterval(session_start_ts, INTERVAL 1 HOUR) AS window_start,
+      gateway,
+      region,
+      model_id,
+      if(countDistinctIf(pipeline, pipeline != '') = 1, anyIf(pipeline, pipeline != ''), '') AS pipeline_fallback
+    FROM latest_sessions
+    WHERE session_start_ts >= {from_ts:DateTime64(3)}
+      AND session_start_ts < {to_ts:DateTime64(3)}
+    GROUP BY window_start, gateway, region, model_id
+  ),
+  perf_1h AS
+  (
+    SELECT
+      toNullable(1) AS rollup_marker,
+      toStartOfInterval(p.window_start, INTERVAL 1 HOUR) AS window_start,
+      p.gateway,
+      ifNull(p.region, '') AS region,
+      if(p.pipeline != '', p.pipeline, ifNull(f.pipeline_fallback, '')) AS pipeline,
+      ifNull(p.model_id, '') AS model_id
+    FROM livepeer_analytics.agg_stream_performance_1m p
+    LEFT JOIN perf_pipeline_fallback f
+      ON f.window_start = toStartOfInterval(p.window_start, INTERVAL 1 HOUR)
+     AND f.gateway = p.gateway
+     AND f.region = ifNull(p.region, '')
+     AND f.model_id = ifNull(p.model_id, '')
+    WHERE p.window_start >= {from_ts:DateTime64(3)}
+      AND p.window_start < {to_ts:DateTime64(3)}
+    GROUP BY window_start, p.gateway, region, pipeline, model_id
   ),
   demand_1h AS
   (
@@ -1028,23 +1565,31 @@ WITH
       toStartOfInterval(session_start_ts, INTERVAL 1 HOUR) AS window_start,
       gateway,
       region,
-      pipeline
+      pipeline,
+      model_id
     FROM latest_sessions
     WHERE session_start_ts >= {from_ts:DateTime64(3)}
       AND session_start_ts < {to_ts:DateTime64(3)}
-    GROUP BY window_start, gateway, region, pipeline
+    GROUP BY window_start, gateway, region, pipeline, model_id
+  ),
+  keys_1h AS
+  (
+    SELECT window_start, gateway, region, pipeline, model_id
+    FROM perf_1h
+    UNION DISTINCT
+    SELECT window_start, gateway, region, pipeline, model_id
+    FROM demand_1h
   ),
   expected AS
   (
     SELECT
-      p.rollup_marker AS expected_marker,
-      p.window_start,
-      p.gateway,
-      p.region,
-      p.pipeline
-    FROM perf_1h p
-    LEFT JOIN demand_1h d
-      USING (window_start, gateway, region, pipeline)
+      toNullable(1) AS expected_marker,
+      k.window_start AS window_start,
+      k.gateway AS gateway,
+      k.region AS region,
+      k.pipeline AS pipeline,
+      k.model_id AS model_id
+    FROM keys_1h k
   ),
   api AS
   (
@@ -1053,7 +1598,8 @@ WITH
       window_start,
       gateway,
       ifNull(region, '') AS region,
-      pipeline
+      pipeline,
+      ifNull(model_id, '') AS model_id
     FROM livepeer_analytics.v_api_network_demand
     WHERE window_start >= {from_ts:DateTime64(3)}
       AND window_start < {to_ts:DateTime64(3)}
@@ -1084,21 +1630,22 @@ FROM
       SELECT count()
       FROM expected e
       LEFT JOIN api a
-        USING (window_start, gateway, region, pipeline)
+        USING (window_start, gateway, region, pipeline, model_id)
       WHERE a.api_marker IS NULL
     ) AS rollup_only_keys,
     (
       SELECT count()
       FROM api a
       LEFT JOIN expected e
-        USING (window_start, gateway, region, pipeline)
+        USING (window_start, gateway, region, pipeline, model_id)
       WHERE e.expected_marker IS NULL
     ) AS view_only_keys
 );
 
 -- TEST: sla_counts_aligned_to_raw_latest_sessions
--- Verifies SLA view has strict key/count alignment with latest-session recompute.
--- Requirement: expected and served keyspaces must match at SLA grain.
+-- Verifies SLA view has strict key/count alignment with latest-session recompute
+-- for attributed sessions (`orchestrator_address != ''`).
+-- Requirement: expected and served keyspaces must match at attributed SLA grain.
 WITH
   latest_sessions AS
   (
@@ -1115,7 +1662,7 @@ WITH
   ),
   raw AS
   (
-    SELECT
+  SELECT
       toNullable(1) AS raw_marker,
       toStartOfInterval(session_start_ts, INTERVAL 1 HOUR) AS window_start,
       orchestrator_address,
@@ -1126,6 +1673,7 @@ WITH
     FROM latest_sessions
     WHERE session_start_ts >= {from_ts:DateTime64(3)}
       AND session_start_ts < {to_ts:DateTime64(3)}
+      AND orchestrator_address != ''
     GROUP BY window_start, orchestrator_address, pipeline, model_id_key, gpu_id_key, region_key
   ),
   api AS
@@ -1181,7 +1729,7 @@ FROM
 );
 
 -- TEST: view_count_grain_ordering
--- Informational check: demand view (coarser grain) is usually <= fine-grain GPU/SLA view counts.
+-- Informational check: compares serving-view row counts as a coarse grain sanity signal.
 SELECT
   toUInt64(0) AS failed_rows,
   multiIf(
@@ -1216,23 +1764,41 @@ FROM
 );
 
 -- TEST: gpu_view_matches_rollup
--- Verifies `v_api_gpu_metrics` matches underlying rollup aggregates at the same dimensional grain.
--- Requirement: serving view must be numerically consistent with rollup source tables.
+-- Verifies `v_api_gpu_metrics` matches independently recomputed perf aggregates
+-- from status facts at the same dimensional grain.
+-- Requirement: serving view must be numerically consistent with perf-backed
+-- attributable GPU keys after canonical fallback normalization.
 WITH
+  latest_session_keys AS
+  (
+    SELECT
+      workflow_session_id,
+      argMax(orchestrator_address, version) AS orchestrator_address,
+      argMax(pipeline, version) AS pipeline,
+      ifNull(argMax(model_id, version), '') AS model_id,
+      ifNull(argMax(gpu_id, version), '') AS gpu_id,
+      ifNull(argMax(region, version), '') AS region
+    FROM livepeer_analytics.fact_workflow_sessions
+    GROUP BY workflow_session_id
+  ),
   rollup AS
   (
     SELECT
       toNullable(1) AS rollup_marker,
-      toStartOfInterval(window_start, INTERVAL 1 HOUR) AS window_start,
-      orchestrator_address,
-      pipeline,
-      ifNull(model_id, '') AS model_id,
-      ifNull(gpu_id, '') AS gpu_id,
-      ifNull(region, '') AS region,
-      avgMerge(output_fps_avg_state) AS avg_output_fps
-    FROM livepeer_analytics.agg_stream_performance_1m
-    WHERE window_start >= {from_ts:DateTime64(3)}
-      AND window_start < {to_ts:DateTime64(3)}
+      toStartOfInterval(s.sample_ts, INTERVAL 1 HOUR) AS window_start,
+      if(s.orchestrator_address != '', s.orchestrator_address, ifNull(k.orchestrator_address, '')) AS orchestrator_address,
+      if(s.pipeline != '', s.pipeline, ifNull(k.pipeline, '')) AS pipeline,
+      if(ifNull(s.model_id, '') != '', s.model_id, ifNull(k.model_id, '')) AS model_id,
+      if(ifNull(s.gpu_id, '') != '', s.gpu_id, ifNull(k.gpu_id, '')) AS gpu_id,
+      if(ifNull(s.region, '') != '', s.region, ifNull(k.region, '')) AS region,
+      avg(s.output_fps) AS avg_output_fps
+    FROM livepeer_analytics.fact_stream_status_samples s
+    LEFT JOIN latest_session_keys k
+      ON k.workflow_session_id = s.workflow_session_id
+    WHERE s.sample_ts >= {from_ts:DateTime64(3)}
+      AND s.sample_ts < {to_ts:DateTime64(3)}
+      AND if(s.orchestrator_address != '', s.orchestrator_address, ifNull(k.orchestrator_address, '')) != ''
+      AND if(ifNull(s.gpu_id, '') != '', s.gpu_id, ifNull(k.gpu_id, '')) != ''
     GROUP BY window_start, orchestrator_address, pipeline, model_id, gpu_id, region
   ),
   api AS
@@ -1249,6 +1815,7 @@ WITH
     FROM livepeer_analytics.v_api_gpu_metrics
     WHERE window_start >= {from_ts:DateTime64(3)}
       AND window_start < {to_ts:DateTime64(3)}
+      AND status_samples > 0
   ),
   joined AS
   (
@@ -1310,11 +1877,14 @@ WITH
 SELECT
   toUInt64(
     (rollup_rows > 0 AND view_rows > 0 AND joined_rows = 0)
+    OR rollup_only_keys > 0
+    OR view_only_keys > 0
     OR (joined_rows > 0 AND ifNull(max_abs_diff_fps, 0) > 0.000001)
   ) AS failed_rows,
   multiIf(
     rollup_rows = 0 AND view_rows = 0, 'EMPTY_BOTH',
     rollup_rows > 0 AND view_rows > 0 AND joined_rows = 0, 'NO_OVERLAP_BOTH_NONEMPTY',
+    rollup_only_keys > 0 OR view_only_keys > 0, 'KEY_MISMATCH',
     joined_rows > 0 AND ifNull(max_abs_diff_fps, 0) > 0.000001, 'VALUE_MISMATCH_WITH_OVERLAP',
     'PASS'
   ) AS failure_mode,
@@ -1337,23 +1907,6 @@ FROM coverage;
 -- Verifies `v_api_network_demand` matches independently recomputed hourly demand/perf aggregates.
 -- Requirement: serving view must remain consistent with rollup and latest-session demand semantics.
 WITH
-  perf_1h AS
-  (
-    SELECT
-      toNullable(1) AS rollup_marker,
-      toStartOfInterval(window_start, INTERVAL 1 HOUR) AS window_start,
-      gateway,
-      ifNull(region, '') AS region,
-      pipeline,
-      uniqExactMerge(sessions_uniq_state) AS total_sessions,
-      uniqExactMerge(streams_uniq_state) AS total_streams,
-      countMerge(sample_count_state) / 60.0 AS total_inference_minutes,
-      avgMerge(output_fps_avg_state) AS avg_output_fps
-    FROM livepeer_analytics.agg_stream_performance_1m
-    WHERE window_start >= {from_ts:DateTime64(3)}
-      AND window_start < {to_ts:DateTime64(3)}
-    GROUP BY window_start, gateway, region, pipeline
-  ),
   latest_sessions AS
   (
     SELECT
@@ -1362,6 +1915,7 @@ WITH
       argMax(gateway, version) AS gateway,
       ifNull(argMax(region, version), '') AS region,
       argMax(pipeline, version) AS pipeline,
+      ifNull(argMax(model_id, version), '') AS model_id,
       argMax(orchestrator_address, version) AS orchestrator_address,
       argMax(known_stream, version) AS known_stream,
       argMax(startup_unexcused, version) AS startup_unexcused,
@@ -1369,6 +1923,42 @@ WITH
       argMax(inferred_orchestrator_change_count, version) AS inferred_orchestrator_change_count
     FROM livepeer_analytics.fact_workflow_sessions
     GROUP BY workflow_session_id
+  ),
+  perf_pipeline_fallback AS
+  (
+    SELECT
+      toStartOfInterval(session_start_ts, INTERVAL 1 HOUR) AS window_start,
+      gateway,
+      region,
+      model_id,
+      if(countDistinctIf(pipeline, pipeline != '') = 1, anyIf(pipeline, pipeline != ''), '') AS pipeline_fallback
+    FROM latest_sessions
+    WHERE session_start_ts >= {from_ts:DateTime64(3)}
+      AND session_start_ts < {to_ts:DateTime64(3)}
+    GROUP BY window_start, gateway, region, model_id
+  ),
+  perf_1h AS
+  (
+    SELECT
+      toNullable(1) AS rollup_marker,
+      toStartOfInterval(p.window_start, INTERVAL 1 HOUR) AS window_start,
+      p.gateway,
+      ifNull(p.region, '') AS region,
+      if(p.pipeline != '', p.pipeline, ifNull(f.pipeline_fallback, '')) AS pipeline,
+      ifNull(p.model_id, '') AS model_id,
+      uniqExactMerge(p.sessions_uniq_state) AS total_sessions,
+      uniqExactMerge(p.streams_uniq_state) AS total_streams,
+      countMerge(p.sample_count_state) / 60.0 AS total_inference_minutes,
+      avgMerge(p.output_fps_avg_state) AS avg_output_fps
+    FROM livepeer_analytics.agg_stream_performance_1m p
+    LEFT JOIN perf_pipeline_fallback f
+      ON f.window_start = toStartOfInterval(p.window_start, INTERVAL 1 HOUR)
+     AND f.gateway = p.gateway
+     AND f.region = ifNull(p.region, '')
+     AND f.model_id = ifNull(p.model_id, '')
+    WHERE p.window_start >= {from_ts:DateTime64(3)}
+      AND p.window_start < {to_ts:DateTime64(3)}
+    GROUP BY window_start, p.gateway, region, pipeline, model_id
   ),
   demand_1h AS
   (
@@ -1378,6 +1968,7 @@ WITH
       gateway,
       region,
       pipeline,
+      model_id,
       sum(toUInt64(known_stream)) AS known_sessions,
       sum(toUInt64(known_stream AND orchestrator_address != '')) AS served_sessions,
       sum(toUInt64(known_stream AND orchestrator_address = '')) AS unserved_sessions,
@@ -1386,28 +1977,47 @@ WITH
     FROM latest_sessions
     WHERE session_start_ts >= {from_ts:DateTime64(3)}
       AND session_start_ts < {to_ts:DateTime64(3)}
-    GROUP BY window_start, gateway, region, pipeline
+    GROUP BY window_start, gateway, region, pipeline, model_id
+  ),
+  keys_1h AS
+  (
+    SELECT window_start, gateway, region, pipeline, model_id
+    FROM perf_1h
+    UNION DISTINCT
+    SELECT window_start, gateway, region, pipeline, model_id
+    FROM demand_1h
   ),
   expected AS
   (
     SELECT
-      p.rollup_marker AS expected_marker,
-      p.window_start,
-      p.gateway,
-      p.region,
-      p.pipeline,
-      p.total_sessions,
-      p.total_streams,
-      p.total_inference_minutes,
+      toNullable(1) AS expected_marker,
+      k.window_start AS window_start,
+      k.gateway AS gateway,
+      k.region AS region,
+      k.pipeline AS pipeline,
+      k.model_id AS model_id,
+      ifNull(p.total_sessions, toUInt64(0)) AS total_sessions,
+      ifNull(p.total_streams, toUInt64(0)) AS total_streams,
+      ifNull(p.total_inference_minutes, 0.0) AS total_inference_minutes,
       p.avg_output_fps,
       ifNull(d.known_sessions, toUInt64(0)) AS known_sessions,
       ifNull(d.served_sessions, toUInt64(0)) AS served_sessions,
       ifNull(d.unserved_sessions, toUInt64(0)) AS unserved_sessions,
       ifNull(d.unexcused_sessions, toUInt64(0)) AS unexcused_sessions,
       ifNull(d.swapped_sessions, toUInt64(0)) AS swapped_sessions
-    FROM perf_1h p
+    FROM keys_1h k
+    LEFT JOIN perf_1h p
+      ON p.window_start = k.window_start
+     AND p.gateway = k.gateway
+     AND p.region = k.region
+     AND p.pipeline = k.pipeline
+     AND p.model_id = k.model_id
     LEFT JOIN demand_1h d
-      USING (window_start, gateway, region, pipeline)
+      ON d.window_start = k.window_start
+     AND d.gateway = k.gateway
+     AND d.region = k.region
+     AND d.pipeline = k.pipeline
+     AND d.model_id = k.model_id
   ),
   api AS
   (
@@ -1417,6 +2027,7 @@ WITH
       gateway,
       ifNull(region, '') AS region,
       pipeline,
+      ifNull(model_id, '') AS model_id,
       total_sessions,
       total_streams,
       total_inference_minutes,
@@ -1447,7 +2058,11 @@ WITH
       sum(abs(toInt64(e.swapped_sessions) - toInt64(a.swapped_sessions))) AS total_diff_swapped_sessions
     FROM expected e
     INNER JOIN api a
-      USING (window_start, gateway, region, pipeline)
+      ON a.window_start = e.window_start
+     AND a.gateway = e.gateway
+     AND a.region = e.region
+     AND a.pipeline = e.pipeline
+     AND a.model_id = e.model_id
   ),
   coverage AS
   (
@@ -1459,22 +2074,32 @@ WITH
         SELECT count()
         FROM expected e
         LEFT JOIN api a
-          USING (window_start, gateway, region, pipeline)
+          ON a.window_start = e.window_start
+         AND a.gateway = e.gateway
+         AND a.region = e.region
+         AND a.pipeline = e.pipeline
+         AND a.model_id = e.model_id
         WHERE a.api_marker IS NULL
       ) AS rollup_only_keys,
       (
         SELECT count()
         FROM api a
         LEFT JOIN expected e
-          USING (window_start, gateway, region, pipeline)
+          ON e.window_start = a.window_start
+         AND e.gateway = a.gateway
+         AND e.region = a.region
+         AND e.pipeline = a.pipeline
+         AND e.model_id = a.model_id
         WHERE e.expected_marker IS NULL
       ) AS view_only_keys,
       (SELECT countIf(gateway = '') FROM expected) AS rollup_empty_gateway_rows,
       (SELECT countIf(region = '') FROM expected) AS rollup_empty_region_rows,
       (SELECT countIf(pipeline = '') FROM expected) AS rollup_empty_pipeline_rows,
+      (SELECT countIf(model_id = '') FROM expected) AS rollup_empty_model_rows,
       (SELECT countIf(gateway = '') FROM api) AS view_empty_gateway_rows,
       (SELECT countIf(region = '') FROM api) AS view_empty_region_rows,
       (SELECT countIf(pipeline = '') FROM api) AS view_empty_pipeline_rows,
+      (SELECT countIf(model_id = '') FROM api) AS view_empty_model_rows,
       (SELECT mean_abs_diff_fps FROM joined) AS mean_abs_diff_fps,
       (SELECT max_abs_diff_fps FROM joined) AS max_abs_diff_fps,
       (SELECT mean_abs_diff_minutes FROM joined) AS mean_abs_diff_minutes,
@@ -1490,6 +2115,8 @@ WITH
 SELECT
   toUInt64(
     (rollup_rows > 0 AND view_rows > 0 AND joined_rows = 0)
+    OR rollup_only_keys > 0
+    OR view_only_keys > 0
     OR (joined_rows > 0 AND (
       ifNull(max_abs_diff_fps, 0) > 0.000001
       OR ifNull(max_abs_diff_minutes, 0) > 0.000001
@@ -1505,6 +2132,7 @@ SELECT
   multiIf(
     rollup_rows = 0 AND view_rows = 0, 'EMPTY_BOTH',
     rollup_rows > 0 AND view_rows > 0 AND joined_rows = 0, 'NO_OVERLAP_BOTH_NONEMPTY',
+    rollup_only_keys > 0 OR view_only_keys > 0, 'KEY_MISMATCH',
     joined_rows > 0 AND (
       ifNull(max_abs_diff_fps, 0) > 0.000001
       OR ifNull(max_abs_diff_minutes, 0) > 0.000001
@@ -1526,9 +2154,11 @@ SELECT
   rollup_empty_gateway_rows,
   rollup_empty_region_rows,
   rollup_empty_pipeline_rows,
+  rollup_empty_model_rows,
   view_empty_gateway_rows,
   view_empty_region_rows,
   view_empty_pipeline_rows,
+  view_empty_model_rows,
   mean_abs_diff_fps,
   max_abs_diff_fps,
   mean_abs_diff_minutes,
@@ -1542,9 +2172,458 @@ SELECT
   total_diff_swapped_sessions
 FROM coverage;
 
+-- TEST: network_demand_model_split_conservation
+-- Verifies model-grain demand rows conserve totals when re-aggregated to pipeline grain.
+-- Requirement: adding model_id to demand grain must not change pipeline-level totals.
+WITH
+  latest_sessions AS
+  (
+    SELECT
+      workflow_session_id,
+      argMax(session_start_ts, version) AS session_start_ts,
+      argMax(gateway, version) AS gateway,
+      ifNull(argMax(region, version), '') AS region,
+      argMax(pipeline, version) AS pipeline,
+      ifNull(argMax(model_id, version), '') AS model_id
+    FROM livepeer_analytics.fact_workflow_sessions
+    GROUP BY workflow_session_id
+  ),
+  perf_pipeline_fallback AS
+  (
+    SELECT
+      toStartOfInterval(session_start_ts, INTERVAL 1 HOUR) AS window_start,
+      gateway,
+      region,
+      model_id,
+      if(countDistinctIf(pipeline, pipeline != '') = 1, anyIf(pipeline, pipeline != ''), '') AS pipeline_fallback
+    FROM latest_sessions
+    WHERE session_start_ts >= {from_ts:DateTime64(3)}
+      AND session_start_ts < {to_ts:DateTime64(3)}
+    GROUP BY window_start, gateway, region, model_id
+  ),
+  pipeline_baseline AS
+  (
+    SELECT
+      toStartOfInterval(p.window_start, INTERVAL 1 HOUR) AS window_start,
+      p.gateway,
+      ifNull(p.region, '') AS region,
+      if(p.pipeline != '', p.pipeline, ifNull(f.pipeline_fallback, '')) AS pipeline,
+      uniqExactMerge(p.sessions_uniq_state) AS total_sessions,
+      uniqExactMerge(p.streams_uniq_state) AS total_streams,
+      countMerge(p.sample_count_state) / 60.0 AS total_inference_minutes
+    FROM livepeer_analytics.agg_stream_performance_1m p
+    LEFT JOIN perf_pipeline_fallback f
+      ON f.window_start = toStartOfInterval(p.window_start, INTERVAL 1 HOUR)
+     AND f.gateway = p.gateway
+     AND f.region = ifNull(p.region, '')
+     AND f.model_id = ifNull(p.model_id, '')
+    WHERE p.window_start >= {from_ts:DateTime64(3)}
+      AND p.window_start < {to_ts:DateTime64(3)}
+    GROUP BY window_start, p.gateway, region, pipeline
+  ),
+  api_reaggregated AS
+  (
+    SELECT
+      window_start,
+      gateway,
+      ifNull(region, '') AS region,
+      pipeline,
+      sum(total_sessions) AS total_sessions,
+      sum(total_streams) AS total_streams,
+      sum(total_inference_minutes) AS total_inference_minutes
+    FROM livepeer_analytics.v_api_network_demand
+    WHERE window_start >= {from_ts:DateTime64(3)}
+      AND window_start < {to_ts:DateTime64(3)}
+    GROUP BY window_start, gateway, region, pipeline
+  ),
+  joined AS
+  (
+    SELECT
+      count() AS joined_rows,
+      sum(abs(toInt64(b.total_sessions) - toInt64(a.total_sessions))) AS total_diff_sessions,
+      sum(abs(toInt64(b.total_streams) - toInt64(a.total_streams))) AS total_diff_streams,
+      max(abs(b.total_inference_minutes - a.total_inference_minutes)) AS max_abs_diff_minutes
+    FROM pipeline_baseline b
+    INNER JOIN api_reaggregated a
+      USING (window_start, gateway, region, pipeline)
+  )
+SELECT
+  toUInt64(
+    (baseline_rows > 0 AND api_rows > 0 AND joined_rows = 0)
+    OR baseline_only_keys > 0
+    OR api_only_keys > 0
+    OR ifNull(total_diff_sessions, 0) > 0
+    OR ifNull(total_diff_streams, 0) > 0
+    OR ifNull(max_abs_diff_minutes, 0) > 0.000001
+  ) AS failed_rows,
+  baseline_rows,
+  api_rows,
+  joined_rows,
+  baseline_only_keys,
+  api_only_keys,
+  total_diff_sessions,
+  total_diff_streams,
+  max_abs_diff_minutes
+FROM
+(
+  SELECT
+    (SELECT count() FROM pipeline_baseline) AS baseline_rows,
+    (SELECT count() FROM api_reaggregated) AS api_rows,
+    (SELECT joined_rows FROM joined) AS joined_rows,
+    (
+      SELECT count()
+      FROM pipeline_baseline b
+      LEFT JOIN api_reaggregated a
+        USING (window_start, gateway, region, pipeline)
+      WHERE a.window_start IS NULL
+    ) AS baseline_only_keys,
+    (
+      SELECT count()
+      FROM api_reaggregated a
+      LEFT JOIN pipeline_baseline b
+        USING (window_start, gateway, region, pipeline)
+      WHERE b.window_start IS NULL
+    ) AS api_only_keys,
+    (SELECT total_diff_sessions FROM joined) AS total_diff_sessions,
+    (SELECT total_diff_streams FROM joined) AS total_diff_streams,
+    (SELECT max_abs_diff_minutes FROM joined) AS max_abs_diff_minutes
+);
+
+-- TEST: network_demand_join_multiplicity_guard
+-- Verifies expected and API keyspaces are unique at model-grain demand keys.
+-- Requirement: parity joins must be 1:1 at (hour,gateway,region,pipeline,model_id).
+WITH
+  latest_sessions AS
+  (
+    SELECT
+      workflow_session_id,
+      argMax(session_start_ts, version) AS session_start_ts,
+      argMax(gateway, version) AS gateway,
+      ifNull(argMax(region, version), '') AS region,
+      argMax(pipeline, version) AS pipeline,
+      ifNull(argMax(model_id, version), '') AS model_id
+    FROM livepeer_analytics.fact_workflow_sessions
+    GROUP BY workflow_session_id
+  ),
+  perf_pipeline_fallback AS
+  (
+    SELECT
+      toStartOfInterval(session_start_ts, INTERVAL 1 HOUR) AS window_start,
+      gateway,
+      region,
+      model_id,
+      if(countDistinctIf(pipeline, pipeline != '') = 1, anyIf(pipeline, pipeline != ''), '') AS pipeline_fallback
+    FROM latest_sessions
+    WHERE session_start_ts >= {from_ts:DateTime64(3)}
+      AND session_start_ts < {to_ts:DateTime64(3)}
+    GROUP BY window_start, gateway, region, model_id
+  ),
+  perf_1h AS
+  (
+    SELECT
+      toStartOfInterval(p.window_start, INTERVAL 1 HOUR) AS window_start,
+      p.gateway,
+      ifNull(p.region, '') AS region,
+      if(p.pipeline != '', p.pipeline, ifNull(f.pipeline_fallback, '')) AS pipeline,
+      ifNull(p.model_id, '') AS model_id
+    FROM livepeer_analytics.agg_stream_performance_1m p
+    LEFT JOIN perf_pipeline_fallback f
+      ON f.window_start = toStartOfInterval(p.window_start, INTERVAL 1 HOUR)
+     AND f.gateway = p.gateway
+     AND f.region = ifNull(p.region, '')
+     AND f.model_id = ifNull(p.model_id, '')
+    WHERE p.window_start >= {from_ts:DateTime64(3)}
+      AND p.window_start < {to_ts:DateTime64(3)}
+    GROUP BY window_start, p.gateway, region, pipeline, model_id
+  ),
+  demand_1h AS
+  (
+    SELECT
+      toStartOfInterval(session_start_ts, INTERVAL 1 HOUR) AS window_start,
+      gateway,
+      region,
+      pipeline,
+      model_id
+    FROM latest_sessions
+    WHERE session_start_ts >= {from_ts:DateTime64(3)}
+      AND session_start_ts < {to_ts:DateTime64(3)}
+    GROUP BY window_start, gateway, region, pipeline, model_id
+  ),
+  expected AS
+  (
+    SELECT
+      p.window_start,
+      p.gateway,
+      p.region,
+      p.pipeline,
+      p.model_id
+    FROM perf_1h p
+    LEFT JOIN demand_1h d
+      USING (window_start, gateway, region, pipeline, model_id)
+  ),
+  expected_keys AS
+  (
+    SELECT
+      window_start,
+      gateway,
+      region,
+      pipeline,
+      model_id,
+      count() AS key_rows
+    FROM expected
+    GROUP BY window_start, gateway, region, pipeline, model_id
+  ),
+  api_keys AS
+  (
+    SELECT
+      window_start,
+      gateway,
+      ifNull(region, '') AS region,
+      pipeline,
+      ifNull(model_id, '') AS model_id,
+      count() AS key_rows
+    FROM livepeer_analytics.v_api_network_demand
+    WHERE window_start >= {from_ts:DateTime64(3)}
+      AND window_start < {to_ts:DateTime64(3)}
+    GROUP BY window_start, gateway, region, pipeline, model_id
+  )
+SELECT
+  toUInt64(expected_nonunique_keys > 0 OR api_nonunique_keys > 0) AS failed_rows,
+  expected_nonunique_keys,
+  api_nonunique_keys
+FROM
+(
+  SELECT
+    (SELECT countIf(key_rows > 1) FROM expected_keys) AS expected_nonunique_keys,
+    (SELECT countIf(key_rows > 1) FROM api_keys) AS api_nonunique_keys
+);
+
+-- TEST: network_demand_pipeline_join_inflation_guard
+-- Verifies naive pipeline-only joins against model-grain demand inflate row counts.
+-- Requirement: detect accidental join patterns that would duplicate metrics.
+WITH
+  pipeline_reference AS
+  (
+    SELECT
+      toStartOfInterval(window_start, INTERVAL 1 HOUR) AS window_start,
+      gateway,
+      ifNull(region, '') AS region,
+      pipeline,
+      sum(total_sessions) AS total_sessions
+    FROM
+    (
+      SELECT
+        window_start,
+        gateway,
+        ifNull(region, '') AS region,
+        pipeline,
+        total_sessions
+      FROM livepeer_analytics.v_api_network_demand
+      WHERE window_start >= {from_ts:DateTime64(3)}
+        AND window_start < {to_ts:DateTime64(3)}
+    )
+    GROUP BY window_start, gateway, region, pipeline
+  ),
+  model_grain AS
+  (
+    SELECT
+      window_start,
+      gateway,
+      ifNull(region, '') AS region,
+      pipeline,
+      ifNull(model_id, '') AS model_id,
+      total_sessions
+    FROM livepeer_analytics.v_api_network_demand
+    WHERE window_start >= {from_ts:DateTime64(3)}
+      AND window_start < {to_ts:DateTime64(3)}
+  ),
+  naive_join AS
+  (
+    SELECT
+      sum(toFloat64(r.total_sessions)) AS naive_sum
+    FROM pipeline_reference r
+    INNER JOIN model_grain m
+      USING (window_start, gateway, region, pipeline)
+  ),
+  safe_total AS
+  (
+    SELECT
+      sum(toFloat64(total_sessions)) AS safe_sum
+    FROM pipeline_reference
+  )
+SELECT
+  toUInt64(0) AS failed_rows,
+  naive_sum,
+  safe_sum,
+  if(safe_sum = 0, 0.0, naive_sum / safe_sum) AS inflation_factor,
+  multiIf(
+    safe_sum = 0, 'INFO',
+    naive_sum > safe_sum * 1.000001, 'WARN',
+    'PASS'
+  ) AS status
+FROM naive_join
+CROSS JOIN safe_total;
+
+-- TEST: preexisting_grain_drift_baseline_gpu_sla
+-- Verifies existing model-grain views conserve totals and keyspace when collapsed to pipeline grain.
+-- Requirement: detect pre-existing drift in model-aware views independent of demand changes.
+WITH
+  gpu_rollup_pipeline AS
+  (
+    SELECT
+      window_start,
+      orchestrator_address,
+      pipeline,
+      sum(status_samples) AS expected_status_samples
+    FROM
+    (
+      SELECT
+        toStartOfInterval(window_start, INTERVAL 1 HOUR) AS window_start,
+        orchestrator_address,
+        pipeline,
+        ifNull(model_id, '') AS model_id,
+        ifNull(gpu_id, '') AS gpu_id,
+        ifNull(region, '') AS region,
+        countMerge(sample_count_state) AS status_samples
+      FROM livepeer_analytics.agg_stream_performance_1m
+      WHERE window_start >= {from_ts:DateTime64(3)}
+        AND window_start < {to_ts:DateTime64(3)}
+      GROUP BY window_start, orchestrator_address, pipeline, model_id, gpu_id, region
+    )
+    GROUP BY window_start, orchestrator_address, pipeline
+  ),
+  gpu_view_pipeline AS
+  (
+    SELECT
+      window_start,
+      orchestrator_address,
+      pipeline,
+      sum(status_samples) AS view_status_samples
+    FROM livepeer_analytics.v_api_gpu_metrics
+    WHERE window_start >= {from_ts:DateTime64(3)}
+      AND window_start < {to_ts:DateTime64(3)}
+    GROUP BY window_start, orchestrator_address, pipeline
+  ),
+  sla_raw_pipeline AS
+  (
+    WITH latest_sessions AS
+    (
+      SELECT
+        workflow_session_id,
+        argMax(session_start_ts, version) AS session_start_ts,
+        argMax(orchestrator_address, version) AS orchestrator_address,
+        argMax(pipeline, version) AS pipeline,
+        argMax(known_stream, version) AS known_stream,
+        argMax(startup_unexcused, version) AS startup_unexcused,
+        argMax(confirmed_swap_count, version) AS confirmed_swap_count,
+        argMax(inferred_orchestrator_change_count, version) AS inferred_orchestrator_change_count
+      FROM livepeer_analytics.fact_workflow_sessions
+      GROUP BY workflow_session_id
+    )
+    SELECT
+      toStartOfInterval(session_start_ts, INTERVAL 1 HOUR) AS window_start,
+      orchestrator_address,
+      pipeline,
+      sum(toUInt64(known_stream)) AS raw_known_sessions,
+      sum(toUInt64(startup_unexcused)) AS raw_unexcused_sessions,
+      sum(toUInt64((confirmed_swap_count > 0) OR (inferred_orchestrator_change_count > 0))) AS raw_swapped_sessions
+    FROM latest_sessions
+    WHERE session_start_ts >= {from_ts:DateTime64(3)}
+      AND session_start_ts < {to_ts:DateTime64(3)}
+    GROUP BY window_start, orchestrator_address, pipeline
+  ),
+  sla_view_pipeline AS
+  (
+    SELECT
+      window_start,
+      orchestrator_address,
+      pipeline,
+      sum(known_sessions) AS view_known_sessions,
+      sum(unexcused_sessions) AS view_unexcused_sessions,
+      sum(swapped_sessions) AS view_swapped_sessions
+    FROM livepeer_analytics.v_api_sla_compliance
+    WHERE window_start >= {from_ts:DateTime64(3)}
+      AND window_start < {to_ts:DateTime64(3)}
+    GROUP BY window_start, orchestrator_address, pipeline
+  )
+SELECT
+  toUInt64(
+    gpu_rollup_only_keys > 0
+    OR gpu_view_only_keys > 0
+    OR gpu_status_sample_diff > 0
+    OR sla_raw_only_keys > 0
+    OR sla_view_only_keys > 0
+    OR sla_known_diff > 0
+    OR sla_unexcused_diff > 0
+    OR sla_swapped_diff > 0
+  ) AS failed_rows,
+  gpu_rollup_rows,
+  gpu_view_rows,
+  gpu_rollup_only_keys,
+  gpu_view_only_keys,
+  gpu_status_sample_diff,
+  sla_raw_rows,
+  sla_view_rows,
+  sla_raw_only_keys,
+  sla_view_only_keys,
+  sla_known_diff,
+  sla_unexcused_diff,
+  sla_swapped_diff
+FROM
+(
+  SELECT
+    (SELECT count() FROM gpu_rollup_pipeline) AS gpu_rollup_rows,
+    (SELECT count() FROM gpu_view_pipeline) AS gpu_view_rows,
+    (
+      SELECT count()
+      FROM gpu_rollup_pipeline r
+      LEFT JOIN gpu_view_pipeline v
+        USING (window_start, orchestrator_address, pipeline)
+      WHERE v.window_start IS NULL
+    ) AS gpu_rollup_only_keys,
+    (
+      SELECT count()
+      FROM gpu_view_pipeline v
+      LEFT JOIN gpu_rollup_pipeline r
+        USING (window_start, orchestrator_address, pipeline)
+      WHERE r.window_start IS NULL
+    ) AS gpu_view_only_keys,
+    ifNull(sum(abs(toInt64(r.expected_status_samples) - toInt64(v.view_status_samples))), 0) AS gpu_status_sample_diff
+  FROM gpu_rollup_pipeline r
+  INNER JOIN gpu_view_pipeline v
+    USING (window_start, orchestrator_address, pipeline)
+) gpu
+CROSS JOIN
+(
+  SELECT
+    (SELECT count() FROM sla_raw_pipeline) AS sla_raw_rows,
+    (SELECT count() FROM sla_view_pipeline) AS sla_view_rows,
+    (
+      SELECT count()
+      FROM sla_raw_pipeline r
+      LEFT JOIN sla_view_pipeline v
+        USING (window_start, orchestrator_address, pipeline)
+      WHERE v.window_start IS NULL
+    ) AS sla_raw_only_keys,
+    (
+      SELECT count()
+      FROM sla_view_pipeline v
+      LEFT JOIN sla_raw_pipeline r
+        USING (window_start, orchestrator_address, pipeline)
+      WHERE r.window_start IS NULL
+    ) AS sla_view_only_keys,
+    ifNull(sum(abs(toInt64(r.raw_known_sessions) - toInt64(v.view_known_sessions))), 0) AS sla_known_diff,
+    ifNull(sum(abs(toInt64(r.raw_unexcused_sessions) - toInt64(v.view_unexcused_sessions))), 0) AS sla_unexcused_diff,
+    ifNull(sum(abs(toInt64(r.raw_swapped_sessions) - toInt64(v.view_swapped_sessions))), 0) AS sla_swapped_diff
+  FROM sla_raw_pipeline r
+  INNER JOIN sla_view_pipeline v
+    USING (window_start, orchestrator_address, pipeline)
+) sla;
+
 -- TEST: sla_view_matches_session_fact
 -- Verifies SLA API view counts match independently recomputed counts from latest session facts.
--- Requirement: `v_api_sla_compliance` must preserve known/unexcused/swapped semantics.
+-- Requirement: `v_api_sla_compliance` must preserve known/unexcused/swapped semantics
+-- for attributed sessions (`orchestrator_address != ''`).
 WITH
   latest_sessions AS (
     SELECT
@@ -1576,6 +2655,7 @@ WITH
     FROM latest_sessions
     WHERE session_start_ts >= {from_ts:DateTime64(3)}
       AND session_start_ts < {to_ts:DateTime64(3)}
+      AND orchestrator_address != ''
     GROUP BY window_start, orchestrator_address, pipeline, model_id_key, gpu_id_key, region_key
   ),
   api AS (
@@ -1596,11 +2676,14 @@ WITH
 SELECT
   toUInt64(
     (raw_rows > 0 AND view_rows > 0 AND joined_rows = 0)
+    OR raw_only_keys > 0
+    OR view_only_keys > 0
     OR (joined_rows > 0 AND (total_known_diff > 0 OR total_unexcused_diff > 0 OR total_swapped_diff > 0))
   ) AS failed_rows,
   multiIf(
     raw_rows = 0 AND view_rows = 0, 'EMPTY_BOTH',
     raw_rows > 0 AND view_rows > 0 AND joined_rows = 0, 'NO_OVERLAP_BOTH_NONEMPTY',
+    raw_only_keys > 0 OR view_only_keys > 0, 'KEY_MISMATCH',
     joined_rows > 0 AND (total_known_diff > 0 OR total_unexcused_diff > 0 OR total_swapped_diff > 0), 'VALUE_MISMATCH_WITH_OVERLAP',
     'PASS'
   ) AS failure_mode,

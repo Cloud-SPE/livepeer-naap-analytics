@@ -180,6 +180,10 @@ Stateful lifecycle contracts are implemented in:
 | Rollups | `agg_*` | Query-efficient aggregates |
 | Serving views | `v_api_*` | Stable API/dashboard contracts |
 
+Serving-grain note:
+- `v_api_network_demand` is model-aware at `(hour, gateway, region, pipeline, model_id)`.
+- Consumers joining demand with pipeline-only datasets must pre-aggregate by pipeline (or include `model_id` when available).
+
 Materialization model:
 
 - Non-stateful projections are emitted by ClickHouse MVs.
@@ -215,8 +219,11 @@ Lifecycle attribution uses a bounded multi-candidate capability cache per hot wa
 Selection flow:
 1. Resolve hot wallet from signal orchestrator identity.
 2. Load candidate capability snapshots for that wallet.
-3. Build pipeline context from signal pipeline, with fallback to persisted lifecycle state pipeline/model context when signal pipeline is empty.
-4. Filter candidates by compatibility first (`pipeline` vs candidate `model_id`).
+3. Resolve canonical semantics through `PipelineModelResolver`:
+   - canonical `pipeline` (workflow class),
+   - canonical `model_id` (model label),
+   - compatibility `model_hint`.
+4. Filter candidates by compatibility first (`model_hint` vs candidate `model_id`).
 5. Rank compatible candidates by deterministic freshness rules:
    - exact timestamp match
    - nearest prior snapshot within TTL
@@ -230,6 +237,13 @@ Safety rules:
 3. Candidate cache is bounded and TTL-pruned to keep lookup O(k) with small bounded `k`.
 
 This design prevents mixed-model drift when one hot wallet advertises multiple model families (for example streamdiffusion and llama) in interleaved capability snapshots.
+
+Compatibility note:
+- Resolver mode is configurable via `LIFECYCLE_PIPELINE_MODEL_MODE`.
+- Default `legacy_misnamed` supports current upstream payloads where stream-event `pipeline`
+  carries model-like values.
+- Future upstream correction to native pipeline/model fields should require mode transition, not
+  lifecycle refactors.
 
 ### Non-Stateful Facts (ClickHouse MV-emitted)
 

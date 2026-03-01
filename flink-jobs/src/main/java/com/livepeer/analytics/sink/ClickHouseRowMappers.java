@@ -265,6 +265,7 @@ public final class ClickHouseRowMappers {
                 .addString("stream_id", f.streamId)
                 .addString("request_id", f.requestId)
                 .addString("pipeline", f.pipeline)
+                .addNullableString("model_id", f.modelId)
                 .addString("gateway", f.gateway)
                 .addString("orchestrator_address", f.orchestratorAddress)
                 .addString("orchestrator_url", f.orchestratorUrl)

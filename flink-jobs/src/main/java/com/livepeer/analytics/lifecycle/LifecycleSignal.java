@@ -23,7 +23,11 @@ public class LifecycleSignal implements Serializable {
 
     public String streamId;
     public String requestId;
+    // Canonical workflow pipeline label used by downstream lifecycle facts.
     public String pipeline;
+    // Raw/transport hint fields used by compatibility resolver.
+    public String pipelineHint;
+    public String modelHint;
     public String gateway;
     public String orchestratorAddress;
     public String orchestratorUrl;

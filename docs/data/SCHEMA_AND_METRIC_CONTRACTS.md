@@ -47,9 +47,10 @@ Primary schema source: `configs/clickhouse-init/01-schema.sql`.
 
 ## API Serving Grains
 
-- `v_api_gpu_metrics`: minute-level orchestrator/pipeline/model/GPU grain.
-- `v_api_network_demand`: hour-level gateway/region/pipeline grain.
-- `v_api_sla_compliance`: hour-level orchestrator/pipeline/model/GPU grain.
+- `v_api_gpu_metrics`: hour-level orchestrator/pipeline/model/GPU grain.
+- `v_api_network_demand`: hour-level gateway/region/pipeline/model grain.
+- `v_api_sla_compliance`: hour-level attributed orchestrator/pipeline/model/GPU grain (`orchestrator_address != ''`).
+  - `v_api_network_demand` keyspace is the union of perf and session-demand keys, so demand-only (no status/perf samples) rows must still appear with zero perf counters.
 
 Contract rule: additive fields are canonical; clients must recompute ratios/scores when re-rolling windows.
 
@@ -68,6 +69,7 @@ Contract rule: additive fields are canonical; clients must recompute ratios/scor
 - API contracts:
   - `/gpu/metrics` -> `v_api_gpu_metrics`
   - `/network/demand` -> `v_api_network_demand` (+ GPU supply slice via `v_api_network_demand_by_gpu`)
+    - consumer join rule: include `model_id` on model-aware joins, or pre-aggregate by pipeline before joining to pipeline-grain datasets.
   - `/sla/compliance` -> `v_api_sla_compliance`
 
 ## Raw-to-Fact and Execution Contract
@@ -144,23 +146,34 @@ Contract rule: additive fields are canonical; clients must recompute ratios/scor
 
 This is a correctness-critical contract for lifecycle facts and downstream API views.
 
-1. `pipeline` source of truth:
-`pipeline` is event-derived lifecycle state. `pipeline` is not sourced from capability snapshots.
+1. Canonical `pipeline`/`model_id` source of truth:
+`pipeline` is canonical workflow class (`live-video-to-video`, `text-to-image`, etc.) and
+`model_id` is canonical model label (`streamdiffusion-sdxl`, etc.).
+Under current upstream payload shape, stream-event `pipeline` is treated as `model_hint`.
+Canonical lifecycle fields are resolved via capability attribution snapshots.
 
 2. Capability candidate cache model:
 Candidates are keyed by hot wallet and stored as bounded multi-candidate snapshot sets. Candidate sets are TTL-pruned and hard-capped per wallet.
 
 3. Selection precedence:
-Compatibility first: incompatible model candidates must be ignored when pipeline context is present. Freshness second: choose exact match, then nearest prior within TTL, then nearest within TTL. Deterministic tie-breakers are required.
+Compatibility first: incompatible model candidates must be ignored when model-hint context is present.
+Freshness second: choose exact match, then nearest prior within TTL, then nearest within TTL.
+Deterministic tie-breakers are required.
 
-4. Empty-pipeline handling:
-Selector input pipeline must use signal pipeline with fallback to persisted lifecycle pipeline/model context. Passing empty pipeline broadens compatibility and can reintroduce mixed-model drift.
+4. Empty-hint handling:
+Selector input model hint must use signal model hint with fallback to persisted lifecycle `model_id`
+context. Passing empty hint broadens compatibility and can reintroduce mixed-model drift.
 
 5. No-compatible-candidate behavior:
 Do not overwrite `model_id`/`gpu_id` for that signal. Continue lifecycle signal processing and row emission.
 
 6. Regression guardrails:
 Prod-derived regression tests must cover mixed-model hot-wallet candidate sets, empty signal pipeline drift path, and incompatible-but-fresh candidate rejection.
+
+7. Compatibility mode:
+Lifecycle resolver mode is controlled by `LIFECYCLE_PIPELINE_MODEL_MODE`:
+- `legacy_misnamed` (default): stream-event `pipeline` is interpreted as `model_hint`.
+- `native_correct`: stream-event payloads are treated as native canonical pipeline/model fields.
 
 ## Rules-to-Implementation Traceability
 
@@ -195,6 +208,12 @@ Prod-derived regression tests must cover mixed-model hot-wallet candidate sets, 
 - Use `*_current` dimensions for "what is true now" labels/inventory.
 - Use `*_snapshots` dimensions for historical correctness at event time.
 - Do not mix current and snapshot semantics in the same view contract.
+- Capability snapshot invariant:
+  - `dim_orchestrator_capability_snapshots` must preserve per-event GPU rows (no collapse across GPUs for the same orchestrator/model/timestamp/source event).
+- Typed capability invariant:
+  - `network_capabilities` must preserve per-GPU rows for each capability event (`source_event_id`), so downstream dimensions and joins can enrich GPU metadata correctly.
+- Drift review invariant:
+  - When Flink resolver semantics or ClickHouse serving schema changes, re-validate status/perf vs lifecycle pipeline alignment (especially `v_api_network_demand` keys) to prevent empty-pipeline split rows.
 
 ## Wallet Identity Contract
 
