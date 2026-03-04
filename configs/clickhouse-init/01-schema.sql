@@ -415,6 +415,7 @@ CREATE TABLE IF NOT EXISTS fact_stream_status_samples
     state LowCardinality(String),
     output_fps Float32,
     input_fps Float32,
+    is_attributed UInt8 DEFAULT 0,
     gpu_attribution_method LowCardinality(String),
     gpu_attribution_confidence Float32,
 
@@ -447,6 +448,7 @@ CREATE TABLE IF NOT EXISTS fact_stream_trace_edges
     trace_type LowCardinality(String),
     trace_category LowCardinality(String),
     is_swap_event UInt8,
+    is_attributed UInt8 DEFAULT 0,
 
     source_event_uid String,
     ingestion_timestamp DateTime64(3, 'UTC') DEFAULT now64(3)
@@ -485,137 +487,9 @@ CREATE TABLE IF NOT EXISTS fact_stream_ingest_samples
         TTL sample_date + INTERVAL 90 DAY DELETE
         SETTINGS index_granularity = 8192;
 
--- Non-stateful silver fact materialization.
--- Rationale:
--- - These facts are direct per-event projections that do not require cross-event/session state.
--- - Keeping them in ClickHouse MVs reduces Flink mapper boilerplate while preserving deterministic logic.
-
-CREATE MATERIALIZED VIEW IF NOT EXISTS mv_ai_stream_status_to_fact_stream_status_samples
-TO fact_stream_status_samples
-AS
-WITH cap_lookup AS
-(
-    SELECT
-        lower(local_address) AS hot_wallet,
-        argMax(pipeline, event_timestamp) AS capability_pipeline,
-        model_id AS capability_model_id,
-        argMax(lower(orchestrator_address), event_timestamp) AS canonical_orchestrator_address,
-        argMax(orch_uri, event_timestamp) AS canonical_orchestrator_url,
-        argMax(gpu_id, event_timestamp) AS gpu_id,
-        max(event_timestamp) AS latest_snapshot_ts
-    FROM network_capabilities
-    WHERE local_address != ''
-      AND model_id != ''
-    GROUP BY hot_wallet, capability_model_id
-)
-SELECT
-    s.event_timestamp AS sample_ts,
-    multiIf(
-        s.stream_id != '' AND s.request_id != '', concat(s.stream_id, '|', s.request_id),
-        s.stream_id != '', concat(s.stream_id, '|_missing_request'),
-        s.request_id != '', concat('_missing_stream|', s.request_id),
-        concat('_missing_stream|_missing_request|', toString(cityHash64(s.raw_json)))
-    ) AS workflow_session_id,
-    s.stream_id,
-    s.request_id,
-    s.gateway,
-    ifNull(nullIf(canonical_orchestrator_address, ''), '') AS orchestrator_address,
-    if(
-        nullIf(canonical_orchestrator_url, '') IS NOT NULL,
-        nullIf(canonical_orchestrator_url, ''),
-        s.orchestrator_url
-    ) AS orchestrator_url,
-    if(
-        nullIf(latest_snapshot_ts, toDateTime64(0, 3, 'UTC')) IS NOT NULL
-            AND abs(dateDiff('millisecond', nullIf(latest_snapshot_ts, toDateTime64(0, 3, 'UTC')), s.event_timestamp)) <= 86400000,
-        ifNull(nullIf(capability_pipeline, ''), ''),
-        ''
-    ) AS pipeline,
-    nullIf(
-        if(
-            nullIf(latest_snapshot_ts, toDateTime64(0, 3, 'UTC')) IS NOT NULL
-                AND abs(dateDiff('millisecond', nullIf(latest_snapshot_ts, toDateTime64(0, 3, 'UTC')), s.event_timestamp)) <= 86400000
-                AND nullIf(capability_model_id, '') IS NOT NULL,
-            capability_model_id,
-            s.pipeline
-        ),
-        ''
-    ) AS model_id,
-    if(
-        nullIf(latest_snapshot_ts, toDateTime64(0, 3, 'UTC')) IS NOT NULL
-            AND abs(dateDiff('millisecond', nullIf(latest_snapshot_ts, toDateTime64(0, 3, 'UTC')), s.event_timestamp)) <= 86400000,
-        nullIf(gpu_id, ''),
-        CAST(NULL AS Nullable(String))
-    ) AS gpu_id,
-    CAST(NULL AS Nullable(String)) AS region,
-    s.state,
-    s.output_fps,
-    s.input_fps,
-    multiIf(
-        nullIf(latest_snapshot_ts, toDateTime64(0, 3, 'UTC')) IS NULL, 'none',
-        dateDiff('millisecond', nullIf(latest_snapshot_ts, toDateTime64(0, 3, 'UTC')), s.event_timestamp) = 0, 'exact_orchestrator_time_match',
-        nullIf(latest_snapshot_ts, toDateTime64(0, 3, 'UTC')) <= s.event_timestamp
-            AND abs(dateDiff('millisecond', nullIf(latest_snapshot_ts, toDateTime64(0, 3, 'UTC')), s.event_timestamp)) <= 86400000, 'nearest_prior_snapshot',
-        abs(dateDiff('millisecond', nullIf(latest_snapshot_ts, toDateTime64(0, 3, 'UTC')), s.event_timestamp)) <= 86400000, 'nearest_snapshot_within_ttl',
-        'proxy_address_join'
-    ) AS gpu_attribution_method,
-    multiIf(
-        nullIf(latest_snapshot_ts, toDateTime64(0, 3, 'UTC')) IS NULL, toFloat32(0),
-        dateDiff('millisecond', nullIf(latest_snapshot_ts, toDateTime64(0, 3, 'UTC')), s.event_timestamp) = 0, toFloat32(1.0),
-        nullIf(latest_snapshot_ts, toDateTime64(0, 3, 'UTC')) <= s.event_timestamp
-            AND abs(dateDiff('millisecond', nullIf(latest_snapshot_ts, toDateTime64(0, 3, 'UTC')), s.event_timestamp)) <= 86400000, toFloat32(0.9),
-        abs(dateDiff('millisecond', nullIf(latest_snapshot_ts, toDateTime64(0, 3, 'UTC')), s.event_timestamp)) <= 86400000, toFloat32(0.7),
-        toFloat32(0.4)
-    ) AS gpu_attribution_confidence,
-    toString(cityHash64(s.raw_json)) AS source_event_uid
-FROM ai_stream_status s
-LEFT JOIN cap_lookup c
-  ON lower(s.orchestrator_address) = c.hot_wallet
- AND ifNull(nullIf(s.pipeline, ''), '') = ifNull(nullIf(c.capability_model_id, ''), '');
-
-CREATE MATERIALIZED VIEW IF NOT EXISTS mv_stream_trace_events_to_fact_stream_trace_edges
-TO fact_stream_trace_edges
-AS
-WITH cap_lookup AS
-(
-    SELECT
-        lower(local_address) AS hot_wallet,
-        argMax(lower(orchestrator_address), event_timestamp) AS canonical_orchestrator_address,
-        argMax(pipeline, event_timestamp) AS capability_pipeline,
-        argMax(model_id, event_timestamp) AS capability_model_id
-    FROM network_capabilities
-    WHERE local_address != ''
-      AND orchestrator_address != ''
-    GROUP BY hot_wallet
-)
-SELECT
-    t.data_timestamp AS edge_ts,
-    multiIf(
-        t.stream_id != '' AND t.request_id != '', concat(t.stream_id, '|', t.request_id),
-        t.stream_id != '', concat(t.stream_id, '|_missing_request'),
-        t.request_id != '', concat('_missing_stream|', t.request_id),
-        concat('_missing_stream|_missing_request|', toString(cityHash64(t.raw_json)))
-    ) AS workflow_session_id,
-    t.stream_id,
-    t.request_id,
-    '' AS gateway,
-    ifNull(nullIf(c.canonical_orchestrator_address, ''), '') AS orchestrator_address,
-    t.orchestrator_url,
-    ifNull(nullIf(c.capability_pipeline, ''), '') AS pipeline,
-    nullIf(c.capability_model_id, '') AS model_id,
-    t.trace_type,
-    multiIf(
-        startsWith(t.trace_type, 'gateway_'), 'gateway',
-        startsWith(t.trace_type, 'orchestrator_'), 'orchestrator',
-        startsWith(t.trace_type, 'runner_'), 'runner',
-        startsWith(t.trace_type, 'app_'), 'app',
-        'other'
-    ) AS trace_category,
-    toUInt8(t.trace_type = 'orchestrator_swap') AS is_swap_event,
-    toString(cityHash64(t.raw_json)) AS source_event_uid
-FROM stream_trace_events t
-LEFT JOIN cap_lookup c
-  ON lower(t.orchestrator_address) = c.hot_wallet;
+-- Transitional exception (P1): non-stateful ingest projection remains ClickHouse-MV owned.
+-- Contract boundary: status/trace canonical attribution is Flink-emitted and must not be reintroduced as typed->fact MVs.
+-- Migration target: replace this typed->fact ingest projection with Flink-emitted ingest facts in a follow-up change.
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_stream_ingest_metrics_to_fact_stream_ingest_samples
 TO fact_stream_ingest_samples
@@ -658,6 +532,8 @@ CREATE TABLE IF NOT EXISTS fact_workflow_sessions
     model_id Nullable(String),
     gpu_id Nullable(String),
     region Nullable(String),
+    has_model_change UInt8 DEFAULT 0,
+    has_pipeline_change UInt8 DEFAULT 0,
     gpu_attribution_method LowCardinality(String),
     gpu_attribution_confidence Float32,
 
@@ -674,6 +550,14 @@ CREATE TABLE IF NOT EXISTS fact_workflow_sessions
     swap_count UInt16,
     error_count UInt32,
     excusable_error_count UInt32,
+    last_error_occurred UInt8 DEFAULT 0,
+    loading_only_session UInt8 DEFAULT 0,
+    zero_output_fps_session UInt8 DEFAULT 0,
+    status_sample_count UInt32 DEFAULT 0,
+    status_error_sample_count UInt32 DEFAULT 0,
+    health_signal_count UInt32 DEFAULT 0,
+    health_expected_signal_count UInt32 DEFAULT 0,
+    health_completeness_ratio Float32 DEFAULT 1,
 
     first_stream_request_ts Nullable(DateTime64(3, 'UTC')),
     first_processed_ts Nullable(DateTime64(3, 'UTC')),
@@ -702,6 +586,7 @@ CREATE TABLE IF NOT EXISTS fact_workflow_session_segments
     segment_end_ts Nullable(DateTime64(3, 'UTC')),
 
     gateway String,
+    pipeline String,
     orchestrator_address String,
     orchestrator_url String,
     worker_id Nullable(String),
@@ -968,6 +853,10 @@ SELECT
     source_event_id AS source_event_uid
 FROM network_capabilities;
 
+-- Transitional exception (P1): capability dimension materialization currently projects from typed capability tables.
+-- Contract boundary: serving views must consume `dim_*`/`fact_*`/`agg_*` objects and avoid direct joins to typed capability tables.
+-- Migration target: emit dimension rows directly from Flink and retire typed-table projection MVs in a follow-up change.
+
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_network_capabilities_advertised_to_dim_orchestrator_capability_advertised_snapshots
 TO dim_orchestrator_capability_advertised_snapshots
 AS
@@ -1123,7 +1012,14 @@ CREATE TABLE IF NOT EXISTS agg_reliability_1h
     unexcused_sessions_state AggregateFunction(sum, UInt64),
     confirmed_swapped_sessions_state AggregateFunction(sum, UInt64),
     inferred_orchestrator_change_sessions_state AggregateFunction(sum, UInt64),
-    swapped_sessions_state AggregateFunction(sum, UInt64)
+    swapped_sessions_state AggregateFunction(sum, UInt64),
+    sessions_with_errors_state AggregateFunction(sum, UInt64),
+    sessions_with_last_error_state AggregateFunction(sum, UInt64),
+    loading_only_sessions_state AggregateFunction(sum, UInt64),
+    zero_output_fps_sessions_state AggregateFunction(sum, UInt64),
+    status_error_samples_state AggregateFunction(sum, UInt64),
+    health_signal_count_state AggregateFunction(sum, UInt64),
+    health_expected_signal_count_state AggregateFunction(sum, UInt64)
 )
     ENGINE = AggregatingMergeTree
         PARTITION BY toYYYYMM(toDate(window_start))
@@ -1185,6 +1081,7 @@ SELECT
 
     countState() AS sample_count_state
 FROM fact_stream_status_samples
+WHERE is_attributed = 1
 GROUP BY
     window_start,
     gateway,
@@ -1212,7 +1109,14 @@ SELECT
     sumState(toUInt64(startup_unexcused)) AS unexcused_sessions_state,
     sumState(toUInt64(confirmed_swap_count > 0)) AS confirmed_swapped_sessions_state,
     sumState(toUInt64(inferred_orchestrator_change_count > 0)) AS inferred_orchestrator_change_sessions_state,
-    sumState(toUInt64((confirmed_swap_count > 0) OR (inferred_orchestrator_change_count > 0))) AS swapped_sessions_state
+    sumState(toUInt64((confirmed_swap_count > 0) OR (inferred_orchestrator_change_count > 0))) AS swapped_sessions_state,
+    sumState(toUInt64(error_count > 0)) AS sessions_with_errors_state,
+    sumState(toUInt64(last_error_occurred > 0)) AS sessions_with_last_error_state,
+    sumState(toUInt64(loading_only_session > 0)) AS loading_only_sessions_state,
+    sumState(toUInt64(zero_output_fps_session > 0)) AS zero_output_fps_sessions_state,
+    sumState(toUInt64(status_error_sample_count)) AS status_error_samples_state,
+    sumState(toUInt64(health_signal_count)) AS health_signal_count_state,
+    sumState(toUInt64(health_expected_signal_count)) AS health_expected_signal_count_state
 FROM fact_workflow_sessions
 GROUP BY
     window_start,
@@ -1299,43 +1203,67 @@ CREATE TABLE IF NOT EXISTS payment_events
 CREATE OR REPLACE VIEW v_api_gpu_metrics AS
 -- Grain: 1 row per (hour, orchestrator, pipeline, model_id, gpu_id, region).
 -- Purpose: primary serving view for /gpu/metrics.
-WITH latest_session_keys AS
+WITH latest_segments AS
 (
-    -- Session-level fallback keys used when status samples are missing model/gpu/region.
     SELECT
         workflow_session_id,
+        segment_index,
+        argMax(segment_start_ts, version) AS segment_start_ts,
+        argMax(segment_end_ts, version) AS segment_end_ts,
         argMax(orchestrator_address, version) AS orchestrator_address,
         argMax(pipeline, version) AS pipeline,
         argMax(model_id, version) AS model_id,
         argMax(gpu_id, version) AS gpu_id,
         argMax(region, version) AS region
-    FROM fact_workflow_sessions
-    GROUP BY workflow_session_id
+    FROM fact_workflow_session_segments
+    GROUP BY workflow_session_id, segment_index
+),
+segment_hours AS
+(
+    SELECT DISTINCT
+        toDateTime64(hour_epoch, 3, 'UTC') AS window_start,
+        orchestrator_address,
+        pipeline,
+        nullIf(model_id, '') AS model_id,
+        nullIf(gpu_id, '') AS gpu_id,
+        nullIf(region, '') AS region
+    FROM
+    (
+        SELECT
+            orchestrator_address,
+            pipeline,
+            model_id,
+            gpu_id,
+            region,
+            toUInt32(toUnixTimestamp(toStartOfInterval(segment_start_ts, INTERVAL 1 HOUR))) AS start_hour_epoch,
+            toUInt32(
+                toUnixTimestamp(
+                    toStartOfInterval(ifNull(segment_end_ts - INTERVAL 1 MILLISECOND, segment_start_ts), INTERVAL 1 HOUR)
+                    + INTERVAL 1 HOUR
+                )
+            ) AS end_hour_exclusive_epoch
+        FROM latest_segments
+        WHERE orchestrator_address != ''
+          AND ifNull(gpu_id, '') != ''
+          AND pipeline != ''
+    ) seg
+    ARRAY JOIN range(start_hour_epoch, end_hour_exclusive_epoch, 3600) AS hour_epoch
 ),
 perf_1h AS
 (
-    -- Performance KPIs from status samples at 1-hour grain.
     SELECT
         toStartOfInterval(s.sample_ts, INTERVAL 1 HOUR) AS window_start,
-        if(s.orchestrator_address != '', s.orchestrator_address, ifNull(k.orchestrator_address, '')) AS orchestrator_address,
-        if(s.pipeline != '', s.pipeline, ifNull(k.pipeline, '')) AS pipeline,
-        nullIf(
-            if(
-                ifNull(s.model_id, '') != '',
-                s.model_id,
-                ifNull(k.model_id, '')
-            ),
-            ''
-        ) AS model_id,
-        nullIf(if(ifNull(s.gpu_id, '') != '', s.gpu_id, ifNull(k.gpu_id, '')), '') AS gpu_id,
-        nullIf(if(ifNull(s.region, '') != '', s.region, ifNull(k.region, '')), '') AS region,
+        s.orchestrator_address,
+        s.pipeline,
+        nullIf(s.model_id, '') AS model_id,
+        nullIf(s.gpu_id, '') AS gpu_id,
+        nullIf(s.region, '') AS region,
         avg(s.output_fps) AS avg_output_fps,
         quantileTDigest(0.95)(s.output_fps) AS p95_output_fps,
         stddevPop(s.output_fps) / nullIf(avg(s.output_fps), 0) AS jitter_coeff_fps,
         count() AS status_samples
     FROM fact_stream_status_samples s
-    LEFT JOIN latest_session_keys k
-        ON k.workflow_session_id = s.workflow_session_id
+    WHERE s.is_attributed = 1
     GROUP BY
         window_start,
         orchestrator_address,
@@ -1365,7 +1293,14 @@ rel_1h AS
             argMax(startup_unexcused, version) AS startup_unexcused,
             argMax(confirmed_swap_count, version) AS confirmed_swap_count,
             argMax(inferred_orchestrator_change_count, version) AS inferred_orchestrator_change_count,
-            argMax(swap_count, version) AS swap_count
+            argMax(swap_count, version) AS swap_count,
+            argMax(error_count, version) AS error_count,
+            argMax(last_error_occurred, version) AS last_error_occurred,
+            argMax(loading_only_session, version) AS loading_only_session,
+            argMax(zero_output_fps_session, version) AS zero_output_fps_session,
+            argMax(status_error_sample_count, version) AS status_error_sample_count,
+            argMax(health_signal_count, version) AS health_signal_count,
+            argMax(health_expected_signal_count, version) AS health_expected_signal_count
         FROM fact_workflow_sessions
         GROUP BY workflow_session_id
     )
@@ -1382,7 +1317,14 @@ rel_1h AS
         sum(toUInt64(startup_unexcused)) AS unexcused_sessions,
         sum(toUInt64(confirmed_swap_count > 0)) AS confirmed_swapped_sessions,
         sum(toUInt64(inferred_orchestrator_change_count > 0)) AS inferred_orchestrator_change_sessions,
-        sum(toUInt64((confirmed_swap_count > 0) OR (inferred_orchestrator_change_count > 0))) AS swapped_sessions
+        sum(toUInt64((confirmed_swap_count > 0) OR (inferred_orchestrator_change_count > 0))) AS swapped_sessions,
+        sum(toUInt64(error_count > 0)) AS sessions_with_errors,
+        sum(toUInt64(last_error_occurred > 0)) AS sessions_with_last_error,
+        sum(toUInt64(loading_only_session > 0)) AS loading_only_sessions,
+        sum(toUInt64(zero_output_fps_session > 0)) AS zero_output_fps_sessions,
+        sum(toUInt64(status_error_sample_count)) AS status_error_samples,
+        sum(toUInt64(health_signal_count)) AS health_signal_count,
+        sum(toUInt64(health_expected_signal_count)) AS health_expected_signal_count
     FROM latest_sessions
     WHERE session_start_ts > toDateTime64('2000-01-01 00:00:00', 3, 'UTC')
     GROUP BY
@@ -1417,18 +1359,11 @@ lat_1h AS
     )
     SELECT
         toStartOfInterval(l.sample_ts, INTERVAL 1 HOUR) AS window_start,
-        if(ifNull(l.orchestrator_address, '') != '', l.orchestrator_address, ifNull(k.orchestrator_address, '')) AS orchestrator_address,
-        if(ifNull(l.pipeline, '') != '', l.pipeline, ifNull(k.pipeline, '')) AS pipeline,
-        nullIf(
-            if(
-                ifNull(l.model_id, '') != '',
-                l.model_id,
-                ifNull(k.model_id, '')
-            ),
-            ''
-        ) AS model_id,
-        nullIf(if(ifNull(l.gpu_id, '') != '', l.gpu_id, ifNull(k.gpu_id, '')), '') AS gpu_id,
-        nullIf(if(ifNull(l.region, '') != '', l.region, ifNull(k.region, '')), '') AS region,
+        l.orchestrator_address,
+        l.pipeline,
+        nullIf(l.model_id, '') AS model_id,
+        nullIf(l.gpu_id, '') AS gpu_id,
+        nullIf(l.region, '') AS region,
         avgIf(l.prompt_to_first_frame_ms, l.has_prompt_to_first_frame = 1) AS prompt_to_first_frame_ms,
         avgIf(l.startup_time_ms, l.has_startup_time = 1) AS startup_time_ms,
         avgIf(l.e2e_latency_ms, l.has_e2e_latency = 1) AS e2e_latency_ms,
@@ -1439,8 +1374,6 @@ lat_1h AS
         sum(toUInt64(l.has_startup_time = 1)) AS valid_startup_time_count,
         sum(toUInt64(l.has_e2e_latency = 1)) AS valid_e2e_latency_count
     FROM latest_latency_sessions l
-    LEFT JOIN latest_session_keys k
-        ON k.workflow_session_id = l.workflow_session_id
     GROUP BY
         window_start,
         orchestrator_address,
@@ -1451,7 +1384,7 @@ lat_1h AS
 ),
 base_keys AS
 (
-    -- Union of keyspaces ensures latency-only windows are not dropped when perf data is sparse.
+    -- Hour-semantic keyspace from in-hour evidence sources.
     SELECT
         window_start,
         orchestrator_address,
@@ -1462,6 +1395,15 @@ base_keys AS
     FROM perf_1h
     UNION DISTINCT
     SELECT
+        rel_window_start AS window_start,
+        orchestrator_address,
+        pipeline,
+        model_id,
+        gpu_id,
+        region
+    FROM rel_1h
+    UNION DISTINCT
+    SELECT
         window_start,
         orchestrator_address,
         pipeline,
@@ -1469,6 +1411,73 @@ base_keys AS
         gpu_id,
         region
     FROM lat_1h
+),
+tail_latest_sessions AS
+(
+    SELECT
+        workflow_session_id,
+        argMax(session_start_ts, version) AS session_start_ts,
+        argMax(session_end_ts, version) AS session_end_ts
+    FROM fact_workflow_sessions
+    GROUP BY workflow_session_id
+),
+status_session_hours AS
+(
+    SELECT
+        toStartOfInterval(sample_ts, INTERVAL 1 HOUR) AS window_start,
+        workflow_session_id,
+        toUInt8(1) AS has_status_row,
+        orchestrator_address,
+        pipeline,
+        nullIf(model_id, '') AS model_id,
+        nullIf(gpu_id, '') AS gpu_id,
+        nullIf(region, '') AS region,
+        count() AS status_samples,
+        countIf(output_fps > 0) AS fps_positive_samples,
+        countIf(state IN ('ONLINE', 'DEGRADED_INFERENCE', 'DEGRADED_INPUT')) AS running_state_samples
+    FROM fact_stream_status_samples
+    WHERE is_attributed = 1
+    GROUP BY
+        window_start,
+        workflow_session_id,
+        orchestrator_address,
+        pipeline,
+        model_id,
+        gpu_id,
+        region
+),
+tail_artifact_keys AS
+(
+    SELECT DISTINCT
+        toUInt8(1) AS is_tail_artifact,
+        sh.window_start AS window_start,
+        sh.orchestrator_address AS orchestrator_address,
+        sh.pipeline AS pipeline,
+        sh.model_id AS model_id,
+        sh.gpu_id AS gpu_id,
+        sh.region AS region
+    FROM status_session_hours sh
+    INNER JOIN tail_latest_sessions ls
+        ON ls.workflow_session_id = sh.workflow_session_id
+    LEFT JOIN status_session_hours prev_sh
+        ON prev_sh.workflow_session_id = sh.workflow_session_id
+       AND prev_sh.window_start = sh.window_start - INTERVAL 1 HOUR
+       AND prev_sh.orchestrator_address = sh.orchestrator_address
+       AND prev_sh.pipeline = sh.pipeline
+       AND ifNull(prev_sh.model_id, '') = ifNull(sh.model_id, '')
+       AND ifNull(prev_sh.gpu_id, '') = ifNull(sh.gpu_id, '')
+       AND ifNull(prev_sh.region, '') = ifNull(sh.region, '')
+    WHERE ls.session_start_ts < sh.window_start
+      AND ls.session_end_ts IS NOT NULL
+      AND ls.session_end_ts >= sh.window_start
+      AND ls.session_end_ts < sh.window_start + INTERVAL 1 HOUR
+      AND sh.fps_positive_samples = 0
+      AND sh.running_state_samples = 0
+      AND sh.status_samples < 3
+      AND prev_sh.has_status_row = 1
+      AND prev_sh.fps_positive_samples = 0
+      AND prev_sh.running_state_samples = 0
+      AND prev_sh.status_samples < 3
 ),
 dim_current AS
 (
@@ -1521,13 +1530,20 @@ SELECT
     ifNull(r.confirmed_swapped_sessions, toUInt64(0)) AS confirmed_swapped_sessions,
     ifNull(r.inferred_orchestrator_change_sessions, toUInt64(0)) AS inferred_orchestrator_change_sessions,
     ifNull(r.swapped_sessions, toUInt64(0)) AS swapped_sessions,
+    ifNull(r.sessions_with_errors, toUInt64(0)) AS sessions_with_errors,
+    ifNull(r.sessions_with_last_error, toUInt64(0)) AS sessions_with_last_error,
+    ifNull(r.loading_only_sessions, toUInt64(0)) AS loading_only_sessions,
+    ifNull(r.zero_output_fps_sessions, toUInt64(0)) AS zero_output_fps_sessions,
+    ifNull(r.status_error_samples, toUInt64(0)) AS status_error_samples,
+    ifNull(r.health_signal_count, toUInt64(0)) AS health_signal_count,
+    ifNull(r.health_expected_signal_count, toUInt64(0)) AS health_expected_signal_count,
+    ifNull(r.health_signal_count / nullIf(r.health_expected_signal_count, 0), 1.0) AS health_completeness_ratio,
 
     -- Derived rates for API response convenience.
     ifNull(r.unexcused_sessions / nullIf(r.known_sessions, 0), 0) AS failure_rate,
     ifNull(r.swapped_sessions / nullIf(r.known_sessions, 0), 0) AS swap_rate
-FROM perf_1h p
-RIGHT JOIN base_keys b
-    -- RIGHT JOIN keeps all key combinations from base_keys (perf-only and latency-only windows).
+FROM base_keys b
+LEFT JOIN perf_1h p
     ON b.window_start = p.window_start
    AND b.orchestrator_address = p.orchestrator_address
    AND b.pipeline = p.pipeline
@@ -1552,14 +1568,22 @@ LEFT JOIN dim_current d
     ON d.orchestrator_address = b.orchestrator_address
    AND ifNull(d.model_id, '') = ifNull(b.model_id, '')
    AND ifNull(d.gpu_id, '') = ifNull(b.gpu_id, '')
+LEFT JOIN tail_artifact_keys tk
+    ON tk.window_start = b.window_start
+   AND tk.orchestrator_address = b.orchestrator_address
+   AND tk.pipeline = b.pipeline
+   AND ifNull(tk.model_id, '') = ifNull(b.model_id, '')
+   AND ifNull(tk.gpu_id, '') = ifNull(b.gpu_id, '')
+   AND ifNull(tk.region, '') = ifNull(b.region, '')
 WHERE b.orchestrator_address != ''
   -- GPU view intentionally serves only attributable orchestrator+GPU rows.
-  AND ifNull(b.gpu_id, '') != '';
+  AND ifNull(b.gpu_id, '') != ''
+  AND ifNull(tk.is_tail_artifact, toUInt8(0)) = toUInt8(0);
 
 CREATE OR REPLACE VIEW v_api_network_demand AS
 -- Grain: 1 row per (hour, gateway, region, pipeline, model_id).
 -- Purpose: primary serving view for /network/demand.
-WITH latest_sessions AS
+WITH latest_sessions_raw AS
 (
     -- Last-write-wins session snapshot for demand/reliability counters.
     SELECT
@@ -1567,16 +1591,53 @@ WITH latest_sessions AS
         argMax(session_start_ts, version) AS session_start_ts,
         argMax(gateway, version) AS gateway,
         argMax(region, version) AS region,
-        argMax(pipeline, version) AS pipeline,
-        argMax(model_id, version) AS model_id,
+        argMax(pipeline, version) AS pipeline_raw,
+        argMax(model_id, version) AS model_id_raw,
         argMax(orchestrator_address, version) AS orchestrator_address,
         argMax(known_stream, version) AS known_stream,
         argMax(startup_unexcused, version) AS startup_unexcused,
         argMax(confirmed_swap_count, version) AS confirmed_swap_count,
         argMax(inferred_orchestrator_change_count, version) AS inferred_orchestrator_change_count,
-        argMax(swap_count, version) AS swap_count
+        argMax(swap_count, version) AS swap_count,
+        argMax(error_count, version) AS error_count,
+        argMax(last_error_occurred, version) AS last_error_occurred,
+        argMax(loading_only_session, version) AS loading_only_session,
+        argMax(zero_output_fps_session, version) AS zero_output_fps_session,
+        argMax(status_error_sample_count, version) AS status_error_sample_count,
+        argMax(health_signal_count, version) AS health_signal_count,
+        argMax(health_expected_signal_count, version) AS health_expected_signal_count
     FROM fact_workflow_sessions
     GROUP BY workflow_session_id
+),
+latest_sessions AS
+(
+    SELECT
+        workflow_session_id,
+        session_start_ts,
+        gateway,
+        region,
+        ifNull(model_id_raw, '') AS model_id,
+        if(
+            ifNull(pipeline_raw, '') != ''
+            AND ifNull(model_id_raw, '') != ''
+            AND lowerUTF8(ifNull(pipeline_raw, '')) = lowerUTF8(ifNull(model_id_raw, '')),
+            '',
+            ifNull(pipeline_raw, '')
+        ) AS pipeline,
+        orchestrator_address,
+        known_stream,
+        startup_unexcused,
+        confirmed_swap_count,
+        inferred_orchestrator_change_count,
+        swap_count,
+        error_count,
+        last_error_occurred,
+        loading_only_session,
+        zero_output_fps_session,
+        status_error_sample_count,
+        health_signal_count,
+        health_expected_signal_count
+    FROM latest_sessions_raw
 ),
 perf_pipeline_fallback AS
 (
@@ -1603,11 +1664,17 @@ perf_1h AS
         toStartOfInterval(p.window_start, INTERVAL 1 HOUR) AS window_start,
         p.gateway,
         ifNull(p.region, '') AS region,
-        if(p.pipeline != '', p.pipeline, ifNull(f.pipeline_fallback, '')) AS pipeline,
+            if(
+                if(p.pipeline != '', p.pipeline, ifNull(f.pipeline_fallback, '')) != ''
+                AND ifNull(p.model_id, '') != ''
+                AND lowerUTF8(if(p.pipeline != '', p.pipeline, ifNull(f.pipeline_fallback, ''))) = lowerUTF8(ifNull(p.model_id, '')),
+                '',
+                if(p.pipeline != '', p.pipeline, ifNull(f.pipeline_fallback, ''))
+            ) AS pipeline,
         ifNull(p.model_id, '') AS model_id,
         uniqExactMerge(p.sessions_uniq_state) AS total_sessions,
         uniqExactMerge(p.streams_uniq_state) AS total_streams,
-        countMerge(p.sample_count_state) / 60.0 AS total_inference_minutes,
+        countMerge(p.sample_count_state) / 60.0 AS total_minutes,
         avgMerge(p.output_fps_avg_state) AS avg_output_fps
     FROM agg_stream_performance_1m p
     LEFT JOIN perf_pipeline_fallback f
@@ -1625,24 +1692,50 @@ perf_1h AS
 demand_1h AS
 (
     -- Served vs unserved demand split from session facts.
+    -- Apply the same unambiguous pipeline fallback used for perf rows.
+    -- Keeping perf/demand fallback semantics identical prevents key drift at
+    -- (hour,gateway,region,pipeline,model_id) grain.
     SELECT
-        toStartOfInterval(session_start_ts, INTERVAL 1 HOUR) AS window_start,
-        gateway,
-        ifNull(region, '') AS region,
-        pipeline,
-        ifNull(model_id, '') AS model_id,
-        sum(toUInt64(known_stream)) AS known_sessions,
-        sum(toUInt64(known_stream AND orchestrator_address != '')) AS served_sessions,
-        sum(toUInt64(known_stream AND orchestrator_address = '')) AS unserved_sessions,
-        sum(toUInt64(startup_unexcused)) AS unexcused_sessions,
-        sum(toUInt64(confirmed_swap_count > 0)) AS confirmed_swapped_sessions,
-        sum(toUInt64(inferred_orchestrator_change_count > 0)) AS inferred_orchestrator_change_sessions,
-        sum(toUInt64((confirmed_swap_count > 0) OR (inferred_orchestrator_change_count > 0))) AS swapped_sessions
-    FROM latest_sessions
-    WHERE session_start_ts > toDateTime64('2000-01-01 00:00:00', 3, 'UTC')
+        toStartOfInterval(s.session_start_ts, INTERVAL 1 HOUR) AS window_start,
+        s.gateway,
+        ifNull(s.region, '') AS region,
+            if(
+                if(s.pipeline != '', s.pipeline, ifNull(f.pipeline_fallback, '')) != ''
+                AND ifNull(s.model_id, '') != ''
+                AND lowerUTF8(if(s.pipeline != '', s.pipeline, ifNull(f.pipeline_fallback, ''))) = lowerUTF8(ifNull(s.model_id, '')),
+                '',
+                if(s.pipeline != '', s.pipeline, ifNull(f.pipeline_fallback, ''))
+            ) AS pipeline,
+        ifNull(s.model_id, '') AS model_id,
+        sum(toUInt64(s.known_stream)) AS known_sessions,
+        sum(toUInt64(s.known_stream AND s.orchestrator_address != '')) AS served_sessions,
+        sum(toUInt64(s.known_stream AND s.orchestrator_address = '')) AS unserved_sessions,
+        sum(toUInt64(s.startup_unexcused)) AS unexcused_sessions,
+        sum(toUInt64(s.confirmed_swap_count > 0)) AS confirmed_swapped_sessions,
+        sum(toUInt64(s.inferred_orchestrator_change_count > 0)) AS inferred_orchestrator_change_sessions,
+        sum(toUInt64((s.confirmed_swap_count > 0) OR (s.inferred_orchestrator_change_count > 0))) AS swapped_sessions,
+        sum(toUInt64(s.error_count > 0)) AS sessions_with_errors,
+        sum(toUInt64(s.last_error_occurred > 0)) AS sessions_with_last_error,
+        sum(toUInt64(s.loading_only_session > 0)) AS loading_only_sessions,
+        sum(toUInt64(s.zero_output_fps_session > 0)) AS zero_output_fps_sessions,
+        sum(toUInt64(
+            (s.startup_unexcused > 0)
+            OR (s.zero_output_fps_session > 0)
+            OR (s.loading_only_session > 0)
+        )) AS effective_failed_sessions,
+        sum(toUInt64(s.status_error_sample_count)) AS status_error_samples,
+        sum(toUInt64(s.health_signal_count)) AS health_signal_count,
+        sum(toUInt64(s.health_expected_signal_count)) AS health_expected_signal_count
+    FROM latest_sessions s
+    LEFT JOIN perf_pipeline_fallback f
+        ON f.window_start = toStartOfInterval(s.session_start_ts, INTERVAL 1 HOUR)
+       AND f.gateway = s.gateway
+       AND f.region = ifNull(s.region, '')
+       AND f.model_id = ifNull(s.model_id, '')
+    WHERE s.session_start_ts > toDateTime64('2000-01-01 00:00:00', 3, 'UTC')
     GROUP BY
         window_start,
-        gateway,
+        s.gateway,
         region,
         pipeline,
         model_id
@@ -1650,23 +1743,41 @@ demand_1h AS
 keys_1h AS
 (
     -- Preserve demand-only session hours/keys even when no perf/status samples exist.
+    -- This UNION is contract-critical: API demand must keep reliability counters even
+    -- when usage samples are absent for the same hour/key.
     SELECT window_start, gateway, region, pipeline, model_id
     FROM perf_1h
     UNION DISTINCT
     SELECT window_start, gateway, region, pipeline, model_id
     FROM demand_1h
 ),
-latest_session_by_request AS
+latest_session_by_request_raw AS
 (
     SELECT
         request_id,
         argMax(gateway, version) AS gateway,
         argMax(region, version) AS region,
-        argMax(pipeline, version) AS pipeline,
-        argMax(model_id, version) AS model_id
+        argMax(pipeline, version) AS pipeline_raw,
+        argMax(model_id, version) AS model_id_raw
     FROM fact_workflow_sessions
     WHERE request_id != ''
     GROUP BY request_id
+),
+latest_session_by_request AS
+(
+    SELECT
+        request_id,
+        gateway,
+        region,
+        ifNull(model_id_raw, '') AS model_id,
+        if(
+            ifNull(pipeline_raw, '') != ''
+            AND ifNull(model_id_raw, '') != ''
+            AND lowerUTF8(ifNull(pipeline_raw, '')) = lowerUTF8(ifNull(model_id_raw, '')),
+            '',
+            ifNull(pipeline_raw, '')
+        ) AS pipeline
+    FROM latest_session_by_request_raw
 ),
 fees_1h AS
 (
@@ -1697,7 +1808,7 @@ SELECT
 
     ifNull(p.total_streams, toUInt64(0)) AS total_streams,
     ifNull(p.total_sessions, toUInt64(0)) AS total_sessions,
-    ifNull(p.total_inference_minutes, 0.0) AS total_inference_minutes,
+    ifNull(p.total_minutes, 0.0) AS total_minutes,
     p.avg_output_fps,
 
     ifNull(d.known_sessions, toUInt64(0)) AS known_sessions,
@@ -1708,9 +1819,18 @@ SELECT
     ifNull(d.confirmed_swapped_sessions, toUInt64(0)) AS confirmed_swapped_sessions,
     ifNull(d.inferred_orchestrator_change_sessions, toUInt64(0)) AS inferred_orchestrator_change_sessions,
     ifNull(d.swapped_sessions, toUInt64(0)) AS swapped_sessions,
+    ifNull(d.sessions_with_errors, toUInt64(0)) AS sessions_with_errors,
+    ifNull(d.sessions_with_last_error, toUInt64(0)) AS sessions_with_last_error,
+    ifNull(d.loading_only_sessions, toUInt64(0)) AS loading_only_sessions,
+    ifNull(d.zero_output_fps_sessions, toUInt64(0)) AS zero_output_fps_sessions,
+    ifNull(d.status_error_samples, toUInt64(0)) AS status_error_samples,
+    ifNull(d.health_signal_count, toUInt64(0)) AS health_signal_count,
+    ifNull(d.health_expected_signal_count, toUInt64(0)) AS health_expected_signal_count,
+    ifNull(d.health_signal_count / nullIf(d.health_expected_signal_count, 0), 1.0) AS health_completeness_ratio,
     -- Proxy for unmet demand (known sessions without orchestrator attribution).
     ifNull(d.unserved_sessions, toUInt64(0)) AS missing_capacity_count,
-    ifNull(1 - (d.unexcused_sessions / nullIf(d.known_sessions, 0)), 0) AS success_ratio,
+    ifNull(1 - (d.unexcused_sessions / nullIf(d.known_sessions, 0)), 0) AS startup_success_ratio,
+    ifNull(1 - (d.effective_failed_sessions / nullIf(d.known_sessions, 0)), 0) AS success_ratio,
     ifNull(f.fee_payment_eth, 0.0) AS fee_payment_eth
 FROM keys_1h k
 LEFT JOIN perf_1h p
@@ -1830,7 +1950,14 @@ rel_gpu_1h_raw AS
         sumMerge(unexcused_sessions_state) AS unexcused_sessions,
         sumMerge(confirmed_swapped_sessions_state) AS confirmed_swapped_sessions,
         sumMerge(inferred_orchestrator_change_sessions_state) AS inferred_orchestrator_change_sessions,
-        sumMerge(swapped_sessions_state) AS swapped_sessions
+        sumMerge(swapped_sessions_state) AS swapped_sessions,
+        sumMerge(sessions_with_errors_state) AS sessions_with_errors,
+        sumMerge(sessions_with_last_error_state) AS sessions_with_last_error,
+        sumMerge(loading_only_sessions_state) AS loading_only_sessions,
+        sumMerge(zero_output_fps_sessions_state) AS zero_output_fps_sessions,
+        sumMerge(status_error_samples_state) AS status_error_samples,
+        sumMerge(health_signal_count_state) AS health_signal_count,
+        sumMerge(health_expected_signal_count_state) AS health_expected_signal_count
     FROM agg_reliability_1h
     GROUP BY
         window_start,
@@ -1855,7 +1982,14 @@ rel_gpu_1h AS
         r.unexcused_sessions,
         r.confirmed_swapped_sessions,
         r.inferred_orchestrator_change_sessions,
-        r.swapped_sessions
+        r.swapped_sessions,
+        r.sessions_with_errors,
+        r.sessions_with_last_error,
+        r.loading_only_sessions,
+        r.zero_output_fps_sessions,
+        r.status_error_samples,
+        r.health_signal_count,
+        r.health_expected_signal_count
     FROM rel_gpu_1h_raw r
     LEFT JOIN latest_gpu_by_key k
         ON k.window_start = r.window_start
@@ -1966,6 +2100,14 @@ SELECT
     ifNull(r.confirmed_swapped_sessions, toUInt64(0)) AS confirmed_swapped_sessions,
     ifNull(r.inferred_orchestrator_change_sessions, toUInt64(0)) AS inferred_orchestrator_change_sessions,
     ifNull(r.swapped_sessions, toUInt64(0)) AS swapped_sessions,
+    ifNull(r.sessions_with_errors, toUInt64(0)) AS sessions_with_errors,
+    ifNull(r.sessions_with_last_error, toUInt64(0)) AS sessions_with_last_error,
+    ifNull(r.loading_only_sessions, toUInt64(0)) AS loading_only_sessions,
+    ifNull(r.zero_output_fps_sessions, toUInt64(0)) AS zero_output_fps_sessions,
+    ifNull(r.status_error_samples, toUInt64(0)) AS status_error_samples,
+    ifNull(r.health_signal_count, toUInt64(0)) AS health_signal_count,
+    ifNull(r.health_expected_signal_count, toUInt64(0)) AS health_expected_signal_count,
+    ifNull(r.health_signal_count / nullIf(r.health_expected_signal_count, 0), 1.0) AS health_completeness_ratio,
     ifNull(r.unexcused_sessions, toUInt64(0)) AS missing_capacity_count,
 
     ifNull(f.fee_payment_eth, 0.0) AS fee_payment_eth
@@ -2024,6 +2166,7 @@ WITH latest_sessions AS
     SELECT
         workflow_session_id,
         argMax(session_start_ts, version) AS session_start_ts,
+        argMax(session_end_ts, version) AS session_end_ts,
         argMax(orchestrator_address, version) AS orchestrator_address,
         argMax(pipeline, version) AS pipeline,
         argMax(model_id, version) AS model_id,
@@ -2035,41 +2178,121 @@ WITH latest_sessions AS
         argMax(startup_unexcused, version) AS startup_unexcused,
         argMax(confirmed_swap_count, version) AS confirmed_swap_count,
         argMax(inferred_orchestrator_change_count, version) AS inferred_orchestrator_change_count,
-        argMax(swap_count, version) AS swap_count
+        argMax(swap_count, version) AS swap_count,
+        argMax(error_count, version) AS error_count,
+        argMax(last_error_occurred, version) AS last_error_occurred,
+        argMax(loading_only_session, version) AS loading_only_session,
+        argMax(zero_output_fps_session, version) AS zero_output_fps_session,
+        argMax(status_error_sample_count, version) AS status_error_sample_count,
+        argMax(health_signal_count, version) AS health_signal_count,
+        argMax(health_expected_signal_count, version) AS health_expected_signal_count
     FROM fact_workflow_sessions
     GROUP BY workflow_session_id
+),
+status_session_hours AS
+(
+    SELECT
+        toStartOfInterval(sample_ts, INTERVAL 1 HOUR) AS window_start,
+        workflow_session_id,
+        toUInt8(1) AS has_status_row,
+        orchestrator_address,
+        pipeline,
+        nullIf(model_id, '') AS model_id,
+        nullIf(gpu_id, '') AS gpu_id,
+        nullIf(region, '') AS region,
+        count() AS status_samples,
+        countIf(output_fps > 0) AS fps_positive_samples,
+        countIf(state IN ('ONLINE', 'DEGRADED_INFERENCE', 'DEGRADED_INPUT')) AS running_state_samples
+    FROM fact_stream_status_samples
+    WHERE is_attributed = 1
+    GROUP BY
+        window_start,
+        workflow_session_id,
+        orchestrator_address,
+        pipeline,
+        model_id,
+        gpu_id,
+        region
 )
 SELECT
-    toStartOfInterval(session_start_ts, INTERVAL 1 HOUR) AS window_start,
-    orchestrator_address,
-    pipeline,
-    model_id,
-    gpu_id,
-    region,
-    sum(toUInt64(known_stream)) AS known_sessions,
-    sum(toUInt64(startup_success)) AS startup_success_sessions,
-    sum(toUInt64(startup_excused)) AS excused_sessions,
-    sum(toUInt64(startup_unexcused)) AS unexcused_sessions,
-    sum(toUInt64(confirmed_swap_count > 0)) AS confirmed_swapped_sessions,
-    sum(toUInt64(inferred_orchestrator_change_count > 0)) AS inferred_orchestrator_change_sessions,
-    sum(toUInt64((confirmed_swap_count > 0) OR (inferred_orchestrator_change_count > 0))) AS swapped_sessions,
-    1 - (sum(toUInt64(startup_unexcused)) / nullIf(sum(toUInt64(known_stream)), 0)) AS success_ratio,
-    1 - (sum(toUInt64((confirmed_swap_count > 0) OR (inferred_orchestrator_change_count > 0))) / nullIf(sum(toUInt64(known_stream)), 0)) AS no_swap_ratio,
+    sh.window_start AS window_start,
+    sh.orchestrator_address AS orchestrator_address,
+    sh.pipeline AS pipeline,
+    sh.model_id AS model_id,
+    sh.gpu_id AS gpu_id,
+    sh.region AS region,
+    sum(toUInt64(ls.known_stream)) AS known_sessions,
+    sum(toUInt64(ls.startup_success)) AS startup_success_sessions,
+    sum(toUInt64(ls.startup_excused)) AS excused_sessions,
+    sum(toUInt64(ls.startup_unexcused)) AS unexcused_sessions,
+    sum(toUInt64(ls.confirmed_swap_count > 0)) AS confirmed_swapped_sessions,
+    sum(toUInt64(ls.inferred_orchestrator_change_count > 0)) AS inferred_orchestrator_change_sessions,
+    sum(toUInt64((ls.confirmed_swap_count > 0) OR (ls.inferred_orchestrator_change_count > 0))) AS swapped_sessions,
+    sum(toUInt64(ls.error_count > 0)) AS sessions_with_errors,
+    sum(toUInt64(ls.last_error_occurred > 0)) AS sessions_with_last_error,
+    sum(toUInt64(ls.loading_only_session > 0)) AS loading_only_sessions,
+    sum(toUInt64(ls.zero_output_fps_session > 0)) AS zero_output_fps_sessions,
+    sum(toUInt64(ls.status_error_sample_count)) AS status_error_samples,
+    sum(toUInt64(ls.health_signal_count)) AS health_signal_count,
+    sum(toUInt64(ls.health_expected_signal_count)) AS health_expected_signal_count,
+    ifNull(sum(toUInt64(ls.health_signal_count)) / nullIf(sum(toUInt64(ls.health_expected_signal_count)), 0), 1.0) AS health_completeness_ratio,
+    1 - (sum(toUInt64(ls.startup_unexcused)) / nullIf(sum(toUInt64(ls.known_stream)), 0)) AS startup_success_ratio,
+    1 - (
+        sum(toUInt64(
+            (ls.startup_unexcused > 0)
+            OR (ls.zero_output_fps_session > 0)
+            OR (ls.loading_only_session > 0)
+        )) / nullIf(sum(toUInt64(ls.known_stream)), 0)
+    ) AS success_ratio,
+    1 - (sum(toUInt64((ls.confirmed_swap_count > 0) OR (ls.inferred_orchestrator_change_count > 0))) / nullIf(sum(toUInt64(ls.known_stream)), 0)) AS no_swap_ratio,
     (
-        (1 - (sum(toUInt64(startup_unexcused)) / nullIf(sum(toUInt64(known_stream)), 0))) * 0.7
+        (1 - (sum(toUInt64(ls.startup_unexcused)) / nullIf(sum(toUInt64(ls.known_stream)), 0))) * 0.4
         +
-        (1 - (sum(toUInt64((confirmed_swap_count > 0) OR (inferred_orchestrator_change_count > 0))) / nullIf(sum(toUInt64(known_stream)), 0))) * 0.3
-    ) * 100 AS sla_score
-FROM latest_sessions
-WHERE session_start_ts > toDateTime64('2000-01-01 00:00:00', 3, 'UTC')
-  AND orchestrator_address != ''
+        (1 - (sum(toUInt64((ls.confirmed_swap_count > 0) OR (ls.inferred_orchestrator_change_count > 0))) / nullIf(sum(toUInt64(ls.known_stream)), 0))) * 0.2
+        +
+        (
+            1 - (
+                sum(toUInt64(
+                    (ls.loading_only_session > 0)
+                    OR (ls.zero_output_fps_session > 0)
+                )) / nullIf(sum(toUInt64(ls.known_stream)), 0)
+            )
+        ) * 0.4
+    ) * ifNull(sum(toUInt64(ls.health_signal_count)) / nullIf(sum(toUInt64(ls.health_expected_signal_count)), 0), 1.0) * 100 AS sla_score
+FROM latest_sessions ls
+INNER JOIN status_session_hours sh
+    ON sh.workflow_session_id = ls.workflow_session_id
+LEFT JOIN status_session_hours prev_sh
+    ON prev_sh.workflow_session_id = sh.workflow_session_id
+   AND prev_sh.window_start = sh.window_start - INTERVAL 1 HOUR
+   AND prev_sh.orchestrator_address = sh.orchestrator_address
+   AND prev_sh.pipeline = sh.pipeline
+   AND ifNull(prev_sh.model_id, '') = ifNull(sh.model_id, '')
+   AND ifNull(prev_sh.gpu_id, '') = ifNull(sh.gpu_id, '')
+   AND ifNull(prev_sh.region, '') = ifNull(sh.region, '')
+WHERE sh.window_start > toDateTime64('2000-01-01 00:00:00', 3, 'UTC')
+  AND sh.orchestrator_address != ''
+  AND NOT (
+      ls.session_start_ts < sh.window_start
+      AND ls.session_end_ts IS NOT NULL
+      AND ls.session_end_ts >= sh.window_start
+      AND ls.session_end_ts < sh.window_start + INTERVAL 1 HOUR
+      AND
+      sh.fps_positive_samples = 0
+      AND sh.running_state_samples = 0
+      AND sh.status_samples < 3
+      AND prev_sh.has_status_row = 1
+      AND prev_sh.fps_positive_samples = 0
+      AND prev_sh.running_state_samples = 0
+      AND prev_sh.status_samples < 3
+  )
 GROUP BY
     window_start,
-    orchestrator_address,
-    pipeline,
-    model_id,
-    gpu_id,
-    region;
+    sh.orchestrator_address,
+    sh.pipeline,
+    sh.model_id,
+    sh.gpu_id,
+    sh.region;
 
 -- ============================================================
 -- HEALTH CHECK VIEWS
@@ -2169,43 +2392,3 @@ ALTER TABLE stream_trace_events
 
 ALTER TABLE network_capabilities
     ADD INDEX IF NOT EXISTS idx_orch_address orchestrator_address TYPE bloom_filter GRANULARITY 1;
-
-
-
---jitter coefficient data
-CREATE MATERIALIZED VIEW IF NOT EXISTS livepeer_analytics.mv_jitter_stats
-            ENGINE = SummingMergeTree()
-                ORDER BY (orchestrator_address, window_start)
-AS SELECT
-       toStartOfInterval(event_timestamp, INTERVAL 5 MINUTE) as window_start,
-       orchestrator_address,
-       avgState(output_fps) as avg_fps_state,
-       stddevPopState(output_fps) as stddev_fps_state
-   FROM livepeer_analytics.ai_stream_status
-   GROUP BY window_start, orchestrator_address;
-
---back fill the jitter data
-INSERT INTO livepeer_analytics.mv_jitter_stats
-SELECT
-    toStartOfInterval(event_timestamp, INTERVAL 5 MINUTE) as window_start,
-    orchestrator_address,
-    avgState(output_fps) as avg_fps_state,
-    stddevPopState(output_fps) as stddev_fps_state
-FROM livepeer_analytics.ai_stream_status
-GROUP BY window_start, orchestrator_address;
-
-
-SELECT
-    -- Use the official URI from capabilities, fallback to the event URL
-    coalesce(nullIf(nc.orch_uri, ''), s.orchestrator_url) AS display_uri,
-    count(DISTINCT s.stream_id) AS active_streams,
-    avg(s.output_fps) AS avg_fps,
-    quantile(0.95)(s.output_fps) AS p95_fps,
-    sum(s.restart_count) AS total_restarts
-FROM livepeer_analytics.ai_stream_status AS s
-         LEFT JOIN livepeer_analytics.network_capabilities AS nc
-                   ON s.orchestrator_url = nc.orch_uri
-WHERE s.event_timestamp >= now() - INTERVAL 24 HOUR
-GROUP BY display_uri
-ORDER BY active_streams DESC
-LIMIT 10

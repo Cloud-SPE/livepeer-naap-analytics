@@ -77,9 +77,11 @@ public class WorkflowSessionAggregatorFunction extends KeyedBroadcastProcessFunc
             state.workflowSessionId = signal.workflowSessionId;
         }
 
-        // Resolve model compatibility context first, then lookup capability by hot-wallet identity.
+        // Phase 1: derive a compatibility model hint without capability context.
+        // This preserves spec behavior for legacy/misnamed payloads where `pipeline` can carry
+        // model-like tokens, and gives attribution selection a normalized hint to match against.
         CapabilitySnapshotRef snapshot = null;
-        String hotKey = AddressNormalizer.normalizeOrEmpty(signal.orchestratorAddress);
+        String hotKey = resolveCapabilityLookupKey(signal.orchestratorAddress, state.orchestratorAddress);
         PipelineModelResolver.Resolution preSelection = PipelineModelResolver.resolve(
                 resolverMode,
                 signal,
@@ -92,20 +94,22 @@ public class WorkflowSessionAggregatorFunction extends KeyedBroadcastProcessFunc
                     ctx.getBroadcastState(CapabilityBroadcastState.CAPABILITY_STATE_DESCRIPTOR).get(hotKey);
             snapshot = CapabilityAttributionSelector.selectBestCandidate(
                     bucket,
-                    modelHint,
-                    signal.signalTimestamp,
-                    DEFAULT_ATTRIBUTION_TTL_MS);
+                    CapabilityAttributionSelector.SelectionContext.of(
+                            modelHint,
+                            signal.orchestratorUrl,
+                            state.gpuId,
+                            signal.signalTimestamp,
+                            DEFAULT_ATTRIBUTION_TTL_MS));
         }
 
+        // Phase 2: resolve canonical pipeline/model using selected capability context.
         PipelineModelResolver.Resolution resolved = PipelineModelResolver.resolve(
                 resolverMode,
                 signal,
                 state.pipeline,
                 state.modelId,
                 snapshot);
-        if (!StringSemantics.isBlank(resolved.pipeline)) {
-            signal.pipeline = resolved.pipeline;
-        }
+        applyResolvedPipelineToSignal(signal, resolved);
 
         // Apply deterministic state transitions and attribution in a fixed order.
         WorkflowSessionStateMachine.applySignal(state, signal);
@@ -120,11 +124,43 @@ public class WorkflowSessionAggregatorFunction extends KeyedBroadcastProcessFunc
                 snapshot,
                 signal.signalTimestamp,
                 DEFAULT_ATTRIBUTION_TTL_MS);
+        if (isTerminalSignal(signal)) {
+            applyTerminalAttributionFinalization(state, signal, ctx);
+        }
         sessionState.update(state);
 
         // Emit latest state snapshot for this session (versioned upsert row).
         EventPayloads.FactWorkflowSession fact = WorkflowSessionStateMachine.toFact(state);
         out.collect(new ParsedEvent<>(signal.sourceEvent, fact));
+    }
+
+    /**
+     * Applies canonical pipeline semantics directly to the lifecycle signal before state-machine
+     * transitions execute.
+     *
+     * <p>Why this matters:
+     * - The state machine ingests `signal.pipeline` for downstream session/segment facts.
+     * - In legacy streams, incoming `signal.pipeline` may be model-like (`legacy_misnamed`).
+     * - Writing `resolved.pipeline` back to the signal prevents model-id leakage into pipeline
+     *   dimensions and keeps emitted facts aligned with serving/view contracts.
+     *
+     * <p>Behavior:
+     * - Non-blank resolved values are copied through.
+     * - Blank unresolved values intentionally normalize to empty string, avoiding stale prior
+     *   model-like labels from persisting in the signal path.
+     */
+    static void applyResolvedPipelineToSignal(
+            LifecycleSignal signal,
+            PipelineModelResolver.Resolution resolved) {
+        if (signal == null || resolved == null) {
+            return;
+        }
+        signal.pipeline = StringSemantics.firstNonBlank(resolved.pipeline);
+    }
+
+    static String resolveCapabilityLookupKey(String signalOrchestratorAddress, String stateOrchestratorAddress) {
+        return AddressNormalizer.normalizeOrEmpty(
+                StringSemantics.firstNonBlank(signalOrchestratorAddress, stateOrchestratorAddress));
     }
 
     @Override
@@ -147,6 +183,7 @@ public class WorkflowSessionAggregatorFunction extends KeyedBroadcastProcessFunc
         // can map to canonical orchestrator identity + model/GPU attribution.
         CapabilitySnapshotRef ref = new CapabilitySnapshotRef();
         ref.snapshotTs = cap.eventTimestamp;
+        ref.sourceEventId = cap.sourceEventId;
         ref.canonicalOrchestratorAddress = canonicalAddress;
         ref.orchestratorUrl = cap.orchUri;
         ref.pipeline = cap.pipeline;
@@ -176,6 +213,45 @@ public class WorkflowSessionAggregatorFunction extends KeyedBroadcastProcessFunc
                 DEFAULT_ATTRIBUTION_TTL_MS,
                 CapabilityAttributionSelector.DEFAULT_MAX_CANDIDATES_PER_WALLET);
         ctx.getBroadcastState(CapabilityBroadcastState.CAPABILITY_STATE_DESCRIPTOR).put(key, bucket);
+    }
+
+    private static boolean isTerminalSignal(LifecycleSignal signal) {
+        return signal.signalType == LifecycleSignal.SignalType.STREAM_TRACE
+                && "gateway_ingest_stream_closed".equals(signal.traceType);
+    }
+
+    private void applyTerminalAttributionFinalization(
+            WorkflowSessionAccumulator state,
+            LifecycleSignal signal,
+            ReadOnlyContext ctx) throws Exception {
+        String lookupAddress = resolveCapabilityLookupKey(signal.orchestratorAddress, state.orchestratorAddress);
+        if (StringSemantics.isBlank(lookupAddress)) {
+            return;
+        }
+
+        CapabilitySnapshotBucket bucket =
+                ctx.getBroadcastState(CapabilityBroadcastState.CAPABILITY_STATE_DESCRIPTOR).get(lookupAddress);
+        if (bucket == null) {
+            return;
+        }
+
+        CapabilitySnapshotRef selected = CapabilityAttributionSelector.selectBestCandidate(
+                bucket,
+                CapabilityAttributionSelector.SelectionContext.of(
+                        StringSemantics.firstNonBlank(state.modelId, signal.modelHint, signal.pipelineHint, signal.pipeline),
+                        StringSemantics.firstNonBlank(signal.orchestratorUrl, state.orchestratorUrl),
+                        state.gpuId,
+                        signal.signalTimestamp,
+                        DEFAULT_ATTRIBUTION_TTL_MS));
+        if (selected == null) {
+            return;
+        }
+
+        WorkflowSessionStateMachine.applyCapabilityAttribution(
+                state,
+                selected,
+                signal.signalTimestamp,
+                DEFAULT_ATTRIBUTION_TTL_MS);
     }
 
 }

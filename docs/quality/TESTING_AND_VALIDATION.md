@@ -2,9 +2,9 @@
 
 ## Quality Layers
 
-1. Flink unit and contract tests (`flink-jobs/src/test/java`)
+1. Flink unit and contract tests ([`flink-jobs/src/test/java`](../../flink-jobs/src/test/java))
 2. Schema sync and parser guardrails
-3. ClickHouse integration SQL assertions (`tests/integration/sql`)
+3. ClickHouse integration SQL assertions ([`tests/integration/sql`](../../tests/integration/sql))
 4. Replay and trace query-pack validation
 5. Notebook-assisted investigation and fixture export/load
 
@@ -34,7 +34,7 @@
 - Scenario assertions:
   - `uv run --project tests/python python tests/python/scripts/run_clickhouse_data_tests.py --sql-file tests/integration/sql/assertions_scenario_candidates.sql --lookback-hours 720`
   - Note: `scenario_4_success_with_param_updates_exists` is currently informational (non-blocking) until param-update source rows are present in production.
-  - Note: if `scenario_3_success_with_swap_exists` fails while replay and raw/typed tests pass, first check fixture coverage (`tests/integration/fixtures/manifest.json`) before debugging parser logic.
+  - Note: if `scenario_3_success_with_swap_exists` fails while replay and raw/typed tests pass, first check fixture coverage ([`tests/integration/fixtures/manifest.json`](../../tests/integration/fixtures/manifest.json)) before debugging parser logic.
 - One-shot integration run:
   - `tests/integration/run_all.sh`
 
@@ -60,16 +60,16 @@ Use a split CI strategy to balance confidence and runtime:
 
 Workflow files:
 
-- `.github/workflows/ci-pr-smoke.yml`
-- `.github/workflows/ci-nightly-full.yml`
-- `.github/workflows/ci-manual-deep-verify.yml`
+- [`.github/workflows/ci-pr-smoke.yml`](../../.github/workflows/ci-pr-smoke.yml)
+- [`.github/workflows/ci-nightly-full.yml`](../../.github/workflows/ci-nightly-full.yml)
+- [`.github/workflows/ci-manual-deep-verify.yml`](../../.github/workflows/ci-manual-deep-verify.yml)
 
 ## Pipeline Assertions Requirement Map
 
-Reference SQL: `tests/integration/sql/assertions_pipeline.sql`
+Reference SQL: [`tests/integration/sql/assertions_pipeline.sql`](../../tests/integration/sql/assertions_pipeline.sql)
 
 Use this map to understand why each assertion exists and where to look first when it fails.
-Maintenance rule: keep this table in sync with `tests/integration/sql/assertions_pipeline.sql`.
+Maintenance rule: keep this table in sync with [`tests/integration/sql/assertions_pipeline.sql`](../../tests/integration/sql/assertions_pipeline.sql).
 Any add/rename/remove of a `-- TEST:` block must co-update this section in the same change.
 
 | Assertion (`-- TEST:`) | Requirement Enforced | First Triage Check |
@@ -82,39 +82,68 @@ Any add/rename/remove of a `-- TEST:` block must co-update this section in the s
 | `session_fact_present` | Sessionization emits `fact_workflow_sessions` rows. | Confirm lifecycle operators are running and replay produced stream trace/status rows. |
 | `core_raw_to_silver_gold_nonempty` | Core flow has non-zero accepted raw rows and non-empty silver+gold facts. | Compare core raw distinct IDs vs DLQ/quarantine distinct IDs, then verify status/trace silver rows and session fact rows are non-zero. |
 | `network_capabilities_raw_and_typed_present` | Capabilities are present both raw and typed for attribution windows. | Check `streaming_events(type='network_capabilities')` vs `network_capabilities` parse output. |
-| `status_raw_to_silver_projection` | Typed status rows are losslessly projected to silver status fact, including per-source-UID multiplicity. | Compare typed vs silver counts by `cityHash64(raw_json)` source UID; inspect `missing_in_silver`, `multiplicity_mismatch`, and `silver_only_keys`. |
-| `trace_raw_to_silver_projection` | Typed trace rows are losslessly projected to silver trace edges, including per-source-UID multiplicity. | Compare typed vs silver counts by `cityHash64(raw_json)` source UID; inspect `missing_in_silver`, `multiplicity_mismatch`, and `silver_only_keys`. |
+| `status_raw_to_silver_projection` | Typed status rows are losslessly projected to silver status fact, including per-source-UID multiplicity. | Compare typed vs silver counts by `lower(hex(SHA256(raw_json)))` source UID; inspect `missing_in_silver`, `multiplicity_mismatch`, and `silver_only_keys`. |
+| `trace_raw_to_silver_projection` | Typed trace rows are losslessly projected to silver trace edges, including per-source-UID multiplicity. | Compare typed vs silver counts by `lower(hex(SHA256(raw_json)))` source UID; inspect `missing_in_silver`, `multiplicity_mismatch`, and `silver_only_keys`. |
 | `ingest_raw_to_silver_projection` | Typed ingest rows are losslessly projected to ingest silver fact, including per-source-UID multiplicity. | Compare typed vs silver counts by `cityHash64(raw_json)` source UID; inspect `missing_in_silver`, `multiplicity_mismatch`, and `silver_only_keys`. |
 | `session_final_uniqueness` | Latest-version session rows are unique per `workflow_session_id` under `FINAL`. | Inspect duplicate latest `version` rows in `fact_workflow_sessions`. |
 | `workflow_session_has_identifier` | Session rows always carry non-empty `workflow_session_id`. | Inspect lifecycle signal key construction (`stream_id|request_id`) for blanks. |
-| `swap_signal_split_consistency` | Legacy `swap_count` must equal confirmed swap count (`confirmed_swap_count`). | Validate session fact emission contract in Flink state machine and mapper fields. |
+| `swap_signal_split_consistency` | Compatibility alias `swap_count` must equal explicit swap count (`confirmed_swap_count`); inferred swaps are tracked separately (`inferred_orchestrator_change_count`). | Validate session fact emission contract in Flink state machine and mapper fields. |
 | `gold_sessions_use_canonical_orchestrator_identity` | Gold/session orchestrator identity is canonical (not hot-wallet/local). | Compare session `orchestrator_address` to canonical `network_capabilities.orchestrator_address` in-window. |
-| `swapped_sessions_have_evidence` | `swap_count > 0` (confirmed swaps) has supporting explicit swap evidence from trace/segments. | Check swap evidence via both `fact_stream_trace_edges` and `stream_trace_events` by `(stream_id,request_id)`. |
+| `swapped_sessions_have_evidence` | Sessions flagged swapped by canonical semantics (`confirmed_swap_count > 0` or `inferred_orchestrator_change_count > 0`) must have fact-level evidence (explicit swap trace edge or multi-orchestrator segment history). | Check `fact_stream_trace_edges.is_swap_event` and segment orchestrator cardinality by `workflow_session_id`; avoid typed/raw fallback joins for attribution evidence. |
 | `param_updates_reference_existing_session` | Param-update facts must reference a known session id (no orphan IDs). | Left join `fact_workflow_param_updates` to all known session ids and inspect orphan IDs. |
 | `lifecycle_session_pipeline_model_compatible` | Attributed sessions keep `pipeline` and `model_id` semantically distinct when both set (`pipeline` workflow class, `model_id` model label). | Inspect lifecycle resolver mode, capability attribution selection, and canonical field assignment paths. |
-| `session_to_segment_pipeline_model_consistency` | Segment rows keep model identity consistent with their parent attributed session (`segment` currently exposes `model_id` but not `pipeline`). | Compare latest session `model_id` vs latest segment `model_id` by `workflow_session_id`/`segment_index`; inspect missing comparable model rows. |
+| `lifecycle_unattributed_pipeline_not_model_id` | Unattributed sessions (`gpu_attribution_method = 'none'`) must not persist model labels into `pipeline`; `pipeline` remains workflow-class semantics even without capability attribution. | Inspect lifecycle signal canonicalization in session aggregation and verify unresolved legacy-model hints do not populate session `pipeline`. |
+| `session_to_segment_pipeline_model_consistency` | Segment rows keep pipeline/model identity consistent with their parent attributed session. | Compare latest session vs latest segment `pipeline`/`model_id` by `workflow_session_id`/`segment_index`; inspect missing comparable rows. |
 | `session_to_latency_pipeline_model_consistency` | Latency samples preserve canonical session `pipeline` and `model_id`. | Compare latest `fact_workflow_latency_samples` fields against latest session fields by `workflow_session_id`. |
-| `session_to_status_projection_consistency` | Status silver rows remain semantically aligned to lifecycle session `pipeline` and `model_id`, including non-empty canonical pipeline coverage for attributed sessions (allowing model-aligned fallback when raw status pipeline is blank). | Join `fact_stream_status_samples` to latest sessions by `workflow_session_id`; inspect mismatch counts and `missing_status_pipeline_rows`. |
-| `trace_edge_pipeline_model_coverage` | Each attributed session has at least one trace-edge row with non-empty `pipeline` and `model_id`. | Aggregate `fact_stream_trace_edges` by `workflow_session_id` and inspect sessions with no joinable (`pipeline`,`model_id`) edge. |
+| `session_to_status_projection_consistency` | Status/session pipeline-model alignment is enforced with severity tiers: partial drift is WARN, full comparable-set mismatch is FAIL. | Compare `pipeline_mismatch_rows`/`model_mismatch_rows` to comparable row counts and inspect model variant normalization (`streamdiffusion-sdxl` vs `streamdiffusion-sdxl-v2v`) before escalation. |
+| `status_vs_segment_identity_consistency` | Status-to-segment identity alignment is monitored with severity tiers: partial drift is WARN, all-row mismatch is FAIL. | Inspect mismatch examples by `workflow_session_id` for canonical orchestrator/model/GPU divergence; use `missing_segment_match_rows` as timing/context diagnostics. |
+| `latency_vs_segment_identity_consistency` | Latency-to-segment identity alignment is monitored with severity tiers: partial drift is WARN, all-row mismatch is FAIL. | Inspect latest latency rows lacking valid segment window matches (`segment_start_ts`/`segment_end_ts`) before classifying as blocking drift. |
+| `proxy_to_canonical_multiplicity_guard` | Proxy identity fanout is severity-tiered: `(local_address, orch_uri)` multi-canonical is FAIL; proxy-only multi-canonical is WARN. | Check canonical cardinality both per `local_address` and per `(local_address, orch_uri)` in `network_capabilities`; prioritize URI-key collisions as blocking. |
+| `session_summary_change_flags_consistency` | Session derived change flags must match distinct segment pipeline/model counts. | Compare `has_model_change`/`has_pipeline_change` from latest sessions against distinct segment values per `workflow_session_id`. |
+| `gpu_view_no_perf_only_orphan_rows` | GPU perf-only orphan rows are tracked as non-blocking drift signal (WARN). | Inspect `v_api_gpu_metrics` rows with `status_samples>0` and zero known/latency evidence, then verify segment-hour key coverage for those keys. |
+| `trace_edge_pipeline_model_coverage` | Trace-edge pipeline/model coverage is severity-tiered: partial uncovered attributed sessions are WARN, fully uncovered attributed set is FAIL. | Aggregate `fact_stream_trace_edges` by `workflow_session_id`; inspect uncovered sessions for missing pipeline/model projection on edge rows. |
 | `latest_sessions_vs_segment_session_ids` | Distinct segmented session ids do not exceed latest session ids. | Compare latest session selection logic vs segment fact time filtering in-window. |
 | `raw_session_rows_vs_latest_sessions` | Raw session rows are never fewer than latest-per-session rows. | Inspect `fact_workflow_sessions` versioning/upserts and replay window boundaries. |
 | `segment_rows_vs_segment_session_ids` | Segment row count is always >= distinct segment session ids. | Check segment emission completeness and any segment-level dedup/drop behavior. |
 | `mixed_known_stream_versions` | Mixed `known_stream` versions are allowed, but regressive `1 -> 0` transitions fail. | Inspect per-session version history ordered by `version` for regressive transitions. |
-| `agg_stream_performance_1m_matches_status_samples` | `agg_stream_performance_1m` is lossless/numerically consistent with `fact_stream_status_samples` at 1-minute grain. | Compare key coverage first (`expected_only_keys`/`rollup_only_keys`), then session/stream/sample and FPS diffs. |
+| `agg_stream_performance_1m_matches_status_samples` | `agg_stream_performance_1m` is lossless/numerically consistent with canonical attributed status facts (`is_attributed=1`, non-empty `orchestrator_address`) at 1-minute grain. | Compare key coverage first (`expected_only_keys`/`rollup_only_keys`), then session/stream/sample and FPS diffs for canonical serving keys. |
 | `gpu_view_covers_healthy_attributed_session_keys` | Successful attributable session keys are represented in `v_api_gpu_metrics`. | Check missing key examples and verify fallback attribution fields (`model_id/gpu_id/region`) for those sessions. |
 | `demand_has_rows_for_all_session_hours` | Every session hour is represented in `v_api_network_demand`. | Inspect missing `window_start` hours and check demand view filters/materialization lag. |
 | `gpu_count_delta_explained_by_key_overlap` | GPU view-vs-rollup row delta must equal net key-overlap delta. | Compare `row_delta` vs `overlap_delta`; investigate unexpected key proliferation/drop. |
 | `network_demand_counts_aligned_to_rollup` | Demand view keyspace/counts strictly align with recomputed union(perf,demand) keyspace at `(hour,gateway,region,pipeline,model_id)` grain. | Inspect `rollup_only_keys`/`view_only_keys` first, then demand/perf key derivation and model-key normalization. |
-| `network_demand_model_split_conservation` | Model-grain demand rows conserve totals when re-aggregated to pipeline grain. | Compare pipeline-baseline recompute versus re-aggregated `v_api_network_demand` totals and key coverage. |
+| `network_demand_effective_success_not_above_startup_success` | Effective success must not exceed startup-only success for any demand row. | Investigate rows where `success_ratio > startup_success_ratio`; check effective-failure signal derivation. |
+| `network_demand_effective_success_penalizes_failure_indicators` | Demand rows with effective failure indicators must not report perfect effective success. | Inspect rows with unexcused/zero-output/loading-only counters and `success_ratio ~= 1`; transient `last_error_occurred` alone is non-penalizing. |
+| `network_demand_model_split_conservation` | Informational guard: model-grain re-aggregation may inflate distinct-count fields (`total_sessions`, `total_streams`), while additive `total_minutes` should remain conserved. | Compare pipeline-baseline recompute versus re-aggregated `v_api_network_demand`; treat distinct-count deltas as WARN and minutes/key drift as blocking only when inconsistent. |
 | `network_demand_join_multiplicity_guard` | Demand parity keyspaces are unique at model grain (1:1 joinable). | Check duplicate key counts on both expected rollup keys and API keys for `(hour,gateway,region,pipeline,model_id)`. |
 | `network_demand_pipeline_join_inflation_guard` | Informational guard for naive pipeline-only joins against model-grain demand rows. | If `status='WARN'`, consumer joins must include `model_id` or pre-aggregate before joining. |
-| `preexisting_grain_drift_baseline_gpu_sla` | Existing model-aware views (`v_api_gpu_metrics`, `v_api_sla_compliance`) conserve totals and keyspace when collapsed to pipeline grain. | Compare pipeline-collapsed view totals and key coverage (`*_only_keys`) with independent rollup/session recomputes. |
-| `sla_counts_aligned_to_raw_latest_sessions` | SLA view keyspace/counts strictly align with latest-session recompute keyspace for attributed sessions (`orchestrator_address != ''`). | Inspect `raw_only_keys`/`view_only_keys`; verify latest-session dedup, attribution filter, and hour bucketing. |
+| `preexisting_grain_drift_baseline_gpu_sla` | Existing model-aware GPU/SLA grain drift is tracked as non-blocking baseline signal (WARN). | Compare pipeline-collapsed view totals and key coverage (`*_only_keys`) with independent rollup/session recomputes and monitor trend direction. |
+| `sla_counts_aligned_to_raw_latest_sessions` | SLA view keyspace/counts strictly align with latest-session recompute keyspace for attributed sessions (`orchestrator_address != ''`), including health counters/signals. | Inspect `raw_only_keys`/`view_only_keys`; verify latest-session dedup, attribution filter, hour bucketing, and health-signal aggregate parity. |
 | `view_count_grain_ordering` | Informational grain-ordering check across serving views. | Treat WARN as diagnostic unless accompanied by blocking parity failures. |
 | `gpu_view_matches_rollup` | GPU API view must match independently recomputed perf aggregates from status facts on both keyspace and numeric values for perf-backed attributable GPU keys. | Check `rollup_only_keys`/`view_only_keys` first (blocking), then inspect `max_abs_diff_fps` and key completeness diagnostics (`*_empty_*_rows`). |
 | `network_demand_view_matches_rollup` | Network demand API view must match recomputed hourly union(perf,demand) keys with perf+demand aggregates on both keyspace and numeric values at model-aware demand grain. | Check `rollup_only_keys`/`view_only_keys` first (blocking), then inspect total diff diagnostics (including empty model diagnostics). |
-| `sla_view_matches_session_fact` | SLA API counts must match independent recomputation from session facts on both keyspace and numeric values for attributed sessions. | Check `raw_only_keys`/`view_only_keys` first (blocking), then compare known/unexcused/swapped diff totals. |
-| `sla_ratios_in_bounds` | SLA ratios are bounded to valid probability range `[0,1]`. | Inspect denominator/guard conditions in `v_api_sla_compliance`. |
+| `sla_view_matches_session_fact` | SLA API counts must match independent recomputation from session facts on both keyspace and numeric values for attributed sessions, including health/error indicators. | Check `raw_only_keys`/`view_only_keys` first (blocking), then compare known/unexcused/swapped and health-signal diff totals. |
+| `terminal_tail_artifact_filtered_in_gpu_sla` | True rollover tail artifact hours (rollover end-hour + no-work current/previous hour) are filtered from GPU/SLA views. | Check artifact candidate count and verify GPU/SLA hit counts are zero. |
+| `same_hour_failed_no_output_retained_in_gpu_sla` | Same-hour failed no-output sessions (short, attributed, error-indicated) remain visible in GPU/SLA views. | Verify same-hour failure candidates exist in both API views; missing rows are blocking. |
+| `active_no_output_rows_retained_in_gpu_sla` | Active no-output hours (material status evidence but zero FPS) remain visible in GPU/SLA views. | Verify candidate keys exist in both API views; missing keys are blocking. |
+| `gold_pipeline_empty_hotspots_diagnostic` | Informational hotspot scan for rows where `model_id` exists but canonical `pipeline` is empty in GPU/SLA views. | Use top orchestrator/model/GPU hotspots to debug attribution misses; non-blocking by design. |
+| `sla_ratios_in_bounds` | SLA ratios are bounded to valid ranges (`success_ratio`/`no_swap_ratio`/`health_completeness_ratio` in `[0,1]`, `sla_score` in `[0,100]`). | Inspect denominator/guard conditions in `v_api_sla_compliance`, especially health completeness weighting. |
+| `serving_views_do_not_reference_typed_raw_tables` | API serving views (`v_api_*`) must not directly reference raw/typed ingestion tables. | Inspect `system.tables.create_table_query` for offending `v_api_*` definitions and refactor to `fact_*`/`agg_*`/`dim_*` inputs. |
+
+### Join Anti-Patterns (Reference Examples)
+
+Use these failures as canonical examples of joins to avoid:
+
+1. Proxy-key attribution joins (`local_address`/hot-wallet as canonical identity)
+  - Risk: one proxy can fan out to multiple canonical orchestrators in-window, causing wrong model/GPU attribution.
+  - Guardrails: `proxy_to_canonical_multiplicity_guard` and Flink selector ambiguity rejection (return no attribution on multi-canonical in-window candidates).
+
+2. Non-equi `LEFT JOIN ... ON` time-window joins in ClickHouse assertions/views
+  - Risk: engine-level failure on stable builds (for example `INVALID_JOIN_ON_EXPRESSION`) and fragile behavior if experimental flags are required.
+  - Guardrails: use join-safe patterns (`ASOF JOIN` + explicit interval-validity predicate) for sample-to-segment time alignment checks.
+
+3. Serving joins that bypass fact/agg contracts and touch raw/typed tables
+  - Risk: metric drift and identity drift caused by reintroducing ingestion semantics into API surfaces.
+  - Guardrails: `serving_views_do_not_reference_typed_raw_tables` and strict serving dependency boundary (`v_api_*` -> `fact_*`/`agg_*`/`dim_*`).
 
 ## Scenario Harness Stages
 
@@ -123,7 +152,7 @@ Default behavior is full-stack replay via Kafka -> Flink -> ClickHouse assertion
 (not direct ClickHouse fixture insertion).
 
 - Script:
-  - `tests/python/scripts/run_scenario_test_harness.py`
+  - [`tests/python/scripts/run_scenario_test_harness.py`](../../tests/python/scripts/run_scenario_test_harness.py)
 - Stage list:
   - `stack_up`
   - `schema_apply`
@@ -135,9 +164,9 @@ Default behavior is full-stack replay via Kafka -> Flink -> ClickHouse assertion
   - `assert_scenarios`
   - `stack_down`
 - Run one stage for debugging:
-  - `python tests/python/scripts/run_scenario_test_harness.py --stage assert_pipeline`
+  - `uv run --project tests/python python tests/python/scripts/run_scenario_test_harness.py --stage assert_pipeline`
 - Keep stack running after failure:
-  - `python tests/python/scripts/run_scenario_test_harness.py --mode full --keep-stack-on-fail`
+  - `uv run --project tests/python python tests/python/scripts/run_scenario_test_harness.py --mode full --keep-stack-on-fail`
 
 ### Smoke vs Smoke-Debug
 
@@ -198,18 +227,18 @@ Use this sequence for shared-helper refactors:
 Apply this checklist to any refactor/change that can affect schema, lifecycle semantics, API views, assertions, or notebook diagnostics:
 
 1. Keep implementation and contract docs in the same change:
-   - `configs/clickhouse-init/01-schema.sql` / `flink-jobs/*`
-   - `docs/data/SCHEMA_AND_METRIC_CONTRACTS.md`
+   - [`configs/clickhouse-init/01-schema.sql`](../../configs/clickhouse-init/01-schema.sql) / [`flink-jobs/`](../../flink-jobs)
+   - [`docs/data/SCHEMA_AND_METRIC_CONTRACTS.md`](../data/SCHEMA_AND_METRIC_CONTRACTS.md)
 2. Keep assertions synchronized with requirement map:
-   - `tests/integration/sql/assertions_pipeline.sql`
-   - `docs/quality/TESTING_AND_VALIDATION.md` (Pipeline Assertions Requirement Map)
+   - [`tests/integration/sql/assertions_pipeline.sql`](../../tests/integration/sql/assertions_pipeline.sql)
+   - [`docs/quality/TESTING_AND_VALIDATION.md`](./TESTING_AND_VALIDATION.md) (Pipeline Assertions Requirement Map)
 3. Run the minimum validation gate:
    - `cd flink-jobs && mvn test`
    - `tests/integration/run_all.sh`
    - `uv run --project tests/python python tests/python/scripts/run_clickhouse_query_pack.py --lookback-hours 24`
 4. If semantics or output fields changed, re-check notebook cells and saved outputs:
-   - `tests/python/notebooks/INTEGRATION_EXEC_SUMMARY.ipynb`
-   - `tests/python/notebooks/FLINK_DATA_TRACE_AND_INTEGRATION_TESTS.ipynb`
+   - [`tests/python/notebooks/INTEGRATION_EXEC_SUMMARY.ipynb`](../../tests/python/notebooks/INTEGRATION_EXEC_SUMMARY.ipynb)
+   - [`tests/python/notebooks/FLINK_DATA_TRACE_AND_INTEGRATION_TESTS.ipynb`](../../tests/python/notebooks/FLINK_DATA_TRACE_AND_INTEGRATION_TESTS.ipynb)
 5. If any step is skipped, document the gap and risk in PR notes.
 
 ## Data Quality Contract
@@ -231,31 +260,37 @@ Apply this checklist to any refactor/change that can affect schema, lifecycle se
 
 | Artifact | Path | Use |
 |---|---|---|
-| Metrics validation SQL | `docs/reports/METRICS_VALIDATION_QUERIES.sql` | KPI/contract query pack |
-| Ops validation SQL | `docs/reports/OPS_ACTIVITY_VALIDATION_QUERIES.sql` | Operational quality checks |
-| Executive summary notebook | `tests/python/notebooks/INTEGRATION_EXEC_SUMMARY.ipynb` | High-level PASS/FAIL review |
-| End-to-end trace notebook | `tests/python/notebooks/FLINK_DATA_TRACE_AND_INTEGRATION_TESTS.ipynb` | Scenario trace walkthroughs |
+| Metrics validation SQL | [`docs/reports/METRICS_VALIDATION_QUERIES.sql`](../reports/METRICS_VALIDATION_QUERIES.sql) | KPI/contract query pack |
+| Ops validation SQL | [`docs/reports/OPS_ACTIVITY_VALIDATION_QUERIES.sql`](../reports/OPS_ACTIVITY_VALIDATION_QUERIES.sql) | Operational quality checks |
+| Executive summary notebook | [`tests/python/notebooks/INTEGRATION_EXEC_SUMMARY.ipynb`](../../tests/python/notebooks/INTEGRATION_EXEC_SUMMARY.ipynb) | High-level PASS/FAIL review |
+| End-to-end trace notebook | [`tests/python/notebooks/FLINK_DATA_TRACE_AND_INTEGRATION_TESTS.ipynb`](../../tests/python/notebooks/FLINK_DATA_TRACE_AND_INTEGRATION_TESTS.ipynb) | Scenario trace walkthroughs |
 
 Policy:
 - Keep `docs/reports/*` as dated evidence artifacts.
 - Canonical testing/quality contracts live in `docs/*`; reports remain supporting evidence.
 
+### Raw/Typed Validation Exception Boundary
+
+- Default contract for serving/attribution validation is fact/agg/view based.
+- [`tests/integration/sql/assertions_raw_typed.sql`](../../tests/integration/sql/assertions_raw_typed.sql) is an intentional exception used only for ingestion-lineage accounting (raw -> typed -> DLQ/quarantine).
+- Do not reuse raw/typed joins from lineage assertions when validating canonical attribution, session identity, or API parity semantics.
+
 ## Notebook + Fixture Workflow
 
 - Notebook environment:
-  - `tests/python/README.md`
+  - [`tests/python/README.md`](../../tests/python/README.md)
 - Production fixture export:
-  - `tests/python/scripts/export_scenario_fixtures.py`
+  - [`tests/python/scripts/export_scenario_fixtures.py`](../../tests/python/scripts/export_scenario_fixtures.py)
 - Fixture load for test database:
-  - `tests/python/scripts/load_scenario_fixtures.py`
+  - [`tests/python/scripts/load_scenario_fixtures.py`](../../tests/python/scripts/load_scenario_fixtures.py)
 
 ### Raw-First Fixture Contract
 
 - Fixture JSONL replay rows must come from canonical raw ingress only:
   - `__table = streaming_events`
-- Scenario discovery still uses `tests/integration/sql/scenario_candidates.sql` against typed/fact tables.
+- Scenario discovery still uses [`tests/integration/sql/scenario_candidates.sql`](../../tests/integration/sql/scenario_candidates.sql) against typed/fact tables.
 - Capability context selection still uses typed capability snapshots to find relevant source ids, but replay payloads are fetched from raw `streaming_events(type='network_capabilities')`.
-- `tests/python/scripts/replay_scenario_events.py` replays raw `streaming_events` rows only (no typed `network_capabilities` reconstruction path).
+- [`tests/python/scripts/replay_scenario_events.py`](../../tests/python/scripts/replay_scenario_events.py) replays raw `streaming_events` rows only (no typed `network_capabilities` reconstruction path).
 
 Recommended export command:
 
@@ -276,7 +311,7 @@ uv run --project tests/python python tests/python/scripts/export_scenario_fixtur
 ### Scenario Candidate Discovery
 
 - Notebook section:
-  - `tests/python/notebooks/FLINK_DATA_TRACE_AND_INTEGRATION_TESTS.ipynb` -> `Scenario Candidate Discovery`
+  - [`tests/python/notebooks/FLINK_DATA_TRACE_AND_INTEGRATION_TESTS.ipynb`](../../tests/python/notebooks/FLINK_DATA_TRACE_AND_INTEGRATION_TESTS.ipynb) -> `Scenario Candidate Discovery`
 - Required review in that section:
   - `scenario_3_success_with_swap` candidate counts (must be non-zero for blocking `assert_scenarios` runs).
   - `scenario_4_success_with_param_updates` candidate counts (track as availability signal; non-blocking until promoted to gate).
@@ -293,7 +328,7 @@ uv run --project tests/python python tests/python/scripts/export_scenario_fixtur
 
 - In notebook trace-pack sections `06_rollup_population` through `09_sla_view_parity`, do not expect 1:1 counts vs sections `01-05`.
 - Use grain-aligned reconciliation sourced from canonical assertions:
-  - `tests/integration/sql/assertions_pipeline.sql`
+  - [`tests/integration/sql/assertions_pipeline.sql`](../../tests/integration/sql/assertions_pipeline.sql)
   - checks: `gpu_view_matches_rollup`, `network_demand_view_matches_rollup`, `sla_view_matches_session_fact`
 - Treat notebook totals as diagnostics; treat assertion SQL parity results as contract verdicts.
 
@@ -353,7 +388,7 @@ Notes:
 
 ## Deep References
 
-- `tests/python/notebooks/FLINK_DATA_TRACE_AND_INTEGRATION_TESTS.ipynb`
-- `tests/python/notebooks/INTEGRATION_EXEC_SUMMARY.ipynb`
-- `docs/quality/DATA_QUALITY.md`
-- `docs/reports/JAVA_CODEBASE_ASSESSMENT.md`
+- [`tests/python/notebooks/FLINK_DATA_TRACE_AND_INTEGRATION_TESTS.ipynb`](../../tests/python/notebooks/FLINK_DATA_TRACE_AND_INTEGRATION_TESTS.ipynb)
+- [`tests/python/notebooks/INTEGRATION_EXEC_SUMMARY.ipynb`](../../tests/python/notebooks/INTEGRATION_EXEC_SUMMARY.ipynb)
+- [`docs/quality/DATA_QUALITY.md`](./DATA_QUALITY.md)
+- [`docs/reports/JAVA_CODEBASE_ASSESSMENT.md`](../reports/JAVA_CODEBASE_ASSESSMENT.md)

@@ -872,7 +872,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT toStartOfInterval(window_start, INTERVAL 1 HOUR) AS time, pipeline, if(sum(total_inference_minutes) > 0, sum(avg_output_fps * total_inference_minutes) / sum(total_inference_minutes), avg(avg_output_fps)) AS avg_fps FROM livepeer_analytics.v_api_network_demand WHERE $__timeFilter(window_start) GROUP BY time, pipeline ORDER BY time",
+          "rawSql": "SELECT toStartOfInterval(window_start, INTERVAL 1 HOUR) AS time, pipeline, if(sum(total_minutes) > 0, sum(avg_output_fps * total_minutes) / sum(total_minutes), avg(avg_output_fps)) AS avg_fps FROM livepeer_analytics.v_api_network_demand WHERE $__timeFilter(window_start) GROUP BY time, pipeline ORDER BY time",
           "refId": "A"
         }
       ],
@@ -2347,11 +2347,11 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT time, if(sum(total_demand_sessions) > 0, sum(unserved_sessions) / sum(total_demand_sessions), toFloat64(0)) AS unmet_demand_rate, if(sum(known_sessions) > 0, sum(served_sessions) / sum(known_sessions), toFloat64(0)) AS supply_match_rate FROM (SELECT toStartOfInterval(window_start, INTERVAL 1 HOUR) AS time, total_demand_sessions, known_sessions, served_sessions, unserved_sessions FROM livepeer_analytics.v_api_network_demand WHERE $__timeFilter(window_start) AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(model_id, '')))) GROUP BY time ORDER BY time",
+          "rawSql": "WITH demand AS (SELECT toStartOfInterval(window_start, INTERVAL 1 HOUR) AS time, total_demand_sessions, known_sessions, served_sessions, unserved_sessions FROM livepeer_analytics.v_api_network_demand WHERE $__timeFilter(window_start) AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(model_id, '')))), sla AS (SELECT toStartOfInterval(window_start, INTERVAL 1 HOUR) AS time, known_sessions, sla_score, health_completeness_ratio FROM livepeer_analytics.v_api_sla_compliance WHERE $__timeFilter(window_start) AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(model_id, '')))) SELECT d.time AS time, if(sum(d.total_demand_sessions) > 0, sum(d.unserved_sessions) / sum(d.total_demand_sessions), toFloat64(0)) AS unmet_demand_rate, if(sum(d.known_sessions) > 0, sum(d.served_sessions) / sum(d.known_sessions), toFloat64(0)) AS supply_match_rate, if(sum(s.known_sessions) > 0, (sum(s.sla_score * s.known_sessions) / sum(s.known_sessions)) / 100.0, toFloat64(0)) AS sla_score, if(sum(s.known_sessions) > 0, sum(s.health_completeness_ratio * s.known_sessions) / sum(s.known_sessions), toFloat64(1)) AS health_completeness_ratio FROM demand d LEFT JOIN sla s ON s.time = d.time GROUP BY d.time ORDER BY d.time",
           "refId": "A"
         }
       ],
-      "title": "Unmet Demand and Supply Match Rates",
+      "title": "Demand, SLA Score, and Health Completeness",
       "type": "timeseries"
     },
     {
@@ -2561,7 +2561,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT if(gateway = '', 'unknown_gateway', gateway) AS \"Gateway\", sum(known_sessions) AS \"Known Sessions\", sum(served_sessions) AS \"Served Sessions\", sum(unserved_sessions) AS \"Unserved Sessions\", if(sum(total_demand_sessions) > 0, sum(unserved_sessions) / sum(total_demand_sessions), toFloat64(0)) AS \"Unmet Rate\", if(sum(known_sessions) > 0, sum(served_sessions) / sum(known_sessions), toFloat64(0)) AS \"Supply Match Rate\" FROM livepeer_analytics.v_api_network_demand WHERE $__timeFilter(window_start) AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(model_id, ''))) GROUP BY \"Gateway\" ORDER BY \"Unserved Sessions\" DESC",
+          "rawSql": "SELECT if(gateway = '', 'unknown_gateway', gateway) AS \"Gateway\", sum(known_sessions) AS \"Known Sessions\", sum(served_sessions) AS \"Served Sessions\", sum(unserved_sessions) AS \"Unserved Sessions\", sum(sessions_with_last_error) AS \"Sessions With Last Error\", sum(loading_only_sessions) AS \"Loading-Only Sessions\", if(sum(total_demand_sessions) > 0, sum(unserved_sessions) / sum(total_demand_sessions), toFloat64(0)) AS \"Unmet Rate\", if(sum(known_sessions) > 0, sum(served_sessions) / sum(known_sessions), toFloat64(0)) AS \"Supply Match Rate\", if(sum(health_expected_signal_count) > 0, sum(health_signal_count) / sum(health_expected_signal_count), toFloat64(1)) AS \"Health Completeness\" FROM livepeer_analytics.v_api_network_demand WHERE $__timeFilter(window_start) AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(model_id, ''))) GROUP BY \"Gateway\" ORDER BY \"Unserved Sessions\" DESC",
           "refId": "A"
         }
       ],

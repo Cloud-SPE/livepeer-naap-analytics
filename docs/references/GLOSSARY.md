@@ -33,7 +33,9 @@ Canonical terminology for consistent communication across architecture, schema, 
 | Startup success | Session with playable startup signal observed in lifecycle edges. |
 | Excused failure | Startup failure matching no-orchestrator signal or approved excusable error taxonomy. |
 | Unexcused failure | Known startup failure not classified as success or excused. |
-| Swap | Session with explicit swap edge or multi-orchestrator lineage in one session. |
+| Explicit swap | Session with direct canonical swap trace evidence (for example `orchestrator_swap`). |
+| Inferred swap | Session classified as swapped from orchestrator-change lineage without requiring a direct swap edge. |
+| Swapped session (combined) | Session counted as swapped when explicit or inferred swap evidence is present. |
 | Session segment | Contiguous portion of a session bounded by orchestrator identity changes. |
 
 ## Quality and Replay Terms

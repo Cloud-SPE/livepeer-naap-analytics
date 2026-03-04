@@ -1,4 +1,4 @@
-> **Status:** Working backlog document. Canonical contracts are in `docs/data/SCHEMA_AND_METRIC_CONTRACTS.md`.
+> **Status:** Working backlog document. Canonical contracts are in [`docs/data/SCHEMA_AND_METRIC_CONTRACTS.md`](../data/SCHEMA_AND_METRIC_CONTRACTS.md).
 
 # Metrics Schema Design Scratchpad
 
@@ -20,8 +20,8 @@
 | API Endpoint | Backing View | Canonical Grain | Core Additive Fields | Core Derived Fields | Status |
 |---|---|---|---|---|---|
 | `/gpu/metrics` | `v_api_gpu_metrics` | 1h (serving rollups may expose finer windows) | `status_samples`, `known_sessions`, `startup_success_sessions`, `excused_sessions`, `unexcused_sessions`, `swapped_sessions` | `avg_output_fps`, `p95_output_fps`, `jitter_coeff_fps`, `failure_rate`, `swap_rate` | In progress |
-| `/network/demand` | `v_api_network_demand` | 1h `(gateway, region, pipeline, model_id)` | `total_streams`, `total_sessions`, `total_inference_minutes`, `known_sessions`, `unexcused_sessions`, `swapped_sessions`, `missing_capacity_count`, `fee_payment_eth` | `avg_output_fps`, `success_ratio` | Live |
-| `/sla/compliance` | `v_api_sla_compliance` | 1h | `known_sessions`, `startup_success_sessions`, `excused_sessions`, `unexcused_sessions`, `swapped_sessions` | `success_ratio`, `no_swap_ratio`, `sla_score` | In progress |
+| `/network/demand` | `v_api_network_demand` | 1h `(gateway, region, pipeline, model_id)` | `total_streams`, `total_sessions`, `total_minutes`, `known_sessions`, `unexcused_sessions`, `swapped_sessions`, `sessions_with_errors`, `loading_only_sessions`, `zero_output_fps_sessions`, `missing_capacity_count`, `fee_payment_eth` | `avg_output_fps`, `startup_success_ratio`, `success_ratio` | Live |
+| `/sla/compliance` | `v_api_sla_compliance` | 1h `(orchestrator, pipeline, model_id, gpu_id, region)` | `known_sessions`, `unexcused_sessions`, `swapped_sessions`, `sessions_with_errors`, `loading_only_sessions`, `zero_output_fps_sessions`, `health_signal_count`, `health_expected_signal_count` | `startup_success_ratio`, `success_ratio`, `no_swap_ratio`, `health_completeness_ratio`, `sla_score` | Live |
 
 Notes:
 - API payloads should remain rollup-safe: recompute ratios/scores from additive fields for larger windows.
@@ -58,5 +58,5 @@ Notes:
 
 ## Outstanding Areas for Improvement (BACKLOG)
 
-- Canonical backlog is tracked in `docs/references/ISSUES_BACKLOG.md`.
+- Canonical backlog is tracked in [`docs/references/ISSUES_BACKLOG.md`](./ISSUES_BACKLOG.md).
 - Keep this scratchpad as working context only; add and update open items in the canonical backlog file.

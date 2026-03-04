@@ -34,6 +34,9 @@ public class LifecycleSignal implements Serializable {
     public String traceType;
     public String aiEventType;
     public String message;
+    public String statusState;
+    public Float statusOutputFps;
+    public String statusLastError;
     public Long startTimeMs;
 
     public String sourceEventUid;

@@ -76,7 +76,8 @@ public class WorkflowSessionSegmentAggregatorFunction extends KeyedBroadcastProc
 
         // Resolve model compatibility context first, then find nearest capability snapshot.
         CapabilitySnapshotRef snapshot = null;
-        String hotKey = AddressNormalizer.normalizeOrEmpty(signal.orchestratorAddress);
+        String hotKey = WorkflowSessionAggregatorFunction.resolveCapabilityLookupKey(
+                signal.orchestratorAddress, state.orchestratorAddress);
         PipelineModelResolver.Resolution preSelection = PipelineModelResolver.resolve(
                 resolverMode,
                 signal,
@@ -89,9 +90,12 @@ public class WorkflowSessionSegmentAggregatorFunction extends KeyedBroadcastProc
                     ctx.getBroadcastState(CapabilityBroadcastState.CAPABILITY_STATE_DESCRIPTOR).get(hotKey);
             snapshot = CapabilityAttributionSelector.selectBestCandidate(
                     bucket,
-                    modelHint,
-                    signal.signalTimestamp,
-                    DEFAULT_ATTRIBUTION_TTL_MS);
+                    CapabilityAttributionSelector.SelectionContext.of(
+                            modelHint,
+                            signal.orchestratorUrl,
+                            state.gpuId,
+                            signal.signalTimestamp,
+                            DEFAULT_ATTRIBUTION_TTL_MS));
         }
 
         PipelineModelResolver.Resolution resolved = PipelineModelResolver.resolve(
@@ -100,9 +104,7 @@ public class WorkflowSessionSegmentAggregatorFunction extends KeyedBroadcastProc
                 state.pipeline,
                 state.modelId,
                 snapshot);
-        if (!StringSemantics.isBlank(resolved.pipeline)) {
-            signal.pipeline = resolved.pipeline;
-        }
+        WorkflowSessionAggregatorFunction.applyResolvedPipelineToSignal(signal, resolved);
         if (!StringSemantics.isBlank(resolved.modelId)) {
             state.modelId = resolved.modelId;
         }
@@ -134,6 +136,7 @@ public class WorkflowSessionSegmentAggregatorFunction extends KeyedBroadcastProc
 
         CapabilitySnapshotRef ref = new CapabilitySnapshotRef();
         ref.snapshotTs = cap.eventTimestamp;
+        ref.sourceEventId = cap.sourceEventId;
         ref.canonicalOrchestratorAddress = canonicalAddress;
         ref.orchestratorUrl = cap.orchUri;
         ref.pipeline = cap.pipeline;

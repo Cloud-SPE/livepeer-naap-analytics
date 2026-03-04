@@ -9,6 +9,7 @@ public class CapabilitySnapshotRef implements Serializable {
     private static final long serialVersionUID = 1L;
 
     public long snapshotTs;
+    public String sourceEventId;
     public String canonicalOrchestratorAddress;
     public String orchestratorUrl;
     public String pipeline;

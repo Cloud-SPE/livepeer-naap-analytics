@@ -42,10 +42,17 @@ public class WorkflowSessionAccumulator implements Serializable {
     public long eventCount;
     public long version;
     public long paramsUpdateCount;
+    public long statusSampleCount;
+    public long statusNonLoadingSampleCount;
+    public long statusPositiveOutputSampleCount;
+    public long statusErrorSampleCount;
+    public boolean lastErrorOccurred;
 
     public String sourceFirstEventUid = "";
     public String sourceLastEventUid = "";
 
     public final Set<String> orchestratorsSeen = new HashSet<>();
     public final Set<String> canonicalOrchestratorsSeen = new HashSet<>();
+    public final Set<String> modelIdsSeen = new HashSet<>();
+    public final Set<String> pipelinesSeen = new HashSet<>();
 }

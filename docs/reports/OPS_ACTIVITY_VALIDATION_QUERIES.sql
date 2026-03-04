@@ -249,6 +249,17 @@ SELECT
 FROM livepeer_analytics.v_api_sla_compliance
 WHERE window_start >= from_ts AND window_start < to_ts;
 
+-- A5b) Goal: Validate network-demand startup/effective success semantics.
+-- What this query does: Checks ratio bounds and enforces effective success <= startup success.
+-- Valid output: all counters = 0.
+WITH now64(3,'UTC') AS to_ts, to_ts - INTERVAL 24 HOUR AS from_ts
+SELECT
+  countIf(startup_success_ratio < 0 OR startup_success_ratio > 1) AS bad_startup_success_ratio,
+  countIf(success_ratio < 0 OR success_ratio > 1) AS bad_effective_success_ratio,
+  countIf(startup_success_ratio + 0.000001 < success_ratio) AS effective_gt_startup
+FROM livepeer_analytics.v_api_network_demand
+WHERE window_start >= from_ts AND window_start < to_ts;
+
 -- A6) Goal: Measure dimensional completeness for dashboard filters.
 -- What this query does: Counts rows with missing orchestrator/pipeline/model/gpu keys
 -- in v_api_gpu_metrics for last 24h.
@@ -262,6 +273,72 @@ SELECT
   countIf(gpu_id = '' OR gpu_id IS NULL) AS missing_gpu
 FROM livepeer_analytics.v_api_gpu_metrics
 WHERE window_start >= from_ts AND window_start < to_ts;
+
+-- A6b) Goal: Track canonical pipeline coverage for attributable GPU/SLA rows.
+-- What this query does: Computes rolling 24h coverage where model is present and pipeline is non-empty.
+-- Valid output: pipeline_coverage_ratio >= 0.99 unless there is a known attribution incident.
+WITH now64(3,'UTC') AS to_ts, to_ts - INTERVAL 24 HOUR AS from_ts
+SELECT
+  sum(rows_with_model) AS attributable_rows_with_model,
+  sum(rows_with_pipeline) AS attributable_rows_with_pipeline,
+  round(if(sum(rows_with_model) = 0, 1.0, sum(rows_with_pipeline) / sum(rows_with_model)), 6) AS pipeline_coverage_ratio
+FROM
+(
+  SELECT
+    countIf(ifNull(model_id, '') != '') AS rows_with_model,
+    countIf(ifNull(model_id, '') != '' AND pipeline != '') AS rows_with_pipeline
+  FROM livepeer_analytics.v_api_gpu_metrics
+  WHERE window_start >= from_ts AND window_start < to_ts
+
+  UNION ALL
+
+  SELECT
+    countIf(ifNull(model_id, '') != '') AS rows_with_model,
+    countIf(ifNull(model_id, '') != '' AND pipeline != '') AS rows_with_pipeline
+  FROM livepeer_analytics.v_api_sla_compliance
+  WHERE window_start >= from_ts AND window_start < to_ts
+);
+
+-- A6c) Goal: Surface top attribution-miss hotspots for triage.
+-- What this query does: Ranks hour/orchestrator/model/GPU keys where model exists but pipeline is empty.
+-- Valid output: ideally zero rows; otherwise use top rows to trace lifecycle attribution gaps.
+WITH now64(3,'UTC') AS to_ts, to_ts - INTERVAL 24 HOUR AS from_ts
+SELECT
+  view_name,
+  window_start,
+  orchestrator_address,
+  model_id,
+  gpu_id,
+  count() AS rows_with_empty_pipeline
+FROM
+(
+  SELECT
+    'v_api_gpu_metrics' AS view_name,
+    window_start,
+    orchestrator_address,
+    ifNull(model_id, '') AS model_id,
+    ifNull(gpu_id, '') AS gpu_id
+  FROM livepeer_analytics.v_api_gpu_metrics
+  WHERE window_start >= from_ts AND window_start < to_ts
+    AND ifNull(model_id, '') != ''
+    AND pipeline = ''
+
+  UNION ALL
+
+  SELECT
+    'v_api_sla_compliance' AS view_name,
+    window_start,
+    orchestrator_address,
+    ifNull(model_id, '') AS model_id,
+    ifNull(gpu_id, '') AS gpu_id
+  FROM livepeer_analytics.v_api_sla_compliance
+  WHERE window_start >= from_ts AND window_start < to_ts
+    AND ifNull(model_id, '') != ''
+    AND pipeline = ''
+)
+GROUP BY view_name, window_start, orchestrator_address, model_id, gpu_id
+ORDER BY rows_with_empty_pipeline DESC
+LIMIT 50;
 
 -- A7) Goal: Detect missing time buckets in the minute-level API output.
 -- What this query does: Builds the expected minute series for last 24h and left joins

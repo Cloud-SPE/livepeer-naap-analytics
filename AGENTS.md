@@ -57,9 +57,10 @@ This file is a short operating map for AI agents and humans. Treat `docs/` as th
   - `fact_workflow_sessions`
   - `fact_workflow_session_segments`
   - `fact_workflow_param_updates`
-- Non-stateful facts are ClickHouse-MV derived:
+- Canonical status/trace facts are Flink-emitted:
   - `fact_stream_status_samples`
   - `fact_stream_trace_edges`
+- Direct non-stateful ingest projection is ClickHouse-MV derived:
   - `fact_stream_ingest_samples`
 - Contract stability:
   - metric semantics changes require versioning and parity validation windows.

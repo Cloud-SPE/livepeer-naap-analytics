@@ -116,6 +116,8 @@ public final class EventPayloads {
         public String streamId, requestId, sessionId, pipeline;
         public String gateway, orchestratorAddress, orchestratorUrl;
         public String modelId, gpuId, region;
+        public int hasModelChange;
+        public int hasPipelineChange;
         public String attributionMethod;
         public float attributionConfidence;
 
@@ -126,6 +128,14 @@ public final class EventPayloads {
         public int inferredOrchestratorChangeCount;
         public int swapCount;
         public long errorCount, excusableErrorCount;
+        public int lastErrorOccurred;
+        public int loadingOnlySession;
+        public int zeroOutputFpsSession;
+        public long statusSampleCount;
+        public long statusErrorSampleCount;
+        public long healthSignalCount;
+        public long healthExpectedSignalCount;
+        public float healthCompletenessRatio;
         public Long firstStreamRequestTs, firstProcessedTs, firstPlayableTs;
         public long eventCount, version;
         public String sourceFirstEventUid, sourceLastEventUid;
@@ -143,6 +153,7 @@ public final class EventPayloads {
         public Long segmentEndTs;
 
         public String gateway;
+        public String pipeline;
         public String orchestratorAddress;
         public String orchestratorUrl;
         public String workerId;
@@ -244,6 +255,54 @@ public final class EventPayloads {
 
         public String edgeSemanticsVersion;
         public long version;
+    }
+
+    /**
+     * Canonical stream status fact aligned to workflow segment identity.
+     */
+    public static class FactStreamStatusSample implements java.io.Serializable {
+        private static final long serialVersionUID = 1L;
+
+        public long sampleTs;
+        public String workflowSessionId;
+        public String streamId;
+        public String requestId;
+        public String gateway;
+        public String orchestratorAddress;
+        public String orchestratorUrl;
+        public String pipeline;
+        public String modelId;
+        public String gpuId;
+        public String region;
+        public String state;
+        public float outputFps;
+        public float inputFps;
+        public int isAttributed;
+        public String attributionMethod;
+        public float attributionConfidence;
+        public String sourceEventUid;
+    }
+
+    /**
+     * Canonical stream trace edge fact aligned to workflow segment identity.
+     */
+    public static class FactStreamTraceEdge implements java.io.Serializable {
+        private static final long serialVersionUID = 1L;
+
+        public long edgeTs;
+        public String workflowSessionId;
+        public String streamId;
+        public String requestId;
+        public String gateway;
+        public String orchestratorAddress;
+        public String orchestratorUrl;
+        public String pipeline;
+        public String modelId;
+        public String traceType;
+        public String traceCategory;
+        public int isSwapEvent;
+        public int isAttributed;
+        public String sourceEventUid;
     }
 
 }

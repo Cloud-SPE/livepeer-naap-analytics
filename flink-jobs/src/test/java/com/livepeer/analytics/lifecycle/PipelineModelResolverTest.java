@@ -49,4 +49,21 @@ class PipelineModelResolverTest {
         assertEquals("SG161222/RealVisXL_V4.0_Lightning", resolved.modelId);
         assertEquals("SG161222/RealVisXL_V4.0_Lightning", resolved.compatibilityModelHint);
     }
+
+    @Test
+    void canonicalPipelineCollapsesModelLikePipelineValue() {
+        assertEquals(
+                "",
+                PipelineModelResolver.canonicalPipeline("streamdiffusion-sdxl", "streamdiffusion-sdxl"));
+        assertEquals(
+                "",
+                PipelineModelResolver.canonicalPipeline("StreamDiffusion-SDXL", "streamdiffusion-sdxl"));
+    }
+
+    @Test
+    void canonicalPipelineRetainsRealPipelineClass() {
+        assertEquals(
+                "live-video-to-video",
+                PipelineModelResolver.canonicalPipeline("live-video-to-video", "streamdiffusion-sdxl"));
+    }
 }

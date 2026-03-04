@@ -527,7 +527,13 @@ WITH
       argMax(known_stream, version) AS known_stream,
       argMax(startup_unexcused, version) AS startup_unexcused,
       argMax(confirmed_swap_count, version) AS confirmed_swap_count,
-      argMax(inferred_orchestrator_change_count, version) AS inferred_orchestrator_change_count
+      argMax(inferred_orchestrator_change_count, version) AS inferred_orchestrator_change_count,
+      argMax(last_error_occurred, version) AS last_error_occurred,
+      argMax(loading_only_session, version) AS loading_only_session,
+      argMax(zero_output_fps_session, version) AS zero_output_fps_session,
+      argMax(status_error_sample_count, version) AS status_error_sample_count,
+      argMax(health_signal_count, version) AS health_signal_count,
+      argMax(health_expected_signal_count, version) AS health_expected_signal_count
     FROM livepeer_analytics.fact_workflow_sessions
     GROUP BY workflow_session_id
   ),
@@ -540,7 +546,13 @@ WITH
       ifNull(gpu_id, '') AS gpu_id,
       sum(toUInt64(known_stream)) AS raw_known_sessions,
       sum(toUInt64(startup_unexcused)) AS raw_unexcused_sessions,
-      sum(toUInt64((confirmed_swap_count > 0) OR (inferred_orchestrator_change_count > 0))) AS raw_swapped_sessions
+      sum(toUInt64((confirmed_swap_count > 0) OR (inferred_orchestrator_change_count > 0))) AS raw_swapped_sessions,
+      sum(toUInt64(last_error_occurred > 0)) AS raw_sessions_with_last_error,
+      sum(toUInt64(loading_only_session > 0)) AS raw_loading_only_sessions,
+      sum(toUInt64(zero_output_fps_session > 0)) AS raw_zero_output_fps_sessions,
+      sum(toUInt64(status_error_sample_count)) AS raw_status_error_samples,
+      sum(toUInt64(health_signal_count)) AS raw_health_signal_count,
+      sum(toUInt64(health_expected_signal_count)) AS raw_health_expected_signal_count
     FROM latest_sessions
     WHERE session_start_ts >= from_ts AND session_start_ts < to_ts
     GROUP BY window_start, orchestrator_address, pipeline, model_id, gpu_id
@@ -554,7 +566,13 @@ WITH
       ifNull(gpu_id, '') AS gpu_id,
       known_sessions,
       unexcused_sessions,
-      swapped_sessions
+      swapped_sessions,
+      sessions_with_last_error,
+      loading_only_sessions,
+      zero_output_fps_sessions,
+      status_error_samples,
+      health_signal_count,
+      health_expected_signal_count
     FROM livepeer_analytics.v_api_sla_compliance
     WHERE window_start >= from_ts AND window_start < to_ts
   )
@@ -562,7 +580,13 @@ SELECT
   count() AS joined_rows,
   sum(abs(raw.raw_known_sessions - api.known_sessions)) AS total_known_diff,
   sum(abs(raw.raw_unexcused_sessions - api.unexcused_sessions)) AS total_unexcused_diff,
-  sum(abs(raw.raw_swapped_sessions - api.swapped_sessions)) AS total_swapped_diff
+  sum(abs(raw.raw_swapped_sessions - api.swapped_sessions)) AS total_swapped_diff,
+  sum(abs(raw.raw_sessions_with_last_error - api.sessions_with_last_error)) AS total_last_error_diff,
+  sum(abs(raw.raw_loading_only_sessions - api.loading_only_sessions)) AS total_loading_only_diff,
+  sum(abs(raw.raw_zero_output_fps_sessions - api.zero_output_fps_sessions)) AS total_zero_output_diff,
+  sum(abs(raw.raw_status_error_samples - api.status_error_samples)) AS total_status_error_samples_diff,
+  sum(abs(raw.raw_health_signal_count - api.health_signal_count)) AS total_health_signal_count_diff,
+  sum(abs(raw.raw_health_expected_signal_count - api.health_expected_signal_count)) AS total_health_expected_signal_count_diff
 FROM raw
 INNER JOIN api USING (window_start, orchestrator_address, pipeline, model_id, gpu_id);
 
@@ -596,6 +620,93 @@ SELECT
   countIf(model_id = '' OR model_id IS NULL) AS rows_missing_model
 FROM livepeer_analytics.v_api_sla_compliance
 WHERE window_start >= from_ts AND window_start < to_ts;
+
+-- 14) Network demand ratio semantics sanity (startup vs effective success)
+WITH
+  now64(3, 'UTC') AS to_ts,
+  to_ts - INTERVAL 24 HOUR AS from_ts
+SELECT
+  countIf(startup_success_ratio < 0 OR startup_success_ratio > 1) AS bad_startup_success_ratio,
+  countIf(success_ratio < 0 OR success_ratio > 1) AS bad_effective_success_ratio,
+  countIf(startup_success_ratio + 0.000001 < success_ratio) AS effective_gt_startup,
+  countIf(
+    known_sessions > 0
+    AND (
+      unexcused_sessions > 0
+      OR zero_output_fps_sessions > 0
+      OR loading_only_sessions > 0
+    )
+    AND success_ratio >= 0.999999
+  ) AS unpenalized_failure_rows
+FROM livepeer_analytics.v_api_network_demand
+WHERE window_start >= from_ts AND window_start < to_ts;
+
+-- 15) Canonical pipeline coverage across attributable GPU/SLA rows (target >= 99%)
+WITH
+  now64(3, 'UTC') AS to_ts,
+  to_ts - INTERVAL 24 HOUR AS from_ts,
+  base AS
+  (
+    SELECT
+      countIf(ifNull(model_id, '') != '') AS rows_with_model,
+      countIf(ifNull(model_id, '') != '' AND pipeline != '') AS rows_with_pipeline
+    FROM livepeer_analytics.v_api_gpu_metrics
+    WHERE window_start >= from_ts AND window_start < to_ts
+
+    UNION ALL
+
+    SELECT
+      countIf(ifNull(model_id, '') != '') AS rows_with_model,
+      countIf(ifNull(model_id, '') != '' AND pipeline != '') AS rows_with_pipeline
+    FROM livepeer_analytics.v_api_sla_compliance
+    WHERE window_start >= from_ts AND window_start < to_ts
+  )
+SELECT
+  sum(rows_with_model) AS attributable_rows_with_model,
+  sum(rows_with_pipeline) AS attributable_rows_with_pipeline,
+  round(if(sum(rows_with_model) = 0, 1.0, sum(rows_with_pipeline) / sum(rows_with_model)), 6) AS pipeline_coverage_ratio
+FROM base;
+
+-- 16) Pipeline-empty hotspot diagnostic (model present but canonical pipeline empty)
+WITH
+  now64(3, 'UTC') AS to_ts,
+  to_ts - INTERVAL 24 HOUR AS from_ts
+SELECT
+  view_name,
+  window_start,
+  orchestrator_address,
+  model_id,
+  gpu_id,
+  count() AS rows_with_empty_pipeline
+FROM
+(
+  SELECT
+    'v_api_gpu_metrics' AS view_name,
+    window_start,
+    orchestrator_address,
+    ifNull(model_id, '') AS model_id,
+    ifNull(gpu_id, '') AS gpu_id
+  FROM livepeer_analytics.v_api_gpu_metrics
+  WHERE window_start >= from_ts AND window_start < to_ts
+    AND ifNull(model_id, '') != ''
+    AND pipeline = ''
+
+  UNION ALL
+
+  SELECT
+    'v_api_sla_compliance' AS view_name,
+    window_start,
+    orchestrator_address,
+    ifNull(model_id, '') AS model_id,
+    ifNull(gpu_id, '') AS gpu_id
+  FROM livepeer_analytics.v_api_sla_compliance
+  WHERE window_start >= from_ts AND window_start < to_ts
+    AND ifNull(model_id, '') != ''
+    AND pipeline = ''
+)
+GROUP BY view_name, window_start, orchestrator_address, model_id, gpu_id
+ORDER BY rows_with_empty_pipeline DESC
+LIMIT 50;
 
 
 =================== SCHEMA VALIDATION QUERIES ===================
