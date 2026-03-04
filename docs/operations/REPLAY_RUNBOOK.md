@@ -37,7 +37,7 @@ SELECT
   failure_class,
   failure_reason,
   count() AS total
-FROM livepeer_analytics.streaming_events_dlq
+FROM livepeer_analytics.raw_streaming_events_dlq
 WHERE ingestion_timestamp >= now() - INTERVAL 1 HOUR
 GROUP BY failure_class, failure_reason
 ORDER BY total DESC;
@@ -47,7 +47,7 @@ ORDER BY total DESC;
 
 ```sql
 SELECT event_id, event_type, failure_class, failure_reason, payload_body
-FROM livepeer_analytics.streaming_events_dlq
+FROM livepeer_analytics.raw_streaming_events_dlq
 WHERE ingestion_timestamp >= now() - INTERVAL 1 HOUR
 ORDER BY ingestion_timestamp DESC
 LIMIT 20;
@@ -88,7 +88,7 @@ The replay job reads from `events.dlq.streaming_events.v1`, adds `__replay` meta
 - The main quality gate uses dedup state TTL; ensure your replay window fits inside the configured TTL.
 - Non-JSON payloads are skipped by replay and remain in DLQ for manual handling.
 - Kafka Connect raw sink offsets are independent from Flink job state:
-  - raw `streaming_events` is written by Connect, not Flink.
+  - raw `raw_streaming_events` is written by Connect, not Flink.
   - sink consumer-group commits live in Kafka `__consumer_offsets`.
   - Connect internal state lives in `_connect-offsets` and is not reset by Flink redeploy/savepoint restore.
   - If you expect historical replay to repopulate raw + typed windows, include an explicit Connect offset rewind/reset plan for `clickhouse-raw-events-sink` (or run a dedicated backfill connector).

@@ -115,7 +115,7 @@ SELECT
   uniqExact(last_error_time) AS distinct_error_updates,
   max(last_error_time) AS latest_error_time,
   argMax(last_error, last_error_time) AS latest_error
-FROM livepeer_analytics.ai_stream_status
+FROM livepeer_analytics.raw_ai_stream_status
 WHERE event_timestamp >= from_ts
   AND event_timestamp < to_ts
   AND last_error_time IS NOT NULL

@@ -11,7 +11,7 @@ USE livepeer_analytics;
 
 -- Raw streaming events table (all events as-is from Kafka)
 -- Schema designed to work with ClickHouse Kafka Connect sink
-CREATE TABLE IF NOT EXISTS streaming_events
+CREATE TABLE IF NOT EXISTS raw_streaming_events
 (
     -- These field names MUST match the JSON keys from Kafka exactly
     id String,              -- Maps to "id" in JSON
@@ -34,14 +34,14 @@ CREATE TABLE IF NOT EXISTS streaming_events
         SETTINGS index_granularity = 8192;
 
 -- Index for fast event type lookups
-ALTER TABLE streaming_events
+ALTER TABLE raw_streaming_events
     ADD INDEX IF NOT EXISTS idx_event_type type TYPE bloom_filter GRANULARITY 1;
 
 -- ============================================
 -- DEAD LETTER QUEUE (Failed Processing)
 -- ============================================
 
-CREATE TABLE IF NOT EXISTS streaming_events_dlq
+CREATE TABLE IF NOT EXISTS raw_streaming_events_dlq
 (
     schema_version LowCardinality(String),
 
@@ -85,7 +85,7 @@ CREATE TABLE IF NOT EXISTS streaming_events_dlq
 -- QUARANTINE (Expected Rejects / Duplicates)
 -- ============================================
 
-CREATE TABLE IF NOT EXISTS streaming_events_quarantine
+CREATE TABLE IF NOT EXISTS raw_streaming_events_quarantine
 (
     schema_version LowCardinality(String),
 
@@ -130,7 +130,7 @@ CREATE TABLE IF NOT EXISTS streaming_events_quarantine
 -- ============================================
 
 -- Table 1: AI Stream Status (core performance metrics)
-CREATE TABLE IF NOT EXISTS ai_stream_status
+CREATE TABLE IF NOT EXISTS raw_ai_stream_status
 (
     event_timestamp DateTime64(3, 'UTC'),
     event_date Date MATERIALIZED toDate(event_timestamp),
@@ -180,7 +180,7 @@ CREATE TABLE IF NOT EXISTS ai_stream_status
         SETTINGS index_granularity = 8192;
 
 -- Table 2: Stream Ingest Metrics (network performance)
-CREATE TABLE IF NOT EXISTS stream_ingest_metrics
+CREATE TABLE IF NOT EXISTS raw_stream_ingest_metrics
 (
     event_timestamp DateTime64(3, 'UTC'),
     event_date Date MATERIALIZED toDate(event_timestamp),
@@ -227,7 +227,7 @@ CREATE TABLE IF NOT EXISTS stream_ingest_metrics
         SETTINGS index_granularity = 8192;
 
 -- Table 3: Stream Trace Events (for latency calculations)
-CREATE TABLE IF NOT EXISTS stream_trace_events
+CREATE TABLE IF NOT EXISTS raw_stream_trace_events
 (
     event_timestamp DateTime64(3, 'UTC'),
     event_date Date MATERIALIZED toDate(event_timestamp),
@@ -257,7 +257,7 @@ CREATE TABLE IF NOT EXISTS stream_trace_events
         SETTINGS index_granularity = 8192;
 
 -- Table 4: Network Capabilities (orchestrator metadata + GPU info)
-CREATE TABLE IF NOT EXISTS network_capabilities
+CREATE TABLE IF NOT EXISTS raw_network_capabilities
 (
     event_timestamp DateTime64(3, 'UTC'),
     event_date Date MATERIALIZED toDate(event_timestamp),
@@ -309,7 +309,7 @@ CREATE TABLE IF NOT EXISTS network_capabilities
         SETTINGS index_granularity = 8192;
 
 -- Table 4b: Network Capability Advertised (one row per capability id advertised)
-CREATE TABLE IF NOT EXISTS network_capabilities_advertised
+CREATE TABLE IF NOT EXISTS raw_network_capabilities_advertised
 (
     event_timestamp DateTime64(3, 'UTC'),
     event_date Date MATERIALIZED toDate(event_timestamp),
@@ -335,7 +335,7 @@ CREATE TABLE IF NOT EXISTS network_capabilities_advertised
         SETTINGS index_granularity = 8192;
 
 -- Table 4c: Network Capability Model Constraints (one row per capability/model)
-CREATE TABLE IF NOT EXISTS network_capabilities_model_constraints
+CREATE TABLE IF NOT EXISTS raw_network_capabilities_model_constraints
 (
     event_timestamp DateTime64(3, 'UTC'),
     event_date Date MATERIALIZED toDate(event_timestamp),
@@ -366,7 +366,7 @@ CREATE TABLE IF NOT EXISTS network_capabilities_model_constraints
         SETTINGS index_granularity = 8192;
 
 -- Table 4d: Network Capability Prices (one row per price entry)
-CREATE TABLE IF NOT EXISTS network_capabilities_prices
+CREATE TABLE IF NOT EXISTS raw_network_capabilities_prices
 (
     event_timestamp DateTime64(3, 'UTC'),
     event_date Date MATERIALIZED toDate(event_timestamp),
@@ -512,7 +512,7 @@ SELECT
     bytes_received,
     bytes_sent,
     toString(cityHash64(raw_json)) AS source_event_uid
-FROM stream_ingest_metrics;
+FROM raw_stream_ingest_metrics;
 
 -- Silver Fact: Workflow Sessions (stateful, Flink-generated)
 CREATE TABLE IF NOT EXISTS fact_workflow_sessions
@@ -851,7 +851,7 @@ SELECT
     runner_version,
     CAST(NULL AS Nullable(String)) AS region,
     source_event_id AS source_event_uid
-FROM network_capabilities;
+FROM raw_network_capabilities;
 
 -- Transitional exception (P1): capability dimension materialization currently projects from typed capability tables.
 -- Contract boundary: serving views must consume `dim_*`/`fact_*`/`agg_*` objects and avoid direct joins to typed capability tables.
@@ -871,7 +871,7 @@ SELECT
     capability_group,
     capacity,
     capability_catalog_version
-FROM network_capabilities_advertised;
+FROM raw_network_capabilities_advertised;
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_network_capabilities_model_constraints_to_dim_orchestrator_capability_model_constraints
 TO dim_orchestrator_capability_model_constraints
@@ -891,7 +891,7 @@ SELECT
     capacity,
     capacity_in_use,
     warm
-FROM network_capabilities_model_constraints;
+FROM raw_network_capabilities_model_constraints;
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_network_capabilities_prices_to_dim_orchestrator_capability_prices
 TO dim_orchestrator_capability_prices
@@ -909,7 +909,7 @@ SELECT
     constraint_name,
     price_per_unit,
     pixels_per_unit
-FROM network_capabilities_prices;
+FROM raw_network_capabilities_prices;
 
 -- Derived current dimension (latest snapshot by orchestrator + workflow + model + GPU).
 CREATE OR REPLACE VIEW dim_orchestrator_capability_current AS
@@ -1159,7 +1159,7 @@ GROUP BY
     region;
 
 -- Table 7: Payment Events (economics tracking)
-CREATE TABLE IF NOT EXISTS payment_events
+CREATE TABLE IF NOT EXISTS raw_payment_events
 (
     event_timestamp DateTime64(3, 'UTC'),
     event_date Date MATERIALIZED toDate(event_timestamp),
@@ -1789,7 +1789,7 @@ fees_1h AS
         s.pipeline,
         s.model_id,
         sum(toFloat64OrZero(p.face_value)) / 1000000000000000000.0 AS fee_payment_eth
-    FROM payment_events p
+    FROM raw_payment_events p
     INNER JOIN latest_session_by_request s ON s.request_id = p.request_id
     GROUP BY
         window_start,
@@ -2046,7 +2046,7 @@ fees_gpu_1h_raw AS
         s.model_id,
         s.gpu_id,
         sum(toFloat64OrZero(p.face_value)) / 1000000000000000000.0 AS fee_payment_eth
-    FROM payment_events p
+    FROM raw_payment_events p
     INNER JOIN latest_session_by_request s ON s.request_id = p.request_id
     GROUP BY
         window_start,
@@ -2327,7 +2327,7 @@ FROM fact_workflow_sessions
 GROUP BY workflow_session_id;
 
 -- Table 5: AI Stream Events (errors and lifecycle events)
-CREATE TABLE IF NOT EXISTS ai_stream_events
+CREATE TABLE IF NOT EXISTS raw_ai_stream_events
 (
     event_timestamp DateTime64(3, 'UTC'),
     event_date Date MATERIALIZED toDate(event_timestamp),
@@ -2355,7 +2355,7 @@ CREATE TABLE IF NOT EXISTS ai_stream_events
         SETTINGS index_granularity = 8192;
 
 -- Table 6: Discovery Results (orchestrator discovery latency)
-CREATE TABLE IF NOT EXISTS discovery_results
+CREATE TABLE IF NOT EXISTS raw_discovery_results
 (
     event_timestamp DateTime64(3, 'UTC'),
     event_date Date MATERIALIZED toDate(event_timestamp),
@@ -2381,14 +2381,14 @@ CREATE TABLE IF NOT EXISTS discovery_results
 -- INDEXES FOR COMMON QUERIES
 -- ============================================
 
-ALTER TABLE ai_stream_status
+ALTER TABLE raw_ai_stream_status
     ADD INDEX IF NOT EXISTS idx_orchestrator orchestrator_address TYPE bloom_filter GRANULARITY 1;
 
-ALTER TABLE ai_stream_status
+ALTER TABLE raw_ai_stream_status
     ADD INDEX IF NOT EXISTS idx_pipeline pipeline TYPE bloom_filter GRANULARITY 1;
 
-ALTER TABLE stream_trace_events
+ALTER TABLE raw_stream_trace_events
     ADD INDEX IF NOT EXISTS idx_request_id request_id TYPE bloom_filter GRANULARITY 1;
 
-ALTER TABLE network_capabilities
+ALTER TABLE raw_network_capabilities
     ADD INDEX IF NOT EXISTS idx_orch_address orchestrator_address TYPE bloom_filter GRANULARITY 1;

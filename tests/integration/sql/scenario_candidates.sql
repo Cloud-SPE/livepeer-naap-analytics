@@ -45,7 +45,7 @@ cap_wallets AS
   -- should line up with canonical capability wallets. Avoid fallback joins
   -- here so normalization regressions surface in notebook output.
   SELECT DISTINCT lower(orchestrator_address) AS wallet
-  FROM livepeer_analytics.network_capabilities
+  FROM livepeer_analytics.raw_network_capabilities
   WHERE event_timestamp >= {from_ts:DateTime64(3)}
     AND event_timestamp < {to_ts:DateTime64(3)}
     AND orchestrator_address != ''
@@ -425,7 +425,7 @@ cap_wallets AS
   -- should line up with canonical capability wallets. Avoid fallback joins
   -- here so normalization regressions surface in notebook output.
   SELECT DISTINCT lower(orchestrator_address) AS wallet
-  FROM livepeer_analytics.network_capabilities
+  FROM livepeer_analytics.raw_network_capabilities
   WHERE event_timestamp >= {from_ts:DateTime64(3)}
     AND event_timestamp < {to_ts:DateTime64(3)}
     AND orchestrator_address != ''

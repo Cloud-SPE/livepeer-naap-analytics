@@ -88,7 +88,7 @@ SELECT
   failure_class,
   failure_reason,
   count() AS total
-FROM livepeer_analytics.streaming_events_dlq
+FROM livepeer_analytics.raw_streaming_events_dlq
 WHERE ingestion_timestamp >= now() - INTERVAL 1 HOUR
 GROUP BY failure_class, failure_reason
 ORDER BY total DESC;
@@ -101,7 +101,7 @@ SELECT
   failure_class,
   failure_reason,
   payload_body
-FROM livepeer_analytics.streaming_events_dlq
+FROM livepeer_analytics.raw_streaming_events_dlq
 WHERE ingestion_timestamp >= now() - INTERVAL 1 HOUR
 ORDER BY ingestion_timestamp DESC
 LIMIT 20;

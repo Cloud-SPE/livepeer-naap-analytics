@@ -418,16 +418,16 @@ public class StreamingEventsToClickHouse {
                 .union(workflowTraceEdgeRows.getSideOutput(DLQ_TAG));
 
         // ClickHouse connector handles retry/backoff; sink failures surface as job failures, not per-record DLQ.
-        sinkToClickHouse(aiStatusRows, config, "ai_stream_status", "CH: AI Status");
-        sinkToClickHouse(ingestMetricsRows, config, "stream_ingest_metrics", "CH: Ingest Metrics");
-        sinkToClickHouse(traceRows, config, "stream_trace_events", "CH: Trace Events");
-        sinkToClickHouse(networkCapsRows, config, "network_capabilities", "CH: Network Caps");
-        sinkToClickHouse(networkCapsAdvertisedRows, config, "network_capabilities_advertised", "CH: Network Caps Advertised");
-        sinkToClickHouse(networkCapsModelConstraintRows, config, "network_capabilities_model_constraints", "CH: Network Caps Model Constraints");
-        sinkToClickHouse(networkCapsPriceRows, config, "network_capabilities_prices", "CH: Network Caps Prices");
-        sinkToClickHouse(aiEventsRows, config, "ai_stream_events", "CH: AI Events");
-        sinkToClickHouse(discoveryRows, config, "discovery_results", "CH: Discovery");
-        sinkToClickHouse(paymentRows, config, "payment_events", "CH: Payments");
+        sinkToClickHouse(aiStatusRows, config, "raw_ai_stream_status", "CH: AI Status");
+        sinkToClickHouse(ingestMetricsRows, config, "raw_stream_ingest_metrics", "CH: Ingest Metrics");
+        sinkToClickHouse(traceRows, config, "raw_stream_trace_events", "CH: Trace Events");
+        sinkToClickHouse(networkCapsRows, config, "raw_network_capabilities", "CH: Network Caps");
+        sinkToClickHouse(networkCapsAdvertisedRows, config, "raw_network_capabilities_advertised", "CH: Network Caps Advertised");
+        sinkToClickHouse(networkCapsModelConstraintRows, config, "raw_network_capabilities_model_constraints", "CH: Network Caps Model Constraints");
+        sinkToClickHouse(networkCapsPriceRows, config, "raw_network_capabilities_prices", "CH: Network Caps Prices");
+        sinkToClickHouse(aiEventsRows, config, "raw_ai_stream_events", "CH: AI Events");
+        sinkToClickHouse(discoveryRows, config, "raw_discovery_results", "CH: Discovery");
+        sinkToClickHouse(paymentRows, config, "raw_payment_events", "CH: Payments");
         sinkToClickHouse(workflowSessionRows, config, "fact_workflow_sessions", "CH: Workflow Sessions");
         sinkToClickHouse(workflowLatencySampleRows, config, "fact_workflow_latency_samples", "CH: Workflow Latency Samples");
         sinkToClickHouse(workflowSessionSegmentRows, config, "fact_workflow_session_segments", "CH: Workflow Session Segments");
@@ -470,8 +470,8 @@ public class StreamingEventsToClickHouse {
                 config,
                 "Rows: Quarantine");
 
-        sinkToClickHouse(dlqRows, config, "streaming_events_dlq", "CH: DLQ");
-        sinkToClickHouse(quarantineRows, config, "streaming_events_quarantine", "CH: Quarantine");
+        sinkToClickHouse(dlqRows, config, "raw_streaming_events_dlq", "CH: DLQ");
+        sinkToClickHouse(quarantineRows, config, "raw_streaming_events_quarantine", "CH: Quarantine");
 
         env.execute("Livepeer Analytics Quality Gate");
     }

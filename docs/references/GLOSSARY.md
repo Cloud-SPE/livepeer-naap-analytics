@@ -6,8 +6,8 @@ Canonical terminology for consistent communication across architecture, schema, 
 
 | Term | Definition |
 |---|---|
-| Raw tables | Directly ingested event surfaces with minimal reshaping (for replay/audit), such as `streaming_events` and DLQ/quarantine tables. |
-| Typed tables | Parsed event-family tables with explicit columns (for example `ai_stream_status`, `stream_trace_events`, `network_capabilities`). |
+| Raw tables | Directly ingested event surfaces with minimal reshaping (for replay/audit), such as `raw_streaming_events` and DLQ/quarantine tables. |
+| Typed tables | Parsed event-family tables with explicit columns (for example `raw_ai_stream_status`, `raw_stream_trace_events`, `raw_network_capabilities`). |
 | Fact tables (`fact_*`) | Curated analytical tables at explicit business grain. |
 | Rollups (`agg_*`) | Pre-aggregated tables optimized for common read patterns and time windows. |
 | API views (`v_api_*`) | Stable serving interfaces consumed by APIs and dashboards. |
@@ -21,7 +21,7 @@ Canonical terminology for consistent communication across architecture, schema, 
 | Canonical wallet | Official orchestrator identity (`orchestrator_address`) used in silver/gold/API layers. |
 | Local/proxy wallet | Non-canonical wallet identity (`local_address`) kept for traceability in capability data. |
 | Wallet normalization | Mapping local/proxy wallet values to canonical orchestrator wallet before downstream joins/persistence. |
-| Raw-to-downstream join | Join path that maps raw wallet values through `network_capabilities` to canonical wallet identity first. |
+| Raw-to-downstream join | Join path that maps raw wallet values through `raw_network_capabilities` to canonical wallet identity first. |
 
 ## Lifecycle and Session Terms
 

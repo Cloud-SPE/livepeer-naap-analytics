@@ -31,7 +31,7 @@ This document consolidates the data quality controls implemented in the Flink pi
 - The TTL bounds state size while still preventing short‑term duplicates.
 
 **Quarantine**
-Duplicates are emitted to the quarantine side output and written to Kafka topic `events.quarantine.streaming_events.v1` and ClickHouse table `streaming_events_quarantine`.
+Duplicates are emitted to the quarantine side output and written to Kafka topic `events.quarantine.streaming_events.v1` and ClickHouse table `raw_streaming_events_quarantine`.
 
 ### Why This Approach Was Chosen Over Alternatives
 
@@ -66,7 +66,7 @@ Duplicates are emitted to the quarantine side output and written to Kafka topic 
 - Controlled by `QUALITY_SUPPORTED_VERSIONS` (default: `1,v1`).
 
 **DLQ process**
-Schema failures emit a DLQ envelope with failure details. Output is written to Kafka topic `events.dlq.streaming_events.v1` and ClickHouse table `streaming_events_dlq`. Source and payload fields are preserved for replay and diagnostics.
+Schema failures emit a DLQ envelope with failure details. Output is written to Kafka topic `events.dlq.streaming_events.v1` and ClickHouse table `raw_streaming_events_dlq`. Source and payload fields are preserved for replay and diagnostics.
 
 **Replay flag**
 - Replayed events carry `__replay=true` and are preserved in DLQ envelopes.
@@ -86,7 +86,7 @@ Schema failures emit a DLQ envelope with failure details. Output is written to K
 
 **High DLQ volume**
 1. Check `SchemaValidator` rules for missing/changed fields.
-2. Inspect a sample from `streaming_events_dlq` to see `failure_class` and `failure_reason`.
+2. Inspect a sample from `raw_streaming_events_dlq` to see `failure_class` and `failure_reason`.
 3. Update these files in order: `configs/clickhouse-init/01-schema.sql`, `flink-jobs/src/main/java/com/livepeer/analytics/parse/EventParsers.java`, `flink-jobs/src/main/java/com/livepeer/analytics/model/EventPayloads.java`, `flink-jobs/src/main/java/com/livepeer/analytics/sink/ClickHouseRowMappers.java`, tests `flink-jobs/src/test/java/com/livepeer/analytics/sink/ClickHouseSchemaSyncTest.java` and `flink-jobs/src/test/java/com/livepeer/analytics/parse/EventParsersTest.java`.
 
 **High quarantine volume**
@@ -114,8 +114,8 @@ Collected via `QualityGateProcessFunction` and `DeduplicationProcessFunction`:
 - `quality_gate.sink_guard.oversize_drops` (counter)
 
 **Key tables for monitoring**
-- `streaming_events_dlq`
-- `streaming_events_quarantine`
+- `raw_streaming_events_dlq`
+- `raw_streaming_events_quarantine`
 
 **Recommended alerts**
 1. DLQ rate > 1% of total events (schema drift likely).

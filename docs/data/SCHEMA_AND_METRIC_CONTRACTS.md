@@ -86,11 +86,11 @@ Contract rule: additive fields are canonical; clients must recompute ratios/scor
 ## Raw-to-Fact and Execution Contract
 
 - Raw -> fact mapping:
-  - `ai_stream_status` -> `fact_stream_status_samples`
-  - `stream_trace_events` -> `fact_stream_trace_edges`
-  - `stream_ingest_metrics` -> `fact_stream_ingest_samples`
-  - `stream_trace_events` + `ai_stream_events` + `fact_stream_status_samples` -> Flink lifecycle facts
-  - `network_capabilities*` -> capability dimensions
+  - `raw_ai_stream_status` -> `fact_stream_status_samples`
+  - `raw_stream_trace_events` -> `fact_stream_trace_edges`
+  - `raw_stream_ingest_metrics` -> `fact_stream_ingest_samples`
+  - `raw_stream_trace_events` + `raw_ai_stream_events` + `fact_stream_status_samples` -> Flink lifecycle facts
+  - `raw_network_capabilities*` -> capability dimensions
 - Execution split:
   - Flink owns correctness-critical canonical fact emission for lifecycle and segment-aligned status/trace facts.
   - ClickHouse MVs own direct non-stateful ingest projection (`fact_stream_ingest_samples`) and serving rollups/views.
@@ -120,7 +120,7 @@ Contract rule: additive fields are canonical; clients must recompute ratios/scor
 - Metric edge definitions:
   - startup proxy: `gateway_receive_stream_request` -> `gateway_receive_first_processed_segment`
   - E2E proxy: `gateway_send_first_ingest_segment` -> `runner_send_first_processed_segment`
-  - prompt-to-playable proxy: `ai_stream_status.start_time` -> `gateway_receive_few_processed_segments`
+  - prompt-to-playable proxy: `raw_ai_stream_status.start_time` -> `gateway_receive_few_processed_segments`
 - Startup outcome classification:
   - classes: `success`, `excused`, `unexcused`, `not_in_denominator` (debug only).
   - rule order:

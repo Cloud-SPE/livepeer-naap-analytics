@@ -15,7 +15,7 @@ WITH
       request_id,
       orchestrator_address,
       min(event_timestamp) AS session_start_ts
-    FROM livepeer_analytics.ai_stream_status
+    FROM livepeer_analytics.raw_ai_stream_status
     WHERE event_timestamp >= from_ts AND event_timestamp < to_ts
       AND (stream_id != '' OR request_id != '')
       AND orchestrator_address != ''
@@ -27,7 +27,7 @@ WITH
       lower(orchestrator_address) AS orchestrator_address,
       argMax(model_id, event_timestamp) AS model_id_latest,
       argMax(gpu_id, event_timestamp) AS gpu_id_latest
-    FROM livepeer_analytics.network_capabilities
+    FROM livepeer_analytics.raw_network_capabilities
     WHERE event_timestamp < to_ts
       AND orchestrator_address != '' AND local_address != ''
     GROUP BY orchestrator_address, local_address
@@ -52,7 +52,7 @@ WITH
       request_id,
       orchestrator_address,
       min(event_timestamp) AS session_start_ts
-    FROM livepeer_analytics.ai_stream_status
+    FROM livepeer_analytics.raw_ai_stream_status
     WHERE event_timestamp >= from_ts AND event_timestamp < to_ts
       AND (stream_id != '' OR request_id != '')
       AND orchestrator_address != ''
@@ -64,7 +64,7 @@ WITH
       lower(orchestrator_address) AS orchestrator_address,
       argMax(model_id, event_timestamp) AS model_id_latest,
       argMax(gpu_id, event_timestamp) AS gpu_id_latest
-    FROM livepeer_analytics.network_capabilities
+    FROM livepeer_analytics.raw_network_capabilities
     WHERE event_timestamp < to_ts
       AND orchestrator_address != '' AND local_address != ''
     GROUP BY orchestrator_address, local_address
@@ -101,7 +101,7 @@ SELECT
     avg(output_fps) AS avg_output_fps,
     quantile(0.95)(output_fps) AS p95_output_fps,
     avg(output_fps / nullIf(input_fps, 0)) AS avg_efficiency_ratio
-FROM livepeer_analytics.ai_stream_status
+FROM livepeer_analytics.raw_ai_stream_status
 WHERE event_timestamp >= from_ts AND event_timestamp < to_ts
 GROUP BY window_start, orchestrator_address
 ORDER BY window_start, orchestrator_address;
@@ -114,7 +114,7 @@ SELECT
     toStartOfInterval(event_timestamp, INTERVAL 5 MINUTE) AS window_start,
     orchestrator_address,
     stddevPop(output_fps) / nullIf(avg(output_fps), 0) AS jitter_coeff_fps
-FROM livepeer_analytics.ai_stream_status
+FROM livepeer_analytics.raw_ai_stream_status
 WHERE event_timestamp >= from_ts AND event_timestamp < to_ts
 GROUP BY window_start, orchestrator_address
 ORDER BY window_start, orchestrator_address;
@@ -148,7 +148,7 @@ WITH
         request_id,
         minIf(data_timestamp, trace_type = 'gateway_receive_stream_request') AS ts_start,
         minIf(data_timestamp, trace_type = 'gateway_receive_first_processed_segment') AS ts_first_processed
-    FROM livepeer_analytics.stream_trace_events
+    FROM livepeer_analytics.raw_stream_trace_events
     WHERE event_timestamp >= from_ts AND event_timestamp < to_ts
     GROUP BY request_id
 )
@@ -165,7 +165,7 @@ FROM trace_edges;
 
 
 -- 7) Prompt-to-playable proxy latency
--- prompt_to_playable_ms = first(gateway_receive_few_processed_segments) - min(stream start_time from ai_stream_status)
+-- prompt_to_playable_ms = first(gateway_receive_few_processed_segments) - min(stream start_time from raw_ai_stream_status)
 -- orch ingest to playable = first(gateway_receive_few_processed_segments) - first(gateway_send_first_ingest_segment)
 -- first segment from runner to playable = first(gateway_receive_few_processed_segments) - first(runner_send_first_processed_segment)
 
@@ -174,7 +174,7 @@ WITH
   toDateTime64('2026-02-11 00:00:00', 3, 'UTC') AS to_ts,
   starts AS (
     SELECT request_id, min(start_time) AS start_time
-    FROM livepeer_analytics.ai_stream_status
+    FROM livepeer_analytics.raw_ai_stream_status
     WHERE event_timestamp >= from_ts AND event_timestamp < to_ts
     GROUP BY request_id
 ),
@@ -185,7 +185,7 @@ trace_edges AS (
     minIf(data_timestamp, trace_type = 'gateway_send_first_ingest_segment') AS ts_sent_to_o,
     minIf(data_timestamp, trace_type = 'runner_send_first_processed_segment') AS ts_runner_first_processed
 
-    FROM livepeer_analytics.stream_trace_events
+    FROM livepeer_analytics.raw_stream_trace_events
     WHERE event_timestamp >= from_ts AND event_timestamp < to_ts
     GROUP BY request_id
 )
@@ -228,7 +228,7 @@ WITH
         maxIf(1, trace_type = 'gateway_receive_few_processed_segments') AS startup_success,
         maxIf(1, trace_type = 'gateway_no_orchestrators_available') AS no_orchestrators_available,
         maxIf(1, trace_type = 'gateway_ingest_stream_closed') AS ingest_closed
-    FROM livepeer_analytics.stream_trace_events
+    FROM livepeer_analytics.raw_stream_trace_events
     WHERE event_timestamp >= from_ts AND event_timestamp < to_ts
       AND (stream_id != '' OR request_id != '')
     GROUP BY session_key
@@ -252,7 +252,7 @@ error_sessions AS (
                 lowerUTF8(message) LIKE '%user disconnected%'
             )
         ) AS excusable_error_count
-    FROM livepeer_analytics.ai_stream_events
+    FROM livepeer_analytics.raw_ai_stream_events
     WHERE event_timestamp >= from_ts AND event_timestamp < to_ts
       AND (stream_id != '' OR request_id != '')
     GROUP BY session_key
@@ -310,7 +310,7 @@ WITH
         maxIf(1, trace_type = 'gateway_receive_few_processed_segments') AS startup_success,
         maxIf(1, trace_type = 'gateway_no_orchestrators_available') AS no_orchestrators_available,
         maxIf(1, trace_type = 'gateway_ingest_stream_closed') AS ingest_closed
-    FROM livepeer_analytics.stream_trace_events
+    FROM livepeer_analytics.raw_stream_trace_events
     WHERE event_timestamp >= from_ts AND event_timestamp < to_ts
       AND (stream_id != '' OR request_id != '')
     GROUP BY session_key
@@ -335,7 +335,7 @@ error_sessions AS (
             )
         ) AS excusable_error_count,
         groupArrayIf(message, event_type = 'error') AS error_messages
-    FROM livepeer_analytics.ai_stream_events
+    FROM livepeer_analytics.raw_ai_stream_events
     WHERE event_timestamp >= from_ts AND event_timestamp < to_ts
       AND (stream_id != '' OR request_id != '')
     GROUP BY session_key
@@ -397,7 +397,7 @@ WITH
         request_id,
         uniqExactIf(orchestrator_address, orchestrator_address != '') AS orch_count,
         countIf(trace_type = 'orchestrator_swap') AS explicit_swap_events
-    FROM livepeer_analytics.stream_trace_events
+    FROM livepeer_analytics.raw_stream_trace_events
     WHERE event_timestamp >= from_ts AND event_timestamp < to_ts
       AND (stream_id != '' OR request_id != '')
     GROUP BY session_key, stream_id, request_id
@@ -425,7 +425,7 @@ WITH
             ''
         )
     ) AS sessions_with_explicit_swap
-FROM livepeer_analytics.stream_trace_events
+FROM livepeer_analytics.raw_stream_trace_events
 WHERE event_timestamp >= from_ts AND event_timestamp < to_ts
   AND trace_type = 'orchestrator_swap'
   AND orchestrator_address != ''
@@ -442,7 +442,7 @@ WITH
         countIf(trace_type = 'orchestrator_swap') AS explicit_swap_events,
         uniqExactIf(orchestrator_address, orchestrator_address != '') AS orch_count,
         count() AS trace_rows
-    FROM livepeer_analytics.stream_trace_events
+    FROM livepeer_analytics.raw_stream_trace_events
     WHERE event_timestamp >= from_ts AND event_timestamp < to_ts
       AND stream_id != ''
     GROUP BY stream_id
@@ -465,7 +465,7 @@ WITH
     trace_type,
     count() AS cnt,
     uniqExact(request_id) AS req_cnt
-FROM livepeer_analytics.stream_trace_events
+FROM livepeer_analytics.raw_stream_trace_events
 WHERE event_timestamp >= from_ts AND event_timestamp < to_ts
 GROUP BY trace_type
 ORDER BY cnt DESC;

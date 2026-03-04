@@ -76,19 +76,19 @@ Any add/rename/remove of a `-- TEST:` block must co-update this section in the s
 |---|---|---|
 | `raw_events_present` | Core raw/typed ingress objects have data in-window. | Confirm assertion `from_ts`/`to_ts` matches replay window and fixture manifest window. |
 | `capability_dimension_mvs_present` | Required capability MVs exist in ClickHouse. | Check `system.tables` for missing MV names and confirm schema init was applied. |
-| `capability_dimensions_projecting` | Capability source tables project into dimension snapshot tables. | Compare row counts between `network_capabilities*` and `dim_orchestrator_capability_*` tables in-window. |
+| `capability_dimensions_projecting` | Capability source tables project into dimension snapshot tables. | Compare row counts between `raw_network_capabilities*` and `dim_orchestrator_capability_*` tables in-window. |
 | `capability_snapshot_gpu_coverage` | Capability snapshot dimensions preserve per-event GPU coverage without collapse or split relative to typed capabilities. | Compare distinct GPU counts per `(source_event_id, orchestrator, pipeline, model_id)` and inspect both deficits (`loss_rows`) and expansions (`expansion_rows`). |
-| `capability_prices_key_multiplicity_guard` | Capability prices remain unique at current key grain. | Check duplicate groups for `(source_event_id, orchestrator, capability_id, event_timestamp)` in `network_capabilities_prices`; duplicates indicate potential collapse risk with current key contract. |
+| `capability_prices_key_multiplicity_guard` | Capability prices remain unique at current key grain. | Check duplicate groups for `(source_event_id, orchestrator, capability_id, event_timestamp)` in `raw_network_capabilities_prices`; duplicates indicate potential collapse risk with current key contract. |
 | `session_fact_present` | Sessionization emits `fact_workflow_sessions` rows. | Confirm lifecycle operators are running and replay produced stream trace/status rows. |
 | `core_raw_to_silver_gold_nonempty` | Core flow has non-zero accepted raw rows and non-empty silver+gold facts. | Compare core raw distinct IDs vs DLQ/quarantine distinct IDs, then verify status/trace silver rows and session fact rows are non-zero. |
-| `network_capabilities_raw_and_typed_present` | Capabilities are present both raw and typed for attribution windows. | Check `streaming_events(type='network_capabilities')` vs `network_capabilities` parse output. |
+| `network_capabilities_raw_and_typed_present` | Capabilities are present both raw and typed for attribution windows. | Check `raw_streaming_events(type='network_capabilities')` vs `raw_network_capabilities` parse output. |
 | `status_raw_to_silver_projection` | Typed status rows are losslessly projected to silver status fact, including per-source-UID multiplicity. | Compare typed vs silver counts by `lower(hex(SHA256(raw_json)))` source UID; inspect `missing_in_silver`, `multiplicity_mismatch`, and `silver_only_keys`. |
 | `trace_raw_to_silver_projection` | Typed trace rows are losslessly projected to silver trace edges, including per-source-UID multiplicity. | Compare typed vs silver counts by `lower(hex(SHA256(raw_json)))` source UID; inspect `missing_in_silver`, `multiplicity_mismatch`, and `silver_only_keys`. |
 | `ingest_raw_to_silver_projection` | Typed ingest rows are losslessly projected to ingest silver fact, including per-source-UID multiplicity. | Compare typed vs silver counts by `cityHash64(raw_json)` source UID; inspect `missing_in_silver`, `multiplicity_mismatch`, and `silver_only_keys`. |
 | `session_final_uniqueness` | Latest-version session rows are unique per `workflow_session_id` under `FINAL`. | Inspect duplicate latest `version` rows in `fact_workflow_sessions`. |
 | `workflow_session_has_identifier` | Session rows always carry non-empty `workflow_session_id`. | Inspect lifecycle signal key construction (`stream_id|request_id`) for blanks. |
 | `swap_signal_split_consistency` | Compatibility alias `swap_count` must equal explicit swap count (`confirmed_swap_count`); inferred swaps are tracked separately (`inferred_orchestrator_change_count`). | Validate session fact emission contract in Flink state machine and mapper fields. |
-| `gold_sessions_use_canonical_orchestrator_identity` | Gold/session orchestrator identity is canonical (not hot-wallet/local). | Compare session `orchestrator_address` to canonical `network_capabilities.orchestrator_address` in-window. |
+| `gold_sessions_use_canonical_orchestrator_identity` | Gold/session orchestrator identity is canonical (not hot-wallet/local). | Compare session `orchestrator_address` to canonical `raw_network_capabilities.orchestrator_address` in-window. |
 | `swapped_sessions_have_evidence` | Sessions flagged swapped by canonical semantics (`confirmed_swap_count > 0` or `inferred_orchestrator_change_count > 0`) must have fact-level evidence (explicit swap trace edge or multi-orchestrator segment history). | Check `fact_stream_trace_edges.is_swap_event` and segment orchestrator cardinality by `workflow_session_id`; avoid typed/raw fallback joins for attribution evidence. |
 | `param_updates_reference_existing_session` | Param-update facts must reference a known session id (no orphan IDs). | Left join `fact_workflow_param_updates` to all known session ids and inspect orphan IDs. |
 | `lifecycle_session_pipeline_model_compatible` | Attributed sessions keep `pipeline` and `model_id` semantically distinct when both set (`pipeline` workflow class, `model_id` model label). | Inspect lifecycle resolver mode, capability attribution selection, and canonical field assignment paths. |
@@ -98,7 +98,7 @@ Any add/rename/remove of a `-- TEST:` block must co-update this section in the s
 | `session_to_status_projection_consistency` | Status/session pipeline-model alignment is enforced with severity tiers: partial drift is WARN, full comparable-set mismatch is FAIL. | Compare `pipeline_mismatch_rows`/`model_mismatch_rows` to comparable row counts and inspect model variant normalization (`streamdiffusion-sdxl` vs `streamdiffusion-sdxl-v2v`) before escalation. |
 | `status_vs_segment_identity_consistency` | Status-to-segment identity alignment is monitored with severity tiers: partial drift is WARN, all-row mismatch is FAIL. | Inspect mismatch examples by `workflow_session_id` for canonical orchestrator/model/GPU divergence; use `missing_segment_match_rows` as timing/context diagnostics. |
 | `latency_vs_segment_identity_consistency` | Latency-to-segment identity alignment is monitored with severity tiers: partial drift is WARN, all-row mismatch is FAIL. | Inspect latest latency rows lacking valid segment window matches (`segment_start_ts`/`segment_end_ts`) before classifying as blocking drift. |
-| `proxy_to_canonical_multiplicity_guard` | Proxy identity fanout is severity-tiered: `(local_address, orch_uri)` multi-canonical is FAIL; proxy-only multi-canonical is WARN. | Check canonical cardinality both per `local_address` and per `(local_address, orch_uri)` in `network_capabilities`; prioritize URI-key collisions as blocking. |
+| `proxy_to_canonical_multiplicity_guard` | Proxy identity fanout is severity-tiered: `(local_address, orch_uri)` multi-canonical is FAIL; proxy-only multi-canonical is WARN. | Check canonical cardinality both per `local_address` and per `(local_address, orch_uri)` in `raw_network_capabilities`; prioritize URI-key collisions as blocking. |
 | `session_summary_change_flags_consistency` | Session derived change flags must match distinct segment pipeline/model counts. | Compare `has_model_change`/`has_pipeline_change` from latest sessions against distinct segment values per `workflow_session_id`. |
 | `gpu_view_no_perf_only_orphan_rows` | GPU perf-only orphan rows are tracked as non-blocking drift signal (WARN). | Inspect `v_api_gpu_metrics` rows with `status_samples>0` and zero known/latency evidence, then verify segment-hour key coverage for those keys. |
 | `trace_edge_pipeline_model_coverage` | Trace-edge pipeline/model coverage is severity-tiered: partial uncovered attributed sessions are WARN, fully uncovered attributed set is FAIL. | Aggregate `fact_stream_trace_edges` by `workflow_session_id`; inspect uncovered sessions for missing pipeline/model projection on edge rows. |
@@ -247,9 +247,9 @@ Apply this checklist to any refactor/change that can affect schema, lifecycle se
   - primary key: `event.id` when present.
   - fallback: deterministic hash over normalized payload/dimensions.
   - state TTL: `QUALITY_DEDUP_TTL_MINUTES` (default `1440`).
-  - duplicates are quarantined (`events.quarantine.streaming_events.v1`, `streaming_events_quarantine`).
+  - duplicates are quarantined (`events.quarantine.streaming_events.v1`, `raw_streaming_events_quarantine`).
 - Validation:
-  - schema/type/version checks emit DLQ envelopes (`events.dlq.streaming_events.v1`, `streaming_events_dlq`).
+  - schema/type/version checks emit DLQ envelopes (`events.dlq.streaming_events.v1`, `raw_streaming_events_dlq`).
   - replay metadata (`__replay=true`) is preserved in failure envelopes.
 - Pre-sink row guard:
   - `CLICKHOUSE_SINK_MAX_RECORD_BYTES` (default `1_000_000`) enforced before sink writes.
@@ -287,10 +287,10 @@ Policy:
 ### Raw-First Fixture Contract
 
 - Fixture JSONL replay rows must come from canonical raw ingress only:
-  - `__table = streaming_events`
+  - `__table = raw_streaming_events`
 - Scenario discovery still uses [`tests/integration/sql/scenario_candidates.sql`](../../tests/integration/sql/scenario_candidates.sql) against typed/fact tables.
-- Capability context selection still uses typed capability snapshots to find relevant source ids, but replay payloads are fetched from raw `streaming_events(type='network_capabilities')`.
-- [`tests/python/scripts/replay_scenario_events.py`](../../tests/python/scripts/replay_scenario_events.py) replays raw `streaming_events` rows only (no typed `network_capabilities` reconstruction path).
+- Capability context selection still uses typed capability snapshots to find relevant source ids, but replay payloads are fetched from raw `raw_streaming_events(type='network_capabilities')`.
+- [`tests/python/scripts/replay_scenario_events.py`](../../tests/python/scripts/replay_scenario_events.py) replays raw `raw_streaming_events` rows only (no typed `raw_network_capabilities` reconstruction path).
 
 Recommended export command:
 

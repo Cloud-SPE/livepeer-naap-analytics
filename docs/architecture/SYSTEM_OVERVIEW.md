@@ -128,7 +128,7 @@ Connect worker runs dual sinks on `streaming_events`.
 | Sink / setting | Property | Value / default | Purpose |
 |---|---|---|---|
 | `clickhouse-raw-events-sink` | `tasks.max` | `2` | Parallel raw ingest to ClickHouse |
-| `clickhouse-raw-events-sink` | insert mode | buffered async insert | Efficient writes to `livepeer_analytics.streaming_events` |
+| `clickhouse-raw-events-sink` | insert mode | buffered async insert | Efficient writes to `livepeer_analytics.raw_streaming_events` |
 | `minio-raw-events-sink` | `tasks.max` | `2` | Parallel object archival |
 | `minio-raw-events-sink` | format | JSON | Durable replay/audit payload preservation |
 | `minio-raw-events-sink` | partitioner | `DefaultPartitioner` | Topic/partition-oriented object layout |
@@ -174,8 +174,8 @@ Stateful lifecycle contracts are implemented in:
 
 | Storage class | Examples | Production role |
 |---|---|---|
-| Raw ingest | `streaming_events`, DLQ/quarantine tables | Immutable audit/replay inputs |
-| Typed event tables | `ai_stream_status`, `stream_trace_events`, `network_capabilities` | Parsed event surfaces |
+| Raw ingest | `raw_streaming_events`, DLQ/quarantine tables | Immutable audit/replay inputs |
+| Typed event tables | `raw_ai_stream_status`, `raw_stream_trace_events`, `raw_network_capabilities` | Parsed event surfaces |
 | Curated facts | `fact_*` | Canonical analytical facts |
 | Rollups | `agg_*` | Query-efficient aggregates |
 | Serving views | `v_api_*` | Stable API/dashboard contracts |

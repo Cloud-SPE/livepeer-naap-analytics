@@ -7,29 +7,29 @@
 
 -- QUERY: 01_raw_ingest
 SELECT
-  'streaming_events' AS object_name,
+  'raw_streaming_events' AS object_name,
   count() AS rows_window,
   min(event_timestamp) AS min_ts,
   max(event_timestamp) AS max_ts
-FROM livepeer_analytics.streaming_events
+FROM livepeer_analytics.raw_streaming_events
 WHERE event_timestamp >= {from_ts:DateTime64(3)}
   AND event_timestamp < {to_ts:DateTime64(3)}
 UNION ALL
 SELECT
-  'streaming_events_dlq' AS object_name,
+  'raw_streaming_events_dlq' AS object_name,
   count() AS rows_window,
   min(source_record_timestamp) AS min_ts,
   max(source_record_timestamp) AS max_ts
-FROM livepeer_analytics.streaming_events_dlq
+FROM livepeer_analytics.raw_streaming_events_dlq
 WHERE source_record_timestamp >= {from_ts:DateTime64(3)}
   AND source_record_timestamp < {to_ts:DateTime64(3)}
 UNION ALL
 SELECT
-  'streaming_events_quarantine' AS object_name,
+  'raw_streaming_events_quarantine' AS object_name,
   count() AS rows_window,
   min(source_record_timestamp) AS min_ts,
   max(source_record_timestamp) AS max_ts
-FROM livepeer_analytics.streaming_events_quarantine
+FROM livepeer_analytics.raw_streaming_events_quarantine
 WHERE source_record_timestamp >= {from_ts:DateTime64(3)}
   AND source_record_timestamp < {to_ts:DateTime64(3)};
 
@@ -42,55 +42,55 @@ SELECT
 FROM
 (
   SELECT
-    'ai_stream_status' AS object_name,
+    'raw_ai_stream_status' AS object_name,
     count() AS rows_window,
     min(event_timestamp) AS min_ts,
     max(event_timestamp) AS max_ts
-  FROM livepeer_analytics.ai_stream_status
+  FROM livepeer_analytics.raw_ai_stream_status
   WHERE event_timestamp >= {from_ts:DateTime64(3)}
     AND event_timestamp < {to_ts:DateTime64(3)}
 
   UNION ALL
 
   SELECT
-    'stream_trace_events' AS object_name,
+    'raw_stream_trace_events' AS object_name,
     count() AS rows_window,
     min(event_timestamp) AS min_ts,
     max(event_timestamp) AS max_ts
-  FROM livepeer_analytics.stream_trace_events
+  FROM livepeer_analytics.raw_stream_trace_events
   WHERE event_timestamp >= {from_ts:DateTime64(3)}
     AND event_timestamp < {to_ts:DateTime64(3)}
 
   UNION ALL
 
   SELECT
-    'ai_stream_events' AS object_name,
+    'raw_ai_stream_events' AS object_name,
     count() AS rows_window,
     min(event_timestamp) AS min_ts,
     max(event_timestamp) AS max_ts
-  FROM livepeer_analytics.ai_stream_events
+  FROM livepeer_analytics.raw_ai_stream_events
   WHERE event_timestamp >= {from_ts:DateTime64(3)}
     AND event_timestamp < {to_ts:DateTime64(3)}
 
   UNION ALL
 
   SELECT
-    'stream_ingest_metrics' AS object_name,
+    'raw_stream_ingest_metrics' AS object_name,
     count() AS rows_window,
     min(event_timestamp) AS min_ts,
     max(event_timestamp) AS max_ts
-  FROM livepeer_analytics.stream_ingest_metrics
+  FROM livepeer_analytics.raw_stream_ingest_metrics
   WHERE event_timestamp >= {from_ts:DateTime64(3)}
     AND event_timestamp < {to_ts:DateTime64(3)}
 
   UNION ALL
 
   SELECT
-    'network_capabilities' AS object_name,
+    'raw_network_capabilities' AS object_name,
     count() AS rows_window,
     min(event_timestamp) AS min_ts,
     max(event_timestamp) AS max_ts
-  FROM livepeer_analytics.network_capabilities
+  FROM livepeer_analytics.raw_network_capabilities
   WHERE event_timestamp >= {from_ts:DateTime64(3)}
     AND event_timestamp < {to_ts:DateTime64(3)}
 )

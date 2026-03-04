@@ -11,22 +11,22 @@ SELECT
   groupArrayIf(object_name, rows_window = 0) AS missing_objects
 FROM
 (
-  SELECT 'streaming_events' AS object_name, count() AS rows_window
-  FROM livepeer_analytics.streaming_events
+  SELECT 'raw_streaming_events' AS object_name, count() AS rows_window
+  FROM livepeer_analytics.raw_streaming_events
   WHERE event_timestamp >= {from_ts:DateTime64(3)}
     AND event_timestamp < {to_ts:DateTime64(3)}
 
   UNION ALL
 
-  SELECT 'ai_stream_status' AS object_name, count() AS rows_window
-  FROM livepeer_analytics.ai_stream_status
+  SELECT 'raw_ai_stream_status' AS object_name, count() AS rows_window
+  FROM livepeer_analytics.raw_ai_stream_status
   WHERE event_timestamp >= {from_ts:DateTime64(3)}
     AND event_timestamp < {to_ts:DateTime64(3)}
 
   UNION ALL
 
-  SELECT 'stream_trace_events' AS object_name, count() AS rows_window
-  FROM livepeer_analytics.stream_trace_events
+  SELECT 'raw_stream_trace_events' AS object_name, count() AS rows_window
+  FROM livepeer_analytics.raw_stream_trace_events
   WHERE event_timestamp >= {from_ts:DateTime64(3)}
     AND event_timestamp < {to_ts:DateTime64(3)}
 );
@@ -67,10 +67,10 @@ WITH
   raw_rows AS
   (
     SELECT
-      (SELECT count() FROM livepeer_analytics.network_capabilities WHERE event_timestamp >= {from_ts:DateTime64(3)} AND event_timestamp < {to_ts:DateTime64(3)}) AS caps_rows,
-      (SELECT count() FROM livepeer_analytics.network_capabilities_advertised WHERE event_timestamp >= {from_ts:DateTime64(3)} AND event_timestamp < {to_ts:DateTime64(3)}) AS adv_rows,
-      (SELECT count() FROM livepeer_analytics.network_capabilities_model_constraints WHERE event_timestamp >= {from_ts:DateTime64(3)} AND event_timestamp < {to_ts:DateTime64(3)}) AS mc_rows,
-      (SELECT count() FROM livepeer_analytics.network_capabilities_prices WHERE event_timestamp >= {from_ts:DateTime64(3)} AND event_timestamp < {to_ts:DateTime64(3)}) AS price_rows
+      (SELECT count() FROM livepeer_analytics.raw_network_capabilities WHERE event_timestamp >= {from_ts:DateTime64(3)} AND event_timestamp < {to_ts:DateTime64(3)}) AS caps_rows,
+      (SELECT count() FROM livepeer_analytics.raw_network_capabilities_advertised WHERE event_timestamp >= {from_ts:DateTime64(3)} AND event_timestamp < {to_ts:DateTime64(3)}) AS adv_rows,
+      (SELECT count() FROM livepeer_analytics.raw_network_capabilities_model_constraints WHERE event_timestamp >= {from_ts:DateTime64(3)} AND event_timestamp < {to_ts:DateTime64(3)}) AS mc_rows,
+      (SELECT count() FROM livepeer_analytics.raw_network_capabilities_prices WHERE event_timestamp >= {from_ts:DateTime64(3)} AND event_timestamp < {to_ts:DateTime64(3)}) AS price_rows
   ),
   dim_rows AS
   (
@@ -110,7 +110,7 @@ WITH
       pipeline,
       model_id,
       countDistinctIf(gpu_id, ifNull(gpu_id, '') != '') AS raw_gpu_count
-    FROM livepeer_analytics.network_capabilities
+    FROM livepeer_analytics.raw_network_capabilities
     WHERE event_timestamp >= {from_ts:DateTime64(3)}
       AND event_timestamp < {to_ts:DateTime64(3)}
     GROUP BY source_event_uid, orchestrator_address, pipeline, model_id
@@ -195,7 +195,7 @@ WITH duplicate_groups AS
     capability_id,
     event_timestamp,
     count() AS rows_in_group
-  FROM livepeer_analytics.network_capabilities_prices
+  FROM livepeer_analytics.raw_network_capabilities_prices
   WHERE event_timestamp >= {from_ts:DateTime64(3)}
     AND event_timestamp < {to_ts:DateTime64(3)}
   GROUP BY source_event_id, orchestrator_address, capability_id, event_timestamp
@@ -225,7 +225,7 @@ WITH
   raw_core AS
   (
     SELECT uniqExact(id) AS raw_distinct_ids
-    FROM livepeer_analytics.streaming_events
+    FROM livepeer_analytics.raw_streaming_events
     WHERE type IN ('ai_stream_status', 'stream_trace', 'ai_stream_events', 'stream_ingest_metrics')
       AND event_timestamp >= {from_ts:DateTime64(3)}
       AND event_timestamp < {to_ts:DateTime64(3)}
@@ -236,7 +236,7 @@ WITH
     FROM
     (
       SELECT event_id
-      FROM livepeer_analytics.streaming_events_dlq
+      FROM livepeer_analytics.raw_streaming_events_dlq
       WHERE event_type IN ('ai_stream_status', 'stream_trace', 'ai_stream_events', 'stream_ingest_metrics')
         AND ifNull(event_timestamp, source_record_timestamp) >= {from_ts:DateTime64(3)}
         AND ifNull(event_timestamp, source_record_timestamp) < {to_ts:DateTime64(3)}
@@ -244,7 +244,7 @@ WITH
       UNION ALL
 
       SELECT event_id
-      FROM livepeer_analytics.streaming_events_quarantine
+      FROM livepeer_analytics.raw_streaming_events_quarantine
       WHERE event_type IN ('ai_stream_status', 'stream_trace', 'ai_stream_events', 'stream_ingest_metrics')
         AND ifNull(event_timestamp, source_record_timestamp) >= {from_ts:DateTime64(3)}
         AND ifNull(event_timestamp, source_record_timestamp) < {to_ts:DateTime64(3)}
@@ -302,7 +302,7 @@ WITH
   raw AS
   (
     SELECT count() AS raw_rows
-    FROM livepeer_analytics.streaming_events
+    FROM livepeer_analytics.raw_streaming_events
     WHERE type = 'network_capabilities'
       AND event_timestamp >= {from_ts:DateTime64(3)}
       AND event_timestamp < {to_ts:DateTime64(3)}
@@ -310,7 +310,7 @@ WITH
   typed AS
   (
     SELECT count() AS typed_rows
-    FROM livepeer_analytics.network_capabilities
+    FROM livepeer_analytics.raw_network_capabilities
     WHERE event_timestamp >= {from_ts:DateTime64(3)}
       AND event_timestamp < {to_ts:DateTime64(3)}
   )
@@ -330,7 +330,7 @@ WITH
     SELECT
       toString(lower(hex(SHA256(raw_json)))) AS source_event_uid,
       count() AS typed_rows_per_uid
-    FROM livepeer_analytics.ai_stream_status
+    FROM livepeer_analytics.raw_ai_stream_status
     WHERE event_timestamp >= {from_ts:DateTime64(3)}
       AND event_timestamp < {to_ts:DateTime64(3)}
     GROUP BY source_event_uid
@@ -401,7 +401,7 @@ WITH
     SELECT
       toString(lower(hex(SHA256(raw_json)))) AS source_event_uid,
       count() AS typed_rows_per_uid
-    FROM livepeer_analytics.stream_trace_events
+    FROM livepeer_analytics.raw_stream_trace_events
     WHERE event_timestamp >= {from_ts:DateTime64(3)}
       AND event_timestamp < {to_ts:DateTime64(3)}
     GROUP BY source_event_uid
@@ -472,7 +472,7 @@ WITH
     SELECT
       toString(cityHash64(raw_json)) AS source_event_uid,
       count() AS typed_rows_per_uid
-    FROM livepeer_analytics.stream_ingest_metrics
+    FROM livepeer_analytics.raw_stream_ingest_metrics
     WHERE event_timestamp >= {from_ts:DateTime64(3)}
       AND event_timestamp < {to_ts:DateTime64(3)}
     GROUP BY source_event_uid
@@ -595,7 +595,7 @@ WITH
   canonical_capability_wallets AS
   (
     SELECT DISTINCT lower(orchestrator_address) AS orchestrator_address
-    FROM livepeer_analytics.network_capabilities
+    FROM livepeer_analytics.raw_network_capabilities
     WHERE event_timestamp >= {from_ts:DateTime64(3)}
       AND event_timestamp < {to_ts:DateTime64(3)}
       AND orchestrator_address != ''
@@ -1169,7 +1169,7 @@ WITH
     SELECT
       lowerUTF8(local_address) AS proxy_wallet,
       uniqExact(lowerUTF8(orchestrator_address)) AS canonical_count
-    FROM livepeer_analytics.network_capabilities
+    FROM livepeer_analytics.raw_network_capabilities
     WHERE event_timestamp >= {from_ts:DateTime64(3)}
       AND event_timestamp < {to_ts:DateTime64(3)}
       AND local_address != ''
@@ -1182,7 +1182,7 @@ WITH
       lowerUTF8(local_address) AS proxy_wallet,
       lowerUTF8(ifNull(orch_uri, '')) AS orch_uri,
       uniqExact(lowerUTF8(orchestrator_address)) AS canonical_count
-    FROM livepeer_analytics.network_capabilities
+    FROM livepeer_analytics.raw_network_capabilities
     WHERE event_timestamp >= {from_ts:DateTime64(3)}
       AND event_timestamp < {to_ts:DateTime64(3)}
       AND local_address != ''
@@ -3727,15 +3727,15 @@ SELECT
 -- Requirement: serving semantics must be sourced from silver/gold contracts (`fact_*`, `agg_*`, `dim_*`), not raw/typed ingestion tables.
 WITH
   [
-    'streaming_events',
-    'ai_stream_status',
-    'stream_trace_events',
-    'stream_ingest_metrics',
-    'ai_stream_events',
-    'network_capabilities',
-    'network_capabilities_advertised',
-    'network_capabilities_model_constraints',
-    'network_capabilities_prices'
+    'raw_streaming_events',
+    'raw_ai_stream_status',
+    'raw_stream_trace_events',
+    'raw_stream_ingest_metrics',
+    'raw_ai_stream_events',
+    'raw_network_capabilities',
+    'raw_network_capabilities_advertised',
+    'raw_network_capabilities_model_constraints',
+    'raw_network_capabilities_prices'
   ] AS forbidden_refs,
   views AS
   (
