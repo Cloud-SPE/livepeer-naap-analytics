@@ -4,7 +4,7 @@
 
 - `dim_*`: enrichment snapshots/current projections.
 - `fact_*`: curated analytical facts at explicit grain.
-- `agg_*`: rollups for high-traffic reads.
+- `agg_*`: optional performance rollups; only valid for append-safe additive sources.
 - `v_api_*`: stable serving interfaces for API/dashboard consumers.
 
 Primary schema source: [`configs/clickhouse-init/01-schema.sql`](../../configs/clickhouse-init/01-schema.sql).
@@ -58,6 +58,10 @@ Primary schema source: [`configs/clickhouse-init/01-schema.sql`](../../configs/c
   - `v_api_network_demand` keyspace is the union of perf and session-demand keys, so demand-only (no status/perf samples) rows must still appear with zero perf counters.
 
 Contract rule: additive fields are canonical; clients must recompute ratios/scores when re-rolling windows.
+
+Versioned-fact rule: for `ReplacingMergeTree(version)` lifecycle facts (`fact_workflow_sessions`, `fact_workflow_latency_samples`),
+canonical serving semantics must use latest-version recompute (`argMax(..., version)` by entity key). Avoid additive MVs from
+versioned facts into `AggregatingMergeTree` rollups because version upserts can inflate counters.
 
 ## Key Metrics and API Contracts
 
@@ -229,8 +233,7 @@ pipeline/model identity at session end.
     - `fact_workflow_session_segments`
     - `fact_workflow_latency_samples`
     - `fact_lifecycle_edge_coverage`
-    - `agg_reliability_1h`
-    - `agg_latency_kpis_1m`
+    - `agg_stream_performance_1m`
     - `v_api_gpu_metrics`
     - `v_api_network_demand`
     - `v_api_network_demand_by_gpu`

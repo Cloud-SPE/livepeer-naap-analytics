@@ -190,6 +190,220 @@ FROM livepeer_analytics.v_api_network_demand_by_gpu
 WHERE window_start >= {from_ts:DateTime64(3)}
   AND window_start < {to_ts:DateTime64(3)};
 
+-- TEST: network_demand_by_gpu_recompute_parity_vs_latest_sessions
+WITH
+  latest_sessions AS
+  (
+    SELECT
+      workflow_session_id,
+      argMax(session_start_ts, version) AS session_start_ts,
+      argMax(gateway, version) AS gateway,
+      argMax(orchestrator_address, version) AS orchestrator_address,
+      argMax(region, version) AS region,
+      argMax(pipeline, version) AS pipeline,
+      argMax(model_id, version) AS model_id,
+      argMax(gpu_id, version) AS gpu_id,
+      argMax(known_stream, version) AS known_stream,
+      argMax(startup_unexcused, version) AS startup_unexcused,
+      argMax(confirmed_swap_count, version) AS confirmed_swap_count,
+      argMax(inferred_orchestrator_change_count, version) AS inferred_orchestrator_change_count,
+      argMax(error_count, version) AS error_count,
+      argMax(last_error_occurred, version) AS last_error_occurred,
+      argMax(loading_only_session, version) AS loading_only_session,
+      argMax(zero_output_fps_session, version) AS zero_output_fps_session,
+      argMax(status_error_sample_count, version) AS status_error_sample_count,
+      argMax(health_signal_count, version) AS health_signal_count,
+      argMax(health_expected_signal_count, version) AS health_expected_signal_count
+    FROM livepeer_analytics.fact_workflow_sessions
+    GROUP BY workflow_session_id
+  ),
+  latest_gpu_by_key AS
+  (
+    SELECT
+      toStartOfInterval(session_start_ts, INTERVAL 1 HOUR) AS window_start,
+      gateway,
+      orchestrator_address,
+      region,
+      pipeline,
+      model_id,
+      argMaxIf(gpu_id, session_start_ts, ifNull(gpu_id, '') != '') AS gpu_id
+    FROM latest_sessions
+    GROUP BY window_start, gateway, orchestrator_address, region, pipeline, model_id
+  ),
+  raw_rollup AS
+  (
+    SELECT
+      toStartOfInterval(s.session_start_ts, INTERVAL 1 HOUR) AS window_start,
+      s.gateway,
+      s.orchestrator_address,
+      ifNull(s.region, '') AS region_key,
+      s.pipeline,
+      ifNull(s.model_id, '') AS model_id_key,
+      ifNull(nullIf(if(ifNull(s.gpu_id, '') != '', s.gpu_id, ifNull(k.gpu_id, '')), ''), '') AS gpu_id_key,
+      sum(toUInt64(s.known_stream)) AS known_sessions,
+      sum(toUInt64(s.startup_unexcused)) AS unexcused_sessions,
+      sum(toUInt64((s.confirmed_swap_count > 0) OR (s.inferred_orchestrator_change_count > 0))) AS swapped_sessions,
+      sum(toUInt64(s.error_count > 0)) AS sessions_with_errors,
+      sum(toUInt64(s.last_error_occurred > 0)) AS sessions_with_last_error,
+      sum(toUInt64(s.loading_only_session > 0)) AS loading_only_sessions,
+      sum(toUInt64(s.zero_output_fps_session > 0)) AS zero_output_fps_sessions,
+      sum(toUInt64(s.status_error_sample_count)) AS status_error_samples,
+      sum(toUInt64(s.health_signal_count)) AS health_signal_count,
+      sum(toUInt64(s.health_expected_signal_count)) AS health_expected_signal_count
+    FROM latest_sessions s
+    LEFT JOIN latest_gpu_by_key k
+      ON k.window_start = toStartOfInterval(s.session_start_ts, INTERVAL 1 HOUR)
+     AND k.gateway = s.gateway
+     AND k.orchestrator_address = s.orchestrator_address
+     AND ifNull(k.region, '') = ifNull(s.region, '')
+     AND k.pipeline = s.pipeline
+     AND ifNull(k.model_id, '') = ifNull(s.model_id, '')
+    WHERE s.session_start_ts >= {from_ts:DateTime64(3)}
+      AND s.session_start_ts < {to_ts:DateTime64(3)}
+    GROUP BY window_start, s.gateway, s.orchestrator_address, region_key, s.pipeline, model_id_key, gpu_id_key
+  ),
+  api_rollup AS
+  (
+    SELECT
+      window_start,
+      gateway,
+      orchestrator_address,
+      ifNull(region, '') AS region_key,
+      pipeline,
+      ifNull(model_id, '') AS model_id_key,
+      ifNull(gpu_id, '') AS gpu_id_key,
+      known_sessions,
+      unexcused_sessions,
+      swapped_sessions,
+      sessions_with_errors,
+      sessions_with_last_error,
+      loading_only_sessions,
+      zero_output_fps_sessions,
+      status_error_samples,
+      health_signal_count,
+      health_expected_signal_count
+    FROM livepeer_analytics.v_api_network_demand_by_gpu
+    WHERE window_start >= {from_ts:DateTime64(3)}
+      AND window_start < {to_ts:DateTime64(3)}
+  )
+SELECT
+  toUInt64(
+    (raw_rows > 0 AND view_rows > 0 AND joined_rows = 0)
+    OR raw_only_keys > 0
+    OR view_only_keys > 0
+    OR total_known_diff > 0
+    OR total_unexcused_diff > 0
+    OR total_swapped_diff > 0
+    OR total_errors_diff > 0
+    OR total_last_error_diff > 0
+    OR total_loading_only_diff > 0
+    OR total_zero_output_diff > 0
+    OR total_status_error_samples_diff > 0
+    OR total_health_signal_count_diff > 0
+    OR total_health_expected_signal_count_diff > 0
+  ) AS failed_rows,
+  raw_rows,
+  view_rows,
+  joined_rows,
+  raw_only_keys,
+  view_only_keys,
+  total_known_diff,
+  total_unexcused_diff,
+  total_swapped_diff,
+  total_errors_diff,
+  total_last_error_diff,
+  total_loading_only_diff,
+  total_zero_output_diff,
+  total_status_error_samples_diff,
+  total_health_signal_count_diff,
+  total_health_expected_signal_count_diff
+FROM
+(
+  SELECT
+    (SELECT count() FROM raw_rollup) AS raw_rows,
+    (SELECT count() FROM api_rollup) AS view_rows,
+    (
+      SELECT count()
+      FROM raw_rollup r
+      INNER JOIN api_rollup a
+        USING (window_start, gateway, orchestrator_address, region_key, pipeline, model_id_key, gpu_id_key)
+    ) AS joined_rows,
+    (
+      SELECT count()
+      FROM raw_rollup r
+      LEFT JOIN api_rollup a
+        USING (window_start, gateway, orchestrator_address, region_key, pipeline, model_id_key, gpu_id_key)
+      WHERE a.window_start IS NULL
+    ) AS raw_only_keys,
+    (
+      SELECT count()
+      FROM api_rollup a
+      LEFT JOIN raw_rollup r
+        USING (window_start, gateway, orchestrator_address, region_key, pipeline, model_id_key, gpu_id_key)
+      WHERE r.window_start IS NULL
+    ) AS view_only_keys,
+    (
+      SELECT ifNull(sum(abs(r.known_sessions - a.known_sessions)), 0)
+      FROM raw_rollup r
+      INNER JOIN api_rollup a
+        USING (window_start, gateway, orchestrator_address, region_key, pipeline, model_id_key, gpu_id_key)
+    ) AS total_known_diff,
+    (
+      SELECT ifNull(sum(abs(r.unexcused_sessions - a.unexcused_sessions)), 0)
+      FROM raw_rollup r
+      INNER JOIN api_rollup a
+        USING (window_start, gateway, orchestrator_address, region_key, pipeline, model_id_key, gpu_id_key)
+    ) AS total_unexcused_diff,
+    (
+      SELECT ifNull(sum(abs(r.swapped_sessions - a.swapped_sessions)), 0)
+      FROM raw_rollup r
+      INNER JOIN api_rollup a
+        USING (window_start, gateway, orchestrator_address, region_key, pipeline, model_id_key, gpu_id_key)
+    ) AS total_swapped_diff,
+    (
+      SELECT ifNull(sum(abs(r.sessions_with_errors - a.sessions_with_errors)), 0)
+      FROM raw_rollup r
+      INNER JOIN api_rollup a
+        USING (window_start, gateway, orchestrator_address, region_key, pipeline, model_id_key, gpu_id_key)
+    ) AS total_errors_diff,
+    (
+      SELECT ifNull(sum(abs(r.sessions_with_last_error - a.sessions_with_last_error)), 0)
+      FROM raw_rollup r
+      INNER JOIN api_rollup a
+        USING (window_start, gateway, orchestrator_address, region_key, pipeline, model_id_key, gpu_id_key)
+    ) AS total_last_error_diff,
+    (
+      SELECT ifNull(sum(abs(r.loading_only_sessions - a.loading_only_sessions)), 0)
+      FROM raw_rollup r
+      INNER JOIN api_rollup a
+        USING (window_start, gateway, orchestrator_address, region_key, pipeline, model_id_key, gpu_id_key)
+    ) AS total_loading_only_diff,
+    (
+      SELECT ifNull(sum(abs(r.zero_output_fps_sessions - a.zero_output_fps_sessions)), 0)
+      FROM raw_rollup r
+      INNER JOIN api_rollup a
+        USING (window_start, gateway, orchestrator_address, region_key, pipeline, model_id_key, gpu_id_key)
+    ) AS total_zero_output_diff,
+    (
+      SELECT ifNull(sum(abs(r.status_error_samples - a.status_error_samples)), 0)
+      FROM raw_rollup r
+      INNER JOIN api_rollup a
+        USING (window_start, gateway, orchestrator_address, region_key, pipeline, model_id_key, gpu_id_key)
+    ) AS total_status_error_samples_diff,
+    (
+      SELECT ifNull(sum(abs(r.health_signal_count - a.health_signal_count)), 0)
+      FROM raw_rollup r
+      INNER JOIN api_rollup a
+        USING (window_start, gateway, orchestrator_address, region_key, pipeline, model_id_key, gpu_id_key)
+    ) AS total_health_signal_count_diff,
+    (
+      SELECT ifNull(sum(abs(r.health_expected_signal_count - a.health_expected_signal_count)), 0)
+      FROM raw_rollup r
+      INNER JOIN api_rollup a
+        USING (window_start, gateway, orchestrator_address, region_key, pipeline, model_id_key, gpu_id_key)
+    ) AS total_health_expected_signal_count_diff
+);
+
 -- TEST: network_demand_additive_fields_nonnegative
 SELECT
   toUInt64(countIf(

@@ -232,8 +232,8 @@ FROM
 
   UNION ALL
 
-  SELECT 'agg_reliability_1h' AS object_name, count() AS rows_window
-  FROM livepeer_analytics.agg_reliability_1h
+  SELECT 'v_api_network_demand_by_gpu' AS object_name, count() AS rows_window
+  FROM livepeer_analytics.v_api_network_demand_by_gpu
   WHERE window_start >= {from_ts:DateTime64(3)}
     AND window_start < {to_ts:DateTime64(3)}
 )

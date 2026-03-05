@@ -995,66 +995,6 @@ CREATE TABLE IF NOT EXISTS agg_stream_performance_1m
         TTL toDate(window_start) + INTERVAL 365 DAY DELETE
         SETTINGS index_granularity = 8192;
 
-CREATE TABLE IF NOT EXISTS agg_reliability_1h
-(
-    window_start DateTime64(3, 'UTC'),
-
-    gateway String,
-    orchestrator_address String,
-    pipeline String,
-    model_id Nullable(String),
-    gpu_id Nullable(String),
-    region Nullable(String),
-
-    known_sessions_state AggregateFunction(sum, UInt64),
-    startup_success_sessions_state AggregateFunction(sum, UInt64),
-    excused_sessions_state AggregateFunction(sum, UInt64),
-    unexcused_sessions_state AggregateFunction(sum, UInt64),
-    confirmed_swapped_sessions_state AggregateFunction(sum, UInt64),
-    inferred_orchestrator_change_sessions_state AggregateFunction(sum, UInt64),
-    swapped_sessions_state AggregateFunction(sum, UInt64),
-    sessions_with_errors_state AggregateFunction(sum, UInt64),
-    sessions_with_last_error_state AggregateFunction(sum, UInt64),
-    loading_only_sessions_state AggregateFunction(sum, UInt64),
-    zero_output_fps_sessions_state AggregateFunction(sum, UInt64),
-    status_error_samples_state AggregateFunction(sum, UInt64),
-    health_signal_count_state AggregateFunction(sum, UInt64),
-    health_expected_signal_count_state AggregateFunction(sum, UInt64)
-)
-    ENGINE = AggregatingMergeTree
-        PARTITION BY toYYYYMM(toDate(window_start))
-        ORDER BY (window_start, gateway, orchestrator_address)
-        TTL toDate(window_start) + INTERVAL 400 DAY DELETE
-        SETTINGS index_granularity = 8192;
-
-CREATE TABLE IF NOT EXISTS agg_latency_kpis_1m
-(
-    window_start DateTime64(3, 'UTC'),
-
-    orchestrator_address String,
-    pipeline String,
-    model_id Nullable(String),
-    gpu_id Nullable(String),
-    region Nullable(String),
-
-    prompt_to_first_frame_ms_avg_state AggregateFunction(avg, Float64),
-    startup_time_ms_avg_state AggregateFunction(avg, Float64),
-    e2e_latency_ms_avg_state AggregateFunction(avg, Float64),
-
-    prompt_to_first_frame_ms_p95_state AggregateFunction(quantileTDigest(0.95), Float64),
-    startup_time_ms_p95_state AggregateFunction(quantileTDigest(0.95), Float64),
-    e2e_latency_ms_p95_state AggregateFunction(quantileTDigest(0.95), Float64),
-
-    valid_prompt_to_first_frame_state AggregateFunction(sum, UInt64),
-    valid_startup_time_state AggregateFunction(sum, UInt64),
-    valid_e2e_latency_state AggregateFunction(sum, UInt64)
-)
-    ENGINE = AggregatingMergeTree
-        PARTITION BY toYYYYMM(toDate(window_start))
-        ORDER BY (window_start, orchestrator_address, ifNull(gpu_id, ''))
-        TTL toDate(window_start) + INTERVAL 365 DAY DELETE
-        SETTINGS index_granularity = 8192;
-
 -- ============================================================
 -- ROLLUP MATERIALIZED VIEWS
 -- ============================================================
@@ -1085,73 +1025,6 @@ WHERE is_attributed = 1
 GROUP BY
     window_start,
     gateway,
-    orchestrator_address,
-    pipeline,
-    model_id,
-    gpu_id,
-    region;
-
-CREATE MATERIALIZED VIEW IF NOT EXISTS mv_fact_sessions_to_reliability_1h
-TO agg_reliability_1h
-AS
-SELECT
-    toStartOfInterval(session_start_ts, INTERVAL 1 HOUR) AS window_start,
-    gateway,
-    orchestrator_address,
-    pipeline,
-    model_id,
-    gpu_id,
-    region,
-
-    sumState(toUInt64(known_stream)) AS known_sessions_state,
-    sumState(toUInt64(startup_success)) AS startup_success_sessions_state,
-    sumState(toUInt64(startup_excused)) AS excused_sessions_state,
-    sumState(toUInt64(startup_unexcused)) AS unexcused_sessions_state,
-    sumState(toUInt64(confirmed_swap_count > 0)) AS confirmed_swapped_sessions_state,
-    sumState(toUInt64(inferred_orchestrator_change_count > 0)) AS inferred_orchestrator_change_sessions_state,
-    sumState(toUInt64((confirmed_swap_count > 0) OR (inferred_orchestrator_change_count > 0))) AS swapped_sessions_state,
-    sumState(toUInt64(error_count > 0)) AS sessions_with_errors_state,
-    sumState(toUInt64(last_error_occurred > 0)) AS sessions_with_last_error_state,
-    sumState(toUInt64(loading_only_session > 0)) AS loading_only_sessions_state,
-    sumState(toUInt64(zero_output_fps_session > 0)) AS zero_output_fps_sessions_state,
-    sumState(toUInt64(status_error_sample_count)) AS status_error_samples_state,
-    sumState(toUInt64(health_signal_count)) AS health_signal_count_state,
-    sumState(toUInt64(health_expected_signal_count)) AS health_expected_signal_count_state
-FROM fact_workflow_sessions
-GROUP BY
-    window_start,
-    gateway,
-    orchestrator_address,
-    pipeline,
-    model_id,
-    gpu_id,
-    region;
-
-CREATE MATERIALIZED VIEW IF NOT EXISTS mv_fact_workflow_latency_to_latency_kpis_1m
-TO agg_latency_kpis_1m
-AS
-SELECT
-    toStartOfInterval(sample_ts, INTERVAL 1 MINUTE) AS window_start,
-    orchestrator_address,
-    pipeline,
-    model_id,
-    gpu_id,
-    region,
-
-    avgStateIf(prompt_to_first_frame_ms, has_prompt_to_first_frame = 1) AS prompt_to_first_frame_ms_avg_state,
-    avgStateIf(startup_time_ms, has_startup_time = 1) AS startup_time_ms_avg_state,
-    avgStateIf(e2e_latency_ms, has_e2e_latency = 1) AS e2e_latency_ms_avg_state,
-
-    quantileTDigestStateIf(0.95)(prompt_to_first_frame_ms, has_prompt_to_first_frame = 1) AS prompt_to_first_frame_ms_p95_state,
-    quantileTDigestStateIf(0.95)(startup_time_ms, has_startup_time = 1) AS startup_time_ms_p95_state,
-    quantileTDigestStateIf(0.95)(e2e_latency_ms, has_e2e_latency = 1) AS e2e_latency_ms_p95_state,
-
-    sumState(toUInt64(has_prompt_to_first_frame)) AS valid_prompt_to_first_frame_state,
-    sumState(toUInt64(has_startup_time)) AS valid_startup_time_state,
-    sumState(toUInt64(has_e2e_latency)) AS valid_e2e_latency_state
-FROM fact_workflow_latency_samples
-GROUP BY
-    window_start,
     orchestrator_address,
     pipeline,
     model_id,
@@ -1937,28 +1810,54 @@ perf_gpu_1h AS
 ),
 rel_gpu_1h_raw AS
 (
-    -- Reliability counters aligned to GPU key grain.
+    -- Reliability counters aligned to GPU key grain using latest session snapshots.
+    WITH latest_sessions AS
+    (
+        SELECT
+            workflow_session_id,
+            argMax(session_start_ts, version) AS session_start_ts,
+            argMax(gateway, version) AS gateway,
+            argMax(orchestrator_address, version) AS orchestrator_address,
+            argMax(region, version) AS region,
+            argMax(pipeline, version) AS pipeline,
+            argMax(model_id, version) AS model_id,
+            argMax(gpu_id, version) AS gpu_id,
+            argMax(known_stream, version) AS known_stream,
+            argMax(startup_unexcused, version) AS startup_unexcused,
+            argMax(confirmed_swap_count, version) AS confirmed_swap_count,
+            argMax(inferred_orchestrator_change_count, version) AS inferred_orchestrator_change_count,
+            argMax(error_count, version) AS error_count,
+            argMax(last_error_occurred, version) AS last_error_occurred,
+            argMax(loading_only_session, version) AS loading_only_session,
+            argMax(zero_output_fps_session, version) AS zero_output_fps_session,
+            argMax(status_error_sample_count, version) AS status_error_sample_count,
+            argMax(health_signal_count, version) AS health_signal_count,
+            argMax(health_expected_signal_count, version) AS health_expected_signal_count
+        FROM fact_workflow_sessions
+        GROUP BY workflow_session_id
+    )
     SELECT
-        window_start,
+        toStartOfInterval(session_start_ts, INTERVAL 1 HOUR) AS window_start,
         gateway,
         orchestrator_address,
         region,
         pipeline,
         model_id,
         gpu_id,
-        sumMerge(known_sessions_state) AS known_sessions,
-        sumMerge(unexcused_sessions_state) AS unexcused_sessions,
-        sumMerge(confirmed_swapped_sessions_state) AS confirmed_swapped_sessions,
-        sumMerge(inferred_orchestrator_change_sessions_state) AS inferred_orchestrator_change_sessions,
-        sumMerge(swapped_sessions_state) AS swapped_sessions,
-        sumMerge(sessions_with_errors_state) AS sessions_with_errors,
-        sumMerge(sessions_with_last_error_state) AS sessions_with_last_error,
-        sumMerge(loading_only_sessions_state) AS loading_only_sessions,
-        sumMerge(zero_output_fps_sessions_state) AS zero_output_fps_sessions,
-        sumMerge(status_error_samples_state) AS status_error_samples,
-        sumMerge(health_signal_count_state) AS health_signal_count,
-        sumMerge(health_expected_signal_count_state) AS health_expected_signal_count
-    FROM agg_reliability_1h
+        sum(toUInt64(known_stream)) AS known_sessions,
+        sum(toUInt64(startup_unexcused)) AS unexcused_sessions,
+        sum(toUInt64(confirmed_swap_count > 0)) AS confirmed_swapped_sessions,
+        sum(toUInt64(inferred_orchestrator_change_count > 0)) AS inferred_orchestrator_change_sessions,
+        sum(toUInt64((confirmed_swap_count > 0) OR (inferred_orchestrator_change_count > 0))) AS swapped_sessions,
+        sum(toUInt64(error_count > 0)) AS sessions_with_errors,
+        sum(toUInt64(last_error_occurred > 0)) AS sessions_with_last_error,
+        sum(toUInt64(loading_only_session > 0)) AS loading_only_sessions,
+        sum(toUInt64(zero_output_fps_session > 0)) AS zero_output_fps_sessions,
+        sum(toUInt64(status_error_sample_count)) AS status_error_samples,
+        sum(toUInt64(health_signal_count)) AS health_signal_count,
+        sum(toUInt64(health_expected_signal_count)) AS health_expected_signal_count
+    FROM latest_sessions
+    WHERE session_start_ts > toDateTime64('2000-01-01 00:00:00', 3, 'UTC')
     GROUP BY
         window_start,
         gateway,

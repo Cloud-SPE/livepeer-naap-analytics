@@ -127,20 +127,15 @@ LIMIT 50;
 -- API / DASHBOARD SERVING VALIDATION
 -- ============================================================
 
--- A1) Goal: Confirm rollup tables are populated for the validation window.
--- What this query does: Counts rows in each agg_* table over last 24h.
--- Valid output: Non-zero counts for tables expected to have traffic.
+-- A1) Goal: Confirm append-safe perf rollup is populated for the validation window.
+-- What this query does: Counts rows in `agg_stream_performance_1m` over last 24h.
+-- Valid output: Non-zero count when status traffic exists.
 WITH
   now64(3, 'UTC') AS to_ts,
   to_ts - INTERVAL 24 HOUR AS from_ts
 SELECT 'agg_stream_performance_1m' AS object_name, count() AS rows_24h
 FROM livepeer_analytics.agg_stream_performance_1m
-WHERE window_start >= from_ts AND window_start < to_ts
-UNION ALL
-SELECT 'agg_reliability_1h' AS object_name, count() AS rows_24h
-FROM livepeer_analytics.agg_reliability_1h
-WHERE window_start >= from_ts AND window_start < to_ts
-;
+WHERE window_start >= from_ts AND window_start < to_ts;
 
 -- A2) Goal: Confirm API/dashboard views are populated.
 -- What this query does: Counts rows in each v_api_* view over last 24h.
@@ -158,6 +153,16 @@ WHERE window_start >= from_ts AND window_start < to_ts
 UNION ALL
 SELECT 'v_api_sla_compliance' AS object_name, count() AS rows_24h
 FROM livepeer_analytics.v_api_sla_compliance
+WHERE window_start >= from_ts AND window_start < to_ts;
+
+-- A2b) Goal: Confirm GPU demand companion view is populated.
+-- What this query does: Counts rows in `v_api_network_demand_by_gpu` over last 24h.
+-- Valid output: Non-zero count when attributed perf/session demand traffic exists.
+WITH
+  now64(3, 'UTC') AS to_ts,
+  to_ts - INTERVAL 24 HOUR AS from_ts
+SELECT count() AS rows_24h
+FROM livepeer_analytics.v_api_network_demand_by_gpu
 WHERE window_start >= from_ts AND window_start < to_ts;
 
 -- A3) Goal: Verify v_api_gpu_metrics matches its rollup source numerically.
@@ -187,6 +192,91 @@ INNER JOIN
   WHERE window_start >= from_ts AND window_start < to_ts
 ) b
 USING (window_start, orchestrator_address, pipeline, model_id, gpu_id, region);
+
+-- A4b) Goal: Verify v_api_network_demand_by_gpu reliability counters match deduped latest sessions.
+-- What this query does: Recomputes known/unexcused/swapped counts from latest sessions at
+-- GPU demand key grain and compares with `v_api_network_demand_by_gpu`.
+-- Valid output: known_diff = 0, unexcused_diff = 0, swapped_diff = 0.
+WITH
+  now64(3,'UTC') AS to_ts,
+  to_ts - INTERVAL 24 HOUR AS from_ts
+SELECT
+  count() AS joined_rows,
+  sum(abs(r.known_sessions - a.known_sessions)) AS known_diff,
+  sum(abs(r.unexcused_sessions - a.unexcused_sessions)) AS unexcused_diff,
+  sum(abs(r.swapped_sessions - a.swapped_sessions)) AS swapped_diff
+FROM
+(
+  WITH latest_sessions AS
+  (
+    SELECT
+      workflow_session_id,
+      argMax(session_start_ts, version) AS session_start_ts,
+      argMax(gateway, version) AS gateway,
+      argMax(orchestrator_address, version) AS orchestrator_address,
+      argMax(region, version) AS region,
+      argMax(pipeline, version) AS pipeline,
+      argMax(model_id, version) AS model_id,
+      argMax(gpu_id, version) AS gpu_id,
+      argMax(known_stream, version) AS known_stream,
+      argMax(startup_unexcused, version) AS startup_unexcused,
+      argMax(confirmed_swap_count, version) AS confirmed_swap_count,
+      argMax(inferred_orchestrator_change_count, version) AS inferred_orchestrator_change_count
+    FROM livepeer_analytics.fact_workflow_sessions
+    GROUP BY workflow_session_id
+  ),
+  latest_gpu_by_key AS
+  (
+    SELECT
+      toStartOfInterval(session_start_ts, INTERVAL 1 HOUR) AS window_start,
+      gateway,
+      orchestrator_address,
+      region,
+      pipeline,
+      model_id,
+      argMaxIf(gpu_id, session_start_ts, ifNull(gpu_id, '') != '') AS gpu_id
+    FROM latest_sessions
+    GROUP BY window_start, gateway, orchestrator_address, region, pipeline, model_id
+  )
+  SELECT
+    toStartOfInterval(s.session_start_ts, INTERVAL 1 HOUR) AS window_start,
+    s.gateway,
+    s.orchestrator_address,
+    ifNull(s.region, '') AS region_key,
+    s.pipeline,
+    ifNull(s.model_id, '') AS model_id_key,
+    ifNull(nullIf(if(ifNull(s.gpu_id, '') != '', s.gpu_id, ifNull(k.gpu_id, '')), ''), '') AS gpu_id_key,
+    sum(toUInt64(s.known_stream)) AS known_sessions,
+    sum(toUInt64(s.startup_unexcused)) AS unexcused_sessions,
+    sum(toUInt64((s.confirmed_swap_count > 0) OR (s.inferred_orchestrator_change_count > 0))) AS swapped_sessions
+  FROM latest_sessions s
+  LEFT JOIN latest_gpu_by_key k
+    ON k.window_start = toStartOfInterval(s.session_start_ts, INTERVAL 1 HOUR)
+   AND k.gateway = s.gateway
+   AND k.orchestrator_address = s.orchestrator_address
+   AND ifNull(k.region, '') = ifNull(s.region, '')
+   AND k.pipeline = s.pipeline
+   AND ifNull(k.model_id, '') = ifNull(s.model_id, '')
+  WHERE s.session_start_ts >= from_ts AND s.session_start_ts < to_ts
+  GROUP BY window_start, s.gateway, s.orchestrator_address, region_key, s.pipeline, model_id_key, gpu_id_key
+) r
+INNER JOIN
+(
+  SELECT
+    window_start,
+    gateway,
+    orchestrator_address,
+    ifNull(region, '') AS region_key,
+    pipeline,
+    ifNull(model_id, '') AS model_id_key,
+    ifNull(gpu_id, '') AS gpu_id_key,
+    known_sessions,
+    unexcused_sessions,
+    swapped_sessions
+  FROM livepeer_analytics.v_api_network_demand_by_gpu
+  WHERE window_start >= from_ts AND window_start < to_ts
+) a
+USING (window_start, gateway, orchestrator_address, region_key, pipeline, model_id_key, gpu_id_key);
 
 -- A4) Goal: Verify v_api_sla_compliance counts match deduped session facts.
 -- What this query does: Recomputes known/unexcused/swapped counts from latest

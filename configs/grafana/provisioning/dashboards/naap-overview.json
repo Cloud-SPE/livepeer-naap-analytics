@@ -584,7 +584,6 @@
         "type": "datasource",
         "uid": "-- Mixed --"
       },
-      "description": "TEMP_INFINITY_LABEL_JOIN: Remove Query B and join/organize transformations to roll back to address-only labels.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -671,7 +670,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "WITH ens AS (SELECT lower(eth_address) AS addr, any(name) AS ens_name FROM url('https://livepeer-api.livepeer.cloud/api/orchestrator', 'JSONEachRow', 'eth_address String, name String') GROUP BY addr), top_orch AS (SELECT lower(orchestrator_address) AS orchestrator_address FROM livepeer_analytics.raw_ai_stream_status WHERE $__timeFilter(event_timestamp) GROUP BY orchestrator_address ORDER BY avg(output_fps) DESC LIMIT 8) SELECT toStartOfInterval(s.event_timestamp, INTERVAL 5 MINUTE) AS time, if(ifNull(ens.ens_name, '') != '' AND NOT startsWith(lower(ens.ens_name), '0x'), ens.ens_name, lower(s.orchestrator_address)) AS \"Orchestrator ENS\", avg(s.output_fps) AS \"Avg FPS\" FROM livepeer_analytics.raw_ai_stream_status s LEFT JOIN ens ON ens.addr = lower(s.orchestrator_address) WHERE $__timeFilter(s.event_timestamp) AND (((('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '')) AND lower(s.orchestrator_address) IN (SELECT orchestrator_address FROM top_orch)) OR ('${orchestrator:csv}' != '__all' AND '${orchestrator:csv}' != '' AND has(splitByChar(',', '${orchestrator:csv}'), lower(s.orchestrator_address)))) GROUP BY time, \"Orchestrator ENS\" ORDER BY time",
+          "rawSql": "WITH ens AS (SELECT lower(eth_address) AS addr, any(name) AS ens_name FROM url('https://livepeer-api.livepeer.cloud/api/orchestrator', 'JSONEachRow', 'eth_address String, name String') GROUP BY addr), top_orch AS (SELECT lower(orchestrator_address) AS orchestrator_address FROM livepeer_analytics.raw_ai_stream_status WHERE $__timeFilter(event_timestamp) GROUP BY orchestrator_address ORDER BY avg(output_fps) DESC LIMIT 8) SELECT toStartOfInterval(s.event_timestamp, INTERVAL 5 MINUTE) AS time, if(ifNull(ens.ens_name, '') != '' AND NOT startsWith(lower(ens.ens_name), '0x'), ens.ens_name, lower(s.orchestrator_address)) AS \"Orchestrator ENS\", avg(s.output_fps) AS \"Avg FPS\" FROM livepeer_analytics.raw_ai_stream_status s LEFT JOIN ens ON ens.addr = lower(s.orchestrator_address) WHERE $__timeFilter(s.event_timestamp) AND (((('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '')) AND lower(s.orchestrator_address) GLOBAL IN (SELECT orchestrator_address FROM top_orch)) OR ('${orchestrator:csv}' != '__all' AND '${orchestrator:csv}' != '' AND has(splitByChar(',', '${orchestrator:csv}'), lower(s.orchestrator_address)))) GROUP BY time, \"Orchestrator ENS\" ORDER BY time",
           "refId": "A"
         }
       ],
@@ -683,7 +682,6 @@
         "type": "datasource",
         "uid": "-- Mixed --"
       },
-      "description": "TEMP_INFINITY_LABEL_JOIN: Remove Query B and join/organize transformations to roll back to address-only labels.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -774,7 +772,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "WITH ens AS (SELECT lower(eth_address) AS addr, any(name) AS ens_name FROM url('https://livepeer-api.livepeer.cloud/api/orchestrator', 'JSONEachRow', 'eth_address String, name String') GROUP BY addr), top_orch AS (SELECT lower(orchestrator_address) AS orchestrator_address FROM livepeer_analytics.v_api_jitter_5m WHERE $__timeFilter(window_start_5m) GROUP BY orchestrator_address ORDER BY avg(avg_output_fps) DESC LIMIT 8) SELECT s.window_start_5m AS time, if(ifNull(ens.ens_name, '') != '' AND NOT startsWith(lower(ens.ens_name), '0x'), ens.ens_name, lower(s.orchestrator_address)) AS \"Orchestrator ENS\", avg(s.jitter_coeff_fps) AS \"Jitter Coefficient\" FROM livepeer_analytics.v_api_jitter_5m s LEFT JOIN ens ON ens.addr = lower(s.orchestrator_address) WHERE $__timeFilter(s.window_start_5m) AND (((('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '')) AND lower(s.orchestrator_address) IN (SELECT orchestrator_address FROM top_orch)) OR ('${orchestrator:csv}' != '__all' AND '${orchestrator:csv}' != '' AND has(splitByChar(',', '${orchestrator:csv}'), lower(s.orchestrator_address)))) GROUP BY time, \"Orchestrator ENS\" ORDER BY time",
+          "rawSql": "WITH ens AS (SELECT lower(eth_address) AS addr, any(name) AS ens_name FROM url('https://livepeer-api.livepeer.cloud/api/orchestrator', 'JSONEachRow', 'eth_address String, name String') GROUP BY addr), top_orch AS (SELECT lower(orchestrator_address) AS orchestrator_address FROM livepeer_analytics.v_api_jitter_5m WHERE $__timeFilter(window_start_5m) GROUP BY orchestrator_address ORDER BY avg(avg_output_fps) DESC LIMIT 8) SELECT s.window_start_5m AS time, if(ifNull(ens.ens_name, '') != '' AND NOT startsWith(lower(ens.ens_name), '0x'), ens.ens_name, lower(s.orchestrator_address)) AS \"Orchestrator ENS\", avg(s.jitter_coeff_fps) AS \"Jitter Coefficient\" FROM livepeer_analytics.v_api_jitter_5m s LEFT JOIN ens ON ens.addr = lower(s.orchestrator_address) WHERE $__timeFilter(s.window_start_5m) AND (((('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '')) AND lower(s.orchestrator_address) GLOBAL IN (SELECT orchestrator_address FROM top_orch)) OR ('${orchestrator:csv}' != '__all' AND '${orchestrator:csv}' != '' AND has(splitByChar(',', '${orchestrator:csv}'), lower(s.orchestrator_address)))) GROUP BY time, \"Orchestrator ENS\" ORDER BY time",
           "refId": "A"
         }
       ],
@@ -897,7 +895,6 @@
         "type": "datasource",
         "uid": "-- Mixed --"
       },
-      "description": "TEMP_INFINITY_LABEL_JOIN: Remove Query B and join/organize transformations to roll back to address-only labels.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1015,7 +1012,6 @@
         "type": "datasource",
         "uid": "-- Mixed --"
       },
-      "description": "TEMP_INFINITY_LABEL_JOIN: Remove Query B and join/organize transformations to roll back to address-only labels.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -1239,7 +1235,6 @@
         "type": "datasource",
         "uid": "-- Mixed --"
       },
-      "description": "TEMP_INFINITY_LABEL_JOIN: Remove Query B and join/organize transformations to roll back to address-only labels.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -1867,7 +1862,6 @@
         "type": "datasource",
         "uid": "-- Mixed --"
       },
-      "description": "TEMP_INFINITY_LABEL_JOIN: Remove Query B and join/organize transformations to roll back to address-only labels.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1985,7 +1979,6 @@
         "type": "datasource",
         "uid": "-- Mixed --"
       },
-      "description": "TEMP_INFINITY_LABEL_JOIN: Remove Query B and join/organize transformations to roll back to address-only labels.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -2071,7 +2064,6 @@
         "type": "datasource",
         "uid": "-- Mixed --"
       },
-      "description": "TEMP_INFINITY_LABEL_JOIN: Remove Query B and join/organize transformations to roll back to address-only labels.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -2854,7 +2846,6 @@
         "type": "datasource",
         "uid": "-- Mixed --"
       },
-      "description": "TEMP_INFINITY_LABEL_JOIN: Remove Query B and join/organize transformations to roll back to address-only labels.",
       "fieldConfig": {
         "defaults": {
           "custom": {
