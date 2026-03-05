@@ -1,9 +1,9 @@
-> **Status:** Historical report (point-in-time evidence). Canonical guidance is in `docs/`; mapping is in `docs/references/DOC_INVENTORY_AND_MIGRATION_MAP.md`.
+> **Status:** Historical report (point-in-time evidence). Canonical guidance is in [`docs/`](../README.md).
 
 # Java Codebase Assessment
 
 Date: 2026-02-18
-Scope: `flink-jobs/src/main/java`, `flink-jobs/src/test/java`
+Scope: [`flink-jobs/src/main/java`](../../flink-jobs/src/main/java), [`flink-jobs/src/test/java`](../../flink-jobs/src/test/java)
 
 ## Snapshot
 
@@ -20,15 +20,15 @@ The codebase has a solid package split (pipeline, lifecycle, parse, quality, sin
 ## Findings
 
 1. High complexity hotspot in pipeline assembly
-- File: `flink-jobs/src/main/java/com/livepeer/analytics/pipeline/StreamingEventsToClickHouse.java`
+- File: [`flink-jobs/src/main/java/com/livepeer/analytics/pipeline/StreamingEventsToClickHouse.java`](../../flink-jobs/src/main/java/com/livepeer/analytics/pipeline/StreamingEventsToClickHouse.java)
 - Risk: This file is the orchestration center for parsing, lifecycle derivation, side outputs, and sinks. At current size, small changes can introduce regressions and make reviews slower.
 
 2. High complexity hotspot in sink row mapping
-- File: `flink-jobs/src/main/java/com/livepeer/analytics/sink/ClickHouseRowMappers.java`
+- File: [`flink-jobs/src/main/java/com/livepeer/analytics/sink/ClickHouseRowMappers.java`](../../flink-jobs/src/main/java/com/livepeer/analytics/sink/ClickHouseRowMappers.java)
 - Risk: Large static mapping surface increases schema-drift risk and makes mapper evolution harder when adding facts/views.
 
 3. Event payload model is flat and mutable
-- File: `flink-jobs/src/main/java/com/livepeer/analytics/model/EventPayloads.java`
+- File: [`flink-jobs/src/main/java/com/livepeer/analytics/model/EventPayloads.java`](../../flink-jobs/src/main/java/com/livepeer/analytics/model/EventPayloads.java)
 - Risk: Public mutable fields are fast, but reduce local type safety and make accidental partial/invalid objects easier.
 
 4. Test coverage is good for core transforms, thinner for end-to-end behavior
@@ -65,7 +65,7 @@ The codebase has a solid package split (pipeline, lifecycle, parse, quality, sin
   - latency derivation presence/absence rules,
   - orchestrator/gpu/model attribution fallback behavior,
   - session served/unserved demand projection correctness.
-- Reuse SQL assertions already added under `tests/integration/sql`.
+- Reuse SQL assertions already added under [`tests/integration/sql`](../../tests/integration/sql).
 
 5. Add Javadocs where they matter most
 - Prioritize:

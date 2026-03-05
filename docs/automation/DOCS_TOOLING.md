@@ -1,13 +1,13 @@
 # Docs Tooling and Automation
 
-Script reference for all repository scripts: `docs/automation/SCRIPTS_REFERENCE.md`
+Script reference for all repository scripts: [`docs/automation/SCRIPTS_REFERENCE.md`](SCRIPTS_REFERENCE.md)
 
 ## Included Scripts
 
 - Inventory all markdown files with line counts and headings:
-  - `scripts/docs_inventory.sh`
+  - [`scripts/docs_inventory.sh`](../../scripts/docs_inventory.sh)
 - Validate local markdown links:
-  - `scripts/docs_link_check.sh`
+  - [`scripts/docs_link_check.sh`](../../scripts/docs_link_check.sh)
 
 ## Recommended CI Additions
 
@@ -16,7 +16,7 @@ Script reference for all repository scripts: `docs/automation/SCRIPTS_REFERENCE.
 2. Link checking:
    - `lychee --offline --no-progress "**/*.md"`
 3. Docs freshness check:
-   - fail CI if `docs/references/DOC_INVENTORY_AND_MIGRATION_MAP.md` is missing entries from `rg --files -g '*.md'`.
+   - fail CI if canonical docs navigation/index references are missing entries from `rg --files -g '*.md'`.
 
 ## Suggested Agent Tasks
 

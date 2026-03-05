@@ -113,7 +113,7 @@ WITH
 SELECT
     toStartOfInterval(event_timestamp, INTERVAL 5 MINUTE) AS window_start,
     orchestrator_address,
-    stddevPop(output_fps) / nullIf(avg(output_fps), 0) AS jitter_coeff_fps
+    stddevPop(output_fps) / nullIf(avg(output_fps), 0) AS fps_jitter_coefficient
 FROM livepeer_analytics.raw_ai_stream_status
 WHERE event_timestamp >= from_ts AND event_timestamp < to_ts
 GROUP BY window_start, orchestrator_address
@@ -284,7 +284,7 @@ SELECT
     countIf(known_stream = 1) AS known_stream_sessions,
     countIf(known_stream = 1 AND startup_status = 'success') AS startup_success_sessions,
     countIf(known_stream = 1 AND startup_status = 'excused') AS excused_sessions,
-    countIf(known_stream = 1 AND startup_status = 'unexcused') AS unexcused_sessions,
+    countIf(known_stream = 1 AND startup_status = 'unexcused') AS startup_unexcused_sessions,
     countIf(known_stream = 1 AND startup_status = 'unexcused') / nullIf(countIf(known_stream = 1), 0) AS unexcused_failure_rate
 FROM classified;
 
@@ -564,13 +564,13 @@ WITH
       pipeline,
       ifNull(model_id, '') AS model_id,
       ifNull(gpu_id, '') AS gpu_id,
-      known_sessions,
-      unexcused_sessions,
-      swapped_sessions,
-      sessions_with_last_error,
+      known_sessions_count,
+      startup_unexcused_sessions,
+      total_swapped_sessions,
+      sessions_ending_in_error,
       loading_only_sessions,
       zero_output_fps_sessions,
-      status_error_samples,
+      error_status_samples,
       health_signal_count,
       health_expected_signal_count
     FROM livepeer_analytics.v_api_sla_compliance
@@ -578,13 +578,13 @@ WITH
   )
 SELECT
   count() AS joined_rows,
-  sum(abs(raw.raw_known_sessions - api.known_sessions)) AS total_known_diff,
-  sum(abs(raw.raw_unexcused_sessions - api.unexcused_sessions)) AS total_unexcused_diff,
-  sum(abs(raw.raw_swapped_sessions - api.swapped_sessions)) AS total_swapped_diff,
-  sum(abs(raw.raw_sessions_with_last_error - api.sessions_with_last_error)) AS total_last_error_diff,
+  sum(abs(raw.raw_known_sessions - api.known_sessions_count)) AS total_known_diff,
+  sum(abs(raw.raw_unexcused_sessions - api.startup_unexcused_sessions)) AS total_unexcused_diff,
+  sum(abs(raw.raw_swapped_sessions - api.total_swapped_sessions)) AS total_swapped_diff,
+  sum(abs(raw.raw_sessions_with_last_error - api.sessions_ending_in_error)) AS total_last_error_diff,
   sum(abs(raw.raw_loading_only_sessions - api.loading_only_sessions)) AS total_loading_only_diff,
   sum(abs(raw.raw_zero_output_fps_sessions - api.zero_output_fps_sessions)) AS total_zero_output_diff,
-  sum(abs(raw.raw_status_error_samples - api.status_error_samples)) AS total_status_error_samples_diff,
+  sum(abs(raw.raw_status_error_samples - api.error_status_samples)) AS total_status_error_samples_diff,
   sum(abs(raw.raw_health_signal_count - api.health_signal_count)) AS total_health_signal_count_diff,
   sum(abs(raw.raw_health_expected_signal_count - api.health_expected_signal_count)) AS total_health_expected_signal_count_diff
 FROM raw
@@ -626,17 +626,17 @@ WITH
   now64(3, 'UTC') AS to_ts,
   to_ts - INTERVAL 24 HOUR AS from_ts
 SELECT
-  countIf(startup_success_ratio < 0 OR startup_success_ratio > 1) AS bad_startup_success_ratio,
-  countIf(success_ratio < 0 OR success_ratio > 1) AS bad_effective_success_ratio,
-  countIf(startup_success_ratio + 0.000001 < success_ratio) AS effective_gt_startup,
+  countIf(startup_success_rate < 0 OR startup_success_rate > 1) AS bad_startup_success_ratio,
+  countIf(effective_success_rate < 0 OR effective_success_rate > 1) AS bad_effective_success_ratio,
+  countIf(startup_success_rate + 0.000001 < effective_success_rate) AS effective_gt_startup,
   countIf(
-    known_sessions > 0
+    known_sessions_count > 0
     AND (
-      unexcused_sessions > 0
+      startup_unexcused_sessions > 0
       OR zero_output_fps_sessions > 0
       OR loading_only_sessions > 0
     )
-    AND success_ratio >= 0.999999
+    AND effective_success_rate >= 0.999999
   ) AS unpenalized_failure_rows
 FROM livepeer_analytics.v_api_network_demand
 WHERE window_start >= from_ts AND window_start < to_ts;

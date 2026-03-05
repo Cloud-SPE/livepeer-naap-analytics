@@ -183,14 +183,14 @@ INNER JOIN status_1h s
 LEFT JOIN livepeer_analytics.v_api_gpu_metrics g
   ON g.window_start = s.window_start
  AND g.orchestrator_address = s.orchestrator_address
- AND g.pipeline = s.pipeline
+ AND g.pipeline_id = s.pipeline
  AND ifNull(g.model_id, '') = s.model_id_key
  AND ifNull(g.gpu_id, '') = s.gpu_id_key
  AND ifNull(g.region, '') = s.region_key
 LEFT JOIN livepeer_analytics.v_api_sla_compliance sl
   ON sl.window_start = s.window_start
  AND sl.orchestrator_address = s.orchestrator_address
- AND sl.pipeline = s.pipeline
+ AND sl.pipeline_id = s.pipeline
  AND ifNull(sl.model_id, '') = s.model_id_key
  AND ifNull(sl.gpu_id, '') = s.gpu_id_key
  AND ifNull(sl.region, '') = s.region_key
@@ -272,7 +272,7 @@ SELECT
       SELECT
         window_start,
         orchestrator_address,
-        pipeline,
+        pipeline_id,
         ifNull(model_id, ''),
         ifNull(gpu_id, ''),
         ifNull(region, '')
@@ -292,7 +292,7 @@ SELECT
       SELECT
         window_start,
         orchestrator_address,
-        pipeline,
+        pipeline_id,
         ifNull(model_id, ''),
         ifNull(gpu_id, ''),
         ifNull(region, '')

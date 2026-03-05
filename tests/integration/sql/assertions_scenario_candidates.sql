@@ -208,7 +208,7 @@ gpu_missing AS
   LEFT JOIN livepeer_analytics.v_api_gpu_metrics g
     ON g.window_start = a.window_start
    AND g.orchestrator_address = a.orchestrator_address
-   AND g.pipeline = a.pipeline
+   AND g.pipeline_id = a.pipeline
    AND ifNull(g.model_id, '') = a.model_id_key
    AND ifNull(g.gpu_id, '') = a.gpu_id_key
    AND ifNull(g.region, '') = a.region_key
@@ -221,7 +221,7 @@ sla_missing AS
   LEFT JOIN livepeer_analytics.v_api_sla_compliance s
     ON s.window_start = a.window_start
    AND s.orchestrator_address = a.orchestrator_address
-   AND s.pipeline = a.pipeline
+   AND s.pipeline_id = a.pipeline
    AND ifNull(s.model_id, '') = a.model_id_key
    AND ifNull(s.gpu_id, '') = a.gpu_id_key
    AND ifNull(s.region, '') = a.region_key
@@ -293,14 +293,14 @@ candidates_with_presence AS
   LEFT JOIN livepeer_analytics.v_api_gpu_metrics g
     ON g.window_start = s.window_start
    AND g.orchestrator_address = s.orchestrator_address
-   AND g.pipeline = s.pipeline
+   AND g.pipeline_id = s.pipeline
    AND ifNull(g.model_id, '') = s.model_id_key
    AND ifNull(g.gpu_id, '') = s.gpu_id_key
    AND ifNull(g.region, '') = s.region_key
   LEFT JOIN livepeer_analytics.v_api_sla_compliance sl
     ON sl.window_start = s.window_start
    AND sl.orchestrator_address = s.orchestrator_address
-   AND sl.pipeline = s.pipeline
+   AND sl.pipeline_id = s.pipeline
    AND ifNull(sl.model_id, '') = s.model_id_key
    AND ifNull(sl.gpu_id, '') = s.gpu_id_key
    AND ifNull(sl.region, '') = s.region_key

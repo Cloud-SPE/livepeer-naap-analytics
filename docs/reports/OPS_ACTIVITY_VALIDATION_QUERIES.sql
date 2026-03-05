@@ -58,7 +58,7 @@ SELECT
   sum(startup_success) AS startup_success_sessions,
   sum(startup_excused) AS startup_excused_sessions,
   sum(startup_unexcused) AS startup_unexcused_sessions,
-  sum((confirmed_swap_count > 0) OR (inferred_orchestrator_change_count > 0)) AS swapped_sessions,
+  sum((confirmed_swap_count > 0) OR (inferred_orchestrator_change_count > 0)) AS total_swapped_sessions,
   sum(confirmed_swap_count > 0) AS confirmed_swapped_sessions,
   sum(inferred_orchestrator_change_count > 0) AS inferred_orchestrator_change_sessions,
   avg(startup_unexcused) AS unexcused_rate
@@ -202,9 +202,9 @@ WITH
   to_ts - INTERVAL 24 HOUR AS from_ts
 SELECT
   count() AS joined_rows,
-  sum(abs(r.known_sessions - a.known_sessions)) AS known_diff,
-  sum(abs(r.unexcused_sessions - a.unexcused_sessions)) AS unexcused_diff,
-  sum(abs(r.swapped_sessions - a.swapped_sessions)) AS swapped_diff
+  sum(abs(r.known_sessions_count - a.known_sessions_count)) AS known_diff,
+  sum(abs(r.startup_unexcused_sessions - a.startup_unexcused_sessions)) AS unexcused_diff,
+  sum(abs(r.total_swapped_sessions - a.total_swapped_sessions)) AS swapped_diff
 FROM
 (
   WITH latest_sessions AS
@@ -246,9 +246,9 @@ FROM
     s.pipeline,
     ifNull(s.model_id, '') AS model_id_key,
     ifNull(nullIf(if(ifNull(s.gpu_id, '') != '', s.gpu_id, ifNull(k.gpu_id, '')), ''), '') AS gpu_id_key,
-    sum(toUInt64(s.known_stream)) AS known_sessions,
-    sum(toUInt64(s.startup_unexcused)) AS unexcused_sessions,
-    sum(toUInt64((s.confirmed_swap_count > 0) OR (s.inferred_orchestrator_change_count > 0))) AS swapped_sessions
+    sum(toUInt64(s.known_stream)) AS known_sessions_count,
+    sum(toUInt64(s.startup_unexcused)) AS startup_unexcused_sessions,
+    sum(toUInt64((s.confirmed_swap_count > 0) OR (s.inferred_orchestrator_change_count > 0))) AS total_swapped_sessions
   FROM latest_sessions s
   LEFT JOIN latest_gpu_by_key k
     ON k.window_start = toStartOfInterval(s.session_start_ts, INTERVAL 1 HOUR)
@@ -270,9 +270,9 @@ INNER JOIN
     pipeline,
     ifNull(model_id, '') AS model_id_key,
     ifNull(gpu_id, '') AS gpu_id_key,
-    known_sessions,
-    unexcused_sessions,
-    swapped_sessions
+    known_sessions_count,
+    startup_unexcused_sessions,
+    total_swapped_sessions
   FROM livepeer_analytics.v_api_network_demand_by_gpu
   WHERE window_start >= from_ts AND window_start < to_ts
 ) a
@@ -287,9 +287,9 @@ WITH
   to_ts - INTERVAL 24 HOUR AS from_ts
 SELECT
   count() AS joined_rows,
-  sum(abs(a.known_sessions - b.known_sessions)) AS known_diff,
-  sum(abs(a.unexcused_sessions - b.unexcused_sessions)) AS unexcused_diff,
-  sum(abs(a.swapped_sessions - b.swapped_sessions)) AS swapped_diff
+  sum(abs(a.known_sessions_count - b.known_sessions_count)) AS known_diff,
+  sum(abs(a.startup_unexcused_sessions - b.startup_unexcused_sessions)) AS unexcused_diff,
+  sum(abs(a.total_swapped_sessions - b.total_swapped_sessions)) AS swapped_diff
 FROM
 (
   WITH latest_sessions AS
@@ -312,9 +312,9 @@ FROM
   SELECT
     toStartOfInterval(session_start_ts, INTERVAL 1 HOUR) AS window_start,
     orchestrator_address, pipeline, model_id, gpu_id, region,
-    sum(toUInt64(known_stream)) AS known_sessions,
-    sum(toUInt64(startup_unexcused)) AS unexcused_sessions,
-    sum(toUInt64((confirmed_swap_count > 0) OR (inferred_orchestrator_change_count > 0))) AS swapped_sessions
+    sum(toUInt64(known_stream)) AS known_sessions_count,
+    sum(toUInt64(startup_unexcused)) AS startup_unexcused_sessions,
+    sum(toUInt64((confirmed_swap_count > 0) OR (inferred_orchestrator_change_count > 0))) AS total_swapped_sessions
   FROM latest_sessions
   WHERE session_start_ts >= from_ts AND session_start_ts < to_ts
   GROUP BY window_start, orchestrator_address, pipeline, model_id, gpu_id, region
@@ -323,7 +323,7 @@ INNER JOIN
 (
   SELECT
     window_start, orchestrator_address, pipeline, model_id, gpu_id, region,
-    known_sessions, unexcused_sessions, swapped_sessions
+    known_sessions_count, startup_unexcused_sessions, total_swapped_sessions
   FROM livepeer_analytics.v_api_sla_compliance
   WHERE window_start >= from_ts AND window_start < to_ts
 ) b
@@ -334,8 +334,8 @@ USING (window_start, orchestrator_address, pipeline, model_id, gpu_id, region);
 -- Valid output: bad_success_ratio = 0 and bad_no_swap_ratio = 0.
 WITH now64(3,'UTC') AS to_ts, to_ts - INTERVAL 24 HOUR AS from_ts
 SELECT
-  countIf(success_ratio < 0 OR success_ratio > 1) AS bad_success_ratio,
-  countIf(no_swap_ratio < 0 OR no_swap_ratio > 1) AS bad_no_swap_ratio
+  countIf(effective_success_rate < 0 OR effective_success_rate > 1) AS bad_success_ratio,
+  countIf(no_swap_rate < 0 OR no_swap_rate > 1) AS bad_no_swap_ratio
 FROM livepeer_analytics.v_api_sla_compliance
 WHERE window_start >= from_ts AND window_start < to_ts;
 
@@ -344,9 +344,9 @@ WHERE window_start >= from_ts AND window_start < to_ts;
 -- Valid output: all counters = 0.
 WITH now64(3,'UTC') AS to_ts, to_ts - INTERVAL 24 HOUR AS from_ts
 SELECT
-  countIf(startup_success_ratio < 0 OR startup_success_ratio > 1) AS bad_startup_success_ratio,
-  countIf(success_ratio < 0 OR success_ratio > 1) AS bad_effective_success_ratio,
-  countIf(startup_success_ratio + 0.000001 < success_ratio) AS effective_gt_startup
+  countIf(startup_success_rate < 0 OR startup_success_rate > 1) AS bad_startup_success_ratio,
+  countIf(effective_success_rate < 0 OR effective_success_rate > 1) AS bad_effective_success_ratio,
+  countIf(startup_success_rate + 0.000001 < effective_success_rate) AS effective_gt_startup
 FROM livepeer_analytics.v_api_network_demand
 WHERE window_start >= from_ts AND window_start < to_ts;
 
@@ -542,12 +542,12 @@ SELECT
   model_id,
   gpu_id,
   status_samples,
-  jitter_coeff_fps
+  fps_jitter_coefficient
 FROM livepeer_analytics.v_api_jitter_5m
 WHERE window_start_5m >= from_ts
   AND window_start_5m < to_ts
-  AND jitter_coeff_fps > 0.2
-ORDER BY jitter_coeff_fps DESC, status_samples DESC;
+  AND fps_jitter_coefficient > 0.2
+ORDER BY fps_jitter_coefficient DESC, status_samples DESC;
 
 -- A13) Goal: Alert query for high startup latency proxy (query 4.2 equivalent).
 -- What this query does: Builds per-orchestrator startup latency stats from session facts

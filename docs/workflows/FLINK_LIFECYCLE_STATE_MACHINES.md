@@ -5,7 +5,7 @@ It is implementation-oriented and intended to make the lifecycle codebase easier
 
 ## Scope and Ownership
 
-- Source topology: `flink-jobs/src/main/java/com/livepeer/analytics/pipeline/StreamingEventsToClickHouse.java`
+- Source topology: [`flink-jobs/src/main/java/com/livepeer/analytics/pipeline/StreamingEventsToClickHouse.java`](../../flink-jobs/src/main/java/com/livepeer/analytics/pipeline/StreamingEventsToClickHouse.java)
 - Stateful operators:
   - `WorkflowSessionAggregatorFunction`
   - `WorkflowSessionSegmentAggregatorFunction`
@@ -203,9 +203,9 @@ For one suspicious `workflow_session_id`:
 When changing lifecycle behavior:
 
 1. Update this document if state transition or attribution semantics change.
-2. Update `docs/data/SCHEMA_AND_METRIC_CONTRACTS.md` for contract-level semantics.
-3. Add/adjust unit tests under `flink-jobs/src/test/java/com/livepeer/analytics/lifecycle`.
+2. Update [`docs/data/SCHEMA_AND_METRIC_CONTRACTS.md`](../data/SCHEMA_AND_METRIC_CONTRACTS.md) for contract-level semantics.
+3. Add/adjust unit tests under [`flink-jobs/src/test/java/com/livepeer/analytics/lifecycle`](../../flink-jobs/src/test/java/com/livepeer/analytics/lifecycle).
 4. Re-run:
    - `cd flink-jobs && mvn test`
-   - `tests/integration/run_all.sh`
+   - [`tests/integration/run_all.sh`](../../tests/integration/run_all.sh)
 5. Re-check parity between lifecycle facts and API views using integration SQL packs.

@@ -9,8 +9,8 @@ You are a consistency and hygiene agent.
 
 - `cd flink-jobs && mvn -q -Dtest=ClickHouseSchemaSyncTest test`
 - `cd flink-jobs && mvn -q -DskipTests package`
-- `scripts/docs_link_check.sh`
-- `scripts/docs_inventory.sh`
+- [`scripts/docs_link_check.sh`](../../scripts/docs_link_check.sh)
+- [`scripts/docs_inventory.sh`](../../scripts/docs_inventory.sh)
 
 ## Your Job
 

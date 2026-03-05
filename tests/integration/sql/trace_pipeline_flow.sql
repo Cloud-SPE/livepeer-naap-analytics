@@ -215,7 +215,7 @@ SELECT
   sum(startup_unexcused) AS startup_unexcused_sessions,
   sum(confirmed_swap_count > 0) AS confirmed_swapped_sessions,
   sum(inferred_orchestrator_change_count > 0) AS inferred_orchestrator_change_sessions,
-  sum(confirmed_swap_count > 0 OR inferred_orchestrator_change_count > 0) AS swapped_sessions,
+  sum(confirmed_swap_count > 0 OR inferred_orchestrator_change_count > 0) AS total_swapped_sessions,
   avg(startup_unexcused) AS unexcused_rate
 FROM fs_latest;
 
@@ -290,7 +290,7 @@ WITH
       toNullable(1) AS api_marker,
       window_start,
       orchestrator_address,
-      pipeline,
+      pipeline_id AS pipeline,
       ifNull(model_id, '') AS model_id,
       ifNull(gpu_id, '') AS gpu_id,
       ifNull(region, '') AS region,
@@ -400,13 +400,13 @@ WITH
     SELECT
       window_start,
       orchestrator_address,
-      pipeline,
+      pipeline_id AS pipeline,
       ifNull(model_id, '') AS model_id_key,
       ifNull(gpu_id, '') AS gpu_id_key,
       ifNull(region, '') AS region_key,
-      known_sessions,
-      unexcused_sessions,
-      swapped_sessions
+      known_sessions_count,
+      startup_unexcused_sessions,
+      total_swapped_sessions
     FROM livepeer_analytics.v_api_sla_compliance
     WHERE window_start >= {from_ts:DateTime64(3)}
       AND window_start < {to_ts:DateTime64(3)}
@@ -452,19 +452,19 @@ FROM
       WHERE r.window_start IS NULL
     ) AS view_only_keys,
     (
-      SELECT sum(abs(r.raw_known_sessions - a.known_sessions))
+      SELECT sum(abs(r.raw_known_sessions - a.known_sessions_count))
       FROM raw r
       INNER JOIN api a
       USING (window_start, orchestrator_address, pipeline, model_id_key, gpu_id_key, region_key)
     ) AS total_known_diff,
     (
-      SELECT sum(abs(r.raw_unexcused_sessions - a.unexcused_sessions))
+      SELECT sum(abs(r.raw_unexcused_sessions - a.startup_unexcused_sessions))
       FROM raw r
       INNER JOIN api a
       USING (window_start, orchestrator_address, pipeline, model_id_key, gpu_id_key, region_key)
     ) AS total_unexcused_diff,
     (
-      SELECT sum(abs(r.raw_swapped_sessions - a.swapped_sessions))
+      SELECT sum(abs(r.raw_swapped_sessions - a.total_swapped_sessions))
       FROM raw r
       INNER JOIN api a
       USING (window_start, orchestrator_address, pipeline, model_id_key, gpu_id_key, region_key)
@@ -546,8 +546,7 @@ WITH
         if(p.pipeline != '', p.pipeline, ifNull(f.pipeline_fallback, ''))
       ) AS pipeline,
       ifNull(p.model_id, '') AS model_id,
-      uniqExactMerge(p.sessions_uniq_state) AS total_sessions,
-      uniqExactMerge(p.streams_uniq_state) AS total_streams,
+      uniqExactMerge(p.sessions_uniq_state) AS sessions_count,
       countMerge(p.sample_count_state) / 60.0 AS total_minutes,
       avgMerge(p.output_fps_avg_state) AS avg_output_fps
     FROM livepeer_analytics.agg_stream_performance_1m p
@@ -574,16 +573,16 @@ WITH
         if(s.pipeline != '', s.pipeline, ifNull(f.pipeline_fallback, ''))
       ) AS pipeline,
       s.model_id,
-      sum(toUInt64(s.known_stream)) AS known_sessions,
+      sum(toUInt64(s.known_stream)) AS known_sessions_count,
       sum(toUInt64(s.known_stream AND s.orchestrator_address != '')) AS served_sessions,
       sum(toUInt64(s.known_stream AND s.orchestrator_address = '')) AS unserved_sessions,
-      sum(toUInt64(s.startup_unexcused)) AS unexcused_sessions,
+      sum(toUInt64(s.startup_unexcused)) AS startup_unexcused_sessions,
       sum(toUInt64(
         (s.startup_unexcused > 0)
         OR (s.zero_output_fps_session > 0)
         OR (s.loading_only_session > 0)
       )) AS effective_failed_sessions,
-      sum(toUInt64((s.confirmed_swap_count > 0) OR (s.inferred_orchestrator_change_count > 0))) AS swapped_sessions
+      sum(toUInt64((s.confirmed_swap_count > 0) OR (s.inferred_orchestrator_change_count > 0))) AS total_swapped_sessions
     FROM latest_sessions s
     LEFT JOIN perf_pipeline_fallback f
       ON f.window_start = toStartOfInterval(s.session_start_ts, INTERVAL 1 HOUR)
@@ -611,17 +610,16 @@ WITH
       k.region AS region,
       k.pipeline AS pipeline,
       k.model_id AS model_id,
-      ifNull(p.total_sessions, toUInt64(0)) AS total_sessions,
-      ifNull(p.total_streams, toUInt64(0)) AS total_streams,
+      ifNull(p.sessions_count, toUInt64(0)) AS sessions_count,
       ifNull(p.total_minutes, 0.0) AS total_minutes,
       p.avg_output_fps,
-      ifNull(d.known_sessions, toUInt64(0)) AS known_sessions,
+      ifNull(d.known_sessions_count, toUInt64(0)) AS known_sessions_count,
       ifNull(d.served_sessions, toUInt64(0)) AS served_sessions,
       ifNull(d.unserved_sessions, toUInt64(0)) AS unserved_sessions,
-      ifNull(d.unexcused_sessions, toUInt64(0)) AS unexcused_sessions,
-      ifNull(d.swapped_sessions, toUInt64(0)) AS swapped_sessions,
-      ifNull(1 - (d.unexcused_sessions / nullIf(d.known_sessions, 0)), 0) AS startup_success_ratio,
-      ifNull(1 - (d.effective_failed_sessions / nullIf(d.known_sessions, 0)), 0) AS success_ratio
+      ifNull(d.startup_unexcused_sessions, toUInt64(0)) AS startup_unexcused_sessions,
+      ifNull(d.total_swapped_sessions, toUInt64(0)) AS total_swapped_sessions,
+      ifNull(1 - (d.startup_unexcused_sessions / nullIf(d.known_sessions_count, 0)), 0) AS startup_success_rate,
+      ifNull(1 - (d.effective_failed_sessions / nullIf(d.known_sessions_count, 0)), 0) AS effective_success_rate
     FROM keys_1h k
     LEFT JOIN perf_1h p
       ON p.window_start = k.window_start
@@ -643,19 +641,18 @@ WITH
       window_start,
       gateway,
       ifNull(region, '') AS region,
-      pipeline,
+      pipeline_id AS pipeline,
       ifNull(model_id, '') AS model_id,
-      total_sessions,
-      total_streams,
+      sessions_count,
       total_minutes,
       avg_output_fps,
-      known_sessions,
+      known_sessions_count,
       served_sessions,
       unserved_sessions,
-      unexcused_sessions,
-      swapped_sessions,
-      startup_success_ratio,
-      success_ratio
+      startup_unexcused_sessions,
+      total_swapped_sessions,
+      startup_success_rate,
+      effective_success_rate
     FROM livepeer_analytics.v_api_network_demand
     WHERE window_start >= {from_ts:DateTime64(3)}
       AND window_start < {to_ts:DateTime64(3)}
@@ -668,15 +665,14 @@ WITH
       max(abs(e.avg_output_fps - a.avg_output_fps)) AS max_abs_diff_fps,
       avg(abs(e.total_minutes - a.total_minutes)) AS mean_abs_diff_minutes,
       max(abs(e.total_minutes - a.total_minutes)) AS max_abs_diff_minutes,
-      sum(abs(toInt64(e.total_sessions) - toInt64(a.total_sessions))) AS total_diff_sessions,
-      sum(abs(toInt64(e.total_streams) - toInt64(a.total_streams))) AS total_diff_streams,
-      sum(abs(toInt64(e.known_sessions) - toInt64(a.known_sessions))) AS total_diff_known_sessions,
+      sum(abs(toInt64(e.sessions_count) - toInt64(a.sessions_count))) AS total_diff_sessions,
+      sum(abs(toInt64(e.known_sessions_count) - toInt64(a.known_sessions_count))) AS total_diff_known_sessions,
       sum(abs(toInt64(e.served_sessions) - toInt64(a.served_sessions))) AS total_diff_served_sessions,
       sum(abs(toInt64(e.unserved_sessions) - toInt64(a.unserved_sessions))) AS total_diff_unserved_sessions,
-      sum(abs(toInt64(e.unexcused_sessions) - toInt64(a.unexcused_sessions))) AS total_diff_unexcused_sessions,
-      sum(abs(toInt64(e.swapped_sessions) - toInt64(a.swapped_sessions))) AS total_diff_swapped_sessions,
-      max(abs(e.startup_success_ratio - a.startup_success_ratio)) AS max_abs_diff_startup_success_ratio,
-      max(abs(e.success_ratio - a.success_ratio)) AS max_abs_diff_success_ratio
+      sum(abs(toInt64(e.startup_unexcused_sessions) - toInt64(a.startup_unexcused_sessions))) AS total_diff_unexcused_sessions,
+      sum(abs(toInt64(e.total_swapped_sessions) - toInt64(a.total_swapped_sessions))) AS total_diff_swapped_sessions,
+      max(abs(e.startup_success_rate - a.startup_success_rate)) AS max_abs_diff_startup_success_ratio,
+      max(abs(e.effective_success_rate - a.effective_success_rate)) AS max_abs_diff_success_ratio
     FROM expected e
     INNER JOIN api a
       ON a.window_start = e.window_start
@@ -693,7 +689,6 @@ SELECT
       ifNull(max_abs_diff_fps, 0) > 0.000001
       OR ifNull(max_abs_diff_minutes, 0) > 0.000001
       OR ifNull(total_diff_sessions, 0) > 0
-      OR ifNull(total_diff_streams, 0) > 0
       OR ifNull(total_diff_known_sessions, 0) > 0
       OR ifNull(total_diff_served_sessions, 0) > 0
       OR ifNull(total_diff_unserved_sessions, 0) > 0
@@ -714,7 +709,6 @@ SELECT
   mean_abs_diff_minutes,
   max_abs_diff_minutes,
   total_diff_sessions,
-  total_diff_streams,
   total_diff_known_sessions,
   total_diff_served_sessions,
   total_diff_unserved_sessions,
@@ -755,7 +749,6 @@ FROM
     (SELECT mean_abs_diff_minutes FROM joined) AS mean_abs_diff_minutes,
     (SELECT max_abs_diff_minutes FROM joined) AS max_abs_diff_minutes,
     (SELECT total_diff_sessions FROM joined) AS total_diff_sessions,
-    (SELECT total_diff_streams FROM joined) AS total_diff_streams,
     (SELECT total_diff_known_sessions FROM joined) AS total_diff_known_sessions,
     (SELECT total_diff_served_sessions FROM joined) AS total_diff_served_sessions,
     (SELECT total_diff_unserved_sessions FROM joined) AS total_diff_unserved_sessions,

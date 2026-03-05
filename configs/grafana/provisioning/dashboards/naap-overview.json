@@ -127,7 +127,7 @@
           "refId": "A"
         }
       ],
-      "title": "Current Network FPS (5min avg)",
+      "title": "Network FPS (15m avg)",
       "type": "gauge"
     },
     {
@@ -430,7 +430,7 @@
           "refId": "A"
         }
       ],
-      "title": "Known GPUs (active 15m)",
+      "title": "Advertised GPUs (15m)",
       "type": "stat"
     },
     {
@@ -572,7 +572,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT toStartOfInterval(window_start, INTERVAL 1 HOUR) AS time, sum(e2e_latency_ms * toFloat64(valid_e2e_latency_count)) / nullIf(sum(toFloat64(valid_e2e_latency_count)), 0) / 1000.0 AS avg_e2e_latency_s, quantileTDigest(0.95)(e2e_latency_ms) / 1000.0 AS p95_e2e_latency_s FROM livepeer_analytics.v_api_gpu_metrics WHERE $__timeFilter(window_start) AND e2e_latency_ms IS NOT NULL AND valid_e2e_latency_count > 0 AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), model_id)) AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), lower(orchestrator_address))) GROUP BY time ORDER BY time",
+          "rawSql": "SELECT toStartOfInterval(window_start, INTERVAL 1 HOUR) AS time, sum(avg_e2e_latency_ms * toFloat64(e2e_latency_sample_count)) / nullIf(sum(toFloat64(e2e_latency_sample_count)), 0) / 1000.0 AS avg_e2e_latency_s, quantileTDigest(0.95)(avg_e2e_latency_ms) / 1000.0 AS p95_e2e_latency_s FROM livepeer_analytics.v_api_gpu_metrics WHERE $__timeFilter(window_start) AND avg_e2e_latency_ms IS NOT NULL AND e2e_latency_sample_count > 0 AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), model_id)) AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), lower(orchestrator_address))) GROUP BY time ORDER BY time",
           "refId": "A"
         }
       ],
@@ -870,7 +870,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT toStartOfInterval(window_start, INTERVAL 1 HOUR) AS time, pipeline, if(sum(total_minutes) > 0, sum(avg_output_fps * total_minutes) / sum(total_minutes), avg(avg_output_fps)) AS avg_fps FROM livepeer_analytics.v_api_network_demand WHERE $__timeFilter(window_start) GROUP BY time, pipeline ORDER BY time",
+          "rawSql": "SELECT toStartOfInterval(window_start, INTERVAL 1 HOUR) AS time, pipeline_id, if(sum(total_minutes) > 0, sum(avg_output_fps * total_minutes) / sum(total_minutes), avg(avg_output_fps)) AS avg_fps FROM livepeer_analytics.v_api_network_demand WHERE $__timeFilter(window_start) GROUP BY time, pipeline_id ORDER BY time",
           "refId": "A"
         }
       ],
@@ -1064,11 +1064,11 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "WITH ens AS (SELECT lower(eth_address) AS addr, any(name) AS ens_name FROM url('https://livepeer-api.livepeer.cloud/api/orchestrator', 'JSONEachRow', 'eth_address String, name String') GROUP BY addr), status_24h AS (SELECT lower(orchestrator_address) AS orchestrator_address, ifNull(nullIf(pipeline, ''), 'unknown') AS pipeline, countDistinct(stream_id) AS active_streams, avg(output_fps) AS avg_fps, quantileTDigest(0.95)(output_fps) AS p95_fps FROM livepeer_analytics.fact_stream_status_samples WHERE sample_ts >= now() - INTERVAL 24 HOUR AND is_attributed = 1 AND orchestrator_address != '' AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(model_id, ''))) AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), lower(orchestrator_address))) GROUP BY orchestrator_address, pipeline), lat_24h AS (SELECT lower(orchestrator_address) AS orchestrator_address, ifNull(nullIf(pipeline, ''), 'unknown') AS pipeline, sum(e2e_latency_ms * toFloat64(valid_e2e_latency_count)) / nullIf(sum(toFloat64(valid_e2e_latency_count)), 0) / 1000.0 AS avg_e2e_latency_s, quantileTDigest(0.95)(e2e_latency_ms) / 1000.0 AS p95_e2e_latency_s FROM livepeer_analytics.v_api_gpu_metrics WHERE window_start >= now() - INTERVAL 24 HOUR AND e2e_latency_ms IS NOT NULL AND valid_e2e_latency_count > 0 AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), model_id)) AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), lower(orchestrator_address))) GROUP BY orchestrator_address, pipeline) SELECT if(ifNull(ens.ens_name, '') != '' AND NOT startsWith(lower(ens.ens_name), '0x'), ens.ens_name, s.orchestrator_address) AS \"Orchestrator\", s.pipeline AS \"Pipeline\", s.active_streams AS \"Active Streams\", round(s.avg_fps, 2) AS \"Avg FPS\", round(s.p95_fps, 2) AS \"P95 FPS\", round(ifNull(l.avg_e2e_latency_s, 0), 2) AS \"Avg E2E Latency (s)\", round(ifNull(l.p95_e2e_latency_s, 0), 2) AS \"P95 E2E Latency (s)\" FROM status_24h s LEFT JOIN lat_24h l ON l.orchestrator_address = s.orchestrator_address AND l.pipeline = s.pipeline LEFT JOIN ens ON ens.addr = s.orchestrator_address ORDER BY s.active_streams DESC, s.avg_fps DESC LIMIT 20",
+          "rawSql": "WITH ens AS (SELECT lower(eth_address) AS addr, any(name) AS ens_name FROM url('https://livepeer-api.livepeer.cloud/api/orchestrator', 'JSONEachRow', 'eth_address String, name String') GROUP BY addr), status_24h AS (SELECT lower(orchestrator_address) AS orchestrator_address, ifNull(nullIf(pipeline, ''), 'unknown') AS pipeline, countDistinct(stream_id) AS active_streams, avg(output_fps) AS avg_fps, quantileTDigest(0.95)(output_fps) AS p95_fps FROM livepeer_analytics.fact_stream_status_samples WHERE sample_ts >= now() - INTERVAL 24 HOUR AND is_attributed = 1 AND orchestrator_address != '' AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(model_id, ''))) AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), lower(orchestrator_address))) GROUP BY orchestrator_address, pipeline), lat_24h AS (SELECT lower(orchestrator_address) AS orchestrator_address, ifNull(nullIf(pipeline_id, ''), 'unknown') AS pipeline, sum(avg_e2e_latency_ms * toFloat64(e2e_latency_sample_count)) / nullIf(sum(toFloat64(e2e_latency_sample_count)), 0) / 1000.0 AS avg_e2e_latency_s, quantileTDigest(0.95)(avg_e2e_latency_ms) / 1000.0 AS p95_e2e_latency_s FROM livepeer_analytics.v_api_gpu_metrics WHERE window_start >= now() - INTERVAL 24 HOUR AND avg_e2e_latency_ms IS NOT NULL AND e2e_latency_sample_count > 0 AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), model_id)) AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), lower(orchestrator_address))) GROUP BY orchestrator_address, pipeline) SELECT if(ifNull(ens.ens_name, '') != '' AND NOT startsWith(lower(ens.ens_name), '0x'), ens.ens_name, s.orchestrator_address) AS \"Orchestrator\", s.pipeline AS \"Pipeline\", s.active_streams AS \"Active Streams\", round(s.avg_fps, 2) AS \"Avg FPS\", round(s.p95_fps, 2) AS \"P95 FPS\", round(ifNull(l.avg_e2e_latency_s, 0), 2) AS \"Avg E2E Latency (s)\", round(ifNull(l.p95_e2e_latency_s, 0), 2) AS \"P95 E2E Latency (s)\" FROM status_24h s LEFT JOIN lat_24h l ON l.orchestrator_address = s.orchestrator_address AND l.pipeline = s.pipeline LEFT JOIN ens ON ens.addr = s.orchestrator_address ORDER BY s.active_streams DESC, s.avg_fps DESC LIMIT 20",
           "refId": "A"
         }
       ],
-      "title": "Top Orchestrators (Last Day)",
+      "title": "Top Orchestrators (24h: Streams, FPS, Latency)",
       "transformations": [
         {
           "id": "filterFieldsByName",
@@ -1222,11 +1222,11 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "WITH latest_gpu AS (SELECT gpu_id, argMax(lower(orchestrator_address), snapshot_ts) AS orchestrator_address, argMax(gpu_name, snapshot_ts) AS gpu_name, argMax(model_id, snapshot_ts) AS model_id, max(snapshot_ts) AS latest_snapshot_ts FROM livepeer_analytics.dim_orchestrator_capability_snapshots WHERE ifNull(gpu_id, '') != '' GROUP BY gpu_id) SELECT ifNull(gpu_name, 'unknown') AS gpu_type, countDistinct(gpu_id) AS gpu_count FROM latest_gpu WHERE latest_snapshot_ts >= now() - INTERVAL 24 HOUR AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), model_id)) AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orchestrator_address)) GROUP BY gpu_type ORDER BY gpu_count DESC",
+          "rawSql": "WITH latest_gpu AS (SELECT gpu_id, argMax(lower(orchestrator_address), snapshot_ts) AS orchestrator_address, argMax(gpu_name, snapshot_ts) AS gpu_model_name, argMax(model_id, snapshot_ts) AS model_id, max(snapshot_ts) AS latest_snapshot_ts FROM livepeer_analytics.dim_orchestrator_capability_snapshots WHERE ifNull(gpu_id, '') != '' GROUP BY gpu_id) SELECT ifNull(gpu_model_name, 'unknown') AS gpu_model_name, countDistinct(gpu_id) AS gpu_count FROM latest_gpu WHERE latest_snapshot_ts >= now() - INTERVAL 24 HOUR AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), model_id)) AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orchestrator_address)) GROUP BY gpu_model_name ORDER BY gpu_count DESC",
           "refId": "A"
         }
       ],
-      "title": "GPU Count by Type",
+      "title": "GPU Count by Type (latest snapshot in 24h)",
       "type": "barchart"
     },
     {
@@ -1286,7 +1286,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "WITH ens AS (SELECT lower(eth_address) AS addr, any(name) AS ens_name FROM url('https://livepeer-api.livepeer.cloud/api/orchestrator', 'JSONEachRow', 'eth_address String, name String') GROUP BY addr), latest_gpu AS (SELECT gpu_id, argMax(lower(orchestrator_address), snapshot_ts) AS orchestrator_address, argMax(gpu_name, snapshot_ts) AS gpu_name, argMax(gpu_memory_total, snapshot_ts) AS gpu_memory_total, argMax(pipeline, snapshot_ts) AS pipeline, argMax(model_id, snapshot_ts) AS model_id, max(snapshot_ts) AS latest_snapshot_ts FROM livepeer_analytics.dim_orchestrator_capability_snapshots WHERE ifNull(gpu_id, '') != '' GROUP BY gpu_id) SELECT latest_snapshot_ts AS \"Latest Snapshot\", pipeline AS \"Pipeline\", if(ifNull(ens.ens_name, '') != '' AND NOT startsWith(lower(ens.ens_name), '0x'), ens.ens_name, latest_gpu.orchestrator_address) AS \"Orchestrator\", model_id AS \"Model\", gpu_id AS \"GPU ID\", gpu_name AS \"GPU Type\", round(toFloat64(ifNull(gpu_memory_total, 0)) / 1073741824.0, 1) AS \"GPU Memory (GB)\" FROM latest_gpu LEFT JOIN ens ON ens.addr = latest_gpu.orchestrator_address WHERE latest_snapshot_ts >= now() - INTERVAL 24 HOUR AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), model_id)) AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orchestrator_address)) ORDER BY latest_snapshot_ts DESC LIMIT 50",
+          "rawSql": "WITH ens AS (SELECT lower(eth_address) AS addr, any(name) AS ens_name FROM url('https://livepeer-api.livepeer.cloud/api/orchestrator', 'JSONEachRow', 'eth_address String, name String') GROUP BY addr), latest_gpu AS (SELECT gpu_id, argMax(lower(orchestrator_address), snapshot_ts) AS orchestrator_address, argMax(gpu_name, snapshot_ts) AS gpu_model_name, argMax(gpu_memory_total, snapshot_ts) AS gpu_memory_bytes_total, argMax(pipeline, snapshot_ts) AS pipeline, argMax(model_id, snapshot_ts) AS model_id, max(snapshot_ts) AS latest_snapshot_ts FROM livepeer_analytics.dim_orchestrator_capability_snapshots WHERE ifNull(gpu_id, '') != '' GROUP BY gpu_id) SELECT latest_snapshot_ts AS \"Latest Snapshot\", pipeline AS \"Pipeline\", if(ifNull(ens.ens_name, '') != '' AND NOT startsWith(lower(ens.ens_name), '0x'), ens.ens_name, latest_gpu.orchestrator_address) AS \"Orchestrator\", model_id AS \"Model\", gpu_id AS \"GPU ID\", gpu_model_name AS \"GPU Type\", round(toFloat64(ifNull(gpu_memory_bytes_total, 0)) / 1073741824.0, 1) AS \"GPU Memory (GB)\" FROM latest_gpu LEFT JOIN ens ON ens.addr = latest_gpu.orchestrator_address WHERE latest_snapshot_ts >= now() - INTERVAL 24 HOUR AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), model_id)) AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orchestrator_address)) ORDER BY latest_snapshot_ts DESC LIMIT 50",
           "refId": "A"
         }
       ],
@@ -1576,7 +1576,7 @@
           "refId": "A"
         }
       ],
-      "title": "Active GPUs (15m)",
+      "title": "Advertised GPUs (15m)",
       "type": "stat"
     },
     {
@@ -1716,7 +1716,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "sql",
-          "rawSql": "SELECT toFloat64(ifNull(sum(e2e_latency_ms * toFloat64(valid_e2e_latency_count)) / nullIf(sum(toFloat64(valid_e2e_latency_count)), 0), 0)) / 1000.0 AS value FROM livepeer_analytics.v_api_gpu_metrics WHERE window_start >= now() - INTERVAL 1 HOUR AND e2e_latency_ms IS NOT NULL AND valid_e2e_latency_count > 0 AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), model_id)) AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), lower(orchestrator_address)))",
+          "rawSql": "SELECT toFloat64(ifNull(sum(avg_e2e_latency_ms * toFloat64(e2e_latency_sample_count)) / nullIf(sum(toFloat64(e2e_latency_sample_count)), 0), 0)) / 1000.0 AS value FROM livepeer_analytics.v_api_gpu_metrics WHERE window_start >= now() - INTERVAL 1 HOUR AND avg_e2e_latency_ms IS NOT NULL AND e2e_latency_sample_count > 0 AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), model_id)) AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), lower(orchestrator_address)))",
           "refId": "A"
         }
       ],
@@ -1970,7 +1970,7 @@
           "refId": "A"
         }
       ],
-      "title": "Active Streams by Orchestrator (15m)",
+      "title": "Streams by Orchestrator (15m; includes zero-active)",
       "type": "barchart"
     },
     {
@@ -2114,7 +2114,7 @@
           "refId": "A"
         }
       ],
-      "title": "Live Event Tape (last 30m)",
+      "title": "Live Status/Trace/Capability Event Tape (30m)",
       "transformations": [
         {
           "id": "filterFieldsByName",
@@ -2338,11 +2338,11 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "WITH demand AS (SELECT toStartOfInterval(window_start, INTERVAL 1 HOUR) AS time, total_demand_sessions, known_sessions, served_sessions, unserved_sessions FROM livepeer_analytics.v_api_network_demand WHERE $__timeFilter(window_start) AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(model_id, '')))), sla AS (SELECT toStartOfInterval(window_start, INTERVAL 1 HOUR) AS time, known_sessions, sla_score, health_completeness_ratio FROM livepeer_analytics.v_api_sla_compliance WHERE $__timeFilter(window_start) AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(model_id, '')))) SELECT d.time AS time, if(sum(d.total_demand_sessions) > 0, sum(d.unserved_sessions) / sum(d.total_demand_sessions), toFloat64(0)) AS unmet_demand_rate, if(sum(d.known_sessions) > 0, sum(d.served_sessions) / sum(d.known_sessions), toFloat64(0)) AS supply_match_rate, if(sum(s.known_sessions) > 0, (sum(s.sla_score * s.known_sessions) / sum(s.known_sessions)) / 100.0, toFloat64(0)) AS sla_score, if(sum(s.known_sessions) > 0, sum(s.health_completeness_ratio * s.known_sessions) / sum(s.known_sessions), toFloat64(1)) AS health_completeness_ratio FROM demand d LEFT JOIN sla s ON s.time = d.time GROUP BY d.time ORDER BY d.time",
+          "rawSql": "WITH demand AS (SELECT toStartOfInterval(window_start, INTERVAL 1 HOUR) AS time, total_demand_sessions, known_sessions_count, served_sessions, unserved_sessions FROM livepeer_analytics.v_api_network_demand WHERE $__timeFilter(window_start) AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(model_id, '')))), sla AS (SELECT toStartOfInterval(window_start, INTERVAL 1 HOUR) AS time, known_sessions_count, sla_score, health_signal_coverage_ratio FROM livepeer_analytics.v_api_sla_compliance WHERE $__timeFilter(window_start) AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(model_id, '')))) SELECT d.time AS time, if(sum(d.total_demand_sessions) > 0, sum(d.unserved_sessions) / sum(d.total_demand_sessions), toFloat64(0)) AS unmet_demand_rate, if(sum(d.known_sessions_count) > 0, sum(d.served_sessions) / sum(d.known_sessions_count), toFloat64(0)) AS supply_match_rate, if(sum(s.known_sessions_count) > 0, (sum(s.sla_score * s.known_sessions_count) / sum(s.known_sessions_count)) / 100.0, toFloat64(0)) AS sla_score, if(sum(s.known_sessions_count) > 0, sum(s.health_signal_coverage_ratio * s.known_sessions_count) / sum(s.known_sessions_count), toFloat64(1)) AS health_signal_coverage_ratio FROM demand d LEFT JOIN sla s ON s.time = d.time GROUP BY d.time ORDER BY d.time",
           "refId": "A"
         }
       ],
-      "title": "Demand, SLA Score, and Health Completeness",
+      "title": "Unmet Demand, Supply Match, SLA Score, and Health Completeness",
       "type": "timeseries"
     },
     {
@@ -2398,7 +2398,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT ifNull(pipeline, '') AS \"Pipeline\", ifNull(model_id, '') AS \"Model\", ifNull(region, '') AS \"Region\", ifNull(gateway, '') AS \"Gateway\", sum(unserved_sessions) AS \"Unserved Sessions\", sum(total_demand_sessions) AS \"Total Demand Sessions\", if(sum(total_demand_sessions) > 0, sum(unserved_sessions) / sum(total_demand_sessions), toFloat64(0)) AS \"Unmet Rate\" FROM livepeer_analytics.v_api_network_demand WHERE $__timeFilter(window_start) AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(model_id, ''))) GROUP BY \"Pipeline\", \"Model\", \"Region\", \"Gateway\" HAVING \"Unserved Sessions\" > 0 ORDER BY \"Unserved Sessions\" DESC LIMIT 30",
+          "rawSql": "SELECT ifNull(pipeline_id, '') AS \"Pipeline\", ifNull(model_id, '') AS \"Model\", ifNull(region, '') AS \"Region\", ifNull(gateway, '') AS \"Gateway\", sum(unserved_sessions) AS \"Unserved Sessions\", sum(total_demand_sessions) AS \"Total Demand Sessions\", if(sum(total_demand_sessions) > 0, sum(unserved_sessions) / sum(total_demand_sessions), toFloat64(0)) AS \"Unmet Rate\" FROM livepeer_analytics.v_api_network_demand WHERE $__timeFilter(window_start) AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(model_id, ''))) GROUP BY \"Pipeline\", \"Model\", \"Region\", \"Gateway\" HAVING \"Unserved Sessions\" > 0 ORDER BY \"Unserved Sessions\" DESC LIMIT 30",
           "refId": "A"
         }
       ],
@@ -2552,11 +2552,11 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT if(gateway = '', 'unknown_gateway', gateway) AS \"Gateway\", sum(known_sessions) AS \"Known Sessions\", sum(served_sessions) AS \"Served Sessions\", sum(unserved_sessions) AS \"Unserved Sessions\", sum(sessions_with_last_error) AS \"Sessions With Last Error\", sum(loading_only_sessions) AS \"Loading-Only Sessions\", if(sum(total_demand_sessions) > 0, sum(unserved_sessions) / sum(total_demand_sessions), toFloat64(0)) AS \"Unmet Rate\", if(sum(known_sessions) > 0, sum(served_sessions) / sum(known_sessions), toFloat64(0)) AS \"Supply Match Rate\", if(sum(health_expected_signal_count) > 0, sum(health_signal_count) / sum(health_expected_signal_count), toFloat64(1)) AS \"Health Completeness\" FROM livepeer_analytics.v_api_network_demand WHERE $__timeFilter(window_start) AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(model_id, ''))) GROUP BY \"Gateway\" ORDER BY \"Unserved Sessions\" DESC",
+          "rawSql": "SELECT if(gateway = '', 'unknown_gateway', gateway) AS \"Gateway\", sum(known_sessions_count) AS \"Known Sessions\", sum(served_sessions) AS \"Served Sessions\", sum(unserved_sessions) AS \"Unserved Sessions\", sum(sessions_ending_in_error) AS \"Sessions With Last Error\", sum(loading_only_sessions) AS \"Loading-Only Sessions\", if(sum(total_demand_sessions) > 0, sum(unserved_sessions) / sum(total_demand_sessions), toFloat64(0)) AS \"Unmet Rate\", if(sum(known_sessions_count) > 0, sum(served_sessions) / sum(known_sessions_count), toFloat64(0)) AS \"Supply Match Rate\", if(sum(health_expected_signal_count) > 0, sum(health_signal_count) / sum(health_expected_signal_count), toFloat64(1)) AS \"Health Completeness\" FROM livepeer_analytics.v_api_network_demand WHERE $__timeFilter(window_start) AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(model_id, ''))) GROUP BY \"Gateway\" ORDER BY \"Unserved Sessions\" DESC",
           "refId": "A"
         }
       ],
-      "title": "Gateway Supply/Demand Summary",
+      "title": "Gateway Demand/Supply and Health Summary",
       "type": "table"
     },
     {
@@ -2736,11 +2736,11 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT time, sum(revenue_eth) AS total_revenue_eth FROM (SELECT toStartOfInterval(window_start, INTERVAL 1 HOUR) AS time, sum(if(fee_payment_eth > 1000000000, fee_payment_eth / 1000000000000000000.0, fee_payment_eth)) AS revenue_eth FROM livepeer_analytics.v_api_network_demand WHERE $__timeFilter(window_start) GROUP BY time UNION ALL SELECT toStartOfInterval(now(), INTERVAL 1 HOUR) AS time, toFloat64(0) AS revenue_eth) GROUP BY time ORDER BY time",
+          "rawSql": "SELECT time, sum(revenue_eth) AS total_revenue_eth FROM (SELECT toStartOfInterval(window_start, INTERVAL 1 HOUR) AS time, sum(if(ticket_face_value_eth > 1000000000, ticket_face_value_eth / 1000000000000000000.0, ticket_face_value_eth)) AS revenue_eth FROM livepeer_analytics.v_api_network_demand WHERE $__timeFilter(window_start) GROUP BY time UNION ALL SELECT toStartOfInterval(now(), INTERVAL 1 HOUR) AS time, toFloat64(0) AS revenue_eth) GROUP BY time ORDER BY time",
           "refId": "A"
         }
       ],
-      "title": "Revenue Analysis (Gateway Tickets)",
+      "title": "Gateway Ticket Face Value (ETH, hourly)",
       "type": "timeseries"
     },
     {
@@ -2837,7 +2837,7 @@
           "refId": "A"
         }
       ],
-      "title": "Pricing Analysis(Gateway Tickets)",
+      "title": "Quoted Price (gwei/MP) by Pipeline",
       "type": "timeseries"
     },
     {

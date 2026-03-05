@@ -1379,49 +1379,48 @@ SELECT
     -- Primary serving keys
     b.window_start AS window_start,
     b.orchestrator_address AS orchestrator_address,
-    b.pipeline AS pipeline,
+    b.pipeline AS pipeline_id,
     b.model_id AS model_id,
     b.gpu_id AS gpu_id,
     b.region AS region,
 
-    d.gpu_name,
-    d.gpu_memory_total,
+    d.gpu_name AS gpu_model_name,
+    d.gpu_memory_total AS gpu_memory_bytes_total,
     d.runner_version,
     if(d.gpu_major IS NOT NULL AND d.gpu_minor IS NOT NULL, concat(toString(d.gpu_major), '.', toString(d.gpu_minor)), CAST(NULL AS Nullable(String))) AS cuda_version,
 
     p.avg_output_fps,
     p.p95_output_fps,
-    p.jitter_coeff_fps,
+    p.jitter_coeff_fps AS fps_jitter_coefficient,
     ifNull(p.status_samples, toUInt64(0)) AS status_samples,
-    if(l.valid_prompt_to_first_frame_count > 0, l.prompt_to_first_frame_ms, CAST(NULL AS Nullable(Float64))) AS prompt_to_first_frame_ms,
-    if(l.valid_startup_time_count > 0, l.startup_time_ms, CAST(NULL AS Nullable(Float64))) AS startup_time_ms,
-    if(l.valid_startup_time_count > 0, l.startup_time_ms / 1000.0, CAST(NULL AS Nullable(Float64))) AS startup_time_s,
-    if(l.valid_e2e_latency_count > 0, l.e2e_latency_ms, CAST(NULL AS Nullable(Float64))) AS e2e_latency_ms,
-    if(l.valid_prompt_to_first_frame_count > 0, l.p95_prompt_to_first_frame_ms, CAST(NULL AS Nullable(Float32))) AS p95_prompt_to_first_frame_ms,
-    if(l.valid_startup_time_count > 0, l.p95_startup_time_ms, CAST(NULL AS Nullable(Float32))) AS p95_startup_time_ms,
+    if(l.valid_prompt_to_first_frame_count > 0, l.prompt_to_first_frame_ms, CAST(NULL AS Nullable(Float64))) AS avg_prompt_to_first_frame_ms,
+    if(l.valid_startup_time_count > 0, l.startup_time_ms, CAST(NULL AS Nullable(Float64))) AS avg_startup_latency_ms,
+    if(l.valid_e2e_latency_count > 0, l.e2e_latency_ms, CAST(NULL AS Nullable(Float64))) AS avg_e2e_latency_ms,
+    if(l.valid_prompt_to_first_frame_count > 0, l.p95_prompt_to_first_frame_ms, CAST(NULL AS Nullable(Float32))) AS p95_prompt_to_first_frame_latency_ms,
+    if(l.valid_startup_time_count > 0, l.p95_startup_time_ms, CAST(NULL AS Nullable(Float32))) AS p95_startup_latency_ms,
     if(l.valid_e2e_latency_count > 0, l.p95_e2e_latency_ms, CAST(NULL AS Nullable(Float32))) AS p95_e2e_latency_ms,
-    ifNull(l.valid_prompt_to_first_frame_count, toUInt64(0)) AS valid_prompt_to_first_frame_count,
-    ifNull(l.valid_startup_time_count, toUInt64(0)) AS valid_startup_time_count,
-    ifNull(l.valid_e2e_latency_count, toUInt64(0)) AS valid_e2e_latency_count,
+    ifNull(l.valid_prompt_to_first_frame_count, toUInt64(0)) AS prompt_to_first_frame_sample_count,
+    ifNull(l.valid_startup_time_count, toUInt64(0)) AS startup_latency_sample_count,
+    ifNull(l.valid_e2e_latency_count, toUInt64(0)) AS e2e_latency_sample_count,
 
-    ifNull(r.known_sessions, toUInt64(0)) AS known_sessions,
+    ifNull(r.known_sessions, toUInt64(0)) AS known_sessions_count,
     ifNull(r.startup_success_sessions, toUInt64(0)) AS startup_success_sessions,
-    ifNull(r.excused_sessions, toUInt64(0)) AS excused_sessions,
-    ifNull(r.unexcused_sessions, toUInt64(0)) AS unexcused_sessions,
+    ifNull(r.excused_sessions, toUInt64(0)) AS startup_excused_sessions,
+    ifNull(r.unexcused_sessions, toUInt64(0)) AS startup_unexcused_sessions,
     ifNull(r.confirmed_swapped_sessions, toUInt64(0)) AS confirmed_swapped_sessions,
-    ifNull(r.inferred_orchestrator_change_sessions, toUInt64(0)) AS inferred_orchestrator_change_sessions,
-    ifNull(r.swapped_sessions, toUInt64(0)) AS swapped_sessions,
+    ifNull(r.inferred_orchestrator_change_sessions, toUInt64(0)) AS inferred_swap_sessions,
+    ifNull(r.swapped_sessions, toUInt64(0)) AS total_swapped_sessions,
     ifNull(r.sessions_with_errors, toUInt64(0)) AS sessions_with_errors,
-    ifNull(r.sessions_with_last_error, toUInt64(0)) AS sessions_with_last_error,
+    ifNull(r.sessions_with_last_error, toUInt64(0)) AS sessions_ending_in_error,
     ifNull(r.loading_only_sessions, toUInt64(0)) AS loading_only_sessions,
     ifNull(r.zero_output_fps_sessions, toUInt64(0)) AS zero_output_fps_sessions,
-    ifNull(r.status_error_samples, toUInt64(0)) AS status_error_samples,
+    ifNull(r.status_error_samples, toUInt64(0)) AS error_status_samples,
     ifNull(r.health_signal_count, toUInt64(0)) AS health_signal_count,
     ifNull(r.health_expected_signal_count, toUInt64(0)) AS health_expected_signal_count,
-    ifNull(r.health_signal_count / nullIf(r.health_expected_signal_count, 0), 1.0) AS health_completeness_ratio,
+    ifNull(r.health_signal_count / nullIf(r.health_expected_signal_count, 0), 1.0) AS health_signal_coverage_ratio,
 
     -- Derived rates for API response convenience.
-    ifNull(r.unexcused_sessions / nullIf(r.known_sessions, 0), 0) AS failure_rate,
+    ifNull(r.unexcused_sessions / nullIf(r.known_sessions, 0), 0) AS startup_unexcused_rate,
     ifNull(r.swapped_sessions / nullIf(r.known_sessions, 0), 0) AS swap_rate
 FROM base_keys b
 LEFT JOIN perf_1h p
@@ -1684,35 +1683,32 @@ SELECT
     k.window_start AS window_start,
     k.gateway AS gateway,
     k.region AS region,
-    k.pipeline AS pipeline,
+    k.pipeline AS pipeline_id,
     k.model_id AS model_id,
 
-    ifNull(p.total_streams, toUInt64(0)) AS total_streams,
-    ifNull(p.total_sessions, toUInt64(0)) AS total_sessions,
+    ifNull(p.total_sessions, toUInt64(0)) AS sessions_count,
     ifNull(p.total_minutes, 0.0) AS total_minutes,
     p.avg_output_fps,
 
-    ifNull(d.known_sessions, toUInt64(0)) AS known_sessions,
+    ifNull(d.known_sessions, toUInt64(0)) AS known_sessions_count,
     ifNull(d.served_sessions, toUInt64(0)) AS served_sessions,
     ifNull(d.unserved_sessions, toUInt64(0)) AS unserved_sessions,
     ifNull(d.served_sessions, toUInt64(0)) + ifNull(d.unserved_sessions, toUInt64(0)) AS total_demand_sessions,
-    ifNull(d.unexcused_sessions, toUInt64(0)) AS unexcused_sessions,
+    ifNull(d.unexcused_sessions, toUInt64(0)) AS startup_unexcused_sessions,
     ifNull(d.confirmed_swapped_sessions, toUInt64(0)) AS confirmed_swapped_sessions,
-    ifNull(d.inferred_orchestrator_change_sessions, toUInt64(0)) AS inferred_orchestrator_change_sessions,
-    ifNull(d.swapped_sessions, toUInt64(0)) AS swapped_sessions,
+    ifNull(d.inferred_orchestrator_change_sessions, toUInt64(0)) AS inferred_swap_sessions,
+    ifNull(d.swapped_sessions, toUInt64(0)) AS total_swapped_sessions,
     ifNull(d.sessions_with_errors, toUInt64(0)) AS sessions_with_errors,
-    ifNull(d.sessions_with_last_error, toUInt64(0)) AS sessions_with_last_error,
+    ifNull(d.sessions_with_last_error, toUInt64(0)) AS sessions_ending_in_error,
     ifNull(d.loading_only_sessions, toUInt64(0)) AS loading_only_sessions,
     ifNull(d.zero_output_fps_sessions, toUInt64(0)) AS zero_output_fps_sessions,
-    ifNull(d.status_error_samples, toUInt64(0)) AS status_error_samples,
+    ifNull(d.status_error_samples, toUInt64(0)) AS error_status_samples,
     ifNull(d.health_signal_count, toUInt64(0)) AS health_signal_count,
     ifNull(d.health_expected_signal_count, toUInt64(0)) AS health_expected_signal_count,
-    ifNull(d.health_signal_count / nullIf(d.health_expected_signal_count, 0), 1.0) AS health_completeness_ratio,
-    -- Proxy for unmet demand (known sessions without orchestrator attribution).
-    ifNull(d.unserved_sessions, toUInt64(0)) AS missing_capacity_count,
-    ifNull(1 - (d.unexcused_sessions / nullIf(d.known_sessions, 0)), 0) AS startup_success_ratio,
-    ifNull(1 - (d.effective_failed_sessions / nullIf(d.known_sessions, 0)), 0) AS success_ratio,
-    ifNull(f.fee_payment_eth, 0.0) AS fee_payment_eth
+    ifNull(d.health_signal_count / nullIf(d.health_expected_signal_count, 0), 1.0) AS health_signal_coverage_ratio,
+    ifNull(1 - (d.unexcused_sessions / nullIf(d.known_sessions, 0)), 0) AS startup_success_rate,
+    ifNull(1 - (d.effective_failed_sessions / nullIf(d.known_sessions, 0)), 0) AS effective_success_rate,
+    ifNull(f.fee_payment_eth, 0.0) AS ticket_face_value_eth
 FROM keys_1h k
 LEFT JOIN perf_1h p
     ON p.window_start = k.window_start
@@ -1989,35 +1985,32 @@ SELECT
     p.gateway AS gateway,
     p.orchestrator_address AS orchestrator_address,
     p.region AS region,
-    p.pipeline AS pipeline,
+    p.pipeline AS pipeline_id,
     p.model_id AS model_id,
     p.gpu_id AS gpu_id,
-    ifNull(d.gpu_type, 'unknown') AS gpu_type,
+    ifNull(d.gpu_type, 'unknown') AS gpu_model_name,
 
-    p.total_streams,
-    p.total_sessions,
-    p.used_inference_minutes AS inference_minutes_by_gpu_type,
+    p.total_sessions AS sessions_count,
     p.used_inference_minutes,
     -- Capacity proxy: capacity slots * 60 minutes in the hour.
-    ifNull(c.capacity, 0) * 60.0 AS available_capacity_minutes,
-    ifNull(p.used_inference_minutes / nullIf(ifNull(c.capacity, 0) * 60.0, 0), 0) AS capacity_rate,
+    ifNull(c.capacity, 0) * 60.0 AS advertised_capacity_minutes,
+    ifNull(p.used_inference_minutes / nullIf(ifNull(c.capacity, 0) * 60.0, 0), 0) AS advertised_capacity_utilization_rate,
 
-    ifNull(r.known_sessions, toUInt64(0)) AS known_sessions,
-    ifNull(r.unexcused_sessions, toUInt64(0)) AS unexcused_sessions,
+    ifNull(r.known_sessions, toUInt64(0)) AS known_sessions_count,
+    ifNull(r.unexcused_sessions, toUInt64(0)) AS startup_unexcused_sessions,
     ifNull(r.confirmed_swapped_sessions, toUInt64(0)) AS confirmed_swapped_sessions,
-    ifNull(r.inferred_orchestrator_change_sessions, toUInt64(0)) AS inferred_orchestrator_change_sessions,
-    ifNull(r.swapped_sessions, toUInt64(0)) AS swapped_sessions,
+    ifNull(r.inferred_orchestrator_change_sessions, toUInt64(0)) AS inferred_swap_sessions,
+    ifNull(r.swapped_sessions, toUInt64(0)) AS total_swapped_sessions,
     ifNull(r.sessions_with_errors, toUInt64(0)) AS sessions_with_errors,
-    ifNull(r.sessions_with_last_error, toUInt64(0)) AS sessions_with_last_error,
+    ifNull(r.sessions_with_last_error, toUInt64(0)) AS sessions_ending_in_error,
     ifNull(r.loading_only_sessions, toUInt64(0)) AS loading_only_sessions,
     ifNull(r.zero_output_fps_sessions, toUInt64(0)) AS zero_output_fps_sessions,
-    ifNull(r.status_error_samples, toUInt64(0)) AS status_error_samples,
+    ifNull(r.status_error_samples, toUInt64(0)) AS error_status_samples,
     ifNull(r.health_signal_count, toUInt64(0)) AS health_signal_count,
     ifNull(r.health_expected_signal_count, toUInt64(0)) AS health_expected_signal_count,
-    ifNull(r.health_signal_count / nullIf(r.health_expected_signal_count, 0), 1.0) AS health_completeness_ratio,
-    ifNull(r.unexcused_sessions, toUInt64(0)) AS missing_capacity_count,
+    ifNull(r.health_signal_count / nullIf(r.health_expected_signal_count, 0), 1.0) AS health_signal_coverage_ratio,
 
-    ifNull(f.fee_payment_eth, 0.0) AS fee_payment_eth
+    ifNull(f.fee_payment_eth, 0.0) AS ticket_face_value_eth
 FROM perf_gpu_1h p
 LEFT JOIN rel_gpu_1h r
     ON r.window_start = p.window_start
@@ -2062,7 +2055,7 @@ GROUP BY
     model_id,
     gpu_id,
     region
-HAVING status_samples >= 10;
+HAVING status_samples >= 5;
 
 CREATE OR REPLACE VIEW v_api_sla_compliance AS
 -- Grain: 1 row per attributed (hour, orchestrator, pipeline, model_id, gpu_id, region).
@@ -2124,34 +2117,34 @@ status_session_hours AS
 SELECT
     sh.window_start AS window_start,
     sh.orchestrator_address AS orchestrator_address,
-    sh.pipeline AS pipeline,
+    sh.pipeline AS pipeline_id,
     sh.model_id AS model_id,
     sh.gpu_id AS gpu_id,
     sh.region AS region,
-    sum(toUInt64(ls.known_stream)) AS known_sessions,
+    sum(toUInt64(ls.known_stream)) AS known_sessions_count,
     sum(toUInt64(ls.startup_success)) AS startup_success_sessions,
-    sum(toUInt64(ls.startup_excused)) AS excused_sessions,
-    sum(toUInt64(ls.startup_unexcused)) AS unexcused_sessions,
+    sum(toUInt64(ls.startup_excused)) AS startup_excused_sessions,
+    sum(toUInt64(ls.startup_unexcused)) AS startup_unexcused_sessions,
     sum(toUInt64(ls.confirmed_swap_count > 0)) AS confirmed_swapped_sessions,
-    sum(toUInt64(ls.inferred_orchestrator_change_count > 0)) AS inferred_orchestrator_change_sessions,
-    sum(toUInt64((ls.confirmed_swap_count > 0) OR (ls.inferred_orchestrator_change_count > 0))) AS swapped_sessions,
+    sum(toUInt64(ls.inferred_orchestrator_change_count > 0)) AS inferred_swap_sessions,
+    sum(toUInt64((ls.confirmed_swap_count > 0) OR (ls.inferred_orchestrator_change_count > 0))) AS total_swapped_sessions,
     sum(toUInt64(ls.error_count > 0)) AS sessions_with_errors,
-    sum(toUInt64(ls.last_error_occurred > 0)) AS sessions_with_last_error,
+    sum(toUInt64(ls.last_error_occurred > 0)) AS sessions_ending_in_error,
     sum(toUInt64(ls.loading_only_session > 0)) AS loading_only_sessions,
     sum(toUInt64(ls.zero_output_fps_session > 0)) AS zero_output_fps_sessions,
-    sum(toUInt64(ls.status_error_sample_count)) AS status_error_samples,
+    sum(toUInt64(ls.status_error_sample_count)) AS error_status_samples,
     sum(toUInt64(ls.health_signal_count)) AS health_signal_count,
     sum(toUInt64(ls.health_expected_signal_count)) AS health_expected_signal_count,
-    ifNull(sum(toUInt64(ls.health_signal_count)) / nullIf(sum(toUInt64(ls.health_expected_signal_count)), 0), 1.0) AS health_completeness_ratio,
-    1 - (sum(toUInt64(ls.startup_unexcused)) / nullIf(sum(toUInt64(ls.known_stream)), 0)) AS startup_success_ratio,
+    ifNull(sum(toUInt64(ls.health_signal_count)) / nullIf(sum(toUInt64(ls.health_expected_signal_count)), 0), 1.0) AS health_signal_coverage_ratio,
+    1 - (sum(toUInt64(ls.startup_unexcused)) / nullIf(sum(toUInt64(ls.known_stream)), 0)) AS startup_success_rate,
     1 - (
         sum(toUInt64(
             (ls.startup_unexcused > 0)
             OR (ls.zero_output_fps_session > 0)
             OR (ls.loading_only_session > 0)
         )) / nullIf(sum(toUInt64(ls.known_stream)), 0)
-    ) AS success_ratio,
-    1 - (sum(toUInt64((ls.confirmed_swap_count > 0) OR (ls.inferred_orchestrator_change_count > 0))) / nullIf(sum(toUInt64(ls.known_stream)), 0)) AS no_swap_ratio,
+    ) AS effective_success_rate,
+    1 - (sum(toUInt64((ls.confirmed_swap_count > 0) OR (ls.inferred_orchestrator_change_count > 0))) / nullIf(sum(toUInt64(ls.known_stream)), 0)) AS no_swap_rate,
     (
         (1 - (sum(toUInt64(ls.startup_unexcused)) / nullIf(sum(toUInt64(ls.known_stream)), 0))) * 0.4
         +

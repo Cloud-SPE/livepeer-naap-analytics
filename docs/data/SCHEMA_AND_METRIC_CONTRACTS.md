@@ -47,14 +47,14 @@ Primary schema source: [`configs/clickhouse-init/01-schema.sql`](../../configs/c
 
 ## API Serving Grains
 
-- `v_api_gpu_metrics`: hour-level orchestrator/pipeline/model/GPU grain.
-- `v_api_network_demand`: hour-level gateway/region/pipeline/model grain.
-- `v_api_sla_compliance`: hour-level attributed orchestrator/pipeline/model/GPU grain (`orchestrator_address != ''`).
+- `v_api_gpu_metrics`: hour-level orchestrator/pipeline_id/model/GPU grain.
+- `v_api_network_demand`: hour-level gateway/region/pipeline_id/model grain.
+- `v_api_sla_compliance`: hour-level attributed orchestrator/pipeline_id/model/GPU grain (`orchestrator_address != ''`).
   - GPU/SLA hour rows are anchored to in-hour evidence and suppress only true rollover terminal tails.
   - Two-class zero-FPS behavior:
     - `terminal_tail_artifact`: rollover hour (`session_start_ts < hour_start`, `session_end_ts` in-hour) with no-work footprint in both current and previous hour, filtered.
     - `active_no_output`: materially active zero-FPS hour, retained for diagnostics.
-  - `sla_score` is health-adjusted (no separate score field): base reliability score multiplied by `health_completeness_ratio`, with additional output-viability penalty (zero-output/loading/error outcomes).
+  - `sla_score` is health-adjusted (no separate score field): base reliability score multiplied by `health_signal_coverage_ratio`, with additional output-viability penalty (zero-output/loading/error outcomes).
   - `v_api_network_demand` keyspace is the union of perf and session-demand keys, so demand-only (no status/perf samples) rows must still appear with zero perf counters.
 
 Contract rule: additive fields are canonical; clients must recompute ratios/scores when re-rolling windows.
@@ -77,15 +77,15 @@ versioned facts into `AggregatingMergeTree` rollups because version upserts can 
   - up/down orchestrator transport bandwidth (requires new telemetry source)
 - API contracts:
   - `/gpu/metrics` -> `v_api_gpu_metrics`
-    - attribution coverage SLO: for attributable rows where `model_id != ''`, canonical `pipeline` should be non-empty for >=99% of rows over rolling 24h (readiness assertion).
+    - attribution coverage SLO: for attributable rows where `model_id != ''`, canonical `pipeline_id` should be non-empty for >=99% of rows over rolling 24h (readiness assertion).
   - `/network/demand` -> `v_api_network_demand` (+ GPU supply slice via `v_api_network_demand_by_gpu`)
     - renamed field: `total_minutes` (formerly `total_inference_minutes`)
-    - `startup_success_ratio`: startup-only reliability ratio (`1 - startup_unexcused/known`)
-    - `success_ratio`: effective-output success ratio (`1 - effective_failed/known`, where effective failure includes unexcused, zero-output, or loading-only sessions; transient `last_error_occurred` alone does not reduce effective success)
-    - consumer join rule: include `model_id` on model-aware joins, or pre-aggregate by pipeline before joining to pipeline-grain datasets.
+    - `startup_success_rate`: startup-only reliability ratio (`1 - startup_unexcused/known`)
+    - `effective_success_rate`: effective-output success ratio (`1 - effective_failed/known`, where effective failure includes unexcused, zero-output, or loading-only sessions; transient `last_error_occurred` alone does not reduce effective success)
+    - consumer join rule: include `model_id` on model-aware joins, or pre-aggregate by `pipeline_id` before joining to pipeline-grain datasets.
   - `/sla/compliance` -> `v_api_sla_compliance`
-    - `startup_success_ratio`: startup-only reliability ratio (`1 - startup_unexcused/known`)
-    - `success_ratio`: effective-output success ratio aligned with `/network/demand`
+    - `startup_success_rate`: startup-only reliability ratio (`1 - startup_unexcused/known`)
+    - `effective_success_rate`: effective-output success ratio aligned with `/network/demand`
 
 ## Raw-to-Fact and Execution Contract
 
@@ -141,7 +141,7 @@ versioned facts into `AggregatingMergeTree` rollups because version upserts can 
   - `status_error_sample_count`: count of status samples with non-empty `last_error`.
   - `health_signal_count`: observed session-health signal count used for SLA confidence weighting.
   - `health_expected_signal_count`: expected health signal denominator at session grain.
-  - `health_completeness_ratio`: `health_signal_count / health_expected_signal_count` (defaults to `1` when denominator is `0`).
+  - `health_signal_coverage_ratio`: `health_signal_count / health_expected_signal_count` (defaults to `1` when denominator is `0`).
   - gold rollups/views expose these as additive counters and ratios; consumers should not infer health from startup class alone.
   - excusable error taxonomy (substring match):
     - `no orchestrators available`
@@ -154,7 +154,7 @@ versioned facts into `AggregatingMergeTree` rollups because version upserts can 
   - `confirmed_swap_count`: explicit `orchestrator_swap` trace evidence.
   - `inferred_orchestrator_change_count`: inferred swap evidence from unique canonical orchestrator count > 1 in the session.
   - `swap_count` (compatibility alias): mirrors explicit swaps (`confirmed_swap_count`).
-  - gold rollups expose both split metrics and also keep `swapped_sessions` as the union of confirmed/inferred.
+  - gold rollups expose both split metrics and also keep `total_swapped_sessions` as the union of confirmed/inferred.
   - segment boundary opens on orchestrator identity change.
 - GPU/model attribution:
   - enrich by nearest capability snapshot using canonicalized orchestrator identity and model-matched join rules.
@@ -303,7 +303,7 @@ pipeline/model identity at session end.
 2. Update Flink parser/model/mappers and tests.
 3. Re-run:
    - `cd flink-jobs && mvn test`
-   - `tests/integration/run_all.sh`
+   - [`tests/integration/run_all.sh`](../../tests/integration/run_all.sh)
 4. Update validation SQL and canonical docs in the same PR.
 
 ## Detailed References

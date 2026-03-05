@@ -181,8 +181,8 @@ Stateful lifecycle contracts are implemented in:
 | Serving views | `v_api_*` | Stable API/dashboard contracts |
 
 Serving-grain note:
-- `v_api_network_demand` is model-aware at `(hour, gateway, region, pipeline, model_id)`.
-- Consumers joining demand with pipeline-only datasets must pre-aggregate by pipeline (or include `model_id` when available).
+- `v_api_network_demand` is model-aware at `(hour, gateway, region, pipeline_id, model_id)`.
+- Consumers joining demand with pipeline-level datasets must pre-aggregate to `pipeline_id` grain (or include `model_id` when available).
 
 Materialization model:
 

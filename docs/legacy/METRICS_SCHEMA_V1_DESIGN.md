@@ -3,7 +3,7 @@
 This file is retained as supplemental design rationale.
 
 Canonical schema and metric contracts:
-- `docs/data/SCHEMA_AND_METRIC_CONTRACTS.md`
+- [`docs/data/SCHEMA_AND_METRIC_CONTRACTS.md`](../data/SCHEMA_AND_METRIC_CONTRACTS.md)
 
 ## Retained Rationale
 
@@ -14,5 +14,5 @@ Canonical schema and metric contracts:
 
 ## Implementation Anchors
 
-- `configs/clickhouse-init/01-schema.sql`
-- `flink-jobs/src/main/java/com/livepeer/analytics/lifecycle/WorkflowSessionStateMachine.java`
+- [`configs/clickhouse-init/01-schema.sql`](../../configs/clickhouse-init/01-schema.sql)
+- [`flink-jobs/src/main/java/com/livepeer/analytics/lifecycle/WorkflowSessionStateMachine.java`](../../flink-jobs/src/main/java/com/livepeer/analytics/lifecycle/WorkflowSessionStateMachine.java)

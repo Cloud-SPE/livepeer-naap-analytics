@@ -9,8 +9,8 @@ This document consolidates the data quality controls implemented in the Flink pi
 ### Dedup Key
 
 **Where it lives**
-- `flink-jobs/src/main/java/com/livepeer/analytics/quality/QualityGateProcessFunction.java`
-- `flink-jobs/src/main/java/com/livepeer/analytics/quality/DeduplicationProcessFunction.java`
+- [`flink-jobs/src/main/java/com/livepeer/analytics/quality/QualityGateProcessFunction.java`](../../flink-jobs/src/main/java/com/livepeer/analytics/quality/QualityGateProcessFunction.java)
+- [`flink-jobs/src/main/java/com/livepeer/analytics/quality/DeduplicationProcessFunction.java`](../../flink-jobs/src/main/java/com/livepeer/analytics/quality/DeduplicationProcessFunction.java)
 
 **Strategy**
 
@@ -53,7 +53,7 @@ Duplicates are emitted to the quarantine side output and written to Kafka topic 
 ## Validation Rules
 
 **Where rules live**
-`flink-jobs/src/main/java/com/livepeer/analytics/quality/SchemaValidator.java`
+[`flink-jobs/src/main/java/com/livepeer/analytics/quality/SchemaValidator.java`](../../flink-jobs/src/main/java/com/livepeer/analytics/quality/SchemaValidator.java)
 
 **What is validated**
 - Root must be a JSON object.
@@ -74,8 +74,8 @@ Schema failures emit a DLQ envelope with failure details. Output is written to K
 ## Pre-Sink Row Guard
 
 **Where it lives**
-- `flink-jobs/src/main/java/com/livepeer/analytics/sink/ParsedEventRowGuardProcessFunction.java`
-- `flink-jobs/src/main/java/com/livepeer/analytics/sink/EnvelopeRowGuardProcessFunction.java`
+- [`flink-jobs/src/main/java/com/livepeer/analytics/sink/ParsedEventRowGuardProcessFunction.java`](../../flink-jobs/src/main/java/com/livepeer/analytics/sink/ParsedEventRowGuardProcessFunction.java)
+- [`flink-jobs/src/main/java/com/livepeer/analytics/sink/EnvelopeRowGuardProcessFunction.java`](../../flink-jobs/src/main/java/com/livepeer/analytics/sink/EnvelopeRowGuardProcessFunction.java)
 
 **Behavior**
 - Enforces `CLICKHOUSE_SINK_MAX_RECORD_BYTES` (default: `1_000_000`).
@@ -87,7 +87,7 @@ Schema failures emit a DLQ envelope with failure details. Output is written to K
 **High DLQ volume**
 1. Check `SchemaValidator` rules for missing/changed fields.
 2. Inspect a sample from `raw_streaming_events_dlq` to see `failure_class` and `failure_reason`.
-3. Update these files in order: `configs/clickhouse-init/01-schema.sql`, `flink-jobs/src/main/java/com/livepeer/analytics/parse/EventParsers.java`, `flink-jobs/src/main/java/com/livepeer/analytics/model/EventPayloads.java`, `flink-jobs/src/main/java/com/livepeer/analytics/sink/ClickHouseRowMappers.java`, tests `flink-jobs/src/test/java/com/livepeer/analytics/sink/ClickHouseSchemaSyncTest.java` and `flink-jobs/src/test/java/com/livepeer/analytics/parse/EventParsersTest.java`.
+3. Update these files in order: [`configs/clickhouse-init/01-schema.sql`](../../configs/clickhouse-init/01-schema.sql), [`flink-jobs/src/main/java/com/livepeer/analytics/parse/EventParsers.java`](../../flink-jobs/src/main/java/com/livepeer/analytics/parse/EventParsers.java), [`flink-jobs/src/main/java/com/livepeer/analytics/model/EventPayloads.java`](../../flink-jobs/src/main/java/com/livepeer/analytics/model/EventPayloads.java), [`flink-jobs/src/main/java/com/livepeer/analytics/sink/ClickHouseRowMappers.java`](../../flink-jobs/src/main/java/com/livepeer/analytics/sink/ClickHouseRowMappers.java), tests [`flink-jobs/src/test/java/com/livepeer/analytics/sink/ClickHouseSchemaSyncTest.java`](../../flink-jobs/src/test/java/com/livepeer/analytics/sink/ClickHouseSchemaSyncTest.java) and [`flink-jobs/src/test/java/com/livepeer/analytics/parse/EventParsersTest.java`](../../flink-jobs/src/test/java/com/livepeer/analytics/parse/EventParsersTest.java).
 
 **High quarantine volume**
 1. Confirm upstream is using stable GUIDs.

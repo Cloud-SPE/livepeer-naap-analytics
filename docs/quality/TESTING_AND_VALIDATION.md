@@ -36,7 +36,7 @@
   - Note: `scenario_4_success_with_param_updates_exists` is currently informational (non-blocking) until param-update source rows are present in production.
   - Note: if `scenario_3_success_with_swap_exists` fails while replay and raw/typed tests pass, first check fixture coverage ([`tests/integration/fixtures/manifest.json`](../../tests/integration/fixtures/manifest.json)) before debugging parser logic.
 - One-shot integration run:
-  - `tests/integration/run_all.sh`
+  - [`tests/integration/run_all.sh`](../../tests/integration/run_all.sh)
 
 ## GitHub CI Split
 
@@ -113,24 +113,24 @@ Any add/rename/remove of a `-- TEST:` block must co-update this section in the s
 | `gpu_view_covers_healthy_attributed_session_keys` | Successful attributable session keys are represented in `v_api_gpu_metrics`. | Check missing key examples and verify fallback attribution fields (`model_id/gpu_id/region`) for those sessions. |
 | `demand_has_rows_for_all_session_hours` | Every session hour is represented in `v_api_network_demand`. | Inspect missing `window_start` hours and check demand view filters/materialization lag. |
 | `gpu_count_delta_explained_by_key_overlap` | GPU view-vs-rollup row delta must equal net key-overlap delta. | Compare `row_delta` vs `overlap_delta`; investigate unexpected key proliferation/drop. |
-| `network_demand_counts_aligned_to_rollup` | Demand view keyspace/counts strictly align with recomputed union(perf,demand) keyspace at `(hour,gateway,region,pipeline,model_id)` grain. | Inspect `rollup_only_keys`/`view_only_keys` first, then demand/perf key derivation and model-key normalization. |
-| `network_demand_effective_success_not_above_startup_success` | Effective success must not exceed startup-only success for any demand row. | Investigate rows where `success_ratio > startup_success_ratio`; check effective-failure signal derivation. |
-| `network_demand_effective_success_penalizes_failure_indicators` | Demand rows with effective failure indicators must not report perfect effective success. | Inspect rows with unexcused/zero-output/loading-only counters and `success_ratio ~= 1`; transient `last_error_occurred` alone is non-penalizing. |
-| `network_demand_model_split_conservation` | Informational guard: model-grain re-aggregation may inflate distinct-count fields (`total_sessions`, `total_streams`), while additive `total_minutes` should remain conserved. | Compare pipeline-baseline recompute versus re-aggregated `v_api_network_demand`; treat distinct-count deltas as WARN and minutes/key drift as blocking only when inconsistent. |
-| `network_demand_join_multiplicity_guard` | Demand parity keyspaces are unique at model grain (1:1 joinable). | Check duplicate key counts on both expected rollup keys and API keys for `(hour,gateway,region,pipeline,model_id)`. |
+| `network_demand_counts_aligned_to_rollup` | Demand view keyspace/counts strictly align with recomputed union(perf,demand) keyspace at `(hour,gateway,region,pipeline_id,model_id)` grain. | Inspect `rollup_only_keys`/`view_only_keys` first, then demand/perf key derivation and model-key normalization. |
+| `network_demand_effective_success_not_above_startup_success` | Effective success must not exceed startup-only success for any demand row. | Investigate rows where `effective_success_rate > startup_success_rate`; check effective-failure signal derivation. |
+| `network_demand_effective_success_penalizes_failure_indicators` | Demand rows with effective failure indicators must not report perfect effective success. | Inspect rows with unexcused/zero-output/loading-only counters and `effective_success_rate ~= 1`; transient `last_error_occurred` alone is non-penalizing. |
+| `network_demand_model_split_conservation` | Informational guard: model-grain re-aggregation may inflate distinct-count fields (`sessions_count`), while additive `total_minutes` should remain conserved. | Compare pipeline-baseline recompute versus re-aggregated `v_api_network_demand`; treat distinct-count deltas as WARN and minutes/key drift as blocking only when inconsistent. |
+| `network_demand_join_multiplicity_guard` | Demand parity keyspaces are unique at model grain (1:1 joinable). | Check duplicate key counts on both expected rollup keys and API keys for `(hour,gateway,region,pipeline_id,model_id)`. |
 | `network_demand_pipeline_join_inflation_guard` | Informational guard for naive pipeline-only joins against model-grain demand rows. | If `status='WARN'`, consumer joins must include `model_id` or pre-aggregate before joining. |
 | `preexisting_grain_drift_baseline_gpu_sla` | Existing model-aware GPU/SLA grain drift is tracked as non-blocking baseline signal (WARN). | Compare pipeline-collapsed view totals and key coverage (`*_only_keys`) with independent rollup/session recomputes and monitor trend direction. |
 | `sla_counts_aligned_to_raw_latest_sessions` | SLA view keyspace/counts strictly align with latest-session recompute keyspace for attributed sessions (`orchestrator_address != ''`), including health counters/signals. | Inspect `raw_only_keys`/`view_only_keys`; verify latest-session dedup, attribution filter, hour bucketing, and health-signal aggregate parity. |
 | `view_count_grain_ordering` | Informational grain-ordering check across serving views. | Treat WARN as diagnostic unless accompanied by blocking parity failures. |
 | `gpu_view_matches_rollup` | GPU API view must match independently recomputed perf aggregates from status facts on both keyspace and numeric values for perf-backed attributable GPU keys. | Check `rollup_only_keys`/`view_only_keys` first (blocking), then inspect `max_abs_diff_fps` and key completeness diagnostics (`*_empty_*_rows`). |
 | `network_demand_view_matches_rollup` | Network demand API view must match recomputed hourly union(perf,demand) keys with perf+demand aggregates on both keyspace and numeric values at model-aware demand grain. | Check `rollup_only_keys`/`view_only_keys` first (blocking), then inspect total diff diagnostics (including empty model diagnostics). |
-| `network_demand_by_gpu_matches_latest_sessions` | GPU demand reliability counters must match independent recomputation from latest-version sessions at `(hour,gateway,orchestrator,region,pipeline,model_id,gpu_id)` grain. | Check `raw_only_keys`/`view_only_keys` first, then inspect known/unexcused/swapped/error/health diff totals. |
+| `network_demand_by_gpu_matches_latest_sessions` | GPU demand reliability counters must match independent recomputation from latest-version sessions at `(hour,gateway,orchestrator,region,pipeline_id,model_id,gpu_id)` grain. | Check `raw_only_keys`/`view_only_keys` first, then inspect known/unexcused/swapped/error/health diff totals. |
 | `sla_view_matches_session_fact` | SLA API counts must match independent recomputation from session facts on both keyspace and numeric values for attributed sessions, including health/error indicators. | Check `raw_only_keys`/`view_only_keys` first (blocking), then compare known/unexcused/swapped and health-signal diff totals. |
 | `terminal_tail_artifact_filtered_in_gpu_sla` | True rollover tail artifact hours (rollover end-hour + no-work current/previous hour) are filtered from GPU/SLA views. | Check artifact candidate count and verify GPU/SLA hit counts are zero. |
 | `same_hour_failed_no_output_retained_in_gpu_sla` | Same-hour failed no-output sessions (short, attributed, error-indicated) remain visible in GPU/SLA views. | Verify same-hour failure candidates exist in both API views; missing rows are blocking. |
 | `active_no_output_rows_retained_in_gpu_sla` | Active no-output hours (material status evidence but zero FPS) remain visible in GPU/SLA views. | Verify candidate keys exist in both API views; missing keys are blocking. |
 | `gold_pipeline_empty_hotspots_diagnostic` | Informational hotspot scan for rows where `model_id` exists but canonical `pipeline` is empty in GPU/SLA views. | Use top orchestrator/model/GPU hotspots to debug attribution misses; non-blocking by design. |
-| `sla_ratios_in_bounds` | SLA ratios are bounded to valid ranges (`success_ratio`/`no_swap_ratio`/`health_completeness_ratio` in `[0,1]`, `sla_score` in `[0,100]`). | Inspect denominator/guard conditions in `v_api_sla_compliance`, especially health completeness weighting. |
+| `sla_ratios_in_bounds` | SLA ratios are bounded to valid ranges (`effective_success_rate`/`no_swap_rate`/`health_signal_coverage_ratio` in `[0,1]`, `sla_score` in `[0,100]`). | Inspect denominator/guard conditions in `v_api_sla_compliance`, especially health-signal coverage weighting. |
 | `serving_views_do_not_reference_typed_raw_tables` | API serving views (`v_api_*`) must not directly reference raw/typed ingestion tables. | Inspect `system.tables.create_table_query` for offending `v_api_*` definitions and refactor to `fact_*`/`agg_*`/`dim_*` inputs. |
 
 ### Join Anti-Patterns (Reference Examples)
@@ -222,7 +222,7 @@ Use this sequence for shared-helper refactors:
 3. Run Java unit/contract tests:
    - `cd flink-jobs && mvn test`
 4. Run integration assertions:
-   - `tests/integration/run_all.sh`
+   - [`tests/integration/run_all.sh`](../../tests/integration/run_all.sh)
 5. Run query-pack validation:
    - `uv run --project tests/python python tests/python/scripts/run_clickhouse_query_pack.py --lookback-hours 24`
 
@@ -238,7 +238,7 @@ Apply this checklist to any refactor/change that can affect schema, lifecycle se
    - [`docs/quality/TESTING_AND_VALIDATION.md`](./TESTING_AND_VALIDATION.md) (Pipeline Assertions Requirement Map)
 3. Run the minimum validation gate:
    - `cd flink-jobs && mvn test`
-   - `tests/integration/run_all.sh`
+   - [`tests/integration/run_all.sh`](../../tests/integration/run_all.sh)
    - `uv run --project tests/python python tests/python/scripts/run_clickhouse_query_pack.py --lookback-hours 24`
 4. If semantics or output fields changed, re-check notebook cells and saved outputs:
    - [`tests/python/notebooks/INTEGRATION_EXEC_SUMMARY.ipynb`](../../tests/python/notebooks/INTEGRATION_EXEC_SUMMARY.ipynb)

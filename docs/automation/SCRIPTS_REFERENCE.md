@@ -20,8 +20,8 @@ Canonical reference for repository operational shell scripts under [`scripts/`](
 
 | Script | Type | Purpose | Example |
 |---|---|---|---|
-| [`scripts/docs_inventory.sh`](../../scripts/docs_inventory.sh) | shell | Inventory markdown files with line counts and first heading. | `scripts/docs_inventory.sh` |
-| [`scripts/docs_link_check.sh`](../../scripts/docs_link_check.sh) | shell | Validate local markdown links in repo docs. | `scripts/docs_link_check.sh` |
+| [`scripts/docs_inventory.sh`](../../scripts/docs_inventory.sh) | shell | Inventory markdown files with line counts and first heading. | [`scripts/docs_inventory.sh`](../../scripts/docs_inventory.sh) |
+| [`scripts/docs_link_check.sh`](../../scripts/docs_link_check.sh) | shell | Validate local markdown links in repo docs. | [`scripts/docs_link_check.sh`](../../scripts/docs_link_check.sh) |
 | [`tests/python/scripts/run_clickhouse_query_pack.py`](../../tests/python/scripts/run_clickhouse_query_pack.py) | python | Run ordered SQL query packs marked with `-- QUERY:` blocks. | `uv run --project tests/python python tests/python/scripts/run_clickhouse_query_pack.py --lookback-hours 24` |
 | [`tests/python/scripts/run_clickhouse_data_tests.py`](../../tests/python/scripts/run_clickhouse_data_tests.py) | python | Run SQL assertions marked with `-- TEST:` blocks and fail on nonzero `failed_rows`. | `uv run --project tests/python python tests/python/scripts/run_clickhouse_data_tests.py --sql-file tests/integration/sql/assertions_pipeline.sql --lookback-hours 24` |
 | [`tests/python/scripts/export_scenario_fixtures.py`](../../tests/python/scripts/export_scenario_fixtures.py) | python | Export scenario-based ClickHouse fixtures from production/test data windows. | `uv run --project tests/python python tests/python/scripts/export_scenario_fixtures.py --from-ts 2026-02-01T00:00:00Z --to-ts 2026-02-16T00:00:00Z` |
@@ -31,29 +31,29 @@ Canonical reference for repository operational shell scripts under [`scripts/`](
 
 ## Details by Script
 
-### `scripts/docs_inventory.sh`
+### [`scripts/docs_inventory.sh`](../../scripts/docs_inventory.sh)
 
 - Inputs:
   - optional root path argument (defaults to `.`).
 - Output:
   - markdown table to stdout (`Lines`, `Path`, `First Heading`).
 - Common use:
-  - `scripts/docs_inventory.sh`
+  - [`scripts/docs_inventory.sh`](../../scripts/docs_inventory.sh)
   - `scripts/docs_inventory.sh docs`
 
-### `scripts/docs_link_check.sh`
+### [`scripts/docs_link_check.sh`](../../scripts/docs_link_check.sh)
 
 - Inputs:
   - optional root path argument (defaults to `.`).
 - Output:
   - prints missing local markdown link targets; exits nonzero on failure.
 - Common use:
-  - `scripts/docs_link_check.sh`
+  - [`scripts/docs_link_check.sh`](../../scripts/docs_link_check.sh)
 
-### `tests/python/scripts/run_clickhouse_query_pack.py`
+### [`tests/python/scripts/run_clickhouse_query_pack.py`](../../tests/python/scripts/run_clickhouse_query_pack.py)
 
 - Required inputs:
-  - SQL file with `-- QUERY:` blocks (default `tests/integration/sql/trace_pipeline_flow.sql`).
+  - SQL file with `-- QUERY:` blocks (default [`tests/integration/sql/trace_pipeline_flow.sql`](../../tests/integration/sql/trace_pipeline_flow.sql)).
 - Useful flags:
   - `--sql-file <path>`
   - `--lookback-hours <n>` or `--from-ts <UTC> --to-ts <UTC>`
@@ -61,7 +61,7 @@ Canonical reference for repository operational shell scripts under [`scripts/`](
 - Output:
   - ordered query result sets printed to stdout.
 
-### `tests/python/scripts/run_clickhouse_data_tests.py`
+### [`tests/python/scripts/run_clickhouse_data_tests.py`](../../tests/python/scripts/run_clickhouse_data_tests.py)
 
 - Required inputs:
   - SQL file(s) with `-- TEST:` blocks returning a `failed_rows` column.
@@ -72,14 +72,14 @@ Canonical reference for repository operational shell scripts under [`scripts/`](
 - Output:
   - pass/fail summary; optional JSON report file.
 
-### `tests/python/scripts/export_scenario_fixtures.py`
+### [`tests/python/scripts/export_scenario_fixtures.py`](../../tests/python/scripts/export_scenario_fixtures.py)
 
 - Required inputs:
   - `--from-ts <UTC>`
   - `--to-ts <UTC>`
 - Optional flags:
-  - `--scenario-sql` (default `tests/integration/sql/scenario_candidates.sql`)
-  - `--output-dir` (default `tests/integration/fixtures`)
+  - `--scenario-sql` (default [`tests/integration/sql/scenario_candidates.sql`](../../tests/integration/sql/scenario_candidates.sql))
+  - `--output-dir` (default [`tests/integration/fixtures`](../../tests/integration/fixtures))
   - `--limit-per-scenario`
   - `--session-padding-minutes`
   - `--open-session-duration-minutes`
@@ -87,7 +87,7 @@ Canonical reference for repository operational shell scripts under [`scripts/`](
 - Output:
   - scenario fixture JSONL files + manifest metadata.
 
-### `tests/python/scripts/load_scenario_fixtures.py`
+### [`tests/python/scripts/load_scenario_fixtures.py`](../../tests/python/scripts/load_scenario_fixtures.py)
 
 - Required inputs:
   - `--manifest <path>`
@@ -96,7 +96,7 @@ Canonical reference for repository operational shell scripts under [`scripts/`](
 - Output:
   - inserts rows into ClickHouse fixture tables from manifest-listed files.
 
-### `tests/python/scripts/run_scenario_test_harness.py`
+### [`tests/python/scripts/run_scenario_test_harness.py`](../../tests/python/scripts/run_scenario_test_harness.py)
 
 - Purpose:
   - Orchestrate integration-test stages with explicit boundaries and run artifacts.
@@ -174,13 +174,13 @@ Maven profiles:
 ## Notes
 
 - For contract-critical checks, prefer:
-  - `tests/integration/run_all.sh`
+  - [`tests/integration/run_all.sh`](../../tests/integration/run_all.sh)
   - `uv run --project tests/python python tests/python/scripts/run_clickhouse_data_tests.py --sql-file tests/integration/sql/assertions_raw_typed.sql --lookback-hours 24`
   - `uv run --project tests/python python tests/python/scripts/run_clickhouse_data_tests.py --sql-file tests/integration/sql/assertions_api_readiness.sql --lookback-hours 24`
 
 ## Notebook Alignment (Scenario Runs)
 
-To run `tests/python/notebooks/FLINK_DATA_TRACE_AND_INTEGRATION_TESTS.ipynb` against local scenario output:
+To run [`tests/python/notebooks/FLINK_DATA_TRACE_AND_INTEGRATION_TESTS.ipynb`](../../tests/python/notebooks/FLINK_DATA_TRACE_AND_INTEGRATION_TESTS.ipynb) against local scenario output:
 
 1. Execute a scenario run:
    - `cd flink-jobs && mvn -Pscenario-it-smoke verify`

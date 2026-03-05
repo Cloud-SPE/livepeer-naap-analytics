@@ -7,8 +7,8 @@ You are the documentation specialist for this repository.
 
 ## Commands You Can Run
 
-- `scripts/docs_inventory.sh`
-- `scripts/docs_link_check.sh`
+- [`scripts/docs_inventory.sh`](../../scripts/docs_inventory.sh)
+- [`scripts/docs_link_check.sh`](../../scripts/docs_link_check.sh)
 - `rg --files -g '*.md'`
 
 ## Project Context
@@ -30,9 +30,9 @@ You are the documentation specialist for this repository.
 ## Boundaries
 
 - ✅ Always:
-  - edit `docs/`, `AGENTS.md`, `docs/agents/`, and documentation cross-links.
+  - edit `docs/`, `AGENTS.md`, [`docs/agents/`](.), and documentation cross-links.
 - ⚠️ Ask first:
   - deleting any markdown file.
 - 🚫 Never:
-  - modify runtime code under `flink-jobs/src/main`,
+  - modify runtime code under [`flink-jobs/src/main`](../../flink-jobs/src/main),
   - alter deployment config as part of docs-only tasks.

@@ -35,7 +35,7 @@ FROM
 SELECT
   toUInt64(countIf(
     orchestrator_address = ''
-    OR (pipeline = '' AND ifNull(model_id, '') = '')
+    OR (pipeline_id = '' AND ifNull(model_id, '') = '')
     OR ifNull(gpu_id, '') = ''
     OR window_start IS NULL
   ) > 0) AS failed_rows,
@@ -63,7 +63,7 @@ FROM
   (
     SELECT
       countIf(ifNull(model_id, '') != '') AS rows_with_model,
-      countIf(ifNull(model_id, '') != '' AND pipeline != '') AS rows_with_pipeline
+      countIf(ifNull(model_id, '') != '' AND pipeline_id != '') AS rows_with_pipeline
     FROM livepeer_analytics.v_api_gpu_metrics
     WHERE window_start >= {from_ts:DateTime64(3)}
       AND window_start < {to_ts:DateTime64(3)}
@@ -72,7 +72,7 @@ FROM
 
     SELECT
       countIf(ifNull(model_id, '') != '') AS rows_with_model,
-      countIf(ifNull(model_id, '') != '' AND pipeline != '') AS rows_with_pipeline
+      countIf(ifNull(model_id, '') != '' AND pipeline_id != '') AS rows_with_pipeline
     FROM livepeer_analytics.v_api_sla_compliance
     WHERE window_start >= {from_ts:DateTime64(3)}
       AND window_start < {to_ts:DateTime64(3)}
@@ -82,8 +82,8 @@ FROM
 -- TEST: gpu_metrics_rollup_fields_consistent
 SELECT
   toUInt64(countIf(
-    abs(failure_rate - ifNull(unexcused_sessions / nullIf(known_sessions, 0), 0)) > 0.000001
-    OR abs(swap_rate - ifNull(swapped_sessions / nullIf(known_sessions, 0), 0)) > 0.000001
+    abs(startup_unexcused_rate - ifNull(startup_unexcused_sessions / nullIf(known_sessions_count, 0), 0)) > 0.000001
+    OR abs(swap_rate - ifNull(total_swapped_sessions / nullIf(known_sessions_count, 0), 0)) > 0.000001
   ) > 0) AS failed_rows,
   count() AS rows_checked
 FROM livepeer_analytics.v_api_gpu_metrics
@@ -93,22 +93,9 @@ WHERE window_start >= {from_ts:DateTime64(3)}
 -- TEST: gpu_metrics_latency_fields_nonnegative
 SELECT
   toUInt64(countIf(
-    (prompt_to_first_frame_ms IS NOT NULL AND prompt_to_first_frame_ms < 0)
-    OR (startup_time_ms IS NOT NULL AND startup_time_ms < 0)
-    OR (startup_time_s IS NOT NULL AND startup_time_s < 0)
-    OR (e2e_latency_ms IS NOT NULL AND e2e_latency_ms < 0)
-  ) > 0) AS failed_rows,
-  count() AS rows_checked
-FROM livepeer_analytics.v_api_gpu_metrics
-WHERE window_start >= {from_ts:DateTime64(3)}
-  AND window_start < {to_ts:DateTime64(3)};
-
--- TEST: gpu_metrics_startup_seconds_matches_ms
-SELECT
-  toUInt64(countIf(
-    startup_time_ms IS NOT NULL
-    AND startup_time_s IS NOT NULL
-    AND abs(startup_time_s - (startup_time_ms / 1000.0)) > 0.000001
+    (avg_prompt_to_first_frame_ms IS NOT NULL AND avg_prompt_to_first_frame_ms < 0)
+    OR (avg_startup_latency_ms IS NOT NULL AND avg_startup_latency_ms < 0)
+    OR (avg_e2e_latency_ms IS NOT NULL AND avg_e2e_latency_ms < 0)
   ) > 0) AS failed_rows,
   count() AS rows_checked
 FROM livepeer_analytics.v_api_gpu_metrics
@@ -135,10 +122,10 @@ FROM
   FROM
   (
     SELECT 'model_id' AS column_name
-    UNION ALL SELECT 'pipeline'
+    UNION ALL SELECT 'pipeline_id'
     UNION ALL SELECT 'total_minutes'
-    UNION ALL SELECT 'startup_success_ratio'
-    UNION ALL SELECT 'success_ratio'
+    UNION ALL SELECT 'startup_success_rate'
+    UNION ALL SELECT 'effective_success_rate'
   ) required
   LEFT JOIN system.columns c
     ON c.database = 'livepeer_analytics'
@@ -167,7 +154,7 @@ FROM
   FROM
   (
     SELECT 'gpu_id' AS column_name
-    UNION ALL SELECT 'gpu_type'
+    UNION ALL SELECT 'gpu_model_name'
   ) required
   LEFT JOIN system.columns c
     ON c.database = 'livepeer_analytics'
@@ -179,11 +166,10 @@ FROM
 -- TEST: network_demand_by_gpu_capacity_fields_nonnegative
 SELECT
   toUInt64(countIf(
-    inference_minutes_by_gpu_type < 0
-    OR used_inference_minutes < 0
-    OR available_capacity_minutes < 0
-    OR capacity_rate < 0
-    OR capacity_rate > 1.5
+    used_inference_minutes < 0
+    OR advertised_capacity_minutes < 0
+    OR advertised_capacity_utilization_rate < 0
+    OR advertised_capacity_utilization_rate > 1.5
   ) > 0) AS failed_rows,
   count() AS rows_checked
 FROM livepeer_analytics.v_api_network_demand_by_gpu
@@ -240,14 +226,14 @@ WITH
       s.pipeline,
       ifNull(s.model_id, '') AS model_id_key,
       ifNull(nullIf(if(ifNull(s.gpu_id, '') != '', s.gpu_id, ifNull(k.gpu_id, '')), ''), '') AS gpu_id_key,
-      sum(toUInt64(s.known_stream)) AS known_sessions,
-      sum(toUInt64(s.startup_unexcused)) AS unexcused_sessions,
-      sum(toUInt64((s.confirmed_swap_count > 0) OR (s.inferred_orchestrator_change_count > 0))) AS swapped_sessions,
+      sum(toUInt64(s.known_stream)) AS known_sessions_count,
+      sum(toUInt64(s.startup_unexcused)) AS startup_unexcused_sessions,
+      sum(toUInt64((s.confirmed_swap_count > 0) OR (s.inferred_orchestrator_change_count > 0))) AS total_swapped_sessions,
       sum(toUInt64(s.error_count > 0)) AS sessions_with_errors,
-      sum(toUInt64(s.last_error_occurred > 0)) AS sessions_with_last_error,
+      sum(toUInt64(s.last_error_occurred > 0)) AS sessions_ending_in_error,
       sum(toUInt64(s.loading_only_session > 0)) AS loading_only_sessions,
       sum(toUInt64(s.zero_output_fps_session > 0)) AS zero_output_fps_sessions,
-      sum(toUInt64(s.status_error_sample_count)) AS status_error_samples,
+      sum(toUInt64(s.status_error_sample_count)) AS error_status_samples,
       sum(toUInt64(s.health_signal_count)) AS health_signal_count,
       sum(toUInt64(s.health_expected_signal_count)) AS health_expected_signal_count
     FROM latest_sessions s
@@ -269,17 +255,17 @@ WITH
       gateway,
       orchestrator_address,
       ifNull(region, '') AS region_key,
-      pipeline,
+      pipeline_id AS pipeline,
       ifNull(model_id, '') AS model_id_key,
       ifNull(gpu_id, '') AS gpu_id_key,
-      known_sessions,
-      unexcused_sessions,
-      swapped_sessions,
+      known_sessions_count,
+      startup_unexcused_sessions,
+      total_swapped_sessions,
       sessions_with_errors,
-      sessions_with_last_error,
+      sessions_ending_in_error,
       loading_only_sessions,
       zero_output_fps_sessions,
-      status_error_samples,
+      error_status_samples,
       health_signal_count,
       health_expected_signal_count
     FROM livepeer_analytics.v_api_network_demand_by_gpu
@@ -343,19 +329,19 @@ FROM
       WHERE r.window_start IS NULL
     ) AS view_only_keys,
     (
-      SELECT ifNull(sum(abs(r.known_sessions - a.known_sessions)), 0)
+      SELECT ifNull(sum(abs(r.known_sessions_count - a.known_sessions_count)), 0)
       FROM raw_rollup r
       INNER JOIN api_rollup a
         USING (window_start, gateway, orchestrator_address, region_key, pipeline, model_id_key, gpu_id_key)
     ) AS total_known_diff,
     (
-      SELECT ifNull(sum(abs(r.unexcused_sessions - a.unexcused_sessions)), 0)
+      SELECT ifNull(sum(abs(r.startup_unexcused_sessions - a.startup_unexcused_sessions)), 0)
       FROM raw_rollup r
       INNER JOIN api_rollup a
         USING (window_start, gateway, orchestrator_address, region_key, pipeline, model_id_key, gpu_id_key)
     ) AS total_unexcused_diff,
     (
-      SELECT ifNull(sum(abs(r.swapped_sessions - a.swapped_sessions)), 0)
+      SELECT ifNull(sum(abs(r.total_swapped_sessions - a.total_swapped_sessions)), 0)
       FROM raw_rollup r
       INNER JOIN api_rollup a
         USING (window_start, gateway, orchestrator_address, region_key, pipeline, model_id_key, gpu_id_key)
@@ -367,7 +353,7 @@ FROM
         USING (window_start, gateway, orchestrator_address, region_key, pipeline, model_id_key, gpu_id_key)
     ) AS total_errors_diff,
     (
-      SELECT ifNull(sum(abs(r.sessions_with_last_error - a.sessions_with_last_error)), 0)
+      SELECT ifNull(sum(abs(r.sessions_ending_in_error - a.sessions_ending_in_error)), 0)
       FROM raw_rollup r
       INNER JOIN api_rollup a
         USING (window_start, gateway, orchestrator_address, region_key, pipeline, model_id_key, gpu_id_key)
@@ -385,7 +371,7 @@ FROM
         USING (window_start, gateway, orchestrator_address, region_key, pipeline, model_id_key, gpu_id_key)
     ) AS total_zero_output_diff,
     (
-      SELECT ifNull(sum(abs(r.status_error_samples - a.status_error_samples)), 0)
+      SELECT ifNull(sum(abs(r.error_status_samples - a.error_status_samples)), 0)
       FROM raw_rollup r
       INNER JOIN api_rollup a
         USING (window_start, gateway, orchestrator_address, region_key, pipeline, model_id_key, gpu_id_key)
@@ -407,17 +393,15 @@ FROM
 -- TEST: network_demand_additive_fields_nonnegative
 SELECT
   toUInt64(countIf(
-    total_streams < 0
-    OR total_sessions < 0
+    sessions_count < 0
     OR total_minutes < 0
-    OR known_sessions < 0
+    OR known_sessions_count < 0
     OR served_sessions < 0
     OR unserved_sessions < 0
     OR total_demand_sessions < 0
-    OR unexcused_sessions < 0
-    OR swapped_sessions < 0
-    OR missing_capacity_count < 0
-    OR fee_payment_eth < 0
+    OR startup_unexcused_sessions < 0
+    OR total_swapped_sessions < 0
+    OR ticket_face_value_eth < 0
   ) > 0) AS failed_rows,
   count() AS rows_checked
 FROM livepeer_analytics.v_api_network_demand
@@ -428,7 +412,6 @@ WHERE window_start >= {from_ts:DateTime64(3)}
 SELECT
   toUInt64(countIf(
     total_demand_sessions != served_sessions + unserved_sessions
-    OR missing_capacity_count != unserved_sessions
   ) > 0) AS failed_rows,
   count() AS rows_checked
 FROM livepeer_analytics.v_api_network_demand
@@ -438,9 +421,9 @@ WHERE window_start >= {from_ts:DateTime64(3)}
 -- TEST: network_demand_pipeline_not_model_id
 SELECT
   toUInt64(countIf(
-    pipeline != ''
+    pipeline_id != ''
     AND ifNull(model_id, '') != ''
-    AND lowerUTF8(pipeline) = lowerUTF8(ifNull(model_id, ''))
+    AND lowerUTF8(pipeline_id) = lowerUTF8(ifNull(model_id, ''))
   ) > 0) AS failed_rows,
   count() AS rows_checked
 FROM livepeer_analytics.v_api_network_demand
@@ -490,18 +473,18 @@ INNER JOIN fallback f
 WHERE d.window_start >= {from_ts:DateTime64(3)}
   AND d.window_start < {to_ts:DateTime64(3)}
   AND ifNull(d.model_id, '') != ''
-  AND ifNull(d.pipeline, '') = ''
+  AND ifNull(d.pipeline_id, '') = ''
   AND ifNull(f.pipeline_fallback, '') != '';
 
 -- TEST: sla_compliance_rollup_safe
 SELECT
   toUInt64(countIf(
-    abs(startup_success_ratio - ifNull(1 - (unexcused_sessions / nullIf(known_sessions, 0)), 0)) > 0.000001
-    OR success_ratio < 0
-    OR success_ratio > 1
-    OR startup_success_ratio + 0.000001 < success_ratio
-    OR abs(no_swap_ratio - ifNull(1 - (swapped_sessions / nullIf(known_sessions, 0)), 0)) > 0.000001
-    OR abs(health_completeness_ratio - ifNull(health_signal_count / nullIf(health_expected_signal_count, 0), 1.0)) > 0.000001
+    abs(startup_success_rate - ifNull(1 - (startup_unexcused_sessions / nullIf(known_sessions_count, 0)), 0)) > 0.000001
+    OR effective_success_rate < 0
+    OR effective_success_rate > 1
+    OR startup_success_rate + 0.000001 < effective_success_rate
+    OR abs(no_swap_rate - ifNull(1 - (total_swapped_sessions / nullIf(known_sessions_count, 0)), 0)) > 0.000001
+    OR abs(health_signal_coverage_ratio - ifNull(health_signal_count / nullIf(health_expected_signal_count, 0), 1.0)) > 0.000001
     OR sla_score < 0
     OR sla_score > 100
   ) > 0) AS failed_rows,
@@ -521,8 +504,8 @@ FROM
     toUInt8(count(c.name) > 0) AS is_present
   FROM
   (
-    SELECT 'startup_success_ratio' AS column_name
-    UNION ALL SELECT 'success_ratio'
+    SELECT 'startup_success_rate' AS column_name
+    UNION ALL SELECT 'effective_success_rate'
   ) required
   LEFT JOIN system.columns c
     ON c.database = 'livepeer_analytics'
@@ -534,9 +517,9 @@ FROM
 -- TEST: network_demand_success_ratios_valid
 SELECT
   toUInt64(countIf(
-    startup_success_ratio < 0 OR startup_success_ratio > 1
-    OR success_ratio < 0 OR success_ratio > 1
-    OR startup_success_ratio + 0.000001 < success_ratio
+    startup_success_rate < 0 OR startup_success_rate > 1
+    OR effective_success_rate < 0 OR effective_success_rate > 1
+    OR startup_success_rate + 0.000001 < effective_success_rate
   ) > 0) AS failed_rows,
   count() AS rows_checked
 FROM livepeer_analytics.v_api_network_demand
@@ -546,13 +529,13 @@ WHERE window_start >= {from_ts:DateTime64(3)}
 -- TEST: network_demand_success_ratio_penalizes_failure_indicators
 SELECT
   toUInt64(countIf(
-    known_sessions > 0
+    known_sessions_count > 0
     AND (
-      unexcused_sessions > 0
+      startup_unexcused_sessions > 0
       OR zero_output_fps_sessions > 0
       OR loading_only_sessions > 0
     )
-    AND success_ratio >= 0.999999
+    AND effective_success_rate >= 0.999999
   ) > 0) AS failed_rows,
   count() AS rows_checked
 FROM livepeer_analytics.v_api_network_demand
@@ -602,13 +585,13 @@ raw_rollup AS
     ifNull(model_id, '') AS model_id_key,
     ifNull(gpu_id, '') AS gpu_id_key,
     ifNull(region, '') AS region_key,
-    sum(toUInt64(known_stream)) AS known_sessions,
-    sum(toUInt64(startup_unexcused)) AS unexcused_sessions,
-    sum(toUInt64((confirmed_swap_count > 0) OR (inferred_orchestrator_change_count > 0))) AS swapped_sessions,
-    sum(toUInt64(last_error_occurred > 0)) AS sessions_with_last_error,
+    sum(toUInt64(known_stream)) AS known_sessions_count,
+    sum(toUInt64(startup_unexcused)) AS startup_unexcused_sessions,
+    sum(toUInt64((confirmed_swap_count > 0) OR (inferred_orchestrator_change_count > 0))) AS total_swapped_sessions,
+    sum(toUInt64(last_error_occurred > 0)) AS sessions_ending_in_error,
     sum(toUInt64(loading_only_session > 0)) AS loading_only_sessions,
     sum(toUInt64(zero_output_fps_session > 0)) AS zero_output_fps_sessions,
-    sum(toUInt64(status_error_sample_count)) AS status_error_samples,
+    sum(toUInt64(status_error_sample_count)) AS error_status_samples,
     sum(toUInt64(health_signal_count)) AS health_signal_count,
     sum(toUInt64(health_expected_signal_count)) AS health_expected_signal_count
   FROM latest_sessions
@@ -622,17 +605,17 @@ api_rollup AS
   SELECT
     window_start,
     orchestrator_address,
-    pipeline,
+    pipeline_id AS pipeline,
     ifNull(model_id, '') AS model_id_key,
     ifNull(gpu_id, '') AS gpu_id_key,
     ifNull(region, '') AS region_key,
-    known_sessions,
-    unexcused_sessions,
-    swapped_sessions,
-    sessions_with_last_error,
+    known_sessions_count,
+    startup_unexcused_sessions,
+    total_swapped_sessions,
+    sessions_ending_in_error,
     loading_only_sessions,
     zero_output_fps_sessions,
-    status_error_samples,
+    error_status_samples,
     health_signal_count,
     health_expected_signal_count
   FROM livepeer_analytics.v_api_sla_compliance
@@ -699,25 +682,25 @@ FROM
       WHERE r.window_start IS NULL
     ) AS view_only_keys,
     (
-      SELECT ifNull(sum(abs(r.known_sessions - a.known_sessions)), 0)
+      SELECT ifNull(sum(abs(r.known_sessions_count - a.known_sessions_count)), 0)
       FROM raw_rollup r
       INNER JOIN api_rollup a
         USING (window_start, orchestrator_address, pipeline, model_id_key, gpu_id_key, region_key)
     ) AS total_known_diff,
     (
-      SELECT ifNull(sum(abs(r.unexcused_sessions - a.unexcused_sessions)), 0)
+      SELECT ifNull(sum(abs(r.startup_unexcused_sessions - a.startup_unexcused_sessions)), 0)
       FROM raw_rollup r
       INNER JOIN api_rollup a
         USING (window_start, orchestrator_address, pipeline, model_id_key, gpu_id_key, region_key)
     ) AS total_unexcused_diff,
     (
-      SELECT ifNull(sum(abs(r.swapped_sessions - a.swapped_sessions)), 0)
+      SELECT ifNull(sum(abs(r.total_swapped_sessions - a.total_swapped_sessions)), 0)
       FROM raw_rollup r
       INNER JOIN api_rollup a
         USING (window_start, orchestrator_address, pipeline, model_id_key, gpu_id_key, region_key)
     ) AS total_swapped_diff,
     (
-      SELECT ifNull(sum(abs(r.sessions_with_last_error - a.sessions_with_last_error)), 0)
+      SELECT ifNull(sum(abs(r.sessions_ending_in_error - a.sessions_ending_in_error)), 0)
       FROM raw_rollup r
       INNER JOIN api_rollup a
         USING (window_start, orchestrator_address, pipeline, model_id_key, gpu_id_key, region_key)
@@ -735,7 +718,7 @@ FROM
         USING (window_start, orchestrator_address, pipeline, model_id_key, gpu_id_key, region_key)
     ) AS total_zero_output_diff,
     (
-      SELECT ifNull(sum(abs(r.status_error_samples - a.status_error_samples)), 0)
+      SELECT ifNull(sum(abs(r.error_status_samples - a.error_status_samples)), 0)
       FROM raw_rollup r
       INNER JOIN api_rollup a
         USING (window_start, orchestrator_address, pipeline, model_id_key, gpu_id_key, region_key)
