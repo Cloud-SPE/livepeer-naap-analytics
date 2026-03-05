@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.livepeer.analytics.model.EventPayloads;
 import com.livepeer.analytics.quality.ValidatedEvent;
 import com.livepeer.analytics.util.AddressNormalizer;
+import com.livepeer.analytics.util.EventUids;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -20,6 +21,7 @@ final class StreamTraceParser {
         EventPayloads.StreamTraceEvent trace = new EventPayloads.StreamTraceEvent();
 
         trace.eventTimestamp = event.event.timestamp;
+        trace.rawEventUid = EventUids.rawEventUid(event.event);
         trace.streamId = data.path("stream_id").asText("");
         trace.requestId = data.path("request_id").asText("");
         trace.traceType = data.path("type").asText("");

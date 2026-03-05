@@ -51,3 +51,4 @@ Canonical backlog for unresolved feature ideas, design hardening, and engineerin
 
 - This file supersedes scattered backlog sections in working/reference docs.
 - Detailed contract semantics remain in `docs/data/SCHEMA_AND_METRIC_CONTRACTS.md`.
+- Hard-cutover lineage path is active: Flink-owned `raw_event_uid` is the canonical raw lineage key; ClickHouse query-time hashing is deprecated for serving/lineage joins.

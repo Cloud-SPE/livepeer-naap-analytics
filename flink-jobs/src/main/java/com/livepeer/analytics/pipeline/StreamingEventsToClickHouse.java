@@ -41,7 +41,7 @@ import com.livepeer.analytics.sink.ClickHouseSinkFactory;
 import com.livepeer.analytics.sink.EnvelopeRowGuardProcessFunction;
 import com.livepeer.analytics.sink.ParsedEventRowGuardProcessFunction;
 import com.livepeer.analytics.sink.RowMapper;
-import com.livepeer.analytics.util.Hashing;
+import com.livepeer.analytics.util.EventUids;
 import com.livepeer.analytics.util.JsonSupport;
 import com.livepeer.analytics.util.WorkflowSessionId;
 
@@ -592,13 +592,7 @@ public class StreamingEventsToClickHouse {
     }
 
     private static String sourceEventUid(StreamingEvent event) {
-        if (event == null) {
-            return "";
-        }
-        if (event.eventId != null && !event.eventId.trim().isEmpty()) {
-            return event.eventId;
-        }
-        return Hashing.sha256Hex(event.rawJson == null ? "" : event.rawJson);
+        return EventUids.rawEventUid(event);
     }
 
     static class SafeParser<T> extends ProcessFunction<ValidatedEvent, ParsedEvent<T>> {

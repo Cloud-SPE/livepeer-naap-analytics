@@ -3,7 +3,7 @@ package com.livepeer.analytics.lifecycle;
 import com.livepeer.analytics.model.EventPayloads;
 import com.livepeer.analytics.model.ParsedEvent;
 import com.livepeer.analytics.model.StreamingEvent;
-import com.livepeer.analytics.util.Hashing;
+import com.livepeer.analytics.util.EventUids;
 import com.livepeer.analytics.util.StringSemantics;
 import com.livepeer.analytics.util.WorkflowSessionId;
 import org.apache.flink.api.common.state.MapState;
@@ -65,7 +65,7 @@ public class WorkflowTraceAttributionProcessFunction extends KeyedCoProcessFunct
         EventPayloads.StreamTraceEvent trace = traceEvent.payload;
         long edgeTs = trace.dataTimestamp > 0 ? trace.dataTimestamp : trace.eventTimestamp;
         EventPayloads.FactWorkflowSessionSegment segment = findMatchingSegment(edgeTs);
-        String sourceEventUid = hashRawJsonOrFallback(trace.rawJson, traceEvent.event);
+        String sourceEventUid = StringSemantics.firstNonBlank(trace.rawEventUid, sourceEventUid(traceEvent.event));
 
         if (segment != null) {
             out.collect(toTraceFact(traceEvent, ctx.getCurrentKey(), edgeTs, sourceEventUid, segment, 1));
@@ -186,20 +186,7 @@ public class WorkflowTraceAttributionProcessFunction extends KeyedCoProcessFunct
     }
 
     private static String sourceEventUid(StreamingEvent event) {
-        if (event == null) {
-            return "";
-        }
-        if (!StringSemantics.isBlank(event.eventId)) {
-            return event.eventId;
-        }
-        return Hashing.sha256Hex(event.rawJson == null ? "" : event.rawJson);
-    }
-
-    private static String hashRawJsonOrFallback(String rawJson, StreamingEvent event) {
-        if (!StringSemantics.isBlank(rawJson)) {
-            return Hashing.sha256Hex(rawJson);
-        }
-        return sourceEventUid(event);
+        return EventUids.rawEventUid(event);
     }
 
     private static String deriveTraceCategory(String traceType) {

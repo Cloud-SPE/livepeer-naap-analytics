@@ -12,6 +12,7 @@ public final class ClickHouseRowMappers {
     public static String aiStreamStatusRow(EventPayloads.AiStreamStatus s) {
         return ClickHouseJsonRow.create()
                 .addTimestampMillis("event_timestamp", s.eventTimestamp)
+                .addString("raw_event_uid", s.rawEventUid)
                 .addString("stream_id", s.streamId)
                 .addString("request_id", s.requestId)
                 .addString("gateway", s.gateway)
@@ -36,6 +37,7 @@ public final class ClickHouseRowMappers {
     public static String streamIngestMetricsRow(EventPayloads.StreamIngestMetrics m) {
         return ClickHouseJsonRow.create()
                 .addTimestampMillis("event_timestamp", m.eventTimestamp)
+                .addString("raw_event_uid", m.rawEventUid)
                 .addString("stream_id", m.streamId)
                 .addString("request_id", m.requestId)
                 .addString("connection_quality", m.connectionQuality)
@@ -62,6 +64,7 @@ public final class ClickHouseRowMappers {
     public static String streamTraceRow(EventPayloads.StreamTraceEvent t) {
         return ClickHouseJsonRow.create()
                 .addTimestampMillis("event_timestamp", t.eventTimestamp)
+                .addString("raw_event_uid", t.rawEventUid)
                 .addString("stream_id", t.streamId)
                 .addString("request_id", t.requestId)
                 .addString("orchestrator_address", t.orchestratorAddress)
@@ -75,6 +78,7 @@ public final class ClickHouseRowMappers {
     public static String networkCapabilitiesRow(EventPayloads.NetworkCapability n) {
         return ClickHouseJsonRow.create()
                 .addTimestampMillis("event_timestamp", n.eventTimestamp)
+                .addString("raw_event_uid", n.rawEventUid)
                 .addString("source_event_id", n.sourceEventId)
                 .addString("orchestrator_address", n.orchestratorAddress)
                 .addString("local_address", n.localAddress)
@@ -105,6 +109,7 @@ public final class ClickHouseRowMappers {
     public static String networkCapabilitiesAdvertisedRow(EventPayloads.NetworkCapabilityAdvertised n) {
         return ClickHouseJsonRow.create()
                 .addTimestampMillis("event_timestamp", n.eventTimestamp)
+                .addString("raw_event_uid", n.rawEventUid)
                 .addString("source_event_id", n.sourceEventId)
                 .addString("orchestrator_address", n.orchestratorAddress)
                 .addString("local_address", n.localAddress)
@@ -121,6 +126,7 @@ public final class ClickHouseRowMappers {
     public static String networkCapabilitiesModelConstraintsRow(EventPayloads.NetworkCapabilityModelConstraint n) {
         return ClickHouseJsonRow.create()
                 .addTimestampMillis("event_timestamp", n.eventTimestamp)
+                .addString("raw_event_uid", n.rawEventUid)
                 .addString("source_event_id", n.sourceEventId)
                 .addString("orchestrator_address", n.orchestratorAddress)
                 .addString("local_address", n.localAddress)
@@ -141,6 +147,7 @@ public final class ClickHouseRowMappers {
     public static String networkCapabilitiesPricesRow(EventPayloads.NetworkCapabilityPrice n) {
         return ClickHouseJsonRow.create()
                 .addTimestampMillis("event_timestamp", n.eventTimestamp)
+                .addString("raw_event_uid", n.rawEventUid)
                 .addString("source_event_id", n.sourceEventId)
                 .addString("orchestrator_address", n.orchestratorAddress)
                 .addString("local_address", n.localAddress)
@@ -159,6 +166,7 @@ public final class ClickHouseRowMappers {
     public static String aiStreamEventsRow(EventPayloads.AiStreamEvent e) {
         return ClickHouseJsonRow.create()
                 .addTimestampMillis("event_timestamp", e.eventTimestamp)
+                .addString("raw_event_uid", e.rawEventUid)
                 .addString("stream_id", e.streamId)
                 .addString("request_id", e.requestId)
                 .addString("pipeline", e.pipeline)
@@ -172,6 +180,7 @@ public final class ClickHouseRowMappers {
     public static String discoveryResultsRow(EventPayloads.DiscoveryResult d) {
         return ClickHouseJsonRow.create()
                 .addTimestampMillis("event_timestamp", d.eventTimestamp)
+                .addString("raw_event_uid", d.rawEventUid)
                 .addString("orchestrator_address", d.orchestratorAddress)
                 .addString("orchestrator_url", d.orchestratorUrl)
                 .addInt("latency_ms", d.latencyMs)
@@ -182,6 +191,7 @@ public final class ClickHouseRowMappers {
     public static String paymentEventsRow(EventPayloads.PaymentEvent p) {
         return ClickHouseJsonRow.create()
                 .addTimestampMillis("event_timestamp", p.eventTimestamp)
+                .addString("raw_event_uid", p.rawEventUid)
                 .addString("request_id", p.requestId)
                 .addString("session_id", p.sessionId)
                 .addString("manifest_id", p.manifestId)

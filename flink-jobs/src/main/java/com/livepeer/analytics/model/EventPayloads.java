@@ -6,6 +6,7 @@ public final class EventPayloads {
     public static class AiStreamStatus implements java.io.Serializable {
         private static final long serialVersionUID = 1L;
         public long eventTimestamp;
+        public String rawEventUid;
         public String streamId, requestId, gateway, orchestratorAddress, orchestratorUrl;
         public String pipeline, state, paramsHash, lastError, promptText;
         public float outputFps, inputFps;
@@ -17,6 +18,7 @@ public final class EventPayloads {
     public static class StreamIngestMetrics implements java.io.Serializable {
         private static final long serialVersionUID = 1L;
         public long eventTimestamp;
+        public String rawEventUid;
         public String streamId, requestId, connectionQuality;
         public float videoJitter, audioJitter;
         public int videoPacketsReceived, videoPacketsLost, audioPacketsReceived, audioPacketsLost;
@@ -30,6 +32,7 @@ public final class EventPayloads {
         private static final long serialVersionUID = 1L;
         public long eventTimestamp;
         public long dataTimestamp;
+        public String rawEventUid;
         public String streamId, requestId, orchestratorAddress, orchestratorUrl, traceType;
         public String rawJson;
     }
@@ -37,6 +40,7 @@ public final class EventPayloads {
     public static class NetworkCapability implements java.io.Serializable {
         private static final long serialVersionUID = 1L;
         public long eventTimestamp;
+        public String rawEventUid;
         public String sourceEventId;
         public String orchestratorAddress, localAddress, orchUri, gpuId, gpuName;
         public String pipeline, modelId, runnerVersion, orchestratorVersion;
@@ -51,6 +55,7 @@ public final class EventPayloads {
     public static class NetworkCapabilityAdvertised implements java.io.Serializable {
         private static final long serialVersionUID = 1L;
         public long eventTimestamp;
+        public String rawEventUid;
         public String sourceEventId;
         public String orchestratorAddress, localAddress, orchUri;
         public Integer capabilityId, capacity;
@@ -61,6 +66,7 @@ public final class EventPayloads {
     public static class NetworkCapabilityModelConstraint implements java.io.Serializable {
         private static final long serialVersionUID = 1L;
         public long eventTimestamp;
+        public String rawEventUid;
         public String sourceEventId;
         public String orchestratorAddress, localAddress, orchUri;
         public Integer capabilityId, capacity, capacityInUse, warm;
@@ -71,6 +77,7 @@ public final class EventPayloads {
     public static class NetworkCapabilityPrice implements java.io.Serializable {
         private static final long serialVersionUID = 1L;
         public long eventTimestamp;
+        public String rawEventUid;
         public String sourceEventId;
         public String orchestratorAddress, localAddress, orchUri;
         public Integer capabilityId, pricePerUnit, pixelsPerUnit;
@@ -81,6 +88,7 @@ public final class EventPayloads {
     public static class AiStreamEvent implements java.io.Serializable {
         private static final long serialVersionUID = 1L;
         public long eventTimestamp;
+        public String rawEventUid;
         public String streamId, requestId, pipeline, eventType, message, capability;
         public String rawJson;
     }
@@ -88,6 +96,7 @@ public final class EventPayloads {
     public static class DiscoveryResult implements java.io.Serializable {
         private static final long serialVersionUID = 1L;
         public long eventTimestamp;
+        public String rawEventUid;
         public String orchestratorAddress, orchestratorUrl;
         public int latencyMs;
         public String rawJson;
@@ -96,6 +105,7 @@ public final class EventPayloads {
     public static class PaymentEvent implements java.io.Serializable {
         private static final long serialVersionUID = 1L;
         public long eventTimestamp;
+        public String rawEventUid;
         public String requestId, sessionId, manifestId, sender, recipient, orchestrator;
         public String faceValue, price, numTickets, winProb, clientIp, capability;
         public String rawJson;

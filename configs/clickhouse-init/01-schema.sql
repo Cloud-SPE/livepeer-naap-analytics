@@ -135,6 +135,7 @@ CREATE TABLE IF NOT EXISTS raw_ai_stream_status
     event_timestamp DateTime64(3, 'UTC'),
     event_date Date MATERIALIZED toDate(event_timestamp),
     event_hour UInt8 MATERIALIZED toHour(event_timestamp),
+    raw_event_uid String,
 
     -- Identifiers
     stream_id String,
@@ -184,6 +185,7 @@ CREATE TABLE IF NOT EXISTS raw_stream_ingest_metrics
 (
     event_timestamp DateTime64(3, 'UTC'),
     event_date Date MATERIALIZED toDate(event_timestamp),
+    raw_event_uid String,
 
     -- Identifiers
     stream_id String,
@@ -231,6 +233,7 @@ CREATE TABLE IF NOT EXISTS raw_stream_trace_events
 (
     event_timestamp DateTime64(3, 'UTC'),
     event_date Date MATERIALIZED toDate(event_timestamp),
+    raw_event_uid String,
 
     -- Identifiers
     stream_id String,
@@ -261,6 +264,7 @@ CREATE TABLE IF NOT EXISTS raw_network_capabilities
 (
     event_timestamp DateTime64(3, 'UTC'),
     event_date Date MATERIALIZED toDate(event_timestamp),
+    raw_event_uid String,
     source_event_id String,
 
     -- Orchestrator info
@@ -313,6 +317,7 @@ CREATE TABLE IF NOT EXISTS raw_network_capabilities_advertised
 (
     event_timestamp DateTime64(3, 'UTC'),
     event_date Date MATERIALIZED toDate(event_timestamp),
+    raw_event_uid String,
     source_event_id String,
 
     orchestrator_address String,
@@ -339,6 +344,7 @@ CREATE TABLE IF NOT EXISTS raw_network_capabilities_model_constraints
 (
     event_timestamp DateTime64(3, 'UTC'),
     event_date Date MATERIALIZED toDate(event_timestamp),
+    raw_event_uid String,
     source_event_id String,
 
     orchestrator_address String,
@@ -370,6 +376,7 @@ CREATE TABLE IF NOT EXISTS raw_network_capabilities_prices
 (
     event_timestamp DateTime64(3, 'UTC'),
     event_date Date MATERIALIZED toDate(event_timestamp),
+    raw_event_uid String,
     source_event_id String,
 
     orchestrator_address String,
@@ -500,7 +507,7 @@ SELECT
         stream_id != '' AND request_id != '', concat(stream_id, '|', request_id),
         stream_id != '', concat(stream_id, '|_missing_request'),
         request_id != '', concat('_missing_stream|', request_id),
-        concat('_missing_stream|_missing_request|', toString(cityHash64(raw_json)))
+        concat('_missing_stream|_missing_request|', raw_event_uid)
     ) AS workflow_session_id,
     stream_id,
     request_id,
@@ -511,7 +518,7 @@ SELECT
     audio_latency,
     bytes_received,
     bytes_sent,
-    toString(cityHash64(raw_json)) AS source_event_uid
+    raw_event_uid AS source_event_uid
 FROM raw_stream_ingest_metrics;
 
 -- Silver Fact: Workflow Sessions (stateful, Flink-generated)
@@ -850,7 +857,7 @@ SELECT
     gpu_minor,
     runner_version,
     CAST(NULL AS Nullable(String)) AS region,
-    source_event_id AS source_event_uid
+    raw_event_uid AS source_event_uid
 FROM raw_network_capabilities;
 
 -- Transitional exception (P1): capability dimension materialization currently projects from typed capability tables.
@@ -862,7 +869,7 @@ TO dim_orchestrator_capability_advertised_snapshots
 AS
 SELECT
     event_timestamp AS snapshot_ts,
-    source_event_id AS source_event_uid,
+    raw_event_uid AS source_event_uid,
     lower(orchestrator_address) AS orchestrator_address,
     lower(local_address) AS orchestrator_proxy_address,
     orch_uri AS orchestrator_url,
@@ -878,7 +885,7 @@ TO dim_orchestrator_capability_model_constraints
 AS
 SELECT
     event_timestamp AS snapshot_ts,
-    source_event_id AS source_event_uid,
+    raw_event_uid AS source_event_uid,
     lower(orchestrator_address) AS orchestrator_address,
     lower(local_address) AS orchestrator_proxy_address,
     orch_uri AS orchestrator_url,
@@ -898,7 +905,7 @@ TO dim_orchestrator_capability_prices
 AS
 SELECT
     event_timestamp AS snapshot_ts,
-    source_event_id AS source_event_uid,
+    raw_event_uid AS source_event_uid,
     lower(orchestrator_address) AS orchestrator_address,
     lower(local_address) AS orchestrator_proxy_address,
     orch_uri AS orchestrator_url,
@@ -1036,6 +1043,7 @@ CREATE TABLE IF NOT EXISTS raw_payment_events
 (
     event_timestamp DateTime64(3, 'UTC'),
     event_date Date MATERIALIZED toDate(event_timestamp),
+    raw_event_uid String,
 
     -- Payment info
     request_id String,
@@ -2225,11 +2233,54 @@ SELECT
 FROM fact_workflow_sessions
 GROUP BY workflow_session_id;
 
+-- Diagnostic raw-to-canonical bridge for status events. Canonical fields are fact-owned.
+CREATE VIEW IF NOT EXISTS v_diag_raw_status_canonicalized AS
+WITH latest_fact AS
+(
+    SELECT
+        source_event_uid AS raw_event_uid,
+        argMax(workflow_session_id, sample_ts) AS workflow_session_id,
+        argMax(orchestrator_address, sample_ts) AS canonical_orchestrator_address,
+        argMax(pipeline, sample_ts) AS canonical_pipeline,
+        argMax(model_id, sample_ts) AS canonical_model_id,
+        argMax(gpu_id, sample_ts) AS canonical_gpu_id,
+        argMax(region, sample_ts) AS canonical_region,
+        argMax(is_attributed, sample_ts) AS is_attributed,
+        max(sample_ts) AS latest_fact_ts
+    FROM fact_stream_status_samples
+    GROUP BY source_event_uid
+)
+SELECT
+    r.event_timestamp,
+    r.raw_event_uid,
+    r.stream_id,
+    r.request_id,
+    r.gateway,
+    r.orchestrator_address AS raw_orchestrator_address,
+    r.orchestrator_url AS raw_orchestrator_url,
+    r.pipeline AS raw_pipeline,
+    r.state,
+    r.output_fps,
+    r.input_fps,
+    f.workflow_session_id,
+    f.canonical_orchestrator_address,
+    f.canonical_pipeline,
+    f.canonical_model_id,
+    f.canonical_gpu_id,
+    f.canonical_region,
+    if(f.raw_event_uid = '', 'unmapped', 'exact') AS canonicalization_status,
+    f.is_attributed,
+    f.latest_fact_ts
+FROM raw_ai_stream_status r
+LEFT JOIN latest_fact f
+    ON f.raw_event_uid = r.raw_event_uid;
+
 -- Table 5: AI Stream Events (errors and lifecycle events)
 CREATE TABLE IF NOT EXISTS raw_ai_stream_events
 (
     event_timestamp DateTime64(3, 'UTC'),
     event_date Date MATERIALIZED toDate(event_timestamp),
+    raw_event_uid String,
 
     -- Identifiers
     stream_id String,
@@ -2258,6 +2309,7 @@ CREATE TABLE IF NOT EXISTS raw_discovery_results
 (
     event_timestamp DateTime64(3, 'UTC'),
     event_date Date MATERIALIZED toDate(event_timestamp),
+    raw_event_uid String,
 
     -- Discovered orchestrator
     orchestrator_address String,
@@ -2286,8 +2338,38 @@ ALTER TABLE raw_ai_stream_status
 ALTER TABLE raw_ai_stream_status
     ADD INDEX IF NOT EXISTS idx_pipeline pipeline TYPE bloom_filter GRANULARITY 1;
 
+ALTER TABLE raw_ai_stream_status
+    ADD INDEX IF NOT EXISTS idx_raw_event_uid raw_event_uid TYPE bloom_filter GRANULARITY 1;
+
+ALTER TABLE raw_stream_ingest_metrics
+    ADD INDEX IF NOT EXISTS idx_raw_event_uid raw_event_uid TYPE bloom_filter GRANULARITY 1;
+
 ALTER TABLE raw_stream_trace_events
     ADD INDEX IF NOT EXISTS idx_request_id request_id TYPE bloom_filter GRANULARITY 1;
 
+ALTER TABLE raw_stream_trace_events
+    ADD INDEX IF NOT EXISTS idx_raw_event_uid raw_event_uid TYPE bloom_filter GRANULARITY 1;
+
 ALTER TABLE raw_network_capabilities
     ADD INDEX IF NOT EXISTS idx_orch_address orchestrator_address TYPE bloom_filter GRANULARITY 1;
+
+ALTER TABLE raw_network_capabilities
+    ADD INDEX IF NOT EXISTS idx_raw_event_uid raw_event_uid TYPE bloom_filter GRANULARITY 1;
+
+ALTER TABLE raw_network_capabilities_advertised
+    ADD INDEX IF NOT EXISTS idx_raw_event_uid raw_event_uid TYPE bloom_filter GRANULARITY 1;
+
+ALTER TABLE raw_network_capabilities_model_constraints
+    ADD INDEX IF NOT EXISTS idx_raw_event_uid raw_event_uid TYPE bloom_filter GRANULARITY 1;
+
+ALTER TABLE raw_network_capabilities_prices
+    ADD INDEX IF NOT EXISTS idx_raw_event_uid raw_event_uid TYPE bloom_filter GRANULARITY 1;
+
+ALTER TABLE raw_ai_stream_events
+    ADD INDEX IF NOT EXISTS idx_raw_event_uid raw_event_uid TYPE bloom_filter GRANULARITY 1;
+
+ALTER TABLE raw_discovery_results
+    ADD INDEX IF NOT EXISTS idx_raw_event_uid raw_event_uid TYPE bloom_filter GRANULARITY 1;
+
+ALTER TABLE raw_payment_events
+    ADD INDEX IF NOT EXISTS idx_raw_event_uid raw_event_uid TYPE bloom_filter GRANULARITY 1;

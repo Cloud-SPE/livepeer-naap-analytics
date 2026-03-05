@@ -328,7 +328,7 @@ WITH
   typed AS
   (
     SELECT
-      toString(lower(hex(SHA256(raw_json)))) AS source_event_uid,
+      raw_event_uid AS source_event_uid,
       count() AS typed_rows_per_uid
     FROM livepeer_analytics.raw_ai_stream_status
     WHERE event_timestamp >= {from_ts:DateTime64(3)}
@@ -399,7 +399,7 @@ WITH
   typed AS
   (
     SELECT
-      toString(lower(hex(SHA256(raw_json)))) AS source_event_uid,
+      raw_event_uid AS source_event_uid,
       count() AS typed_rows_per_uid
     FROM livepeer_analytics.raw_stream_trace_events
     WHERE event_timestamp >= {from_ts:DateTime64(3)}
@@ -470,7 +470,7 @@ WITH
   typed AS
   (
     SELECT
-      toString(cityHash64(raw_json)) AS source_event_uid,
+      raw_event_uid AS source_event_uid,
       count() AS typed_rows_per_uid
     FROM livepeer_analytics.raw_stream_ingest_metrics
     WHERE event_timestamp >= {from_ts:DateTime64(3)}
@@ -533,6 +533,51 @@ FROM
       FROM joined
     ) AS total_row_excess
 );
+
+-- TEST: raw_event_uid_non_empty_status
+-- Verifies status typed rows always persist a non-empty Flink-owned raw_event_uid.
+WITH w AS
+(
+  SELECT count() AS total_rows, countIf(ifNull(raw_event_uid, '') = '') AS empty_uid_rows
+  FROM livepeer_analytics.raw_ai_stream_status
+  WHERE event_timestamp >= {from_ts:DateTime64(3)}
+    AND event_timestamp < {to_ts:DateTime64(3)}
+)
+SELECT
+  toUInt64(total_rows > 0 AND empty_uid_rows > 0) AS failed_rows,
+  total_rows,
+  empty_uid_rows
+FROM w;
+
+-- TEST: raw_event_uid_non_empty_trace
+-- Verifies trace typed rows always persist a non-empty Flink-owned raw_event_uid.
+WITH w AS
+(
+  SELECT count() AS total_rows, countIf(ifNull(raw_event_uid, '') = '') AS empty_uid_rows
+  FROM livepeer_analytics.raw_stream_trace_events
+  WHERE event_timestamp >= {from_ts:DateTime64(3)}
+    AND event_timestamp < {to_ts:DateTime64(3)}
+)
+SELECT
+  toUInt64(total_rows > 0 AND empty_uid_rows > 0) AS failed_rows,
+  total_rows,
+  empty_uid_rows
+FROM w;
+
+-- TEST: raw_event_uid_non_empty_ingest
+-- Verifies ingest typed rows always persist a non-empty Flink-owned raw_event_uid.
+WITH w AS
+(
+  SELECT count() AS total_rows, countIf(ifNull(raw_event_uid, '') = '') AS empty_uid_rows
+  FROM livepeer_analytics.raw_stream_ingest_metrics
+  WHERE event_timestamp >= {from_ts:DateTime64(3)}
+    AND event_timestamp < {to_ts:DateTime64(3)}
+)
+SELECT
+  toUInt64(total_rows > 0 AND empty_uid_rows > 0) AS failed_rows,
+  total_rows,
+  empty_uid_rows
+FROM w;
 
 -- TEST: session_final_uniqueness
 -- Verifies `FINAL` semantics yield exactly one latest row per workflow session id.

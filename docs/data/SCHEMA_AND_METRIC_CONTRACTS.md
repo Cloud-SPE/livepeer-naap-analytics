@@ -241,6 +241,11 @@ pipeline/model identity at session end.
 
 ## Join Policy
 
+- Flink-owned lineage UID contract:
+  - Flink emits one non-empty event lineage key per accepted event: `raw_event_uid`.
+  - `raw_event_uid` uses upstream event id when present; otherwise Flink generates deterministic fallback.
+  - Typed raw tables persist `raw_event_uid`; silver/gold facts persist the same lineage as `source_event_uid`.
+  - ClickHouse serving/diagnostic joins must use persisted lineage keys and must not hash `raw_json` to derive join keys.
 - Canonical identity for serving (`orchestrator_address`, `gpu_id`, `model_id`, `pipeline`, `region`) is segment-first:
   - source of truth: `fact_workflow_session_segments`
   - session fields are derived summaries over segment history

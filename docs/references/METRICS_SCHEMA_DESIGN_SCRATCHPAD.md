@@ -26,6 +26,7 @@
 Notes:
 - API payloads should remain rollup-safe: recompute ratios/scores from additive fields for larger windows.
 - `v_api_network_demand` is now model-aware; downstream consumers must include `model_id` in joins or pre-aggregate to pipeline grain before joining to pipeline-only datasets.
+- Hard-cutover lineage contract: raw typed tables now use Flink-owned `raw_event_uid`; downstream lineage joins use persisted UID fields (`raw_event_uid` <-> `source_event_uid`) and no longer depend on ClickHouse-side hashing.
 - `/datasets` remains out of scope.
 
 ## Transformation Mapping (Trace -> Status -> Metrics)
