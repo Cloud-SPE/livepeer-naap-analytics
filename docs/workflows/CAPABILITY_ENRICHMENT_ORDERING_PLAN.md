@@ -38,7 +38,7 @@ Reduce attribution/key gaps caused by out-of-order `network_capabilities` vs ses
 
 ### Validation
 
-- `tests/integration/sql/assertions_pipeline.sql` fails on non-overlap parity regressions.
+- [`tests/integration/sql/assertions_pipeline.sql`](../../tests/integration/sql/assertions_pipeline.sql) fails on non-overlap parity regressions.
 - Scenario export produces reproducible manifests in either mode.
 
 ## Phase 2: Canonical Enrichment Ownership

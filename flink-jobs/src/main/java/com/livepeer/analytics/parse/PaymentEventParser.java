@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 
 import com.livepeer.analytics.model.EventPayloads;
 import com.livepeer.analytics.quality.ValidatedEvent;
+import com.livepeer.analytics.util.EventUids;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -19,6 +20,7 @@ final class PaymentEventParser {
         EventPayloads.PaymentEvent payment = new EventPayloads.PaymentEvent();
 
         payment.eventTimestamp = event.event.timestamp;
+        payment.rawEventUid = EventUids.rawEventUid(event.event);
         payment.requestId = data.path("requestID").asText("");
         payment.sessionId = data.path("sessionID").asText("");
         payment.manifestId = data.path("manifestID").asText("");

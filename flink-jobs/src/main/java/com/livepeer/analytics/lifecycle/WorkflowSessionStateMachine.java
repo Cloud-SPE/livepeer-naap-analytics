@@ -15,7 +15,7 @@ import java.util.Locale;
  * - Swap signals are split into:
  *   confirmed swap count (explicit trace evidence) and
  *   inferred orchestrator-change count (canonical orchestrator set cardinality).
- * - Legacy `swap_count` is retained as confirmed-only for backward-compatible consumers.
+ * - Compatibility alias `swap_count` is retained as confirmed-only for backward-compatible consumers.
  * </p>
  */
 public final class WorkflowSessionStateMachine {
@@ -37,7 +37,16 @@ public final class WorkflowSessionStateMachine {
         state.workflowSessionId = StringSemantics.firstNonBlank(state.workflowSessionId, signal.workflowSessionId);
         state.streamId = StringSemantics.firstNonBlank(state.streamId, signal.streamId);
         state.requestId = StringSemantics.firstNonBlank(state.requestId, signal.requestId);
+        // Session pipeline is intentionally first-write-wins within a session. Upstream operators
+        // are responsible for canonicalizing signal.pipeline before invoking the state machine.
         state.pipeline = StringSemantics.firstNonBlank(state.pipeline, signal.pipeline);
+        state.modelId = StringSemantics.blankToNull(StringSemantics.firstNonBlank(state.modelId, signal.modelHint));
+        if (!StringSemantics.isBlank(state.pipeline)) {
+            state.pipelinesSeen.add(state.pipeline);
+        }
+        if (!StringSemantics.isBlank(state.modelId)) {
+            state.modelIdsSeen.add(state.modelId);
+        }
         state.workflowId = StringSemantics.firstNonBlank(state.workflowId, state.pipeline, "ai_live_video_stream");
         state.gateway = StringSemantics.firstNonBlank(state.gateway, signal.gateway);
         if (!StringSemantics.isBlank(signal.orchestratorUrl)) {
@@ -62,6 +71,8 @@ public final class WorkflowSessionStateMachine {
             applyTrace(state, signal);
         } else if (signal.signalType == LifecycleSignal.SignalType.AI_STREAM_EVENT) {
             applyAiEvent(state, signal);
+        } else if (signal.signalType == LifecycleSignal.SignalType.STREAM_STATUS) {
+            applyStatus(state, signal);
         }
     }
 
@@ -85,10 +96,26 @@ public final class WorkflowSessionStateMachine {
                 AttributionSemantics.fromSnapshot(signalTs, snapshot.snapshotTs, attributionTtlMs);
         state.attributionMethod = decision.method;
         state.attributionConfidence = decision.confidence;
+        // When capability evidence exists, model/gpu attribution is authoritative for lifecycle facts
+        // and intentionally overrides prior signal-derived hints.
         state.modelId = StringSemantics.blankToNull(snapshot.modelId);
         state.gpuId = StringSemantics.blankToNull(snapshot.gpuId);
+        if (!StringSemantics.isBlank(state.modelId)) {
+            state.modelIdsSeen.add(state.modelId);
+        }
+        if (!StringSemantics.isBlank(state.pipeline)) {
+            state.pipelinesSeen.add(state.pipeline);
+        }
     }
 
+    /**
+     * Materializes the latest accumulator state into the canonical session fact.
+     *
+     * <p>Key invariants:
+     * - classification precedence remains success > excused > unexcused;
+     * - `swap_count` is compatibility-only and mirrors confirmed swap evidence;
+     * - health counters are derived from emitted lifecycle signals, not inferred at query time.</p>
+     */
     public static EventPayloads.FactWorkflowSession toFact(WorkflowSessionAccumulator state) {
         EventPayloads.FactWorkflowSession fact = new EventPayloads.FactWorkflowSession();
 
@@ -105,6 +132,8 @@ public final class WorkflowSessionStateMachine {
         fact.modelId = state.modelId;
         fact.gpuId = state.gpuId;
         fact.region = state.region;
+        fact.hasModelChange = state.modelIdsSeen.size() > 1 ? 1 : 0;
+        fact.hasPipelineChange = state.pipelinesSeen.size() > 1 ? 1 : 0;
         fact.attributionMethod = state.attributionMethod;
         fact.attributionConfidence = state.attributionConfidence;
 
@@ -136,6 +165,27 @@ public final class WorkflowSessionStateMachine {
         fact.swapCount = fact.confirmedSwapCount;
         fact.errorCount = state.errorCount;
         fact.excusableErrorCount = state.excusableErrorCount;
+        fact.lastErrorOccurred = state.lastErrorOccurred ? 1 : 0;
+        fact.loadingOnlySession = state.statusSampleCount > 0 && state.statusNonLoadingSampleCount == 0 ? 1 : 0;
+        fact.zeroOutputFpsSession = state.statusSampleCount > 0 && state.statusPositiveOutputSampleCount == 0 ? 1 : 0;
+        fact.statusSampleCount = state.statusSampleCount;
+        fact.statusErrorSampleCount = state.statusErrorSampleCount;
+        long healthExpectedSignalCount = state.knownStream ? 3L : 0L;
+        long healthSignalCount = 0L;
+        if (state.statusSampleCount > 0) {
+            healthSignalCount++;
+        }
+        if (state.firstProcessedTs != null) {
+            healthSignalCount++;
+        }
+        if (state.firstPlayableTs != null) {
+            healthSignalCount++;
+        }
+        fact.healthSignalCount = healthSignalCount;
+        fact.healthExpectedSignalCount = healthExpectedSignalCount;
+        fact.healthCompletenessRatio = healthExpectedSignalCount > 0
+                ? (float) ((double) healthSignalCount / (double) healthExpectedSignalCount)
+                : 1.0f;
         fact.eventCount = state.eventCount;
         fact.version = state.version;
         fact.sourceFirstEventUid = state.sourceFirstEventUid;
@@ -161,6 +211,11 @@ public final class WorkflowSessionStateMachine {
         }
     }
 
+    /**
+     * Applies AI stream event semantics that affect session health/classification only.
+     *
+     * <p>Note: this does not mutate attribution identity fields.</p>
+     */
     private static void applyAiEvent(WorkflowSessionAccumulator state, LifecycleSignal signal) {
         String eventType = StringSemantics.firstNonBlank(signal.aiEventType, "");
         if ("error".equalsIgnoreCase(eventType)) {
@@ -170,6 +225,24 @@ public final class WorkflowSessionStateMachine {
             }
         } else if ("params_update".equalsIgnoreCase(eventType)) {
             state.paramsUpdateCount++;
+        }
+    }
+
+    private static void applyStatus(WorkflowSessionAccumulator state, LifecycleSignal signal) {
+        state.statusSampleCount++;
+        String statusState = StringSemantics.firstNonBlank(signal.statusState, "");
+        // LOADING-only sessions are treated as weak health signal and are tracked explicitly
+        // for SLA/forensics, rather than being collapsed into generic startup failure buckets.
+        if (!"LOADING".equalsIgnoreCase(statusState)) {
+            state.statusNonLoadingSampleCount++;
+        }
+        float outputFps = signal.statusOutputFps == null ? 0.0f : signal.statusOutputFps;
+        if (outputFps > 0.0f) {
+            state.statusPositiveOutputSampleCount++;
+        }
+        if (!StringSemantics.isBlank(signal.statusLastError)) {
+            state.lastErrorOccurred = true;
+            state.statusErrorSampleCount++;
         }
     }
 

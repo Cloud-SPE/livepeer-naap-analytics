@@ -49,7 +49,7 @@
 ## Flink Deployment Workflow
 
 - First deployment:
-  - upload jar and run job (see `docs/operations/FLINK_DEPLOYMENT.md`)
+  - upload jar and run job (see [`docs/operations/FLINK_DEPLOYMENT.md`](FLINK_DEPLOYMENT.md))
 - Clean update:
   - stop with savepoint,
   - capture savepoint location,
@@ -88,7 +88,7 @@ SELECT
   failure_class,
   failure_reason,
   count() AS total
-FROM livepeer_analytics.streaming_events_dlq
+FROM livepeer_analytics.raw_streaming_events_dlq
 WHERE ingestion_timestamp >= now() - INTERVAL 1 HOUR
 GROUP BY failure_class, failure_reason
 ORDER BY total DESC;
@@ -101,7 +101,7 @@ SELECT
   failure_class,
   failure_reason,
   payload_body
-FROM livepeer_analytics.streaming_events_dlq
+FROM livepeer_analytics.raw_streaming_events_dlq
 WHERE ingestion_timestamp >= now() - INTERVAL 1 HOUR
 ORDER BY ingestion_timestamp DESC
 LIMIT 20;
@@ -126,7 +126,7 @@ LIMIT 20;
   - MinIO/archive store: long-retention replay source; mirror to external object storage on a schedule.
 - Scenario: ClickHouse table corruption:
   1. isolate affected table(s).
-  2. recreate schema from `configs/clickhouse-init/01-schema.sql`.
+  2. recreate schema from [`configs/clickhouse-init/01-schema.sql`](../../configs/clickhouse-init/01-schema.sql).
   3. restore from backup or replay bounded windows.
   4. validate rollup and API view parity post-restore.
 - Scenario: complete data loss (host/volume):
@@ -146,7 +146,7 @@ LIMIT 20;
 
 ## Backup and Retention Policy
 
-- Database retention in serving tables is contract-driven by table TTLs in `configs/clickhouse-init/01-schema.sql`.
+- Database retention in serving tables is contract-driven by table TTLs in [`configs/clickhouse-init/01-schema.sql`](../../configs/clickhouse-init/01-schema.sql).
 - Keep backup retention windows explicit per environment (dev/staging/prod), and document overrides in release notes.
 - Treat configuration and schema as Git-backed source-of-truth; treat data backups as operational recovery artifacts.
 
@@ -161,7 +161,7 @@ LIMIT 20;
 ## Release Readiness Checklist
 
 - Flink tests: `cd flink-jobs && mvn test` pass.
-- Integration SQL assertions: `tests/integration/run_all.sh` pass.
+- Integration SQL assertions: [`tests/integration/run_all.sh`](../../tests/integration/run_all.sh) pass.
 - Schema and row mapper sync is green.
 - Rollup/API parity checks are green for target windows.
 - Canonical docs in `docs/` are updated.
@@ -169,6 +169,6 @@ LIMIT 20;
 
 ## Primary Runbook References
 
-- `docs/operations/FLINK_DEPLOYMENT.md`
-- `docs/operations/REPLAY_RUNBOOK.md`
-- `docs/quality/DATA_QUALITY.md`
+- [`docs/operations/FLINK_DEPLOYMENT.md`](FLINK_DEPLOYMENT.md)
+- [`docs/operations/REPLAY_RUNBOOK.md`](REPLAY_RUNBOOK.md)
+- [`docs/quality/DATA_QUALITY.md`](../quality/DATA_QUALITY.md)

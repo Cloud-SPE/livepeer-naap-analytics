@@ -69,8 +69,8 @@ class CapabilityAttributionSelectorTest {
         CapabilityAttributionSelector.upsertCandidate(
                 bucket, ref(5L * TTL_MS + 10L, "0xcanonical", "model-d", null), 5L * TTL_MS + 10L, TTL_MS, 3);
 
-        assertTrue(bucket.byModelKey.size() <= 3);
-        assertTrue(bucket.byModelKey.keySet().stream().noneMatch(k -> k.contains("old-model")));
+        assertTrue(bucket.byCandidateKey.size() <= 3);
+        assertTrue(bucket.byCandidateKey.keySet().stream().noneMatch(k -> k.contains("old-model")));
     }
 
     @Test
@@ -180,6 +180,91 @@ class CapabilityAttributionSelectorTest {
                 TTL_MS);
 
         assertNull(selected);
+    }
+
+    @Test
+    void returnsNullWhenCompatibleInTtlCandidatesSpanMultipleCanonicalOrchestrators() {
+        CapabilitySnapshotBucket bucket = new CapabilitySnapshotBucket();
+
+        CapabilityAttributionSelector.upsertCandidate(
+                bucket,
+                ref(10_000L, "0xcanonical-a", "streamdiffusion-sdxl", "GPU-A"),
+                10_000L,
+                TTL_MS,
+                32);
+        CapabilityAttributionSelector.upsertCandidate(
+                bucket,
+                ref(10_100L, "0xcanonical-b", "streamdiffusion-sdxl", "GPU-B"),
+                10_100L,
+                TTL_MS,
+                32);
+
+        CapabilitySnapshotRef selected = CapabilityAttributionSelector.selectBestCandidate(
+                bucket,
+                "streamdiffusion-sdxl",
+                10_120L,
+                TTL_MS);
+
+        assertNull(selected);
+    }
+
+    @Test
+    void prefersExactOrchestratorUrlWhenModelAndTimeTie() {
+        CapabilitySnapshotBucket bucket = new CapabilitySnapshotBucket();
+        CapabilitySnapshotRef a = ref(10_000L, "0xcanonical", "streamdiffusion-sdxl", "GPU-A");
+        a.orchestratorUrl = "https://orch-a.example";
+        CapabilitySnapshotRef b = ref(10_000L, "0xcanonical", "streamdiffusion-sdxl", "GPU-B");
+        b.orchestratorUrl = "https://orch-b.example";
+        CapabilityAttributionSelector.upsertCandidate(bucket, a, 10_000L, TTL_MS, 32);
+        CapabilityAttributionSelector.upsertCandidate(bucket, b, 10_000L, TTL_MS, 32);
+
+        CapabilitySnapshotRef selected = CapabilityAttributionSelector.selectBestCandidate(
+                bucket,
+                CapabilityAttributionSelector.SelectionContext.of(
+                        "streamdiffusion-sdxl",
+                        "https://orch-b.example",
+                        null,
+                        10_010L,
+                        TTL_MS));
+        assertNotNull(selected);
+        assertEquals("https://orch-b.example", selected.orchestratorUrl);
+    }
+
+    @Test
+    void prefersGpuHintWhenUriAndModelTie() {
+        CapabilitySnapshotBucket bucket = new CapabilitySnapshotBucket();
+        CapabilitySnapshotRef a = ref(10_000L, "0xcanonical", "streamdiffusion-sdxl", "GPU-A");
+        a.orchestratorUrl = "https://orch.example";
+        CapabilitySnapshotRef b = ref(10_000L, "0xcanonical", "streamdiffusion-sdxl", "GPU-B");
+        b.orchestratorUrl = "https://orch.example";
+        CapabilityAttributionSelector.upsertCandidate(bucket, a, 10_000L, TTL_MS, 32);
+        CapabilityAttributionSelector.upsertCandidate(bucket, b, 10_000L, TTL_MS, 32);
+
+        CapabilitySnapshotRef selected = CapabilityAttributionSelector.selectBestCandidate(
+                bucket,
+                CapabilityAttributionSelector.SelectionContext.of(
+                        "streamdiffusion-sdxl",
+                        "https://orch.example",
+                        "GPU-A",
+                        10_020L,
+                        TTL_MS));
+        assertNotNull(selected);
+        assertEquals("GPU-A", selected.gpuId);
+    }
+
+    @Test
+    void preservesDistinctCandidatesWithSameModelAndTimestampDifferentSourceEventId() {
+        CapabilitySnapshotBucket bucket = new CapabilitySnapshotBucket();
+        CapabilitySnapshotRef a = ref(10_000L, "0xcanonical", "streamdiffusion-sdxl", "GPU-A");
+        a.sourceEventId = "evt-a";
+        a.orchestratorUrl = "https://orch-a.example";
+        CapabilitySnapshotRef b = ref(10_000L, "0xcanonical", "streamdiffusion-sdxl", "GPU-B");
+        b.sourceEventId = "evt-b";
+        b.orchestratorUrl = "https://orch-b.example";
+        CapabilityAttributionSelector.upsertCandidate(bucket, a, 10_000L, TTL_MS, 32);
+        CapabilityAttributionSelector.upsertCandidate(bucket, b, 10_000L, TTL_MS, 32);
+
+        assertEquals(2, bucket.byCandidateKey.size());
     }
 
     private static CapabilitySnapshotRef ref(

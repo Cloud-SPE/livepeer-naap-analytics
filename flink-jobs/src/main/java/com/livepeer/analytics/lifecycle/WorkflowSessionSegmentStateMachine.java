@@ -18,6 +18,13 @@ import java.util.List;
 public final class WorkflowSessionSegmentStateMachine {
     private WorkflowSessionSegmentStateMachine() {}
 
+    /**
+     * Applies one lifecycle signal to segment state and emits one or two segment facts.
+     *
+     * <p>Emission contract:
+     * - initial/open or in-place update: emits one row (latest segment state);
+     * - orchestrator boundary transition: emits close row for prior segment and open row for new segment.</p>
+     */
     public static List<EventPayloads.FactWorkflowSessionSegment> applySignal(
             WorkflowSessionSegmentAccumulator state,
             LifecycleSignal signal,
@@ -54,6 +61,8 @@ public final class WorkflowSessionSegmentStateMachine {
 
         // In-place updates (no boundary).
         state.gateway = StringSemantics.firstNonBlank(state.gateway, signal.gateway);
+        // Pipeline remains first-write-wins at segment scope; upstream resolver path is expected
+        // to canonicalize signal.pipeline before this state machine executes.
         state.pipeline = StringSemantics.firstNonBlank(state.pipeline, signal.pipeline);
         if (!StringSemantics.isBlank(effectiveOrchestrator)) {
             state.orchestratorAddress = effectiveOrchestrator;
@@ -94,6 +103,12 @@ public final class WorkflowSessionSegmentStateMachine {
         state.version++;
     }
 
+    /**
+     * Applies capability attribution fields to the active segment.
+     *
+     * <p>Snapshot values are authoritative for attribution dimensions when present and
+     * intentionally override signal hints for model/GPU identity.</p>
+     */
     private static void applySnapshot(
             WorkflowSessionSegmentAccumulator state,
             CapabilitySnapshotRef snapshot,
@@ -113,6 +128,7 @@ public final class WorkflowSessionSegmentStateMachine {
             state.orchestratorAddress = snapshot.canonicalOrchestratorAddress;
         }
         state.orchestratorUrl = StringSemantics.firstNonBlank(snapshot.orchestratorUrl, state.orchestratorUrl);
+        // Snapshot attribution is authoritative for model/gpu dimensions whenever available.
         state.modelId = StringSemantics.blankToNull(snapshot.modelId);
         state.gpuId = StringSemantics.blankToNull(snapshot.gpuId);
     }
@@ -124,6 +140,7 @@ public final class WorkflowSessionSegmentStateMachine {
         fact.segmentStartTs = state.segmentStartTs;
         fact.segmentEndTs = state.segmentEndTs;
         fact.gateway = state.gateway;
+        fact.pipeline = state.pipeline;
         fact.orchestratorAddress = state.orchestratorAddress;
         fact.orchestratorUrl = state.orchestratorUrl;
         fact.workerId = state.workerId;

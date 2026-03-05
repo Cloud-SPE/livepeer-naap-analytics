@@ -1,0 +1,12 @@
+apiVersion: 1
+
+datasources:
+  - name: Orchestrator API
+    type: yesoreyeram-infinity-datasource
+    uid: orchestrator_api
+    access: proxy
+    url: https://livepeer-api.livepeer.cloud/api
+    isDefault: false
+    editable: true
+    jsonData:
+      auth_method: none

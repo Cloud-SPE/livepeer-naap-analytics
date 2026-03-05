@@ -401,7 +401,7 @@ FROM
     lower(orchestrator_address) AS lookup_wallet,
     '' AS canonical_orchestrator_address,
     '' AS gpu_id
-  FROM livepeer_analytics.ai_stream_status
+    FROM livepeer_analytics.raw_ai_stream_status
   WHERE event_timestamp >= %(window_start)s AND event_timestamp < %(window_end)s
     AND ({typed_predicate})
 
@@ -412,7 +412,7 @@ FROM
     lower(orchestrator_address) AS lookup_wallet,
     '' AS canonical_orchestrator_address,
     '' AS gpu_id
-  FROM livepeer_analytics.stream_trace_events
+    FROM livepeer_analytics.raw_stream_trace_events
   WHERE event_timestamp >= %(window_start)s AND event_timestamp < %(window_end)s
     AND ({typed_predicate})
 )

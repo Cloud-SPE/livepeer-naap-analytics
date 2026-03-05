@@ -128,7 +128,7 @@ Connect worker runs dual sinks on `streaming_events`.
 | Sink / setting | Property | Value / default | Purpose |
 |---|---|---|---|
 | `clickhouse-raw-events-sink` | `tasks.max` | `2` | Parallel raw ingest to ClickHouse |
-| `clickhouse-raw-events-sink` | insert mode | buffered async insert | Efficient writes to `livepeer_analytics.streaming_events` |
+| `clickhouse-raw-events-sink` | insert mode | buffered async insert | Efficient writes to `livepeer_analytics.raw_streaming_events` |
 | `minio-raw-events-sink` | `tasks.max` | `2` | Parallel object archival |
 | `minio-raw-events-sink` | format | JSON | Durable replay/audit payload preservation |
 | `minio-raw-events-sink` | partitioner | `DefaultPartitioner` | Topic/partition-oriented object layout |
@@ -158,8 +158,8 @@ Processing stages:
 
 Stateful lifecycle contracts are implemented in:
 
-- `flink-jobs/src/main/java/com/livepeer/analytics/lifecycle/WorkflowSessionStateMachine.java`
-- `flink-jobs/src/main/java/com/livepeer/analytics/lifecycle/WorkflowLatencyDerivation.java`
+- [`flink-jobs/src/main/java/com/livepeer/analytics/lifecycle/WorkflowSessionStateMachine.java`](../../flink-jobs/src/main/java/com/livepeer/analytics/lifecycle/WorkflowSessionStateMachine.java)
+- [`flink-jobs/src/main/java/com/livepeer/analytics/lifecycle/WorkflowLatencyDerivation.java`](../../flink-jobs/src/main/java/com/livepeer/analytics/lifecycle/WorkflowLatencyDerivation.java)
 
 #### Flink Error Handling Strategy
 
@@ -174,17 +174,21 @@ Stateful lifecycle contracts are implemented in:
 
 | Storage class | Examples | Production role |
 |---|---|---|
-| Raw ingest | `streaming_events`, DLQ/quarantine tables | Immutable audit/replay inputs |
-| Typed event tables | `ai_stream_status`, `stream_trace_events`, `network_capabilities` | Parsed event surfaces |
+| Raw ingest | `raw_streaming_events`, DLQ/quarantine tables | Immutable audit/replay inputs |
+| Typed event tables | `raw_ai_stream_status`, `raw_stream_trace_events`, `raw_network_capabilities` | Parsed event surfaces |
 | Curated facts | `fact_*` | Canonical analytical facts |
 | Rollups | `agg_*` | Query-efficient aggregates |
 | Serving views | `v_api_*` | Stable API/dashboard contracts |
 
+Serving-grain note:
+- `v_api_network_demand` is model-aware at `(hour, gateway, region, pipeline_id, model_id)`.
+- Consumers joining demand with pipeline-level datasets must pre-aggregate to `pipeline_id` grain (or include `model_id` when available).
+
 Materialization model:
 
-- Non-stateful projections are emitted by ClickHouse MVs.
-- Stateful lifecycle outputs are emitted by Flink into target facts.
-- Schema source of truth: `configs/clickhouse-init/01-schema.sql`.
+- Canonical status/trace and lifecycle facts are emitted by Flink into target facts.
+- ClickHouse MVs are used for direct ingest projection and serving rollups/views.
+- Schema source of truth: [`configs/clickhouse-init/01-schema.sql`](../../configs/clickhouse-init/01-schema.sql).
 
 ## Ownership and Execution Split
 
@@ -196,7 +200,7 @@ Materialization model:
 
 ### ClickHouse Owns Serving
 
-- Non-stateful 1:1 materialized projections
+- Direct ingest projections and serving-layer materialization
 - Rollups and API-serving views
 - Freshness/parity health queries
 
@@ -208,6 +212,11 @@ Materialization model:
 
 These facts require ordering-aware correlation and classification (session identity, startup outcomes, swap detection, attribution confidence).
 
+Segment-first identity contract:
+- `fact_workflow_session_segments` is the canonical identity spine for orchestrator/GPU/model/pipeline/region.
+- `fact_workflow_sessions` keeps derived summary identity and change indicators over segment history.
+- Status/trace rows that cannot be deterministically mapped to segment windows remain observable as unattributed (`is_attributed=0`) and are excluded from serving keyspaces.
+
 ### Lifecycle Attribution Steady State
 
 Lifecycle attribution uses a bounded multi-candidate capability cache per hot wallet key (`local_address`).
@@ -215,8 +224,11 @@ Lifecycle attribution uses a bounded multi-candidate capability cache per hot wa
 Selection flow:
 1. Resolve hot wallet from signal orchestrator identity.
 2. Load candidate capability snapshots for that wallet.
-3. Build pipeline context from signal pipeline, with fallback to persisted lifecycle state pipeline/model context when signal pipeline is empty.
-4. Filter candidates by compatibility first (`pipeline` vs candidate `model_id`).
+3. Resolve canonical semantics through [`PipelineModelResolver`](../../flink-jobs/src/main/java/com/livepeer/analytics/lifecycle/PipelineModelResolver.java):
+   - canonical `pipeline` (workflow class),
+   - canonical `model_id` (model label),
+   - compatibility `model_hint`.
+4. Filter candidates by compatibility first (`model_hint` vs candidate `model_id`).
 5. Rank compatible candidates by deterministic freshness rules:
    - exact timestamp match
    - nearest prior snapshot within TTL
@@ -231,17 +243,31 @@ Safety rules:
 
 This design prevents mixed-model drift when one hot wallet advertises multiple model families (for example streamdiffusion and llama) in interleaved capability snapshots.
 
-### Non-Stateful Facts (ClickHouse MV-emitted)
+Compatibility note:
+- Resolver mode is configurable via `LIFECYCLE_PIPELINE_MODEL_MODE`.
+- Default `legacy_misnamed` supports current upstream payloads where stream-event `pipeline`
+  carries model-like values.
+- Future upstream correction to native pipeline/model fields should require mode transition, not
+  lifecycle refactors.
+
+### Canonical Status/Trace Facts (Flink-emitted)
 
 - `fact_stream_status_samples`
 - `fact_stream_trace_edges`
+
+### Direct Non-Stateful Facts (ClickHouse MV-emitted)
+
 - `fact_stream_ingest_samples`
+
+Serving-key policy:
+- `v_api_gpu_metrics` keyspace is segment-hour based.
+- Perf/latency/reliability aggregates are left-joined to segment keys so perf-only orphan rows cannot create extra GPU rows.
 
 ### Why This Split
 
 - Stateful logic in ClickHouse SQL is harder to test and keep deterministic across replays.
-- Non-stateful projections in Flink create repetitive mapper/sink code without equivalent correctness gain.
-- This split keeps complex correctness logic centralized in Flink and high-volume reshaping close to ClickHouse storage.
+- Segment-window status/trace attribution is correctness-critical and deterministic in Flink state.
+- This split keeps complex correctness logic centralized in Flink and high-volume serving reshaping close to ClickHouse storage.
 
 ## Runtime Environment Variables
 
@@ -281,11 +307,11 @@ This design prevents mixed-model drift when one hot wallet advertises multiple m
 ## Canonical Lifecycle Concepts
 
 - Session identity is deterministic and replay-safe.
-- Startup/failure/swap semantics are defined in `docs/data/SCHEMA_AND_METRIC_CONTRACTS.md`.
+- Startup/failure/swap semantics are defined in [`docs/data/SCHEMA_AND_METRIC_CONTRACTS.md`](../data/SCHEMA_AND_METRIC_CONTRACTS.md).
 - Canonical orchestrator identity should use capability-based normalization (`local_address`) when available.
 - Parameter updates (`ai_stream_events.type='params_update'`) are lifecycle markers, not segment boundaries in v1.
 
 ## Open Areas and Related Docs
 
-- Canonical open issues/backlog: `docs/references/ISSUES_BACKLOG.md`
-- Data contract details: `docs/data/SCHEMA_AND_METRIC_CONTRACTS.md`
+- Canonical open issues/backlog: [`docs/references/ISSUES_BACKLOG.md`](../references/ISSUES_BACKLOG.md)
+- Data contract details: [`docs/data/SCHEMA_AND_METRIC_CONTRACTS.md`](../data/SCHEMA_AND_METRIC_CONTRACTS.md)

@@ -1,4 +1,4 @@
-> **Status:** Working backlog document. Canonical contracts are in `docs/data/SCHEMA_AND_METRIC_CONTRACTS.md`.
+> **Status:** Working backlog document. Canonical contracts are in [`docs/data/SCHEMA_AND_METRIC_CONTRACTS.md`](../data/SCHEMA_AND_METRIC_CONTRACTS.md).
 
 # Metrics Schema Design Scratchpad
 
@@ -19,12 +19,14 @@
 
 | API Endpoint | Backing View | Canonical Grain | Core Additive Fields | Core Derived Fields | Status |
 |---|---|---|---|---|---|
-| `/gpu/metrics` | `v_api_gpu_metrics` | 1h (serving rollups may expose finer windows) | `status_samples`, `known_sessions`, `success_sessions`, `excused_sessions`, `unexcused_sessions`, `swapped_sessions` | `avg_output_fps`, `p95_output_fps`, `jitter_coeff_fps`, `failure_rate`, `swap_rate` | In progress |
-| `/network/demand` | `v_api_network_demand` | 1h | `total_streams`, `total_sessions`, `total_inference_minutes`, `known_sessions`, `unexcused_sessions`, `swapped_sessions`, `missing_capacity_count`, `fee_payment_eth` | `avg_output_fps`, `success_ratio` | In progress |
-| `/sla/compliance` | `v_api_sla_compliance` | 1h | `known_sessions`, `success_sessions`, `excused_sessions`, `unexcused_sessions`, `swapped_sessions` | `success_ratio`, `no_swap_ratio`, `sla_score` | In progress |
+| `/gpu/metrics` | `v_api_gpu_metrics` | 1h (serving rollups may expose finer windows) | `status_samples`, `known_sessions_count`, `startup_success_sessions`, `excused_sessions`, `startup_unexcused_sessions`, `total_swapped_sessions` | `avg_output_fps`, `p95_output_fps`, `fps_jitter_coefficient`, `startup_unexcused_rate`, `swap_rate` | In progress |
+| `/network/demand` | `v_api_network_demand` | 1h `(gateway, region, pipeline_id, model_id)` | `sessions_count`, `total_minutes`, `known_sessions_count`, `startup_unexcused_sessions`, `total_swapped_sessions`, `sessions_with_errors`, `loading_only_sessions`, `zero_output_fps_sessions`, `ticket_face_value_eth` | `avg_output_fps`, `startup_success_rate`, `effective_success_rate` | Live |
+| `/sla/compliance` | `v_api_sla_compliance` | 1h `(orchestrator, pipeline_id, model_id, gpu_id, region)` | `known_sessions_count`, `startup_unexcused_sessions`, `total_swapped_sessions`, `sessions_with_errors`, `loading_only_sessions`, `zero_output_fps_sessions`, `health_signal_count`, `health_expected_signal_count` | `startup_success_rate`, `effective_success_rate`, `no_swap_rate`, `health_signal_coverage_ratio`, `sla_score` | Live |
 
 Notes:
 - API payloads should remain rollup-safe: recompute ratios/scores from additive fields for larger windows.
+- `v_api_network_demand` is now model-aware; downstream consumers must include `model_id` in joins or pre-aggregate to `pipeline_id` grain before joining to pipeline-level datasets.
+- Hard-cutover lineage contract: raw typed tables now use Flink-owned `raw_event_uid`; downstream lineage joins use persisted UID fields (`raw_event_uid` <-> `source_event_uid`) and no longer depend on ClickHouse-side hashing.
 - `/datasets` remains out of scope.
 
 ## Transformation Mapping (Trace -> Status -> Metrics)
@@ -57,5 +59,5 @@ Notes:
 
 ## Outstanding Areas for Improvement (BACKLOG)
 
-- Canonical backlog is tracked in `docs/references/ISSUES_BACKLOG.md`.
+- Canonical backlog is tracked in [`docs/references/ISSUES_BACKLOG.md`](./ISSUES_BACKLOG.md).
 - Keep this scratchpad as working context only; add and update open items in the canonical backlog file.

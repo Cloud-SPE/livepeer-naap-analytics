@@ -8,7 +8,7 @@ datasources:
       host: clickhouse
       port: 9000
       defaultDatabase: livepeer_analytics
-      defaultTable: ai_stream_status
+      defaultTable: raw_ai_stream_status
       protocol: native
       secure: false
       username: analytics_user
@@ -24,7 +24,7 @@ datasources:
       host: clickhouse.livepeer.cloud
       port: 8123
       defaultDatabase: livepeer_analytics
-      defaultTable: ai_stream_status
+      defaultTable: raw_ai_stream_status
       protocol: http
       secure: false
       username: analytics_user

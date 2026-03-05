@@ -22,8 +22,8 @@
           "session_end_ts": "2026-02-25T20:43:55.262000+00:00",
           "file": "prod_snapshot_20260225T211506Z/scenario_1_clean_success_no_swap_fps_gt_12/aiJobTesterStream-1772052186479599343_ebeb78b7.jsonl",
           "table_counts": {
-            "streaming_events": 14,
-            "streaming_events:network_capabilities": 2,
+            "streaming_events": 15,
+            "streaming_events:network_capabilities": 3,
             "streaming_events:stream_trace": 7,
             "streaming_events:ai_stream_status": 4,
             "streaming_events:ai_stream_events": 1

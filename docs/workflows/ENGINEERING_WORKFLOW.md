@@ -16,12 +16,12 @@ Ship quickly without contract drift by making design decisions legible and mecha
 
 | If you change... | You must also update... |
 |---|---|
-| ClickHouse schema | Flink row mappers + parser/model tests + `docs/data/SCHEMA_AND_METRIC_CONTRACTS.md` |
-| Lifecycle classification or edge semantics | `docs/data/SCHEMA_AND_METRIC_CONTRACTS.md` + validation SQL + canonical data docs |
+| ClickHouse schema | Flink row mappers + parser/model tests + [`docs/data/SCHEMA_AND_METRIC_CONTRACTS.md`](../data/SCHEMA_AND_METRIC_CONTRACTS.md) |
+| Lifecycle classification or edge semantics | [`docs/data/SCHEMA_AND_METRIC_CONTRACTS.md`](../data/SCHEMA_AND_METRIC_CONTRACTS.md) + validation SQL + canonical data docs |
 | API view grain/fields | metric contract docs + integration SQL assertions for API readiness |
-| Replay behavior | `docs/operations/RUNBOOKS_AND_RELEASE.md` + `docs/operations/REPLAY_RUNBOOK.md` |
-| Test harness scripts | `docs/quality/TESTING_AND_VALIDATION.md` |
-| Shared normalization/helper semantics | `docs/workflows/CODE_REUSE_AND_NORMALIZATION_GUIDELINES.md` + characterization tests in `flink-jobs/src/test/java` |
+| Replay behavior | [`docs/operations/RUNBOOKS_AND_RELEASE.md`](../operations/RUNBOOKS_AND_RELEASE.md) + [`docs/operations/REPLAY_RUNBOOK.md`](../operations/REPLAY_RUNBOOK.md) |
+| Test harness scripts | [`docs/quality/TESTING_AND_VALIDATION.md`](../quality/TESTING_AND_VALIDATION.md) |
+| Shared normalization/helper semantics | [`docs/workflows/CODE_REUSE_AND_NORMALIZATION_GUIDELINES.md`](CODE_REUSE_AND_NORMALIZATION_GUIDELINES.md) + characterization tests in [`flink-jobs/src/test/java`](../../flink-jobs/src/test/java) |
 
 ## PR Quality Bar
 
@@ -36,15 +36,15 @@ Ship quickly without contract drift by making design decisions legible and mecha
 For any refactor or behavior change that can affect contracts, run this minimum drift gate before merge:
 
 1. `cd flink-jobs && mvn test`
-2. `tests/integration/run_all.sh`
+2. [`tests/integration/run_all.sh`](../../tests/integration/run_all.sh)
 3. `uv run --project tests/python python tests/python/scripts/run_clickhouse_query_pack.py --lookback-hours 24`
 
 And ensure synchronization across these artifacts:
 
-- `tests/integration/sql/assertions_pipeline.sql` and
-  `docs/quality/TESTING_AND_VALIDATION.md` assertion map.
-- contract docs in `docs/data/` and serving/validation SQL in `tests/integration/sql/` + `docs/reports/*`.
-- notebook diagnostics in `tests/python/notebooks/FLINK_DATA_TRACE_AND_INTEGRATION_TESTS.ipynb`
+- [`tests/integration/sql/assertions_pipeline.sql`](../../tests/integration/sql/assertions_pipeline.sql) and
+  [`docs/quality/TESTING_AND_VALIDATION.md`](../quality/TESTING_AND_VALIDATION.md) assertion map.
+- contract docs in [`docs/data/`](../data) and serving/validation SQL in [`tests/integration/sql/`](../../tests/integration/sql) + `docs/reports/*`.
+- notebook diagnostics in [`tests/python/notebooks/FLINK_DATA_TRACE_AND_INTEGRATION_TESTS.ipynb`](../../tests/python/notebooks/FLINK_DATA_TRACE_AND_INTEGRATION_TESTS.ipynb)
   when semantics or output columns change.
 
 ## Preferred Iteration Pattern

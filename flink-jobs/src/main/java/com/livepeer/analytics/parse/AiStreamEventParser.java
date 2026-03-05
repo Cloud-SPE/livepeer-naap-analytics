@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 
 import com.livepeer.analytics.model.EventPayloads;
 import com.livepeer.analytics.quality.ValidatedEvent;
+import com.livepeer.analytics.util.EventUids;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -19,6 +20,7 @@ final class AiStreamEventParser {
         EventPayloads.AiStreamEvent parsed = new EventPayloads.AiStreamEvent();
 
         parsed.eventTimestamp = event.event.timestamp;
+        parsed.rawEventUid = EventUids.rawEventUid(event.event);
         parsed.streamId = data.path("stream_id").asText("");
         parsed.requestId = data.path("request_id").asText("");
         parsed.pipeline = data.path("pipeline").asText("");

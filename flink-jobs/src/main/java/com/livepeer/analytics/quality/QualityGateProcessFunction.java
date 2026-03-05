@@ -143,6 +143,7 @@ public class QualityGateProcessFunction extends ProcessFunction<KafkaInboundReco
         DedupKey dedupKey = DedupKey.build(event, root);
         event.dedupKey = dedupKey.key;
         event.dedupStrategy = dedupKey.strategy;
+        event.rawEventUid = dedupKey.key;
 
         LOG.trace("Accepted event (id={}, type={}, dedupKey={})", event.eventId, event.eventType, event.dedupKey);
         acceptedCounter.inc();

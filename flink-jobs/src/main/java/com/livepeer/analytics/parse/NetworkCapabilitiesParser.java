@@ -8,6 +8,7 @@ import com.livepeer.analytics.capability.CapabilityDescriptor;
 import com.livepeer.analytics.model.EventPayloads;
 import com.livepeer.analytics.quality.ValidatedEvent;
 import com.livepeer.analytics.util.AddressNormalizer;
+import com.livepeer.analytics.util.EventUids;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -102,6 +103,7 @@ final class NetworkCapabilitiesParser {
 
                 EventPayloads.NetworkCapabilityAdvertised row = new EventPayloads.NetworkCapabilityAdvertised();
                 row.eventTimestamp = event.event.timestamp;
+                row.rawEventUid = EventUids.rawEventUid(event.event);
                 row.sourceEventId = event.event.eventId;
                 row.orchestratorAddress = orchestratorAddress;
                 row.localAddress = localAddress;
@@ -149,6 +151,7 @@ final class NetworkCapabilitiesParser {
 
                     EventPayloads.NetworkCapabilityModelConstraint row = new EventPayloads.NetworkCapabilityModelConstraint();
                     row.eventTimestamp = event.event.timestamp;
+                    row.rawEventUid = EventUids.rawEventUid(event.event);
                     row.sourceEventId = event.event.eventId;
                     row.orchestratorAddress = orchestratorAddress;
                     row.localAddress = localAddress;
@@ -188,6 +191,7 @@ final class NetworkCapabilitiesParser {
 
                 EventPayloads.NetworkCapabilityPrice row = new EventPayloads.NetworkCapabilityPrice();
                 row.eventTimestamp = event.event.timestamp;
+                row.rawEventUid = EventUids.rawEventUid(event.event);
                 row.sourceEventId = event.event.eventId;
                 row.orchestratorAddress = orchestratorAddress;
                 row.localAddress = localAddress;
@@ -242,6 +246,7 @@ final class NetworkCapabilitiesParser {
             JsonNode priceInfo) {
         EventPayloads.NetworkCapability row = new EventPayloads.NetworkCapability();
         row.eventTimestamp = event.event.timestamp;
+        row.rawEventUid = EventUids.rawEventUid(event.event);
         row.sourceEventId = event.event.eventId;
         row.orchestratorAddress = orchestratorAddress;
         row.localAddress = localAddress;

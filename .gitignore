@@ -59,5 +59,5 @@ data/kafka/.gitkeep
 tests/python/.venv/
 artifacts/test-runs/
 scripts/__pycache__/
-tests/python/scripts/__pycache__/
+tests/python/notebooks/__pycache__/
 **/.ipynb_checkpoints/

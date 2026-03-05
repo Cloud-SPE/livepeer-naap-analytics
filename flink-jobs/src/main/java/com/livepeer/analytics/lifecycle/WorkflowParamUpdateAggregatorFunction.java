@@ -35,6 +35,17 @@ public class WorkflowParamUpdateAggregatorFunction extends KeyedBroadcastProcess
     private static final long DEFAULT_ATTRIBUTION_TTL_MS = 24L * 60L * 60L * 1000L;
 
     private transient ValueState<WorkflowParamUpdateAccumulator> stateRef;
+    private final PipelineModelResolver.Mode resolverMode;
+
+    public WorkflowParamUpdateAggregatorFunction() {
+        this(PipelineModelResolver.Mode.LEGACY_MISNAMED);
+    }
+
+    public WorkflowParamUpdateAggregatorFunction(PipelineModelResolver.Mode resolverMode) {
+        this.resolverMode = resolverMode == null
+                ? PipelineModelResolver.Mode.LEGACY_MISNAMED
+                : resolverMode;
+    }
 
     @Override
     public void open(Configuration parameters) {
@@ -65,25 +76,43 @@ public class WorkflowParamUpdateAggregatorFunction extends KeyedBroadcastProcess
         state.workflowSessionId = StringSemantics.firstNonBlank(state.workflowSessionId, signal.workflowSessionId);
         state.streamId = StringSemantics.firstNonBlank(state.streamId, signal.streamId);
         state.requestId = StringSemantics.firstNonBlank(state.requestId, signal.requestId);
-        state.pipeline = StringSemantics.firstNonBlank(state.pipeline, signal.pipeline);
         state.gateway = StringSemantics.firstNonBlank(state.gateway, signal.gateway);
         state.orchestratorUrl = StringSemantics.firstNonBlank(state.orchestratorUrl, signal.orchestratorUrl);
 
-        // Reuse broadcast enrichment for canonical orchestrator and model/GPU attribution.
+        // Resolve model compatibility context first, then lookup candidate snapshot.
         CapabilitySnapshotRef snapshot = null;
-        String signalAddress = AddressNormalizer.normalizeOrEmpty(signal.orchestratorAddress);
-        // Critical: preserve non-empty pipeline context across signals; empty pipeline must not
-        // broaden compatibility and allow nearest-but-incompatible snapshot selection.
-        String attributionPipeline = StringSemantics.firstNonBlank(signal.pipeline, state.pipeline);
+        String signalAddress = WorkflowSessionAggregatorFunction.resolveCapabilityLookupKey(
+                signal.orchestratorAddress, state.orchestratorAddress);
+        PipelineModelResolver.Resolution preSelection = PipelineModelResolver.resolve(
+                resolverMode,
+                signal,
+                state.pipeline,
+                state.modelId,
+                null);
+        String modelHint = preSelection.compatibilityModelHint;
         if (!StringSemantics.isBlank(signalAddress)) {
             CapabilitySnapshotBucket bucket = ctx.getBroadcastState(CapabilityBroadcastState.CAPABILITY_STATE_DESCRIPTOR)
                     .get(signalAddress);
             snapshot = CapabilityAttributionSelector.selectBestCandidate(
                     bucket,
-                    attributionPipeline,
-                    signal.signalTimestamp,
-                    DEFAULT_ATTRIBUTION_TTL_MS);
+                    CapabilityAttributionSelector.SelectionContext.of(
+                            modelHint,
+                            signal.orchestratorUrl,
+                            state.gpuId,
+                            signal.signalTimestamp,
+                            DEFAULT_ATTRIBUTION_TTL_MS));
         }
+        PipelineModelResolver.Resolution resolved = PipelineModelResolver.resolve(
+                resolverMode,
+                signal,
+                state.pipeline,
+                state.modelId,
+                snapshot);
+        WorkflowSessionAggregatorFunction.applyResolvedPipelineToSignal(signal, resolved);
+        // Param-update stream keeps session-scoped identity fields stable (first-write-wins)
+        // while still accepting canonical resolver output when fields are not yet established.
+        state.pipeline = StringSemantics.firstNonBlank(state.pipeline, signal.pipeline);
+        state.modelId = StringSemantics.blankToNull(StringSemantics.firstNonBlank(state.modelId, resolved.modelId));
         applySnapshotAttribution(state, snapshot, signal.signalTimestamp);
 
         state.version++;
@@ -129,8 +158,10 @@ public class WorkflowParamUpdateAggregatorFunction extends KeyedBroadcastProcess
         }
         CapabilitySnapshotRef ref = new CapabilitySnapshotRef();
         ref.snapshotTs = cap.eventTimestamp;
+        ref.sourceEventId = cap.sourceEventId;
         ref.canonicalOrchestratorAddress = canonicalAddress;
         ref.orchestratorUrl = cap.orchUri;
+        ref.pipeline = cap.pipeline;
         ref.modelId = cap.modelId;
         ref.gpuId = cap.gpuId;
         // Index by both hot wallet and canonical address so signal lookups work
@@ -176,6 +207,7 @@ public class WorkflowParamUpdateAggregatorFunction extends KeyedBroadcastProcess
         state.attributionMethod = decision.method;
         state.attributionConfidence = decision.confidence;
 
+        // Capability snapshot attribution is authoritative for model/gpu fields.
         state.modelId = StringSemantics.blankToNull(snapshot.modelId);
         state.gpuId = StringSemantics.blankToNull(snapshot.gpuId);
     }

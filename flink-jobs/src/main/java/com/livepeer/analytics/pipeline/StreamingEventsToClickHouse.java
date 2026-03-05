@@ -21,7 +21,10 @@ import com.livepeer.analytics.lifecycle.WorkflowLifecycleCoverageAggregatorFunct
 import com.livepeer.analytics.lifecycle.WorkflowParamUpdateAggregatorFunction;
 import com.livepeer.analytics.lifecycle.WorkflowSessionAggregatorFunction;
 import com.livepeer.analytics.lifecycle.WorkflowSessionSegmentAggregatorFunction;
+import com.livepeer.analytics.lifecycle.WorkflowStatusAttributionProcessFunction;
+import com.livepeer.analytics.lifecycle.WorkflowTraceAttributionProcessFunction;
 import com.livepeer.analytics.lifecycle.WorkflowLatencyDerivation;
+import com.livepeer.analytics.lifecycle.PipelineModelResolver;
 import com.livepeer.analytics.model.EventPayloads;
 import com.livepeer.analytics.model.KafkaInboundRecord;
 import com.livepeer.analytics.model.ParsedEvent;
@@ -38,7 +41,7 @@ import com.livepeer.analytics.sink.ClickHouseSinkFactory;
 import com.livepeer.analytics.sink.EnvelopeRowGuardProcessFunction;
 import com.livepeer.analytics.sink.ParsedEventRowGuardProcessFunction;
 import com.livepeer.analytics.sink.RowMapper;
-import com.livepeer.analytics.util.Hashing;
+import com.livepeer.analytics.util.EventUids;
 import com.livepeer.analytics.util.JsonSupport;
 import com.livepeer.analytics.util.WorkflowSessionId;
 
@@ -68,8 +71,10 @@ public class StreamingEventsToClickHouse {
         env.enableCheckpointing(60000);
 
         QualityGateConfig config = QualityGateConfig.fromEnv();
+        PipelineModelResolver.Mode pipelineModelMode = PipelineModelResolver.modeFromEnvironment();
         LOG.info("Starting quality gate with inputTopic={}, dlqTopic={}, quarantineTopic={}",
                 config.inputTopic, config.dlqTopic, config.quarantineTopic);
+        LOG.info("Pipeline/model resolver mode={}", pipelineModelMode);
 
         KafkaSource<KafkaInboundRecord> kafkaSource = KafkaSource.<KafkaInboundRecord>builder()
                 .setBootstrapServers(config.kafkaBootstrap)
@@ -202,7 +207,7 @@ public class StreamingEventsToClickHouse {
         SingleOutputStreamOperator<ParsedEvent<EventPayloads.FactWorkflowSession>> workflowSessionsStream = lifecycleSignals
                 .keyBy(signal -> signal.workflowSessionId)
                 .connect(capabilityBroadcast)
-                .process(new WorkflowSessionAggregatorFunction())
+                .process(new WorkflowSessionAggregatorFunction(pipelineModelMode))
                 .returns(new TypeHint<ParsedEvent<EventPayloads.FactWorkflowSession>>() {})
                 .name("Sessionize: Workflow Sessions");
 
@@ -216,14 +221,28 @@ public class StreamingEventsToClickHouse {
         SingleOutputStreamOperator<ParsedEvent<EventPayloads.FactWorkflowSessionSegment>> workflowSessionSegmentsStream = lifecycleSignals
                 .keyBy(signal -> signal.workflowSessionId)
                 .connect(capabilityBroadcast)
-                .process(new WorkflowSessionSegmentAggregatorFunction())
+                .process(new WorkflowSessionSegmentAggregatorFunction(pipelineModelMode))
                 .returns(new TypeHint<ParsedEvent<EventPayloads.FactWorkflowSessionSegment>>() {})
                 .name("Sessionize: Workflow Session Segments");
+
+        SingleOutputStreamOperator<ParsedEvent<EventPayloads.FactStreamStatusSample>> workflowStatusSamplesStream = aiStatusStream
+                .keyBy(parsed -> WorkflowSessionId.from(parsed.payload.streamId, parsed.payload.requestId, parsed.event.eventId))
+                .connect(workflowSessionSegmentsStream.keyBy(parsed -> parsed.payload.workflowSessionId))
+                .process(new WorkflowStatusAttributionProcessFunction())
+                .returns(new TypeHint<ParsedEvent<EventPayloads.FactStreamStatusSample>>() {})
+                .name("Derive: Workflow Status Samples");
+
+        SingleOutputStreamOperator<ParsedEvent<EventPayloads.FactStreamTraceEdge>> workflowTraceEdgesStream = traceStream
+                .keyBy(parsed -> WorkflowSessionId.from(parsed.payload.streamId, parsed.payload.requestId, parsed.event.eventId))
+                .connect(workflowSessionSegmentsStream.keyBy(parsed -> parsed.payload.workflowSessionId))
+                .process(new WorkflowTraceAttributionProcessFunction())
+                .returns(new TypeHint<ParsedEvent<EventPayloads.FactStreamTraceEdge>>() {})
+                .name("Derive: Workflow Trace Edges");
 
         SingleOutputStreamOperator<ParsedEvent<EventPayloads.FactWorkflowParamUpdate>> workflowParamUpdatesStream = lifecycleSignals
                 .keyBy(signal -> signal.workflowSessionId)
                 .connect(capabilityBroadcast)
-                .process(new WorkflowParamUpdateAggregatorFunction())
+                .process(new WorkflowParamUpdateAggregatorFunction(pipelineModelMode))
                 .returns(new TypeHint<ParsedEvent<EventPayloads.FactWorkflowParamUpdate>>() {})
                 .name("Sessionize: Workflow Param Updates");
 
@@ -364,6 +383,22 @@ public class StreamingEventsToClickHouse {
                 "Rows: Lifecycle Edge Coverage",
                 true);
 
+        SingleOutputStreamOperator<String> workflowStatusSampleRows = mapRowsWithGuard(
+                workflowStatusSamplesStream,
+                ClickHouseRowMappers::factStreamStatusSamplesRow,
+                DLQ_TAG,
+                config,
+                "Rows: Workflow Status Samples",
+                true);
+
+        SingleOutputStreamOperator<String> workflowTraceEdgeRows = mapRowsWithGuard(
+                workflowTraceEdgesStream,
+                ClickHouseRowMappers::factStreamTraceEdgesRow,
+                DLQ_TAG,
+                config,
+                "Rows: Workflow Trace Edges",
+                true);
+
         DataStream<RejectedEventEnvelope> guardDlqStream = aiStatusRows.getSideOutput(DLQ_TAG)
                 .union(ingestMetricsRows.getSideOutput(DLQ_TAG))
                 .union(traceRows.getSideOutput(DLQ_TAG))
@@ -378,24 +413,28 @@ public class StreamingEventsToClickHouse {
                 .union(workflowLatencySampleRows.getSideOutput(DLQ_TAG))
                 .union(workflowSessionSegmentRows.getSideOutput(DLQ_TAG))
                 .union(workflowParamUpdateRows.getSideOutput(DLQ_TAG))
-                .union(lifecycleCoverageRows.getSideOutput(DLQ_TAG));
+                .union(lifecycleCoverageRows.getSideOutput(DLQ_TAG))
+                .union(workflowStatusSampleRows.getSideOutput(DLQ_TAG))
+                .union(workflowTraceEdgeRows.getSideOutput(DLQ_TAG));
 
         // ClickHouse connector handles retry/backoff; sink failures surface as job failures, not per-record DLQ.
-        sinkToClickHouse(aiStatusRows, config, "ai_stream_status", "CH: AI Status");
-        sinkToClickHouse(ingestMetricsRows, config, "stream_ingest_metrics", "CH: Ingest Metrics");
-        sinkToClickHouse(traceRows, config, "stream_trace_events", "CH: Trace Events");
-        sinkToClickHouse(networkCapsRows, config, "network_capabilities", "CH: Network Caps");
-        sinkToClickHouse(networkCapsAdvertisedRows, config, "network_capabilities_advertised", "CH: Network Caps Advertised");
-        sinkToClickHouse(networkCapsModelConstraintRows, config, "network_capabilities_model_constraints", "CH: Network Caps Model Constraints");
-        sinkToClickHouse(networkCapsPriceRows, config, "network_capabilities_prices", "CH: Network Caps Prices");
-        sinkToClickHouse(aiEventsRows, config, "ai_stream_events", "CH: AI Events");
-        sinkToClickHouse(discoveryRows, config, "discovery_results", "CH: Discovery");
-        sinkToClickHouse(paymentRows, config, "payment_events", "CH: Payments");
+        sinkToClickHouse(aiStatusRows, config, "raw_ai_stream_status", "CH: AI Status");
+        sinkToClickHouse(ingestMetricsRows, config, "raw_stream_ingest_metrics", "CH: Ingest Metrics");
+        sinkToClickHouse(traceRows, config, "raw_stream_trace_events", "CH: Trace Events");
+        sinkToClickHouse(networkCapsRows, config, "raw_network_capabilities", "CH: Network Caps");
+        sinkToClickHouse(networkCapsAdvertisedRows, config, "raw_network_capabilities_advertised", "CH: Network Caps Advertised");
+        sinkToClickHouse(networkCapsModelConstraintRows, config, "raw_network_capabilities_model_constraints", "CH: Network Caps Model Constraints");
+        sinkToClickHouse(networkCapsPriceRows, config, "raw_network_capabilities_prices", "CH: Network Caps Prices");
+        sinkToClickHouse(aiEventsRows, config, "raw_ai_stream_events", "CH: AI Events");
+        sinkToClickHouse(discoveryRows, config, "raw_discovery_results", "CH: Discovery");
+        sinkToClickHouse(paymentRows, config, "raw_payment_events", "CH: Payments");
         sinkToClickHouse(workflowSessionRows, config, "fact_workflow_sessions", "CH: Workflow Sessions");
         sinkToClickHouse(workflowLatencySampleRows, config, "fact_workflow_latency_samples", "CH: Workflow Latency Samples");
         sinkToClickHouse(workflowSessionSegmentRows, config, "fact_workflow_session_segments", "CH: Workflow Session Segments");
         sinkToClickHouse(workflowParamUpdateRows, config, "fact_workflow_param_updates", "CH: Workflow Param Updates");
         sinkToClickHouse(lifecycleCoverageRows, config, "fact_lifecycle_edge_coverage", "CH: Lifecycle Edge Coverage");
+        sinkToClickHouse(workflowStatusSampleRows, config, "fact_stream_status_samples", "CH: Workflow Status Samples");
+        sinkToClickHouse(workflowTraceEdgeRows, config, "fact_stream_trace_edges", "CH: Workflow Trace Edges");
 
         // Centralized DLQ stream to feed Kafka and ClickHouse audit sinks.
         DataStream<RejectedEventEnvelope> dlqStream = qualityDlqStream.union(parseDlqStream).union(guardDlqStream);
@@ -431,8 +470,8 @@ public class StreamingEventsToClickHouse {
                 config,
                 "Rows: Quarantine");
 
-        sinkToClickHouse(dlqRows, config, "streaming_events_dlq", "CH: DLQ");
-        sinkToClickHouse(quarantineRows, config, "streaming_events_quarantine", "CH: Quarantine");
+        sinkToClickHouse(dlqRows, config, "raw_streaming_events_dlq", "CH: DLQ");
+        sinkToClickHouse(quarantineRows, config, "raw_streaming_events_quarantine", "CH: Quarantine");
 
         env.execute("Livepeer Analytics Quality Gate");
     }
@@ -496,9 +535,14 @@ public class StreamingEventsToClickHouse {
         signal.streamId = parsed.payload.streamId;
         signal.requestId = parsed.payload.requestId;
         signal.pipeline = parsed.payload.pipeline;
+        signal.pipelineHint = parsed.payload.pipeline;
+        signal.modelHint = parsed.payload.pipeline;
         signal.gateway = parsed.payload.gateway;
         signal.orchestratorAddress = parsed.payload.orchestratorAddress;
         signal.orchestratorUrl = parsed.payload.orchestratorUrl;
+                signal.statusState = parsed.payload.state;
+                signal.statusOutputFps = parsed.payload.outputFps;
+                signal.statusLastError = parsed.payload.lastError;
         signal.startTimeMs = parsed.payload.startTime;
         signal.sourceEventUid = sourceEventUid(parsed.event);
         signal.sourceEvent = parsed.event;
@@ -513,6 +557,7 @@ public class StreamingEventsToClickHouse {
         signal.ingestTimestamp = parsed.event.timestamp;
         signal.streamId = parsed.payload.streamId;
         signal.requestId = parsed.payload.requestId;
+        signal.gateway = parsed.event.gateway;
         signal.orchestratorAddress = parsed.payload.orchestratorAddress;
         signal.orchestratorUrl = parsed.payload.orchestratorUrl;
         signal.traceType = parsed.payload.traceType;
@@ -529,7 +574,10 @@ public class StreamingEventsToClickHouse {
         signal.ingestTimestamp = parsed.event.timestamp;
         signal.streamId = parsed.payload.streamId;
         signal.requestId = parsed.payload.requestId;
+        signal.gateway = parsed.event.gateway;
         signal.pipeline = parsed.payload.pipeline;
+        signal.pipelineHint = parsed.payload.pipeline;
+        signal.modelHint = parsed.payload.pipeline;
         signal.aiEventType = parsed.payload.eventType;
         signal.message = parsed.payload.message;
         signal.sourceEventUid = sourceEventUid(parsed.event);
@@ -544,13 +592,7 @@ public class StreamingEventsToClickHouse {
     }
 
     private static String sourceEventUid(StreamingEvent event) {
-        if (event == null) {
-            return "";
-        }
-        if (event.eventId != null && !event.eventId.trim().isEmpty()) {
-            return event.eventId;
-        }
-        return Hashing.sha256Hex(event.rawJson == null ? "" : event.rawJson);
+        return EventUids.rawEventUid(event);
     }
 
     static class SafeParser<T> extends ProcessFunction<ValidatedEvent, ParsedEvent<T>> {

@@ -4,10 +4,10 @@
 
 - `dim_*`: enrichment snapshots/current projections.
 - `fact_*`: curated analytical facts at explicit grain.
-- `agg_*`: rollups for high-traffic reads.
+- `agg_*`: optional performance rollups; only valid for append-safe additive sources.
 - `v_api_*`: stable serving interfaces for API/dashboard consumers.
 
-Primary schema source: `configs/clickhouse-init/01-schema.sql`.
+Primary schema source: [`configs/clickhouse-init/01-schema.sql`](../../configs/clickhouse-init/01-schema.sql).
 
 ## Core Facts
 
@@ -47,11 +47,21 @@ Primary schema source: `configs/clickhouse-init/01-schema.sql`.
 
 ## API Serving Grains
 
-- `v_api_gpu_metrics`: minute-level orchestrator/pipeline/model/GPU grain.
-- `v_api_network_demand`: hour-level gateway/region/pipeline grain.
-- `v_api_sla_compliance`: hour-level orchestrator/pipeline/model/GPU grain.
+- `v_api_gpu_metrics`: hour-level orchestrator/pipeline_id/model/GPU grain.
+- `v_api_network_demand`: hour-level gateway/region/pipeline_id/model grain.
+- `v_api_sla_compliance`: hour-level attributed orchestrator/pipeline_id/model/GPU grain (`orchestrator_address != ''`).
+  - GPU/SLA hour rows are anchored to in-hour evidence and suppress only true rollover terminal tails.
+  - Two-class zero-FPS behavior:
+    - `terminal_tail_artifact`: rollover hour (`session_start_ts < hour_start`, `session_end_ts` in-hour) with no-work footprint in both current and previous hour, filtered.
+    - `active_no_output`: materially active zero-FPS hour, retained for diagnostics.
+  - `sla_score` is health-adjusted (no separate score field): base reliability score multiplied by `health_signal_coverage_ratio`, with additional output-viability penalty (zero-output/loading/error outcomes).
+  - `v_api_network_demand` keyspace is the union of perf and session-demand keys, so demand-only (no status/perf samples) rows must still appear with zero perf counters.
 
 Contract rule: additive fields are canonical; clients must recompute ratios/scores when re-rolling windows.
+
+Versioned-fact rule: for `ReplacingMergeTree(version)` lifecycle facts (`fact_workflow_sessions`, `fact_workflow_latency_samples`),
+canonical serving semantics must use latest-version recompute (`argMax(..., version)` by entity key). Avoid additive MVs from
+versioned facts into `AggregatingMergeTree` rollups because version upserts can inflate counters.
 
 ## Key Metrics and API Contracts
 
@@ -67,20 +77,27 @@ Contract rule: additive fields are canonical; clients must recompute ratios/scor
   - up/down orchestrator transport bandwidth (requires new telemetry source)
 - API contracts:
   - `/gpu/metrics` -> `v_api_gpu_metrics`
+    - attribution coverage SLO: for attributable rows where `model_id != ''`, canonical `pipeline_id` should be non-empty for >=99% of rows over rolling 24h (readiness assertion).
   - `/network/demand` -> `v_api_network_demand` (+ GPU supply slice via `v_api_network_demand_by_gpu`)
+    - renamed field: `total_minutes` (formerly `total_inference_minutes`)
+    - `startup_success_rate`: startup-only reliability ratio (`1 - startup_unexcused/known`)
+    - `effective_success_rate`: effective-output success ratio (`1 - effective_failed/known`, where effective failure includes unexcused, zero-output, or loading-only sessions; transient `last_error_occurred` alone does not reduce effective success)
+    - consumer join rule: include `model_id` on model-aware joins, or pre-aggregate by `pipeline_id` before joining to pipeline-grain datasets.
   - `/sla/compliance` -> `v_api_sla_compliance`
+    - `startup_success_rate`: startup-only reliability ratio (`1 - startup_unexcused/known`)
+    - `effective_success_rate`: effective-output success ratio aligned with `/network/demand`
 
 ## Raw-to-Fact and Execution Contract
 
 - Raw -> fact mapping:
-  - `ai_stream_status` -> `fact_stream_status_samples`
-  - `stream_trace_events` -> `fact_stream_trace_edges`
-  - `stream_ingest_metrics` -> `fact_stream_ingest_samples`
-  - `stream_trace_events` + `ai_stream_events` + `fact_stream_status_samples` -> Flink lifecycle facts
-  - `network_capabilities*` -> capability dimensions
+  - `raw_ai_stream_status` -> `fact_stream_status_samples`
+  - `raw_stream_trace_events` -> `fact_stream_trace_edges`
+  - `raw_stream_ingest_metrics` -> `fact_stream_ingest_samples`
+  - `raw_stream_trace_events` + `raw_ai_stream_events` + `fact_stream_status_samples` -> Flink lifecycle facts
+  - `raw_network_capabilities*` -> capability dimensions
 - Execution split:
-  - ClickHouse MVs own non-stateful per-event reshaping.
-  - Flink owns stateful lifecycle correctness (sessionization, classification, latency derivation, versioning).
+  - Flink owns correctness-critical canonical fact emission for lifecycle and segment-aligned status/trace facts.
+  - ClickHouse MVs own direct non-stateful ingest projection (`fact_stream_ingest_samples`) and serving rollups/views.
 
 ## Lifecycle Rules Contract
 
@@ -107,7 +124,7 @@ Contract rule: additive fields are canonical; clients must recompute ratios/scor
 - Metric edge definitions:
   - startup proxy: `gateway_receive_stream_request` -> `gateway_receive_first_processed_segment`
   - E2E proxy: `gateway_send_first_ingest_segment` -> `runner_send_first_processed_segment`
-  - prompt-to-playable proxy: `ai_stream_status.start_time` -> `gateway_receive_few_processed_segments`
+  - prompt-to-playable proxy: `raw_ai_stream_status.start_time` -> `gateway_receive_few_processed_segments`
 - Startup outcome classification:
   - classes: `success`, `excused`, `unexcused`, `not_in_denominator` (debug only).
   - rule order:
@@ -116,6 +133,16 @@ Contract rule: additive fields are canonical; clients must recompute ratios/scor
     3. no-orchestrator signal present -> `excused`
     4. all session errors excusable -> `excused`
     5. otherwise -> `unexcused`
+- Session health signal contract (`fact_workflow_sessions`, additive fields):
+  - `last_error_occurred`: status stream reported non-empty `last_error` at least once in-session.
+  - `loading_only_session`: status samples exist and every observed state is `LOADING`.
+  - `zero_output_fps_session`: status samples exist and no sample has `output_fps > 0`.
+  - `status_sample_count`: total status samples observed in session lifecycle.
+  - `status_error_sample_count`: count of status samples with non-empty `last_error`.
+  - `health_signal_count`: observed session-health signal count used for SLA confidence weighting.
+  - `health_expected_signal_count`: expected health signal denominator at session grain.
+  - `health_signal_coverage_ratio`: `health_signal_count / health_expected_signal_count` (defaults to `1` when denominator is `0`).
+  - gold rollups/views expose these as additive counters and ratios; consumers should not infer health from startup class alone.
   - excusable error taxonomy (substring match):
     - `no orchestrators available`
     - `mediamtx ingest disconnected`
@@ -125,9 +152,9 @@ Contract rule: additive fields are canonical; clients must recompute ratios/scor
     - `user disconnected`
 - Swap detection:
   - `confirmed_swap_count`: explicit `orchestrator_swap` trace evidence.
-  - `inferred_orchestrator_change_count`: unique canonical orchestrator count > 1 in the session.
-  - `swap_count` (legacy compatibility): mirrors confirmed swaps (`confirmed_swap_count`).
-  - gold rollups expose both split metrics and also keep `swapped_sessions` as the union of confirmed/inferred.
+  - `inferred_orchestrator_change_count`: inferred swap evidence from unique canonical orchestrator count > 1 in the session.
+  - `swap_count` (compatibility alias): mirrors explicit swaps (`confirmed_swap_count`).
+  - gold rollups expose both split metrics and also keep `total_swapped_sessions` as the union of confirmed/inferred.
   - segment boundary opens on orchestrator identity change.
 - GPU/model attribution:
   - enrich by nearest capability snapshot using canonicalized orchestrator identity and model-matched join rules.
@@ -144,17 +171,25 @@ Contract rule: additive fields are canonical; clients must recompute ratios/scor
 
 This is a correctness-critical contract for lifecycle facts and downstream API views.
 
-1. `pipeline` source of truth:
-`pipeline` is event-derived lifecycle state. `pipeline` is not sourced from capability snapshots.
+1. Canonical `pipeline`/`model_id` source of truth:
+`pipeline` is canonical workflow class (`live-video-to-video`, `text-to-image`, etc.) and
+`model_id` is canonical model label (`streamdiffusion-sdxl`, etc.).
+Under current upstream payload shape, stream-event `pipeline` is treated as `model_hint`.
+Canonical lifecycle fields are resolved via capability attribution snapshots.
+When a pipeline value is model-like (equal to `model_id` case-insensitively), canonicalization
+collapses `pipeline` to empty and keeps model semantics in `model_id`.
 
 2. Capability candidate cache model:
 Candidates are keyed by hot wallet and stored as bounded multi-candidate snapshot sets. Candidate sets are TTL-pruned and hard-capped per wallet.
 
 3. Selection precedence:
-Compatibility first: incompatible model candidates must be ignored when pipeline context is present. Freshness second: choose exact match, then nearest prior within TTL, then nearest within TTL. Deterministic tie-breakers are required.
+Compatibility first: incompatible model candidates must be ignored when model-hint context is present.
+Freshness second: choose exact match, then nearest prior within TTL, then nearest within TTL.
+Deterministic tie-breakers are required.
 
-4. Empty-pipeline handling:
-Selector input pipeline must use signal pipeline with fallback to persisted lifecycle pipeline/model context. Passing empty pipeline broadens compatibility and can reintroduce mixed-model drift.
+4. Empty-hint handling:
+Selector input model hint must use signal model hint with fallback to persisted lifecycle `model_id`
+context. Passing empty hint broadens compatibility and can reintroduce mixed-model drift.
 
 5. No-compatible-candidate behavior:
 Do not overwrite `model_id`/`gpu_id` for that signal. Continue lifecycle signal processing and row emission.
@@ -162,29 +197,43 @@ Do not overwrite `model_id`/`gpu_id` for that signal. Continue lifecycle signal 
 6. Regression guardrails:
 Prod-derived regression tests must cover mixed-model hot-wallet candidate sets, empty signal pipeline drift path, and incompatible-but-fresh candidate rejection.
 
+7. Compatibility mode:
+Lifecycle resolver mode is controlled by `LIFECYCLE_PIPELINE_MODEL_MODE`:
+- `legacy_misnamed` (default): stream-event `pipeline` is interpreted as `model_hint`.
+- `native_correct`: stream-event payloads are treated as native canonical pipeline/model fields.
+
+8. Where capability attribution applies:
+Capability snapshots are used during lifecycle session/segment aggregation to resolve canonical
+pipeline/model/gpu identity. Downstream status/trace attribution consumes those segment identities
+and does not perform a separate capability backfill step.
+
+9. Close-time attribution finalization:
+On terminal close signals (`gateway_ingest_stream_closed`), lifecycle aggregation performs a final
+capability selection pass so emitted final session/segment versions represent best-known canonical
+pipeline/model identity at session end.
+
 ## Rules-to-Implementation Traceability
 
 - Flink rule owners:
   - sessionization and startup/swap classification:
-    - `flink-jobs/src/main/java/com/livepeer/analytics/lifecycle/WorkflowSessionStateMachine.java`
+    - [`flink-jobs/src/main/java/com/livepeer/analytics/lifecycle/WorkflowSessionStateMachine.java`](../../flink-jobs/src/main/java/com/livepeer/analytics/lifecycle/WorkflowSessionStateMachine.java)
   - latency KPI derivation and semantics versioning:
-    - `flink-jobs/src/main/java/com/livepeer/analytics/lifecycle/WorkflowLatencyDerivation.java`
+    - [`flink-jobs/src/main/java/com/livepeer/analytics/lifecycle/WorkflowLatencyDerivation.java`](../../flink-jobs/src/main/java/com/livepeer/analytics/lifecycle/WorkflowLatencyDerivation.java)
   - lifecycle coverage diagnostics:
-    - `flink-jobs/src/main/java/com/livepeer/analytics/lifecycle/WorkflowLifecycleCoverageAggregatorFunction.java`
+    - [`flink-jobs/src/main/java/com/livepeer/analytics/lifecycle/WorkflowLifecycleCoverageAggregatorFunction.java`](../../flink-jobs/src/main/java/com/livepeer/analytics/lifecycle/WorkflowLifecycleCoverageAggregatorFunction.java)
   - sink mappings for persisted contract fields:
-    - `flink-jobs/src/main/java/com/livepeer/analytics/sink/ClickHouseRowMappers.java`
+    - [`flink-jobs/src/main/java/com/livepeer/analytics/sink/ClickHouseRowMappers.java`](../../flink-jobs/src/main/java/com/livepeer/analytics/sink/ClickHouseRowMappers.java)
 - ClickHouse rule owners:
   - canonical MV/fact/view contract:
-    - `configs/clickhouse-init/01-schema.sql`
+    - [`configs/clickhouse-init/01-schema.sql`](../../configs/clickhouse-init/01-schema.sql)
   - key objects impacted by lifecycle rules:
-    - `mv_ai_stream_status_to_fact_stream_status_samples`
-    - `mv_stream_trace_events_to_fact_stream_trace_edges`
+    - `fact_stream_status_samples`
+    - `fact_stream_trace_edges`
     - `fact_workflow_sessions`
     - `fact_workflow_session_segments`
     - `fact_workflow_latency_samples`
     - `fact_lifecycle_edge_coverage`
-    - `agg_reliability_1h`
-    - `agg_latency_kpis_1m`
+    - `agg_stream_performance_1m`
     - `v_api_gpu_metrics`
     - `v_api_network_demand`
     - `v_api_network_demand_by_gpu`
@@ -192,9 +241,24 @@ Prod-derived regression tests must cover mixed-model hot-wallet candidate sets, 
 
 ## Join Policy
 
+- Flink-owned lineage UID contract:
+  - Flink emits one non-empty event lineage key per accepted event: `raw_event_uid`.
+  - `raw_event_uid` uses upstream event id when present; otherwise Flink generates deterministic fallback.
+  - Typed raw tables persist `raw_event_uid`; silver/gold facts persist the same lineage as `source_event_uid`.
+  - ClickHouse serving/diagnostic joins must use persisted lineage keys and must not hash `raw_json` to derive join keys.
+- Canonical identity for serving (`orchestrator_address`, `gpu_id`, `model_id`, `pipeline`, `region`) is segment-first:
+  - source of truth: `fact_workflow_session_segments`
+  - session fields are derived summaries over segment history
+  - status/trace canonical facts must align to segment window identity when attributed.
 - Use `*_current` dimensions for "what is true now" labels/inventory.
 - Use `*_snapshots` dimensions for historical correctness at event time.
 - Do not mix current and snapshot semantics in the same view contract.
+- Capability snapshot invariant:
+  - `dim_orchestrator_capability_snapshots` must preserve per-event GPU rows (no collapse across GPUs for the same orchestrator/model/timestamp/source event).
+- Typed capability invariant:
+  - `network_capabilities` must preserve per-GPU rows for each capability event (`source_event_id`), so downstream dimensions and joins can enrich GPU metadata correctly.
+- Drift review invariant:
+  - When Flink resolver semantics or ClickHouse serving schema changes, re-validate status/perf vs lifecycle pipeline alignment (especially `v_api_network_demand` keys) to prevent empty-pipeline split rows.
 
 ## Wallet Identity Contract
 
@@ -208,9 +272,11 @@ Prod-derived regression tests must cover mixed-model hot-wallet candidate sets, 
   - `local_address`: proxy/local wallet reference
 - Join rule:
   - Downstream-to-downstream joins: use canonical `orchestrator_address` directly.
-  - Raw-to-downstream joins: map through `network_capabilities` (`local_address` -> `orchestrator_address`) before joining.
+  - Raw-to-downstream joins for canonical serving paths must map through session/segment context first.
+  - `network_capabilities` proxy mapping is for ingest-boundary attribution context and diagnostics, not serving key derivation.
 - Canonicalization expectation:
   - `fact_*`, `agg_*`, and `v_api_*` relations persist canonical `orchestrator_address`.
+  - Unattributed status/trace rows are retained for observability (`is_attributed=0`) but excluded from canonical serving keyspaces.
   - `network_capabilities*` relations preserve both canonical and local identity fields for traceability.
   - Flink attribution lookup should tolerate both identity representations at ingest boundaries:
     capability context is indexed by both `network_capabilities.local_address` (hot wallet) and
@@ -226,23 +292,23 @@ Prod-derived regression tests must cover mixed-model hot-wallet candidate sets, 
 
 ## Outstanding Improvement Backlog
 
-- Canonical backlog now lives in `docs/references/ISSUES_BACKLOG.md`.
+- Canonical backlog now lives in [`docs/references/ISSUES_BACKLOG.md`](../references/ISSUES_BACKLOG.md).
 - Keep this document focused on active contracts and invariants; add new backlog items in the canonical backlog file.
 
 ## Change Procedure (Schema or Metric Semantics)
 
 1. Update schema and/or lifecycle contract docs:
-   - `configs/clickhouse-init/01-schema.sql`
-   - `docs/data/SCHEMA_AND_METRIC_CONTRACTS.md`
+   - [`configs/clickhouse-init/01-schema.sql`](../../configs/clickhouse-init/01-schema.sql)
+   - [`docs/data/SCHEMA_AND_METRIC_CONTRACTS.md`](./SCHEMA_AND_METRIC_CONTRACTS.md)
 2. Update Flink parser/model/mappers and tests.
 3. Re-run:
    - `cd flink-jobs && mvn test`
-   - `tests/integration/run_all.sh`
+   - [`tests/integration/run_all.sh`](../../tests/integration/run_all.sh)
 4. Update validation SQL and canonical docs in the same PR.
 
 ## Detailed References
 
-- Validation query packs: `docs/reports/METRICS_VALIDATION_QUERIES.sql`
-- Ops validation query packs: `docs/reports/OPS_ACTIVITY_VALIDATION_QUERIES.sql`
-- End-to-end trace notebook: `tests/python/notebooks/FLINK_DATA_TRACE_AND_INTEGRATION_TESTS.ipynb`
-- Canonical testing guide: `docs/quality/TESTING_AND_VALIDATION.md`
+- Validation query packs: [`docs/reports/METRICS_VALIDATION_QUERIES.sql`](../reports/METRICS_VALIDATION_QUERIES.sql)
+- Ops validation query packs: [`docs/reports/OPS_ACTIVITY_VALIDATION_QUERIES.sql`](../reports/OPS_ACTIVITY_VALIDATION_QUERIES.sql)
+- End-to-end trace notebook: [`tests/python/notebooks/FLINK_DATA_TRACE_AND_INTEGRATION_TESTS.ipynb`](../../tests/python/notebooks/FLINK_DATA_TRACE_AND_INTEGRATION_TESTS.ipynb)
+- Canonical testing guide: [`docs/quality/TESTING_AND_VALIDATION.md`](../quality/TESTING_AND_VALIDATION.md)

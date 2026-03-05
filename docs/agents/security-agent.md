@@ -20,7 +20,7 @@ You are the security reviewer for this repository.
 ## Scope
 
 - `docker-compose.yml`
-- `configs/clickhouse-users/`
+- [`configs/clickhouse-users/`](../../configs/clickhouse-users)
 - `.env.template`
 - security sections in architecture/ops docs
 

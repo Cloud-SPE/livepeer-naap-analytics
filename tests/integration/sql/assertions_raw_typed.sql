@@ -19,7 +19,7 @@ FROM
   FROM
   (
     SELECT type AS event_type, count() AS raw_rows
-    FROM livepeer_analytics.streaming_events
+    FROM livepeer_analytics.raw_streaming_events
     WHERE event_timestamp >= {from_ts:DateTime64(3)}
       AND event_timestamp < {to_ts:DateTime64(3)}
     GROUP BY type
@@ -27,7 +27,7 @@ FROM
   LEFT JOIN
   (
     SELECT event_type, count() AS dlq_rows
-    FROM livepeer_analytics.streaming_events_dlq
+    FROM livepeer_analytics.raw_streaming_events_dlq
     WHERE ifNull(event_timestamp, source_record_timestamp) >= {from_ts:DateTime64(3)}
       AND ifNull(event_timestamp, source_record_timestamp) < {to_ts:DateTime64(3)}
     GROUP BY event_type
@@ -35,7 +35,7 @@ FROM
   LEFT JOIN
   (
     SELECT event_type, count() AS quarantine_rows
-    FROM livepeer_analytics.streaming_events_quarantine
+    FROM livepeer_analytics.raw_streaming_events_quarantine
     WHERE ifNull(event_timestamp, source_record_timestamp) >= {from_ts:DateTime64(3)}
       AND ifNull(event_timestamp, source_record_timestamp) < {to_ts:DateTime64(3)}
     GROUP BY event_type
@@ -52,14 +52,14 @@ FROM
   SELECT
     (
       SELECT count()
-      FROM livepeer_analytics.streaming_events_dlq
+      FROM livepeer_analytics.raw_streaming_events_dlq
       WHERE ifNull(event_timestamp, source_record_timestamp) >= {from_ts:DateTime64(3)}
         AND ifNull(event_timestamp, source_record_timestamp) < {to_ts:DateTime64(3)}
         AND event_type IN ('ai_stream_status', 'stream_trace', 'ai_stream_events', 'stream_ingest_metrics')
     ) AS dlq_rows,
     (
       SELECT count()
-      FROM livepeer_analytics.streaming_events_quarantine
+      FROM livepeer_analytics.raw_streaming_events_quarantine
       WHERE ifNull(event_timestamp, source_record_timestamp) >= {from_ts:DateTime64(3)}
         AND ifNull(event_timestamp, source_record_timestamp) < {to_ts:DateTime64(3)}
         AND event_type IN ('ai_stream_status', 'stream_trace', 'ai_stream_events', 'stream_ingest_metrics')
@@ -91,10 +91,10 @@ FROM
     ifNull(t.typed_rows, 0) AS typed_rows
   FROM
   (
-    SELECT 'ai_stream_status' AS event_type, 'ai_stream_status' AS typed_name
-    UNION ALL SELECT 'stream_trace', 'stream_trace_events'
-    UNION ALL SELECT 'ai_stream_events', 'ai_stream_events'
-    UNION ALL SELECT 'stream_ingest_metrics', 'stream_ingest_metrics'
+    SELECT 'ai_stream_status' AS event_type, 'raw_ai_stream_status' AS typed_name
+    UNION ALL SELECT 'stream_trace', 'raw_stream_trace_events'
+    UNION ALL SELECT 'ai_stream_events', 'raw_ai_stream_events'
+    UNION ALL SELECT 'stream_ingest_metrics', 'raw_stream_ingest_metrics'
   ) tm
   LEFT JOIN
   (
@@ -102,7 +102,7 @@ FROM
       type AS event_type,
       count() AS raw_rows,
       uniqExact(id) AS raw_distinct_ids
-    FROM livepeer_analytics.streaming_events
+    FROM livepeer_analytics.raw_streaming_events
     WHERE event_timestamp >= {from_ts:DateTime64(3)}
       AND event_timestamp < {to_ts:DateTime64(3)}
     GROUP BY type
@@ -110,7 +110,7 @@ FROM
   LEFT JOIN
   (
     SELECT event_type, count() AS dlq_rows
-    FROM livepeer_analytics.streaming_events_dlq
+    FROM livepeer_analytics.raw_streaming_events_dlq
     WHERE ifNull(event_timestamp, source_record_timestamp) >= {from_ts:DateTime64(3)}
       AND ifNull(event_timestamp, source_record_timestamp) < {to_ts:DateTime64(3)}
     GROUP BY event_type
@@ -118,36 +118,36 @@ FROM
   LEFT JOIN
   (
     SELECT event_type, count() AS quarantine_rows
-    FROM livepeer_analytics.streaming_events_quarantine
+    FROM livepeer_analytics.raw_streaming_events_quarantine
     WHERE ifNull(event_timestamp, source_record_timestamp) >= {from_ts:DateTime64(3)}
       AND ifNull(event_timestamp, source_record_timestamp) < {to_ts:DateTime64(3)}
     GROUP BY event_type
   ) q ON tm.event_type = q.event_type
   LEFT JOIN
   (
-    SELECT 'ai_stream_status' AS typed_name, count() AS typed_rows
-    FROM livepeer_analytics.ai_stream_status
+    SELECT 'raw_ai_stream_status' AS typed_name, count() AS typed_rows
+    FROM livepeer_analytics.raw_ai_stream_status
     WHERE event_timestamp >= {from_ts:DateTime64(3)}
       AND event_timestamp < {to_ts:DateTime64(3)}
 
     UNION ALL
 
-    SELECT 'stream_trace_events' AS typed_name, count() AS typed_rows
-    FROM livepeer_analytics.stream_trace_events
+    SELECT 'raw_stream_trace_events' AS typed_name, count() AS typed_rows
+    FROM livepeer_analytics.raw_stream_trace_events
     WHERE event_timestamp >= {from_ts:DateTime64(3)}
       AND event_timestamp < {to_ts:DateTime64(3)}
 
     UNION ALL
 
-    SELECT 'ai_stream_events' AS typed_name, count() AS typed_rows
-    FROM livepeer_analytics.ai_stream_events
+    SELECT 'raw_ai_stream_events' AS typed_name, count() AS typed_rows
+    FROM livepeer_analytics.raw_ai_stream_events
     WHERE event_timestamp >= {from_ts:DateTime64(3)}
       AND event_timestamp < {to_ts:DateTime64(3)}
 
     UNION ALL
 
-    SELECT 'stream_ingest_metrics' AS typed_name, count() AS typed_rows
-    FROM livepeer_analytics.stream_ingest_metrics
+    SELECT 'raw_stream_ingest_metrics' AS typed_name, count() AS typed_rows
+    FROM livepeer_analytics.raw_stream_ingest_metrics
     WHERE event_timestamp >= {from_ts:DateTime64(3)}
       AND event_timestamp < {to_ts:DateTime64(3)}
   ) t ON tm.typed_name = t.typed_name
@@ -162,7 +162,7 @@ SELECT
 FROM
 (
   SELECT count() AS raw_rows
-  FROM livepeer_analytics.streaming_events
+  FROM livepeer_analytics.raw_streaming_events
   WHERE type = 'network_capabilities'
     AND event_timestamp >= {from_ts:DateTime64(3)}
     AND event_timestamp < {to_ts:DateTime64(3)}
@@ -174,12 +174,14 @@ FROM
 -- In preserve-state runs, DLQ rows may accumulate faster than raw rows in the
 -- selected window, so accepted_rows_est can clamp to 0 even when valid typed
 -- rows exist for a raw source event. Guard against impossible lineage instead:
--- typed distinct source ids must not exceed raw source events.
+-- typed distinct source ids must not exceed distinct raw source events.
 WITH
   raw AS
   (
-    SELECT count() AS raw_rows
-    FROM livepeer_analytics.streaming_events
+    SELECT
+      count() AS raw_rows,
+      uniqExact(id) AS raw_distinct_ids
+    FROM livepeer_analytics.raw_streaming_events
     WHERE type = 'network_capabilities'
       AND event_timestamp >= {from_ts:DateTime64(3)}
       AND event_timestamp < {to_ts:DateTime64(3)}
@@ -187,7 +189,7 @@ WITH
   dlq AS
   (
     SELECT count() AS dlq_rows
-    FROM livepeer_analytics.streaming_events_dlq
+    FROM livepeer_analytics.raw_streaming_events_dlq
     WHERE event_type = 'network_capabilities'
       AND ifNull(event_timestamp, source_record_timestamp) >= {from_ts:DateTime64(3)}
       AND ifNull(event_timestamp, source_record_timestamp) < {to_ts:DateTime64(3)}
@@ -195,7 +197,7 @@ WITH
   quarantine AS
   (
     SELECT count() AS quarantine_rows
-    FROM livepeer_analytics.streaming_events_quarantine
+    FROM livepeer_analytics.raw_streaming_events_quarantine
     WHERE event_type = 'network_capabilities'
       AND ifNull(event_timestamp, source_record_timestamp) >= {from_ts:DateTime64(3)}
       AND ifNull(event_timestamp, source_record_timestamp) < {to_ts:DateTime64(3)}
@@ -205,15 +207,16 @@ WITH
     SELECT
       count() AS typed_rows,
       uniqExact(source_event_id) AS typed_distinct_source_events
-    FROM livepeer_analytics.network_capabilities
+    FROM livepeer_analytics.raw_network_capabilities
     WHERE event_timestamp >= {from_ts:DateTime64(3)}
       AND event_timestamp < {to_ts:DateTime64(3)}
   )
 SELECT
   toUInt64(
-    typed_distinct_source_events > raw_rows
+    typed_distinct_source_events > raw_distinct_ids
   ) AS failed_rows,
   raw_rows,
+  raw_distinct_ids,
   dlq_rows,
   quarantine_rows,
   accepted_rows_est,
@@ -224,6 +227,7 @@ FROM
 (
   SELECT
     raw.raw_rows AS raw_rows,
+    raw.raw_distinct_ids AS raw_distinct_ids,
     dlq.dlq_rows AS dlq_rows,
     quarantine.quarantine_rows AS quarantine_rows,
     greatest(raw.raw_rows - dlq.dlq_rows - quarantine.quarantine_rows, 0) AS accepted_rows_est,

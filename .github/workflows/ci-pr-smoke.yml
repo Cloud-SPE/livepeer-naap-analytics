@@ -58,6 +58,9 @@ jobs:
       - name: Docker Compose Version
         run: docker compose version
 
+      - name: Ensure external Maven cache volume exists
+        run: docker volume create livepeer-analytics-flink-maven-cache
+
       - name: Run Reduced Smoke Harness Stages
         run: |
           python3 tests/python/scripts/run_scenario_test_harness.py \
