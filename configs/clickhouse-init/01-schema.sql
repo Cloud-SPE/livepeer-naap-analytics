@@ -2233,47 +2233,8 @@ SELECT
 FROM fact_workflow_sessions
 GROUP BY workflow_session_id;
 
--- Diagnostic raw-to-canonical bridge for status events. Canonical fields are fact-owned.
-CREATE VIEW IF NOT EXISTS v_diag_raw_status_canonicalized AS
-WITH latest_fact AS
-(
-    SELECT
-        source_event_uid AS raw_event_uid,
-        argMax(workflow_session_id, sample_ts) AS workflow_session_id,
-        argMax(orchestrator_address, sample_ts) AS canonical_orchestrator_address,
-        argMax(pipeline, sample_ts) AS canonical_pipeline,
-        argMax(model_id, sample_ts) AS canonical_model_id,
-        argMax(gpu_id, sample_ts) AS canonical_gpu_id,
-        argMax(region, sample_ts) AS canonical_region,
-        argMax(is_attributed, sample_ts) AS is_attributed,
-        max(sample_ts) AS latest_fact_ts
-    FROM fact_stream_status_samples
-    GROUP BY source_event_uid
-)
-SELECT
-    r.event_timestamp,
-    r.raw_event_uid,
-    r.stream_id,
-    r.request_id,
-    r.gateway,
-    r.orchestrator_address AS raw_orchestrator_address,
-    r.orchestrator_url AS raw_orchestrator_url,
-    r.pipeline AS raw_pipeline,
-    r.state,
-    r.output_fps,
-    r.input_fps,
-    f.workflow_session_id,
-    f.canonical_orchestrator_address,
-    f.canonical_pipeline,
-    f.canonical_model_id,
-    f.canonical_gpu_id,
-    f.canonical_region,
-    if(f.raw_event_uid = '', 'unmapped', 'exact') AS canonicalization_status,
-    f.is_attributed,
-    f.latest_fact_ts
-FROM raw_ai_stream_status r
-LEFT JOIN latest_fact f
-    ON f.raw_event_uid = r.raw_event_uid;
+-- Hard-cutover cleanup: transitional raw diagnostic canonicalization views are not allowed.
+DROP VIEW IF EXISTS v_diag_raw_status_canonicalized;
 
 -- Table 5: AI Stream Events (errors and lifecycle events)
 CREATE TABLE IF NOT EXISTS raw_ai_stream_events
