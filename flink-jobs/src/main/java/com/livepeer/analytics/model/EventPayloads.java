@@ -294,6 +294,19 @@ public final class EventPayloads {
     }
 
     /**
+     * Placeholder for event types not yet handled by a typed parser.
+     * Stored in raw_unknown_events for future promotion to typed raw tables.
+     */
+    public static class UnknownEvent implements java.io.Serializable {
+        private static final long serialVersionUID = 1L;
+        public String eventType;
+        public String rawEventUid;
+        public long ingestTimestamp;
+        public String sourceTopic;
+        public String rawJson;
+    }
+
+    /**
      * Canonical stream trace edge fact aligned to workflow segment identity.
      */
     public static class FactStreamTraceEdge implements java.io.Serializable {

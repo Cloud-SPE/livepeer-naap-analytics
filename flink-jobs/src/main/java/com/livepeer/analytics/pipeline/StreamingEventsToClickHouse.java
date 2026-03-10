@@ -45,7 +45,11 @@ import com.livepeer.analytics.util.EventUids;
 import com.livepeer.analytics.util.JsonSupport;
 import com.livepeer.analytics.util.WorkflowSessionId;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+
+import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 
 /**
  * Main Flink pipeline:
@@ -62,6 +66,15 @@ public class StreamingEventsToClickHouse {
     private static final OutputTag<RejectedEventEnvelope> DLQ_TAG = new OutputTag<RejectedEventEnvelope>("dlq"){};
     private static final OutputTag<RejectedEventEnvelope> QUARANTINE_TAG = new OutputTag<RejectedEventEnvelope>("quarantine"){};
 
+    private static final Set<String> KNOWN_EVENT_TYPES = Set.of(
+            "ai_stream_status",
+            "stream_ingest_metrics",
+            "stream_trace",
+            "network_capabilities",
+            "ai_stream_events",
+            "discovery_results",
+            "create_new_payment");
+
     // ============================================
     // MAIN JOB
     // ============================================
@@ -72,22 +85,37 @@ public class StreamingEventsToClickHouse {
 
         QualityGateConfig config = QualityGateConfig.fromEnv();
         PipelineModelResolver.Mode pipelineModelMode = PipelineModelResolver.modeFromEnvironment();
-        LOG.info("Starting quality gate with inputTopic={}, dlqTopic={}, quarantineTopic={}",
-                config.inputTopic, config.dlqTopic, config.quarantineTopic);
+        LOG.info("Starting quality gate with inputTopics={}, dlqTopic={}, quarantineTopic={}, topicOrgMap={}",
+                config.inputTopics, config.dlqTopic, config.quarantineTopic, config.topicOrgMap);
         LOG.info("Pipeline/model resolver mode={}", pipelineModelMode);
 
-        KafkaSource<KafkaInboundRecord> kafkaSource = KafkaSource.<KafkaInboundRecord>builder()
-                .setBootstrapServers(config.kafkaBootstrap)
-                .setTopics(config.inputTopic)
-                .setGroupId(config.kafkaGroupId)
-                .setStartingOffsets(OffsetsInitializer.earliest())
-                .setDeserializer(new KafkaInboundRecordDeserializationSchema())
-                .build();
+        // Build one KafkaSource per topic so each can have its own offset reset strategy.
+        // "latest" reset strategy is safe for newly added topics: if no committed offset exists,
+        // Flink starts from the tip rather than flooding the pipeline with historical data.
+        // Existing topics with committed offsets are unaffected by this setting.
+        List<DataStream<KafkaInboundRecord>> topicStreams = new ArrayList<>();
+        for (String topic : config.inputTopics) {
+            String resetStrategy = config.topicResetStrategyMap.getOrDefault(topic, "earliest");
+            OffsetsInitializer offsetsInitializer = "latest".equalsIgnoreCase(resetStrategy)
+                    ? OffsetsInitializer.committedOffsets(OffsetResetStrategy.LATEST)
+                    : OffsetsInitializer.committedOffsets(OffsetResetStrategy.EARLIEST);
+            KafkaSource<KafkaInboundRecord> kafkaSource = KafkaSource.<KafkaInboundRecord>builder()
+                    .setBootstrapServers(config.kafkaBootstrap)
+                    .setTopics(topic)
+                    .setGroupId(config.kafkaGroupId)
+                    .setStartingOffsets(offsetsInitializer)
+                    .setDeserializer(new KafkaInboundRecordDeserializationSchema())
+                    .build();
+            topicStreams.add(env.fromSource(kafkaSource, WatermarkStrategy.noWatermarks(), "Kafka Source: " + topic));
+        }
+        DataStream<KafkaInboundRecord> kafkaStream = topicStreams.get(0);
+        for (int i = 1; i < topicStreams.size(); i++) {
+            kafkaStream = kafkaStream.union(topicStreams.get(i));
+        }
 
         // Quality gate: deserialize → validate → build dedup key, then forward or emit DLQ.
         // JSON is parsed once here and reused downstream via ValidatedEvent.
-        SingleOutputStreamOperator<ValidatedEvent> validatedStream = env
-                .fromSource(kafkaSource, WatermarkStrategy.noWatermarks(), "Kafka Source")
+        SingleOutputStreamOperator<ValidatedEvent> validatedStream = kafkaStream
                 .process(new QualityGateProcessFunction(config, DLQ_TAG))
                 .returns(ValidatedEvent.class)
                 .name("Quality Gate");
@@ -181,6 +209,21 @@ public class StreamingEventsToClickHouse {
                 DLQ_TAG,
                 new TypeHint<ParsedEvent<EventPayloads.PaymentEvent>>() {},
                 "Parse: Payments");
+
+        // Capture event types not handled by any typed parser for future promotion to raw_<type> tables.
+        SingleOutputStreamOperator<ParsedEvent<EventPayloads.UnknownEvent>> unknownEventsStream = dedupedStream
+                .filter(e -> e != null && e.event != null && !KNOWN_EVENT_TYPES.contains(e.event.eventType))
+                .map(e -> {
+                    EventPayloads.UnknownEvent u = new EventPayloads.UnknownEvent();
+                    u.eventType = e.event.eventType;
+                    u.rawEventUid = e.event.rawEventUid;
+                    u.ingestTimestamp = e.event.timestamp;
+                    u.sourceTopic = e.event.source != null ? e.event.source.topic : "";
+                    u.rawJson = e.event.rawJson;
+                    return new ParsedEvent<>(e.event, u);
+                })
+                .returns(new TypeHint<ParsedEvent<EventPayloads.UnknownEvent>>() {})
+                .name("Filter: Unknown Events");
 
         SingleOutputStreamOperator<LifecycleSignal> statusLifecycleSignals = aiStatusStream
                 .map(StreamingEventsToClickHouse::toLifecycleSignalFromStatus)
@@ -435,6 +478,15 @@ public class StreamingEventsToClickHouse {
         sinkToClickHouse(lifecycleCoverageRows, config, "fact_lifecycle_edge_coverage", "CH: Lifecycle Edge Coverage");
         sinkToClickHouse(workflowStatusSampleRows, config, "fact_stream_status_samples", "CH: Workflow Status Samples");
         sinkToClickHouse(workflowTraceEdgeRows, config, "fact_stream_trace_edges", "CH: Workflow Trace Edges");
+
+        SingleOutputStreamOperator<String> unknownEventRows = mapRowsWithGuard(
+                unknownEventsStream,
+                ClickHouseRowMappers::unknownEventsRow,
+                DLQ_TAG,
+                config,
+                "Rows: Unknown Events",
+                false);
+        sinkToClickHouse(unknownEventRows, config, "raw_unknown_events", "CH: Unknown Events");
 
         // Centralized DLQ stream to feed Kafka and ClickHouse audit sinks.
         DataStream<RejectedEventEnvelope> dlqStream = qualityDlqStream.union(parseDlqStream).union(guardDlqStream);

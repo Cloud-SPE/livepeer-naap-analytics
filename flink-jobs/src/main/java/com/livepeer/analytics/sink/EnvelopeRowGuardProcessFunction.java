@@ -26,7 +26,7 @@ public class EnvelopeRowGuardProcessFunction extends ProcessFunction<RejectedEve
         if (value == null) {
             return;
         }
-        String row = mapper.map(value);
+        String row = mapper.map(value, "");
         int sizeBytes = RowSizeUtil.utf8Bytes(row);
         if (sizeBytes > sizeLimitBytes) {
             if (oversizeCounter != null) {

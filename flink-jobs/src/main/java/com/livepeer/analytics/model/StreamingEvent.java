@@ -12,6 +12,7 @@ public class StreamingEvent implements Serializable {
     public String eventType;
     public String eventVersion;
     public String gateway;
+    public String org;
     public String rawJson;
     public String rawEventUid;
     public long timestamp;

@@ -74,7 +74,7 @@ class EventParsersTest {
         assertEquals(84, results.get(0).latencyMs);
         assertEquals(119, results.get(1).latencyMs);
 
-        String row = ClickHouseRowMappers.discoveryResultsRow(results.get(0));
+        String row = ClickHouseRowMappers.discoveryResultsRow(results.get(0), "test_org");
         assertTrue(row.contains("\"orchestrator_address\""));
         assertTrue(row.contains("\"latency_ms\""));
     }
@@ -88,7 +88,7 @@ class EventParsersTest {
         List<EventPayloads.AiStreamStatus> results = EventParsers.parseAiStreamStatus(event);
         assertEquals(1, results.size());
 
-        String row = ClickHouseRowMappers.aiStreamStatusRow(results.get(0));
+        String row = ClickHouseRowMappers.aiStreamStatusRow(results.get(0), "test_org");
         JsonNode node = JsonSupport.MAPPER.readTree(row);
         assertTrue(node.isObject());
         assertEquals(results.get(0).streamId, node.path("stream_id").asText());
