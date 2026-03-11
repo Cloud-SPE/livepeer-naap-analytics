@@ -1,9 +1,13 @@
 package com.livepeer.analytics.quality;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -12,7 +16,16 @@ import java.util.Set;
 public class QualityGateConfig implements java.io.Serializable {
     private static final long serialVersionUID = 1L;
     public final String kafkaBootstrap;
-    public final String inputTopic;
+    public final List<String> inputTopics;
+    /** Maps Kafka topic name to logical org label (e.g. "streaming_events" -> "cloud_spe"). */
+    public final Map<String, String> topicOrgMap;
+    /**
+     * Maps Kafka topic name to offset reset strategy ("earliest" or "latest").
+     * Used when no committed offset exists for a topic's partitions.
+     * Defaults to "earliest" if a topic is not listed.
+     * Set "latest" for newly added topics to avoid replaying historical data on first deployment.
+     */
+    public final Map<String, String> topicResetStrategyMap;
     public final String dlqTopic;
     public final String quarantineTopic;
     public final String kafkaGroupId;
@@ -35,7 +48,9 @@ public class QualityGateConfig implements java.io.Serializable {
 
     private QualityGateConfig(
             String kafkaBootstrap,
-            String inputTopic,
+            List<String> inputTopics,
+            Map<String, String> topicOrgMap,
+            Map<String, String> topicResetStrategyMap,
             String dlqTopic,
             String quarantineTopic,
             String kafkaGroupId,
@@ -53,7 +68,9 @@ public class QualityGateConfig implements java.io.Serializable {
             int clickhouseSinkMaxRecordSizeBytes,
             Duration metricsRateWindow) {
         this.kafkaBootstrap = kafkaBootstrap;
-        this.inputTopic = inputTopic;
+        this.inputTopics = inputTopics;
+        this.topicOrgMap = topicOrgMap;
+        this.topicResetStrategyMap = topicResetStrategyMap;
         this.dlqTopic = dlqTopic;
         this.quarantineTopic = quarantineTopic;
         this.kafkaGroupId = kafkaGroupId;
@@ -74,7 +91,14 @@ public class QualityGateConfig implements java.io.Serializable {
 
     public static QualityGateConfig fromEnv() {
         String kafkaBootstrap = env("QUALITY_KAFKA_BOOTSTRAP", "kafka:9092");
-        String inputTopic = env("QUALITY_INPUT_TOPIC", "streaming_events");
+        // QUALITY_INPUT_TOPICS takes precedence; falls back to QUALITY_INPUT_TOPIC for backward compat.
+        String inputTopicsRaw = env("QUALITY_INPUT_TOPICS", env("QUALITY_INPUT_TOPIC", "streaming_events"));
+        List<String> inputTopics = Arrays.asList(inputTopicsRaw.split("\\s*,\\s*"));
+        // Format: topic1=org1,topic2=org2  e.g. streaming_events=cloud_spe,network_events=daydream
+        Map<String, String> topicOrgMap = envTopicOrgMap("QUALITY_TOPIC_ORG_MAP");
+        // Format: topic1=earliest,topic2=latest  Defaults to "earliest" if topic not listed.
+        // Set "latest" for newly added topics to avoid flooding the pipeline with historical data.
+        Map<String, String> topicResetStrategyMap = envTopicOrgMap("QUALITY_TOPIC_RESET_STRATEGY_MAP");
         String dlqTopic = env("QUALITY_DLQ_TOPIC", "events.dlq.streaming_events.v1");
         String quarantineTopic = env("QUALITY_QUARANTINE_TOPIC", "events.quarantine.streaming_events.v1");
         String kafkaGroupId = env("QUALITY_GROUP_ID", "flink-quality-gate-v1");
@@ -97,7 +121,9 @@ public class QualityGateConfig implements java.io.Serializable {
 
         return new QualityGateConfig(
                 kafkaBootstrap,
-                inputTopic,
+                inputTopics,
+                topicOrgMap,
+                topicResetStrategyMap,
                 dlqTopic,
                 quarantineTopic,
                 kafkaGroupId,
@@ -152,6 +178,21 @@ public class QualityGateConfig implements java.io.Serializable {
             return Collections.emptySet();
         }
         return new HashSet<>(Arrays.asList(raw.split("\\s*,\\s*")));
+    }
+
+    private static Map<String, String> envTopicOrgMap(String key) {
+        String value = System.getenv(key);
+        if (value == null || value.trim().isEmpty()) {
+            return Collections.emptyMap();
+        }
+        Map<String, String> map = new HashMap<>();
+        for (String pair : value.split("\\s*,\\s*")) {
+            int eq = pair.indexOf('=');
+            if (eq > 0 && eq < pair.length() - 1) {
+                map.put(pair.substring(0, eq).trim(), pair.substring(eq + 1).trim());
+            }
+        }
+        return Collections.unmodifiableMap(map);
     }
 
     private static String extractDatabase(String url, String fallback) {

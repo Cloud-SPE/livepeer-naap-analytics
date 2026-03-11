@@ -42,7 +42,7 @@ class ClickHouseSchemaSyncTest {
         payload.startTime = 1710000000000L;
         payload.rawJson = "{}";
 
-        assertRowMatchesTable("raw_ai_stream_status", ClickHouseRowMappers.aiStreamStatusRow(payload));
+        assertRowMatchesTable("raw_ai_stream_status", ClickHouseRowMappers.aiStreamStatusRow(payload, "test_org"));
     }
 
     @Test
@@ -70,7 +70,7 @@ class ClickHouseSchemaSyncTest {
         payload.bytesSent = 1L;
         payload.rawJson = "{}";
 
-        assertRowMatchesTable("raw_stream_ingest_metrics", ClickHouseRowMappers.streamIngestMetricsRow(payload));
+        assertRowMatchesTable("raw_stream_ingest_metrics", ClickHouseRowMappers.streamIngestMetricsRow(payload, "test_org"));
     }
 
     @Test
@@ -85,7 +85,7 @@ class ClickHouseSchemaSyncTest {
         payload.dataTimestamp = 1710000000000L;
         payload.rawJson = "{}";
 
-        assertRowMatchesTable("raw_stream_trace_events", ClickHouseRowMappers.streamTraceRow(payload));
+        assertRowMatchesTable("raw_stream_trace_events", ClickHouseRowMappers.streamTraceRow(payload, "test_org"));
     }
 
     @Test
@@ -117,7 +117,7 @@ class ClickHouseSchemaSyncTest {
         payload.orchestratorVersion = "0.1";
         payload.rawJson = "{}";
 
-        assertRowMatchesTable("raw_network_capabilities", ClickHouseRowMappers.networkCapabilitiesRow(payload));
+        assertRowMatchesTable("raw_network_capabilities", ClickHouseRowMappers.networkCapabilitiesRow(payload, "test_org"));
     }
 
     @Test
@@ -135,7 +135,7 @@ class ClickHouseSchemaSyncTest {
         payload.capacity = 1;
         payload.rawJson = "{}";
 
-        assertRowMatchesTable("raw_network_capabilities_advertised", ClickHouseRowMappers.networkCapabilitiesAdvertisedRow(payload));
+        assertRowMatchesTable("raw_network_capabilities_advertised", ClickHouseRowMappers.networkCapabilitiesAdvertisedRow(payload, "test_org"));
     }
 
     @Test
@@ -157,7 +157,7 @@ class ClickHouseSchemaSyncTest {
         payload.warm = 1;
         payload.rawJson = "{}";
 
-        assertRowMatchesTable("raw_network_capabilities_model_constraints", ClickHouseRowMappers.networkCapabilitiesModelConstraintsRow(payload));
+        assertRowMatchesTable("raw_network_capabilities_model_constraints", ClickHouseRowMappers.networkCapabilitiesModelConstraintsRow(payload, "test_org"));
     }
 
     @Test
@@ -177,7 +177,7 @@ class ClickHouseSchemaSyncTest {
         payload.pixelsPerUnit = 1;
         payload.rawJson = "{}";
 
-        assertRowMatchesTable("raw_network_capabilities_prices", ClickHouseRowMappers.networkCapabilitiesPricesRow(payload));
+        assertRowMatchesTable("raw_network_capabilities_prices", ClickHouseRowMappers.networkCapabilitiesPricesRow(payload, "test_org"));
     }
 
     @Test
@@ -205,7 +205,7 @@ class ClickHouseSchemaSyncTest {
         payload.capability = "cap";
         payload.rawJson = "{}";
 
-        assertRowMatchesTable("raw_ai_stream_events", ClickHouseRowMappers.aiStreamEventsRow(payload));
+        assertRowMatchesTable("raw_ai_stream_events", ClickHouseRowMappers.aiStreamEventsRow(payload, "test_org"));
     }
 
     @Test
@@ -217,7 +217,7 @@ class ClickHouseSchemaSyncTest {
         payload.latencyMs = 1;
         payload.rawJson = "{}";
 
-        assertRowMatchesTable("raw_discovery_results", ClickHouseRowMappers.discoveryResultsRow(payload));
+        assertRowMatchesTable("raw_discovery_results", ClickHouseRowMappers.discoveryResultsRow(payload, "test_org"));
     }
 
     @Test
@@ -238,7 +238,7 @@ class ClickHouseSchemaSyncTest {
         payload.capability = "cap";
         payload.rawJson = "{}";
 
-        assertRowMatchesTable("raw_payment_events", ClickHouseRowMappers.paymentEventsRow(payload));
+        assertRowMatchesTable("raw_payment_events", ClickHouseRowMappers.paymentEventsRow(payload, "test_org"));
     }
 
     @Test
@@ -278,7 +278,7 @@ class ClickHouseSchemaSyncTest {
         payload.sourceFirstEventUid = "e1";
         payload.sourceLastEventUid = "e2";
 
-        assertRowMatchesTable("fact_workflow_sessions", ClickHouseRowMappers.factWorkflowSessionsRow(payload));
+        assertRowMatchesTable("fact_workflow_sessions", ClickHouseRowMappers.factWorkflowSessionsRow(payload, "test_org"));
     }
 
     @Test
@@ -302,7 +302,7 @@ class ClickHouseSchemaSyncTest {
         payload.sourceEventUid = "e2";
         payload.version = 2L;
 
-        assertRowMatchesTable("fact_workflow_session_segments", ClickHouseRowMappers.factWorkflowSessionSegmentsRow(payload));
+        assertRowMatchesTable("fact_workflow_session_segments", ClickHouseRowMappers.factWorkflowSessionSegmentsRow(payload, "test_org"));
     }
 
     @Test
@@ -325,7 +325,7 @@ class ClickHouseSchemaSyncTest {
         payload.sourceEventUid = "e3";
         payload.version = 3L;
 
-        assertRowMatchesTable("fact_workflow_param_updates", ClickHouseRowMappers.factWorkflowParamUpdatesRow(payload));
+        assertRowMatchesTable("fact_workflow_param_updates", ClickHouseRowMappers.factWorkflowParamUpdatesRow(payload, "test_org"));
     }
 
     @Test
@@ -350,7 +350,19 @@ class ClickHouseSchemaSyncTest {
         payload.edgeSemanticsVersion = "v1";
         payload.version = 5L;
 
-        assertRowMatchesTable("fact_workflow_latency_samples", ClickHouseRowMappers.factWorkflowLatencySamplesRow(payload));
+        assertRowMatchesTable("fact_workflow_latency_samples", ClickHouseRowMappers.factWorkflowLatencySamplesRow(payload, "test_org"));
+    }
+
+    @Test
+    void unknownEventsRowMatchesSchema() throws Exception {
+        EventPayloads.UnknownEvent payload = new EventPayloads.UnknownEvent();
+        payload.rawEventUid = "uid-1";
+        payload.ingestTimestamp = 1710000000000L;
+        payload.eventType = "some_new_event";
+        payload.sourceTopic = "network_events";
+        payload.rawJson = "{}";
+
+        assertRowMatchesTable("raw_unknown_events", ClickHouseRowMappers.unknownEventsRow(payload, "daydream"));
     }
 
     @Test
@@ -383,7 +395,7 @@ class ClickHouseSchemaSyncTest {
         envelope.payload.body = "{}";
         envelope.payload.canonicalJson = "{}";
 
-        String row = ClickHouseRowMappers.dlqRow(envelope);
+        String row = ClickHouseRowMappers.dlqRow(envelope, "");
         assertRowMatchesTable("raw_streaming_events_dlq", row);
         assertRowMatchesTable("raw_streaming_events_quarantine", row);
     }

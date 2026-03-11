@@ -19,7 +19,7 @@ class RowGuardProcessFunctionTest {
     void parsedEventOversizeEmitsDlq() throws Exception {
         OutputTag<RejectedEventEnvelope> dlqTag = new OutputTag<RejectedEventEnvelope>("dlq"){};
         ParsedEventRowGuardProcessFunction<String> fn = new ParsedEventRowGuardProcessFunction<>(
-                payload -> "12345678901",
+                (payload, org) -> "12345678901",
                 dlqTag,
                 10,
                 true);
@@ -50,7 +50,7 @@ class RowGuardProcessFunctionTest {
     @Test
     void dlqOversizeIsDropped() throws Exception {
         EnvelopeRowGuardProcessFunction fn = new EnvelopeRowGuardProcessFunction(
-                envelope -> "12345678901",
+                (envelope, org) -> "12345678901",
                 10);
 
         var harness = ProcessFunctionTestHarnesses.forProcessFunction(fn);
@@ -69,7 +69,7 @@ class RowGuardProcessFunctionTest {
     void parsedEventWithinLimitEmitsRow() throws Exception {
         OutputTag<RejectedEventEnvelope> dlqTag = new OutputTag<RejectedEventEnvelope>("dlq"){};
         ParsedEventRowGuardProcessFunction<String> fn = new ParsedEventRowGuardProcessFunction<>(
-                payload -> "ok",
+                (payload, org) -> "ok",
                 dlqTag,
                 10,
                 true);

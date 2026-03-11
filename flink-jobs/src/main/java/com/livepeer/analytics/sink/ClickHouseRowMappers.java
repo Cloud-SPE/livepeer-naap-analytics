@@ -9,10 +9,11 @@ import com.livepeer.analytics.model.RejectedEventEnvelope;
 public final class ClickHouseRowMappers {
     private ClickHouseRowMappers() {}
 
-    public static String aiStreamStatusRow(EventPayloads.AiStreamStatus s) {
+    public static String aiStreamStatusRow(EventPayloads.AiStreamStatus s, String org) {
         return ClickHouseJsonRow.create()
                 .addTimestampMillis("event_timestamp", s.eventTimestamp)
                 .addString("raw_event_uid", s.rawEventUid)
+                .addString("org", org)
                 .addString("stream_id", s.streamId)
                 .addString("request_id", s.requestId)
                 .addString("gateway", s.gateway)
@@ -34,10 +35,11 @@ public final class ClickHouseRowMappers {
                 .build();
     }
 
-    public static String streamIngestMetricsRow(EventPayloads.StreamIngestMetrics m) {
+    public static String streamIngestMetricsRow(EventPayloads.StreamIngestMetrics m, String org) {
         return ClickHouseJsonRow.create()
                 .addTimestampMillis("event_timestamp", m.eventTimestamp)
                 .addString("raw_event_uid", m.rawEventUid)
+                .addString("org", org)
                 .addString("stream_id", m.streamId)
                 .addString("request_id", m.requestId)
                 .addString("connection_quality", m.connectionQuality)
@@ -61,10 +63,11 @@ public final class ClickHouseRowMappers {
                 .build();
     }
 
-    public static String streamTraceRow(EventPayloads.StreamTraceEvent t) {
+    public static String streamTraceRow(EventPayloads.StreamTraceEvent t, String org) {
         return ClickHouseJsonRow.create()
                 .addTimestampMillis("event_timestamp", t.eventTimestamp)
                 .addString("raw_event_uid", t.rawEventUid)
+                .addString("org", org)
                 .addString("stream_id", t.streamId)
                 .addString("request_id", t.requestId)
                 .addString("orchestrator_address", t.orchestratorAddress)
@@ -75,10 +78,11 @@ public final class ClickHouseRowMappers {
                 .build();
     }
 
-    public static String networkCapabilitiesRow(EventPayloads.NetworkCapability n) {
+    public static String networkCapabilitiesRow(EventPayloads.NetworkCapability n, String org) {
         return ClickHouseJsonRow.create()
                 .addTimestampMillis("event_timestamp", n.eventTimestamp)
                 .addString("raw_event_uid", n.rawEventUid)
+                .addString("org", org)
                 .addString("source_event_id", n.sourceEventId)
                 .addString("orchestrator_address", n.orchestratorAddress)
                 .addString("local_address", n.localAddress)
@@ -106,10 +110,11 @@ public final class ClickHouseRowMappers {
                 .build();
     }
 
-    public static String networkCapabilitiesAdvertisedRow(EventPayloads.NetworkCapabilityAdvertised n) {
+    public static String networkCapabilitiesAdvertisedRow(EventPayloads.NetworkCapabilityAdvertised n, String org) {
         return ClickHouseJsonRow.create()
                 .addTimestampMillis("event_timestamp", n.eventTimestamp)
                 .addString("raw_event_uid", n.rawEventUid)
+                .addString("org", org)
                 .addString("source_event_id", n.sourceEventId)
                 .addString("orchestrator_address", n.orchestratorAddress)
                 .addString("local_address", n.localAddress)
@@ -123,10 +128,11 @@ public final class ClickHouseRowMappers {
                 .build();
     }
 
-    public static String networkCapabilitiesModelConstraintsRow(EventPayloads.NetworkCapabilityModelConstraint n) {
+    public static String networkCapabilitiesModelConstraintsRow(EventPayloads.NetworkCapabilityModelConstraint n, String org) {
         return ClickHouseJsonRow.create()
                 .addTimestampMillis("event_timestamp", n.eventTimestamp)
                 .addString("raw_event_uid", n.rawEventUid)
+                .addString("org", org)
                 .addString("source_event_id", n.sourceEventId)
                 .addString("orchestrator_address", n.orchestratorAddress)
                 .addString("local_address", n.localAddress)
@@ -144,10 +150,11 @@ public final class ClickHouseRowMappers {
                 .build();
     }
 
-    public static String networkCapabilitiesPricesRow(EventPayloads.NetworkCapabilityPrice n) {
+    public static String networkCapabilitiesPricesRow(EventPayloads.NetworkCapabilityPrice n, String org) {
         return ClickHouseJsonRow.create()
                 .addTimestampMillis("event_timestamp", n.eventTimestamp)
                 .addString("raw_event_uid", n.rawEventUid)
+                .addString("org", org)
                 .addString("source_event_id", n.sourceEventId)
                 .addString("orchestrator_address", n.orchestratorAddress)
                 .addString("local_address", n.localAddress)
@@ -163,10 +170,11 @@ public final class ClickHouseRowMappers {
                 .build();
     }
 
-    public static String aiStreamEventsRow(EventPayloads.AiStreamEvent e) {
+    public static String aiStreamEventsRow(EventPayloads.AiStreamEvent e, String org) {
         return ClickHouseJsonRow.create()
                 .addTimestampMillis("event_timestamp", e.eventTimestamp)
                 .addString("raw_event_uid", e.rawEventUid)
+                .addString("org", org)
                 .addString("stream_id", e.streamId)
                 .addString("request_id", e.requestId)
                 .addString("pipeline", e.pipeline)
@@ -177,10 +185,11 @@ public final class ClickHouseRowMappers {
                 .build();
     }
 
-    public static String discoveryResultsRow(EventPayloads.DiscoveryResult d) {
+    public static String discoveryResultsRow(EventPayloads.DiscoveryResult d, String org) {
         return ClickHouseJsonRow.create()
                 .addTimestampMillis("event_timestamp", d.eventTimestamp)
                 .addString("raw_event_uid", d.rawEventUid)
+                .addString("org", org)
                 .addString("orchestrator_address", d.orchestratorAddress)
                 .addString("orchestrator_url", d.orchestratorUrl)
                 .addInt("latency_ms", d.latencyMs)
@@ -188,10 +197,11 @@ public final class ClickHouseRowMappers {
                 .build();
     }
 
-    public static String paymentEventsRow(EventPayloads.PaymentEvent p) {
+    public static String paymentEventsRow(EventPayloads.PaymentEvent p, String org) {
         return ClickHouseJsonRow.create()
                 .addTimestampMillis("event_timestamp", p.eventTimestamp)
                 .addString("raw_event_uid", p.rawEventUid)
+                .addString("org", org)
                 .addString("request_id", p.requestId)
                 .addString("session_id", p.sessionId)
                 .addString("manifest_id", p.manifestId)
@@ -208,8 +218,9 @@ public final class ClickHouseRowMappers {
                 .build();
     }
 
-    public static String factWorkflowSessionsRow(EventPayloads.FactWorkflowSession f) {
+    public static String factWorkflowSessionsRow(EventPayloads.FactWorkflowSession f, String org) {
         return ClickHouseJsonRow.create()
+                .addString("org", org)
                 .addString("workflow_session_id", f.workflowSessionId)
                 .addString("workflow_type", f.workflowType)
                 .addString("workflow_id", f.workflowId)
@@ -256,8 +267,9 @@ public final class ClickHouseRowMappers {
                 .build();
     }
 
-    public static String factWorkflowSessionSegmentsRow(EventPayloads.FactWorkflowSessionSegment f) {
+    public static String factWorkflowSessionSegmentsRow(EventPayloads.FactWorkflowSessionSegment f, String org) {
         return ClickHouseJsonRow.create()
+                .addString("org", org)
                 .addString("workflow_session_id", f.workflowSessionId)
                 .addInt("segment_index", f.segmentIndex)
                 .addTimestampMillis("segment_start_ts", f.segmentStartTs)
@@ -279,8 +291,9 @@ public final class ClickHouseRowMappers {
                 .build();
     }
 
-    public static String factWorkflowParamUpdatesRow(EventPayloads.FactWorkflowParamUpdate f) {
+    public static String factWorkflowParamUpdatesRow(EventPayloads.FactWorkflowParamUpdate f, String org) {
         return ClickHouseJsonRow.create()
+                .addString("org", org)
                 .addTimestampMillis("update_ts", f.updateTs)
                 .addString("workflow_session_id", f.workflowSessionId)
                 .addString("stream_id", f.streamId)
@@ -301,8 +314,9 @@ public final class ClickHouseRowMappers {
                 .build();
     }
 
-    public static String factLifecycleEdgeCoverageRow(EventPayloads.FactLifecycleEdgeCoverage f) {
+    public static String factLifecycleEdgeCoverageRow(EventPayloads.FactLifecycleEdgeCoverage f, String org) {
         return ClickHouseJsonRow.create()
+                .addString("org", org)
                 .addTimestampMillis("signal_ts", f.signalTs)
                 .addString("workflow_session_id", f.workflowSessionId)
                 .addString("stream_id", f.streamId)
@@ -323,8 +337,9 @@ public final class ClickHouseRowMappers {
                 .build();
     }
 
-    public static String factWorkflowLatencySamplesRow(EventPayloads.FactWorkflowLatencySample f) {
+    public static String factWorkflowLatencySamplesRow(EventPayloads.FactWorkflowLatencySample f, String org) {
         return ClickHouseJsonRow.create()
+                .addString("org", org)
                 .addTimestampMillis("sample_ts", f.sampleTs)
                 .addString("workflow_session_id", f.workflowSessionId)
                 .addString("stream_id", f.streamId)
@@ -346,8 +361,9 @@ public final class ClickHouseRowMappers {
                 .build();
     }
 
-    public static String factStreamStatusSamplesRow(EventPayloads.FactStreamStatusSample f) {
+    public static String factStreamStatusSamplesRow(EventPayloads.FactStreamStatusSample f, String org) {
         return ClickHouseJsonRow.create()
+                .addString("org", org)
                 .addTimestampMillis("sample_ts", f.sampleTs)
                 .addString("workflow_session_id", f.workflowSessionId)
                 .addString("stream_id", f.streamId)
@@ -369,8 +385,9 @@ public final class ClickHouseRowMappers {
                 .build();
     }
 
-    public static String factStreamTraceEdgesRow(EventPayloads.FactStreamTraceEdge f) {
+    public static String factStreamTraceEdgesRow(EventPayloads.FactStreamTraceEdge f, String org) {
         return ClickHouseJsonRow.create()
+                .addString("org", org)
                 .addTimestampMillis("edge_ts", f.edgeTs)
                 .addString("workflow_session_id", f.workflowSessionId)
                 .addString("stream_id", f.streamId)
@@ -388,7 +405,18 @@ public final class ClickHouseRowMappers {
                 .build();
     }
 
-    public static String dlqRow(RejectedEventEnvelope envelope) {
+    public static String unknownEventsRow(EventPayloads.UnknownEvent u, String org) {
+        return ClickHouseJsonRow.create()
+                .addString("raw_event_uid", u.rawEventUid)
+                .addString("org", org)
+                .addString("event_type", u.eventType)
+                .addString("source_topic", u.sourceTopic)
+                .addTimestampMillis("ingest_timestamp", u.ingestTimestamp)
+                .addString("raw_json", u.rawJson)
+                .build();
+    }
+
+    public static String dlqRow(RejectedEventEnvelope envelope, String org) {
         long sourceRecordTimestamp = envelope.source == null
                 ? envelope.ingestionTimestamp
                 : envelope.source.recordTimestamp;

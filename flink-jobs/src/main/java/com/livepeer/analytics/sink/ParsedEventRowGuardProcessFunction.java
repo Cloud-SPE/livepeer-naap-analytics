@@ -38,7 +38,7 @@ public class ParsedEventRowGuardProcessFunction<T> extends ProcessFunction<Parse
         if (value == null || value.payload == null) {
             return;
         }
-        String row = mapper.map(value.payload);
+        String row = mapper.map(value.payload, value.event != null ? value.event.org : "");
         int sizeBytes = RowSizeUtil.utf8Bytes(row);
         if (sizeBytes > sizeLimitBytes) {
             if (oversizeCounter != null) {

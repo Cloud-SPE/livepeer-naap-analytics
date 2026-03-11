@@ -136,6 +136,7 @@ public class QualityGateProcessFunction extends ProcessFunction<KafkaInboundReco
         event.timestamp = JsonNodeUtils.parseTimestampMillisOrDefault(root.path("timestamp"), System.currentTimeMillis());
         event.gateway = root.path("gateway").asText("");
         event.rawJson = rawJson;
+        event.org = config.topicOrgMap.getOrDefault(record.topic, "unknown");
         event.replay = root.path("__replay").asBoolean(false);
         event.source = RejectedEventEnvelopeSupport.buildSourcePointer(record);
         event.dimensions = RejectedEventEnvelopeSupport.extractDimensions(root);

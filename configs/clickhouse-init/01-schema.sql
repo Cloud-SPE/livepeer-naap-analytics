@@ -136,6 +136,7 @@ CREATE TABLE IF NOT EXISTS raw_ai_stream_status
     event_date Date MATERIALIZED toDate(event_timestamp),
     event_hour UInt8 MATERIALIZED toHour(event_timestamp),
     raw_event_uid String,
+    org LowCardinality(String),
 
     -- Identifiers
     stream_id String,
@@ -186,6 +187,7 @@ CREATE TABLE IF NOT EXISTS raw_stream_ingest_metrics
     event_timestamp DateTime64(3, 'UTC'),
     event_date Date MATERIALIZED toDate(event_timestamp),
     raw_event_uid String,
+    org LowCardinality(String),
 
     -- Identifiers
     stream_id String,
@@ -234,6 +236,7 @@ CREATE TABLE IF NOT EXISTS raw_stream_trace_events
     event_timestamp DateTime64(3, 'UTC'),
     event_date Date MATERIALIZED toDate(event_timestamp),
     raw_event_uid String,
+    org LowCardinality(String),
 
     -- Identifiers
     stream_id String,
@@ -266,6 +269,7 @@ CREATE TABLE IF NOT EXISTS raw_network_capabilities
     event_date Date MATERIALIZED toDate(event_timestamp),
     raw_event_uid String,
     source_event_id String,
+    org LowCardinality(String),
 
     -- Orchestrator info
     orchestrator_address String,
@@ -319,6 +323,7 @@ CREATE TABLE IF NOT EXISTS raw_network_capabilities_advertised
     event_date Date MATERIALIZED toDate(event_timestamp),
     raw_event_uid String,
     source_event_id String,
+    org LowCardinality(String),
 
     orchestrator_address String,
     local_address String,
@@ -346,6 +351,7 @@ CREATE TABLE IF NOT EXISTS raw_network_capabilities_model_constraints
     event_date Date MATERIALIZED toDate(event_timestamp),
     raw_event_uid String,
     source_event_id String,
+    org LowCardinality(String),
 
     orchestrator_address String,
     local_address String,
@@ -378,6 +384,7 @@ CREATE TABLE IF NOT EXISTS raw_network_capabilities_prices
     event_date Date MATERIALIZED toDate(event_timestamp),
     raw_event_uid String,
     source_event_id String,
+    org LowCardinality(String),
 
     orchestrator_address String,
     local_address String,
@@ -406,6 +413,7 @@ CREATE TABLE IF NOT EXISTS fact_stream_status_samples
     sample_ts DateTime64(3, 'UTC'),
     sample_date Date MATERIALIZED toDate(sample_ts),
 
+    org LowCardinality(String),
     workflow_session_id String,
     stream_id String,
     request_id String,
@@ -441,6 +449,7 @@ CREATE TABLE IF NOT EXISTS fact_stream_trace_edges
     edge_ts DateTime64(3, 'UTC'),
     edge_date Date MATERIALIZED toDate(edge_ts),
 
+    org LowCardinality(String),
     workflow_session_id String,
     stream_id String,
     request_id String,
@@ -524,6 +533,7 @@ FROM raw_stream_ingest_metrics;
 -- Silver Fact: Workflow Sessions (stateful, Flink-generated)
 CREATE TABLE IF NOT EXISTS fact_workflow_sessions
 (
+    org LowCardinality(String),
     workflow_session_id String,
     workflow_type LowCardinality(String),
     workflow_id String,
@@ -586,6 +596,7 @@ CREATE TABLE IF NOT EXISTS fact_workflow_sessions
 -- Silver Fact: Workflow Session Segments (stateful, Flink-generated)
 CREATE TABLE IF NOT EXISTS fact_workflow_session_segments
 (
+    org LowCardinality(String),
     workflow_session_id String,
     segment_index UInt16,
 
@@ -622,6 +633,7 @@ CREATE TABLE IF NOT EXISTS fact_workflow_param_updates
     update_ts DateTime64(3, 'UTC'),
     update_date Date MATERIALIZED toDate(update_ts),
 
+    org LowCardinality(String),
     workflow_session_id String,
     stream_id String,
     request_id String,
@@ -654,6 +666,7 @@ CREATE TABLE IF NOT EXISTS fact_lifecycle_edge_coverage
     signal_ts DateTime64(3, 'UTC'),
     signal_date Date MATERIALIZED toDate(signal_ts),
 
+    org LowCardinality(String),
     workflow_session_id String,
     stream_id String,
     request_id String,
@@ -687,6 +700,7 @@ CREATE TABLE IF NOT EXISTS fact_workflow_latency_samples
     sample_ts DateTime64(3, 'UTC'),
     sample_date Date MATERIALIZED toDate(sample_ts),
 
+    org LowCardinality(String),
     workflow_session_id String,
     stream_id String,
     request_id String,
@@ -1044,6 +1058,7 @@ CREATE TABLE IF NOT EXISTS raw_payment_events
     event_timestamp DateTime64(3, 'UTC'),
     event_date Date MATERIALIZED toDate(event_timestamp),
     raw_event_uid String,
+    org LowCardinality(String),
 
     -- Payment info
     request_id String,
@@ -2235,6 +2250,7 @@ CREATE TABLE IF NOT EXISTS raw_ai_stream_events
     event_timestamp DateTime64(3, 'UTC'),
     event_date Date MATERIALIZED toDate(event_timestamp),
     raw_event_uid String,
+    org LowCardinality(String),
 
     -- Identifiers
     stream_id String,
@@ -2264,6 +2280,7 @@ CREATE TABLE IF NOT EXISTS raw_discovery_results
     event_timestamp DateTime64(3, 'UTC'),
     event_date Date MATERIALIZED toDate(event_timestamp),
     raw_event_uid String,
+    org LowCardinality(String),
 
     -- Discovered orchestrator
     orchestrator_address String,
@@ -2280,6 +2297,30 @@ CREATE TABLE IF NOT EXISTS raw_discovery_results
         PARTITION BY toYYYYMM(event_date)
         ORDER BY (event_date, orchestrator_address, event_timestamp)
         TTL event_date + INTERVAL 30 DAY DELETE
+        SETTINGS index_granularity = 8192;
+
+-- Table 8: Unknown Events (unrecognized event types, stored for future promotion)
+CREATE TABLE IF NOT EXISTS raw_unknown_events
+(
+    ingest_timestamp DateTime64(3, 'UTC'),
+    ingest_date Date MATERIALIZED toDate(ingest_timestamp),
+    raw_event_uid String,
+    org LowCardinality(String),
+
+    -- Event identification
+    event_type LowCardinality(String),
+    source_topic LowCardinality(String),
+
+    -- Raw JSON for future parsing
+    raw_json String,
+
+    -- Metadata
+    ingestion_timestamp DateTime64(3, 'UTC') DEFAULT now64(3)
+)
+    ENGINE = MergeTree()
+        PARTITION BY toYYYYMM(ingest_date)
+        ORDER BY (ingest_date, org, event_type, ingest_timestamp)
+        TTL ingest_date + INTERVAL 90 DAY DELETE
         SETTINGS index_granularity = 8192;
 
 -- ============================================
