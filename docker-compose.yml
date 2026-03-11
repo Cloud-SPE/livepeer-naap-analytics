@@ -228,7 +228,9 @@ services:
     # env.java.opts: "--add-opens java.base/java.util=ALL-UNNAMED"
     environment:
       QUALITY_KAFKA_BOOTSTRAP: kafka:9092
-      QUALITY_INPUT_TOPIC: streaming_events
+      QUALITY_INPUT_TOPICS: streaming_events
+      QUALITY_TOPIC_ORG_MAP: streaming_events=cloud_spe
+      QUALITY_TOPIC_RESET_STRATEGY_MAP: streaming_events=earliest
       QUALITY_DLQ_TOPIC: events.dlq.streaming_events.v1
       QUALITY_QUARANTINE_TOPIC: events.quarantine.streaming_events.v1
       QUALITY_DEDUP_TTL_MINUTES: "1440"
@@ -277,7 +279,9 @@ services:
     # env.java.opts: "--add-opens java.base/java.util=ALL-UNNAMED"
     environment:
       QUALITY_KAFKA_BOOTSTRAP: kafka:9092
-      QUALITY_INPUT_TOPIC: streaming_events
+      QUALITY_INPUT_TOPICS: streaming_events
+      QUALITY_TOPIC_ORG_MAP: streaming_events=cloud_spe
+      QUALITY_TOPIC_RESET_STRATEGY_MAP: streaming_events=earliest
       QUALITY_DLQ_TOPIC: events.dlq.streaming_events.v1
       QUALITY_QUARANTINE_TOPIC: events.quarantine.streaming_events.v1
       QUALITY_DEDUP_TTL_MINUTES: "1440"
