@@ -1,0 +1,1336 @@
+openapi: 3.0.3
+info:
+  title: NAAP Analytics API
+  version: "1"
+  description: |
+    Read-only analytics API for the Livepeer AI network.
+    Backed by ClickHouse materialized views fed from two Kafka topics:
+    `network_events` (daydream org) and `streaming_events` (cloudspe org).
+
+    **Rate limiting:** 30 req/s sustained, burst 60 per IP.
+    Exceeded requests receive `429 Too Many Requests` with a `Retry-After: 1` header.
+
+    **Default time window:** last 24 hours when `start`/`end` are omitted.
+
+    **WEI values** (payment amounts) are returned as decimal strings to avoid
+    float64 precision loss (e.g. `"1234500000000000000"`).
+
+servers:
+  - url: http://localhost:8000
+    description: Local development
+  - url: https://analytics.livepeer.cloud
+    description: Production
+
+tags:
+  - name: Health
+  - name: Network
+    description: Orchestrator network state (R1)
+  - name: Streams
+    description: Stream activity (R2)
+  - name: Performance
+    description: FPS, latency, and WebRTC quality (R3)
+  - name: Payments
+    description: Micropayment economics (R4)
+  - name: Reliability
+    description: Failure rates and events (R5)
+  - name: Leaderboard
+    description: Composite-scored orchestrator ranking (R6)
+
+# ── Common parameter definitions ──────────────────────────────────────────────
+
+components:
+  parameters:
+    org:
+      name: org
+      in: query
+      description: Filter to a single organisation. Omit for all orgs.
+      schema:
+        type: string
+        enum: [daydream, cloudspe]
+    start:
+      name: start
+      in: query
+      description: Window start (RFC3339). Defaults to 24 hours ago.
+      schema:
+        type: string
+        format: date-time
+        example: "2026-03-01T00:00:00Z"
+    end:
+      name: end
+      in: query
+      description: Window end (RFC3339). Defaults to now.
+      schema:
+        type: string
+        format: date-time
+        example: "2026-03-24T23:59:59Z"
+    limit:
+      name: limit
+      in: query
+      description: Maximum rows to return (1–1000).
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 1000
+        default: 50
+    offset:
+      name: offset
+      in: query
+      description: Pagination offset.
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+    pipeline:
+      name: pipeline
+      in: query
+      description: Filter by pipeline name (e.g. `text-to-image`).
+      schema:
+        type: string
+    orch_address:
+      name: orch_address
+      in: query
+      description: Filter by orchestrator Ethereum address (lowercased).
+      schema:
+        type: string
+        example: "0xabc123def456"
+    active_only:
+      name: active_only
+      in: query
+      description: When `true`, return only orchestrators active within the last 15 minutes.
+      schema:
+        type: boolean
+        default: false
+    stream_id:
+      name: stream_id
+      in: query
+      schema:
+        type: string
+    failure_type:
+      name: failure_type
+      in: query
+      description: Filter failure events by type.
+      schema:
+        type: string
+        enum: [no_orch_available, orch_swap, inference_restart, inference_error]
+    address_path:
+      name: address
+      in: path
+      required: true
+      description: Orchestrator Ethereum address (lowercased).
+      schema:
+        type: string
+        example: "0xabc123def456"
+
+  schemas:
+
+    # ── Shared ──────────────────────────────────────────────────────────────
+
+    Problem:
+      description: RFC 7807 Problem Details error response.
+      type: object
+      properties:
+        type:
+          type: string
+          example: "about:blank"
+        title:
+          type: string
+          example: "Too Many Requests"
+        status:
+          type: integer
+          example: 429
+        detail:
+          type: string
+          example: "rate limit exceeded"
+
+    WEI:
+      description: |
+        Payment value in wei (1e-18 ETH), returned as a decimal string to
+        preserve full uint64 precision.
+      type: string
+      pattern: "^[0-9]+$"
+      example: "1234500000000000000"
+
+    FPSStats:
+      type: object
+      properties:
+        Avg:
+          type: number
+          format: double
+        P5:
+          type: number
+          format: double
+        P50:
+          type: number
+          format: double
+        P99:
+          type: number
+          format: double
+
+    # ── Network (R1) ────────────────────────────────────────────────────────
+
+    NetworkSummary:
+      type: object
+      properties:
+        Org:
+          type: string
+          example: ""
+        SnapshotTime:
+          type: string
+          format: date-time
+        TotalRegistered:
+          type: integer
+          format: int64
+        TotalActive:
+          type: integer
+          format: int64
+        ActiveThresholdMinutes:
+          type: integer
+
+    Orchestrator:
+      type: object
+      properties:
+        Address:
+          type: string
+        Org:
+          type: string
+        Name:
+          type: string
+        URI:
+          type: string
+        Version:
+          type: string
+        LastSeen:
+          type: string
+          format: date-time
+        IsActive:
+          type: boolean
+        RawCapabilities:
+          type: string
+          description: Raw JSON capabilities blob.
+
+    GPUModel:
+      type: object
+      properties:
+        Model:
+          type: string
+          example: "NVIDIA GeForce RTX 4090"
+        Count:
+          type: integer
+          format: int64
+        TotalVRAMGB:
+          type: number
+          format: double
+        VRAMPerGPUGB:
+          type: number
+          format: double
+
+    GPUSummary:
+      type: object
+      properties:
+        TotalGPUs:
+          type: integer
+          format: int64
+        TotalVRAMGB:
+          type: number
+          format: double
+        ByModel:
+          type: array
+          items:
+            $ref: "#/components/schemas/GPUModel"
+
+    ModelAvailability:
+      type: object
+      properties:
+        Pipeline:
+          type: string
+        Model:
+          type: string
+        WarmOrchCount:
+          type: integer
+          format: int64
+        TotalCapacity:
+          type: integer
+          format: int64
+        PriceMinWeiPerPixel:
+          type: integer
+          format: int64
+        PriceMaxWeiPerPixel:
+          type: integer
+          format: int64
+        PriceAvgWeiPerPixel:
+          type: number
+          format: double
+
+    OrchProfile:
+      type: object
+      properties:
+        Address:
+          type: string
+        Name:
+          type: string
+        URI:
+          type: string
+        Version:
+          type: string
+        Org:
+          type: string
+        LastSeen:
+          type: string
+          format: date-time
+        IsActive:
+          type: boolean
+        StreamsHandled:
+          type: integer
+          format: int64
+        AvgInferenceFPS:
+          type: number
+          format: double
+        DegradedRate:
+          type: number
+          format: double
+        AvgLatencyMS:
+          type: number
+          format: double
+        RawCapabilities:
+          type: string
+          description: Raw JSON for GPU/model/pricing detail.
+
+    # ── Streams (R2) ────────────────────────────────────────────────────────
+
+    ActiveStreamsSummary:
+      type: object
+      properties:
+        TotalActive:
+          type: integer
+          format: int64
+        ActiveThresholdSeconds:
+          type: integer
+        ByOrg:
+          type: object
+          additionalProperties:
+            type: integer
+            format: int64
+        ByPipeline:
+          type: object
+          additionalProperties:
+            type: integer
+            format: int64
+        ByState:
+          type: object
+          additionalProperties:
+            type: integer
+            format: int64
+
+    StreamSummary:
+      type: object
+      properties:
+        StartTime:
+          type: string
+          format: date-time
+        EndTime:
+          type: string
+          format: date-time
+        TotalStarted:
+          type: integer
+          format: int64
+        TotalCompleted:
+          type: integer
+          format: int64
+        NoOrchAvailableCount:
+          type: integer
+          format: int64
+        SuccessRate:
+          type: number
+          format: double
+          description: Fraction of started streams that completed successfully (0–1).
+        NoOrchAvailableRate:
+          type: number
+          format: double
+        OrchSwapCount:
+          type: integer
+          format: int64
+
+    StreamBucket:
+      type: object
+      properties:
+        Timestamp:
+          type: string
+          format: date-time
+        Started:
+          type: integer
+          format: int64
+        Completed:
+          type: integer
+          format: int64
+        NoOrchAvailable:
+          type: integer
+          format: int64
+        OrchSwap:
+          type: integer
+          format: int64
+
+    # ── Performance (R3) ────────────────────────────────────────────────────
+
+    PipelineFPS:
+      type: object
+      properties:
+        Pipeline:
+          type: string
+        InferenceFPS:
+          $ref: "#/components/schemas/FPSStats"
+        InputFPS:
+          $ref: "#/components/schemas/FPSStats"
+        SampleCount:
+          type: integer
+          format: int64
+
+    OrchFPS:
+      type: object
+      properties:
+        Address:
+          type: string
+        Name:
+          type: string
+        Pipeline:
+          type: string
+        InferenceFPS:
+          $ref: "#/components/schemas/FPSStats"
+        InputFPS:
+          $ref: "#/components/schemas/FPSStats"
+        SampleCount:
+          type: integer
+          format: int64
+
+    FPSSummary:
+      type: object
+      properties:
+        StartTime:
+          type: string
+          format: date-time
+        EndTime:
+          type: string
+          format: date-time
+        ByPipeline:
+          type: array
+          items:
+            $ref: "#/components/schemas/PipelineFPS"
+        ByOrchestrator:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrchFPS"
+
+    FPSBucket:
+      type: object
+      properties:
+        Timestamp:
+          type: string
+          format: date-time
+        AvgInferenceFPS:
+          type: number
+          format: double
+        AvgInputFPS:
+          type: number
+          format: double
+        SampleCount:
+          type: integer
+          format: int64
+        Degraded:
+          type: boolean
+          description: True when avg inference FPS drops ≥20% from the prior bucket.
+
+    OrchLatency:
+      type: object
+      properties:
+        Address:
+          type: string
+        Name:
+          type: string
+        AvgMS:
+          type: number
+          format: double
+        P50MS:
+          type: number
+          format: double
+        P95MS:
+          type: number
+          format: double
+        P99MS:
+          type: number
+          format: double
+        SampleCount:
+          type: integer
+          format: int64
+
+    LatencySummary:
+      type: object
+      properties:
+        NetworkAvgMS:
+          type: number
+          format: double
+        ByOrchestrator:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrchLatency"
+
+    WebRTCQuality:
+      type: object
+      properties:
+        StartTime:
+          type: string
+          format: date-time
+        EndTime:
+          type: string
+          format: date-time
+        Video:
+          type: object
+          properties:
+            AvgJitterMS:
+              type: number
+              format: double
+            PacketLossRate:
+              type: number
+              format: double
+        Audio:
+          type: object
+          properties:
+            AvgJitterMS:
+              type: number
+              format: double
+            PacketLossRate:
+              type: number
+              format: double
+        ConnQuality:
+          type: object
+          properties:
+            Good:
+              type: number
+              format: double
+              description: Fraction of streams in good quality tier (0–1).
+            Fair:
+              type: number
+              format: double
+            Poor:
+              type: number
+              format: double
+
+    # ── Payments (R4) ───────────────────────────────────────────────────────
+
+    OrgPaymentTotal:
+      type: object
+      properties:
+        TotalWEI:
+          $ref: "#/components/schemas/WEI"
+        Count:
+          type: integer
+          format: int64
+
+    PaymentSummary:
+      type: object
+      properties:
+        StartTime:
+          type: string
+          format: date-time
+        EndTime:
+          type: string
+          format: date-time
+        TotalPaymentsWEI:
+          $ref: "#/components/schemas/WEI"
+        PaymentEventCount:
+          type: integer
+          format: int64
+        UniqueOrchestrators:
+          type: integer
+          format: int64
+        ByOrg:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/OrgPaymentTotal"
+
+    PaymentBucket:
+      type: object
+      properties:
+        Timestamp:
+          type: string
+          format: date-time
+        TotalWEI:
+          $ref: "#/components/schemas/WEI"
+        EventCount:
+          type: integer
+          format: int64
+        UniqueOrchs:
+          type: integer
+          format: int64
+
+    PipelinePayment:
+      type: object
+      properties:
+        Pipeline:
+          type: string
+        TotalWEI:
+          $ref: "#/components/schemas/WEI"
+        EventCount:
+          type: integer
+          format: int64
+        AvgPriceWeiPerPixel:
+          type: number
+          format: double
+
+    OrchPayment:
+      type: object
+      properties:
+        Address:
+          type: string
+        TotalReceivedWEI:
+          $ref: "#/components/schemas/WEI"
+        PaymentCount:
+          type: integer
+          format: int64
+
+    # ── Reliability (R5) ────────────────────────────────────────────────────
+
+    FailureBreakdown:
+      type: object
+      properties:
+        NoOrchAvailable:
+          type: integer
+          format: int64
+        OrchSwap:
+          type: integer
+          format: int64
+        InferenceRestart:
+          type: integer
+          format: int64
+        InferenceError:
+          type: integer
+          format: int64
+        DegradedInference:
+          type: integer
+          format: int64
+        DegradedInput:
+          type: integer
+          format: int64
+
+    ReliabilitySummary:
+      type: object
+      properties:
+        StartTime:
+          type: string
+          format: date-time
+        EndTime:
+          type: string
+          format: date-time
+        StreamSuccessRate:
+          type: number
+          format: double
+        NoOrchAvailableRate:
+          type: number
+          format: double
+        OrchSwapCount:
+          type: integer
+          format: int64
+        OrchSwapRate:
+          type: number
+          format: double
+        InferenceRestartRate:
+          type: number
+          format: double
+        DegradedStateRate:
+          type: number
+          format: double
+        FailureBreakdown:
+          $ref: "#/components/schemas/FailureBreakdown"
+
+    ReliabilityBucket:
+      type: object
+      properties:
+        Timestamp:
+          type: string
+          format: date-time
+        Started:
+          type: integer
+          format: int64
+        SuccessRate:
+          type: number
+          format: double
+          nullable: true
+          description: Null when sample count is below minimum threshold (5 streams).
+        NoOrchAvailableRate:
+          type: number
+          format: double
+          nullable: true
+        DegradedRate:
+          type: number
+          format: double
+          nullable: true
+
+    OrchReliability:
+      type: object
+      properties:
+        Address:
+          type: string
+        StreamsHandled:
+          type: integer
+          format: int64
+        DegradedRate:
+          type: number
+          format: double
+        RestartRate:
+          type: number
+          format: double
+        ErrorRate:
+          type: number
+          format: double
+
+    FailureEvent:
+      type: object
+      properties:
+        Timestamp:
+          type: string
+          format: date-time
+        FailureType:
+          type: string
+          enum: [no_orch_available, orch_swap, inference_restart, inference_error]
+        StreamID:
+          type: string
+        RequestID:
+          type: string
+        Org:
+          type: string
+        Gateway:
+          type: string
+        Detail:
+          type: string
+          description: Raw JSON payload from the source event.
+
+    # ── Leaderboard (R6) ────────────────────────────────────────────────────
+
+    LeaderboardEntry:
+      type: object
+      properties:
+        Address:
+          type: string
+        Name:
+          type: string
+        Score:
+          type: number
+          format: double
+          description: |
+            Composite score 0–100.
+            Weights: FPS 30%, reliability (1−degraded) 30%, volume 20%, latency (inverted) 20%.
+            Min-max normalised across the current result set.
+        StreamsHandled:
+          type: integer
+          format: int64
+        AvgInferenceFPS:
+          type: number
+          format: double
+        DegradedRate:
+          type: number
+          format: double
+        AvgLatencyMS:
+          type: number
+          format: double
+        LastSeen:
+          type: string
+          format: date-time
+        IsActive:
+          type: boolean
+
+  responses:
+    429:
+      description: Rate limit exceeded.
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+          description: Seconds to wait before retrying.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    500:
+      description: Internal server error.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    404:
+      description: Resource not found.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+
+# ── Paths ──────────────────────────────────────────────────────────────────────
+
+paths:
+
+  /healthz:
+    get:
+      tags: [Health]
+      summary: Health check
+      description: Returns 200 with `{"status":"ok"}` if the service and ClickHouse are healthy. Returns 503 if the ClickHouse ping fails.
+      operationId: getHealth
+      responses:
+        "200":
+          description: Service is healthy.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [ok, degraded]
+        "503":
+          description: ClickHouse is unreachable.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: degraded
+
+  # ── Network ────────────────────────────────────────────────────────────────
+
+  /v1/net/summary:
+    get:
+      tags: [Network]
+      summary: Network summary
+      description: Total and active orchestrator counts at the time of the last capabilities snapshot.
+      operationId: getNetworkSummary
+      parameters:
+        - $ref: "#/components/parameters/org"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NetworkSummary"
+        "429":
+          $ref: "#/components/responses/429"
+        "500":
+          $ref: "#/components/responses/500"
+
+  /v1/net/orchestrators:
+    get:
+      tags: [Network]
+      summary: List orchestrators
+      description: Paginated list of orchestrators ordered by last seen descending.
+      operationId: listOrchestrators
+      parameters:
+        - $ref: "#/components/parameters/org"
+        - $ref: "#/components/parameters/active_only"
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/offset"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Orchestrator"
+        "429":
+          $ref: "#/components/responses/429"
+        "500":
+          $ref: "#/components/responses/500"
+
+  /v1/net/orchestrators/{address}:
+    get:
+      tags: [Network]
+      summary: Orchestrator profile
+      description: Full profile for a single orchestrator including 7-day reliability stats and raw capabilities JSON.
+      operationId: getOrchProfile
+      parameters:
+        - $ref: "#/components/parameters/address_path"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrchProfile"
+        "404":
+          $ref: "#/components/responses/404"
+        "429":
+          $ref: "#/components/responses/429"
+        "500":
+          $ref: "#/components/responses/500"
+
+  /v1/net/gpu:
+    get:
+      tags: [Network]
+      summary: GPU summary
+      description: Total GPU count and VRAM aggregated by hardware model.
+      operationId: getGPUSummary
+      parameters:
+        - $ref: "#/components/parameters/org"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GPUSummary"
+        "429":
+          $ref: "#/components/responses/429"
+        "500":
+          $ref: "#/components/responses/500"
+
+  /v1/net/models:
+    get:
+      tags: [Network]
+      summary: Model availability
+      description: Available AI models per pipeline, including warm orch count and price range.
+      operationId: listModels
+      parameters:
+        - $ref: "#/components/parameters/org"
+        - $ref: "#/components/parameters/pipeline"
+        - $ref: "#/components/parameters/limit"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ModelAvailability"
+        "429":
+          $ref: "#/components/responses/429"
+        "500":
+          $ref: "#/components/responses/500"
+
+  # ── Streams ────────────────────────────────────────────────────────────────
+
+  /v1/streams/active:
+    get:
+      tags: [Streams]
+      summary: Active streams
+      description: Count of currently active streams broken down by org, pipeline, and state. A stream is considered active if it was seen within the last 60 seconds.
+      operationId: getActiveStreams
+      parameters:
+        - $ref: "#/components/parameters/org"
+        - $ref: "#/components/parameters/pipeline"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActiveStreamsSummary"
+        "429":
+          $ref: "#/components/responses/429"
+        "500":
+          $ref: "#/components/responses/500"
+
+  /v1/streams/summary:
+    get:
+      tags: [Streams]
+      summary: Stream activity summary
+      description: Aggregate stream lifecycle metrics over the requested time window.
+      operationId: getStreamSummary
+      parameters:
+        - $ref: "#/components/parameters/org"
+        - $ref: "#/components/parameters/pipeline"
+        - $ref: "#/components/parameters/start"
+        - $ref: "#/components/parameters/end"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StreamSummary"
+        "429":
+          $ref: "#/components/responses/429"
+        "500":
+          $ref: "#/components/responses/500"
+
+  /v1/streams/history:
+    get:
+      tags: [Streams]
+      summary: Stream activity history
+      description: Hourly time series of stream counts over the requested window.
+      operationId: listStreamHistory
+      parameters:
+        - $ref: "#/components/parameters/org"
+        - $ref: "#/components/parameters/pipeline"
+        - $ref: "#/components/parameters/start"
+        - $ref: "#/components/parameters/end"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/StreamBucket"
+        "429":
+          $ref: "#/components/responses/429"
+        "500":
+          $ref: "#/components/responses/500"
+
+  # ── Performance ────────────────────────────────────────────────────────────
+
+  /v1/perf/fps:
+    get:
+      tags: [Performance]
+      summary: FPS summary
+      description: |
+        Inference and input FPS percentiles (p5/p50/p99) broken down by pipeline
+        and by orchestrator. Samples with fps == 0 are excluded.
+        Computed from raw events (not aggregates) for percentile accuracy.
+      operationId: getFPSSummary
+      parameters:
+        - $ref: "#/components/parameters/org"
+        - $ref: "#/components/parameters/pipeline"
+        - $ref: "#/components/parameters/orch_address"
+        - $ref: "#/components/parameters/start"
+        - $ref: "#/components/parameters/end"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FPSSummary"
+        "429":
+          $ref: "#/components/responses/429"
+        "500":
+          $ref: "#/components/responses/500"
+
+  /v1/perf/fps/history:
+    get:
+      tags: [Performance]
+      summary: FPS history
+      description: Hourly average inference and input FPS for charting. Buckets flagged as `Degraded` when avg FPS drops ≥20% from the prior bucket.
+      operationId: listFPSHistory
+      parameters:
+        - $ref: "#/components/parameters/org"
+        - $ref: "#/components/parameters/pipeline"
+        - $ref: "#/components/parameters/orch_address"
+        - $ref: "#/components/parameters/start"
+        - $ref: "#/components/parameters/end"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FPSBucket"
+        "429":
+          $ref: "#/components/responses/429"
+        "500":
+          $ref: "#/components/responses/500"
+
+  /v1/perf/latency:
+    get:
+      tags: [Performance]
+      summary: Orchestrator discovery latency
+      description: Avg, p50, p95, p99 discovery latency per orchestrator, computed from raw `discovery_results` events.
+      operationId: getLatencySummary
+      parameters:
+        - $ref: "#/components/parameters/org"
+        - $ref: "#/components/parameters/start"
+        - $ref: "#/components/parameters/end"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LatencySummary"
+        "429":
+          $ref: "#/components/responses/429"
+        "500":
+          $ref: "#/components/responses/500"
+
+  /v1/perf/webrtc:
+    get:
+      tags: [Performance]
+      summary: WebRTC quality
+      description: Aggregated WebRTC video/audio jitter, packet loss, and connection quality distribution.
+      operationId: getWebRTCQuality
+      parameters:
+        - $ref: "#/components/parameters/org"
+        - $ref: "#/components/parameters/stream_id"
+        - $ref: "#/components/parameters/start"
+        - $ref: "#/components/parameters/end"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebRTCQuality"
+        "429":
+          $ref: "#/components/responses/429"
+        "500":
+          $ref: "#/components/responses/500"
+
+  # ── Payments ───────────────────────────────────────────────────────────────
+
+  /v1/payments/summary:
+    get:
+      tags: [Payments]
+      summary: Payment summary
+      description: Total payments in WEI, event count, and unique orchestrators over the window. Broken down by org.
+      operationId: getPaymentSummary
+      parameters:
+        - $ref: "#/components/parameters/org"
+        - $ref: "#/components/parameters/start"
+        - $ref: "#/components/parameters/end"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentSummary"
+        "429":
+          $ref: "#/components/responses/429"
+        "500":
+          $ref: "#/components/responses/500"
+
+  /v1/payments/history:
+    get:
+      tags: [Payments]
+      summary: Payment history
+      description: Hourly payment totals for charting.
+      operationId: listPaymentHistory
+      parameters:
+        - $ref: "#/components/parameters/org"
+        - $ref: "#/components/parameters/start"
+        - $ref: "#/components/parameters/end"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PaymentBucket"
+        "429":
+          $ref: "#/components/responses/429"
+        "500":
+          $ref: "#/components/responses/500"
+
+  /v1/payments/by-pipeline:
+    get:
+      tags: [Payments]
+      summary: Payments by pipeline
+      description: Total payments and average price per pixel for each pipeline.
+      operationId: listPaymentsByPipeline
+      parameters:
+        - $ref: "#/components/parameters/org"
+        - $ref: "#/components/parameters/pipeline"
+        - $ref: "#/components/parameters/start"
+        - $ref: "#/components/parameters/end"
+        - $ref: "#/components/parameters/limit"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PipelinePayment"
+        "429":
+          $ref: "#/components/responses/429"
+        "500":
+          $ref: "#/components/responses/500"
+
+  /v1/payments/by-orch:
+    get:
+      tags: [Payments]
+      summary: Payments by orchestrator
+      description: Total payments received per orchestrator, ordered by total descending.
+      operationId: listPaymentsByOrch
+      parameters:
+        - $ref: "#/components/parameters/org"
+        - $ref: "#/components/parameters/orch_address"
+        - $ref: "#/components/parameters/start"
+        - $ref: "#/components/parameters/end"
+        - $ref: "#/components/parameters/limit"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/OrchPayment"
+        "429":
+          $ref: "#/components/responses/429"
+        "500":
+          $ref: "#/components/responses/500"
+
+  # ── Reliability ────────────────────────────────────────────────────────────
+
+  /v1/reliability/summary:
+    get:
+      tags: [Reliability]
+      summary: Reliability summary
+      description: Network-wide stream success rate, failure rates, and failure breakdown over the window.
+      operationId: getReliabilitySummary
+      parameters:
+        - $ref: "#/components/parameters/org"
+        - $ref: "#/components/parameters/start"
+        - $ref: "#/components/parameters/end"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReliabilitySummary"
+        "429":
+          $ref: "#/components/responses/429"
+        "500":
+          $ref: "#/components/responses/500"
+
+  /v1/reliability/history:
+    get:
+      tags: [Reliability]
+      summary: Reliability history
+      description: Hourly success and failure rates for charting. Rates are null when the sample count is below the minimum threshold (5 streams).
+      operationId: listReliabilityHistory
+      parameters:
+        - $ref: "#/components/parameters/org"
+        - $ref: "#/components/parameters/start"
+        - $ref: "#/components/parameters/end"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ReliabilityBucket"
+        "429":
+          $ref: "#/components/responses/429"
+        "500":
+          $ref: "#/components/responses/500"
+
+  /v1/reliability/orchs:
+    get:
+      tags: [Reliability]
+      summary: Orchestrator reliability
+      description: Per-orchestrator degraded, restart, and error rates over the window.
+      operationId: listOrchReliability
+      parameters:
+        - $ref: "#/components/parameters/org"
+        - $ref: "#/components/parameters/orch_address"
+        - $ref: "#/components/parameters/start"
+        - $ref: "#/components/parameters/end"
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/offset"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/OrchReliability"
+        "429":
+          $ref: "#/components/responses/429"
+        "500":
+          $ref: "#/components/responses/500"
+
+  /v1/failures:
+    get:
+      tags: [Reliability]
+      summary: Failure events
+      description: Raw failure event log, newest first. Filterable by type.
+      operationId: listFailures
+      parameters:
+        - $ref: "#/components/parameters/org"
+        - $ref: "#/components/parameters/failure_type"
+        - $ref: "#/components/parameters/start"
+        - $ref: "#/components/parameters/end"
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/offset"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FailureEvent"
+        "429":
+          $ref: "#/components/responses/429"
+        "500":
+          $ref: "#/components/responses/500"
+
+  # ── Leaderboard ────────────────────────────────────────────────────────────
+
+  /v1/leaderboard:
+    get:
+      tags: [Leaderboard]
+      summary: Orchestrator leaderboard
+      description: |
+        Orchestrators ranked by composite score.
+        Scoring weights: FPS 30%, reliability (1−degradedRate) 30%,
+        volume 20%, latency (inverted) 20%.
+        All four dimensions are min-max normalised across the result set,
+        then scaled to 0–100. Only orchestrators with ≥10 streams handled
+        in the window are included.
+      operationId: getLeaderboard
+      parameters:
+        - $ref: "#/components/parameters/org"
+        - $ref: "#/components/parameters/start"
+        - $ref: "#/components/parameters/end"
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/offset"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LeaderboardEntry"
+        "429":
+          $ref: "#/components/responses/429"
+        "500":
+          $ref: "#/components/responses/500"
+
+  /v1/leaderboard/{address}:
+    get:
+      tags: [Leaderboard]
+      summary: Leaderboard orchestrator profile
+      description: Full profile for a single orchestrator including 7-day reliability stats and raw capabilities JSON.
+      operationId: getLeaderboardProfile
+      parameters:
+        - $ref: "#/components/parameters/address_path"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrchProfile"
+        "404":
+          $ref: "#/components/responses/404"
+        "429":
+          $ref: "#/components/responses/429"
+        "500":
+          $ref: "#/components/responses/500"
