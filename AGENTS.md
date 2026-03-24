@@ -1,0 +1,97 @@
+# AGENTS.md
+
+This file is the **table of contents** for this repository. It is short by design.
+Do not add detailed rules here — add them to the appropriate `docs/` file and link here.
+
+## What this project is
+
+Livepeer NAAP Analytics — a multi-stack Kafka analytics pipeline with a Go REST API.
+Events flow through Kafka, are processed by a Python pipeline, and surfaced via a Go API.
+
+See `docs/PRODUCT_SENSE.md` for product principles and goals.
+
+## Repository map
+
+```
+api/        — Go REST API service
+pipeline/   — Python Kafka analytics pipeline
+infra/      — Docker, Kafka, and infrastructure configuration
+scripts/    — Developer and ops utilities
+docs/       — System of record (start here for context)
+```
+
+## Architecture
+
+Layered domain architecture enforced per component. Dependencies flow **forward only**:
+
+```
+Types → Config → Repo → Service → Runtime
+```
+
+Cross-cutting concerns (auth, telemetry, feature flags) enter through **Providers only**.
+No layer may import from a layer ahead of it. This is enforced mechanically.
+
+See `docs/DESIGN.md` for the full architecture map and enforcement model.
+See `docs/design-docs/architecture.md` for per-component layer rules.
+
+## Documentation index
+
+| File | Purpose |
+|------|---------|
+| `docs/DESIGN.md` | Architecture overview and layering rules |
+| `docs/PLANS.md` | Active and completed plans index |
+| `docs/PRODUCT_SENSE.md` | Product principles and goals |
+| `docs/design-docs/index.md` | All design documents with status |
+| `docs/design-docs/core-beliefs.md` | Agent-first operating principles |
+| `docs/design-docs/architecture.md` | Detailed per-component architecture |
+| `docs/exec-plans/active/` | In-progress execution plans |
+| `docs/exec-plans/completed/` | Historical execution plans |
+| `docs/exec-plans/tech-debt-tracker.md` | Known technical debt |
+| `docs/generated/schema.md` | Auto-generated schema reference |
+| `docs/product-specs/index.md` | Feature and product specifications |
+
+## Non-negotiable tenants
+
+Five principles that govern every decision. Read them before writing any code.
+Full detail in `docs/design-docs/core-beliefs.md`.
+
+1. **Secure by default** — non-root containers, validated inputs, no secrets in code
+2. **Performance is critical** — latency targets are real; regressions are bugs
+3. **No shortcuts** — tradeoffs are deliberate and documented in `docs/exec-plans/`
+4. **Testing and docs are baked in** — every interface is documented; every behaviour is tested
+5. **Simplicity first** — add complexity only when unavoidable, and justify it
+
+## Working in this repo
+
+- **All knowledge lives in the repository.** If it is not here, it does not exist.
+- **Plans are first-class artifacts.** Use `docs/exec-plans/` for complex work.
+- **Enforce boundaries mechanically.** Do not bypass linters or structural tests.
+- **Validate data at boundaries** using typed schemas (Pydantic for Python, typed structs for Go).
+- **Do not probe data shapes speculatively** — rely on typed SDKs and generated schemas.
+- **Prefer shared utilities** over hand-rolled helpers. Check `api/internal/` and `pipeline/src/` first.
+- **Linter error messages include remediation instructions.** Read them before guessing a fix.
+
+## Component quick-start
+
+```bash
+# Full stack
+make up
+
+# API only
+make dev-api        # cd api && go run ./cmd/server
+
+# Pipeline only
+make dev-pipeline   # cd pipeline && python -m src.runtime.consumer
+
+# Run all tests
+make test
+
+# Run linters
+make lint
+```
+
+## CI and quality
+
+- Linters are enforced in CI. Structural tests validate layer dependency directions.
+- A recurring doc-gardening pass scans for stale documentation.
+- See `docs/design-docs/architecture.md` for the full enforcement model.

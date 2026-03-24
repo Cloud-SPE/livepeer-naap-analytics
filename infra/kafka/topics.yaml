@@ -1,0 +1,33 @@
+# Kafka topic definitions for NAAP Analytics.
+# Used for documentation and topic provisioning via scripts/setup.sh.
+# Topic naming convention: naap.<domain>.<event-type>
+
+topics:
+  - name: naap.events.raw
+    partitions: 6
+    replication_factor: 1
+    config:
+      retention.ms: "604800000"   # 7 days
+      cleanup.policy: delete
+    description: >
+      Raw inbound events from the Livepeer network.
+      Produced by network nodes, consumed by the analytics pipeline.
+
+  - name: naap.analytics.aggregated
+    partitions: 3
+    replication_factor: 1
+    config:
+      retention.ms: "2592000000"  # 30 days
+      cleanup.policy: delete
+    description: >
+      Time-windowed analytics aggregates produced by the pipeline.
+      Consumed by the API repo layer for storage.
+
+  - name: naap.alerts
+    partitions: 1
+    replication_factor: 1
+    config:
+      retention.ms: "604800000"   # 7 days
+      cleanup.policy: delete
+    description: >
+      Threshold breach alerts produced by the pipeline.

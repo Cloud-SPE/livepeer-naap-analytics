@@ -1,0 +1,3460 @@
+{
+  "generated_at": "2026-03-24T13:28:02.180766+00:00",
+  "topics": {
+    "network_events": {
+      "total_messages": 100,
+      "parse_errors": 0,
+      "time_range": {
+        "start": "2026-03-24 12:27:54 UTC",
+        "end": "2026-03-24 12:28:03 UTC"
+      },
+      "event_type_counts": {
+        "pipelines_api_request": 34,
+        "stream_ingest_metrics": 13,
+        "webrtc_stats": 20,
+        "create_new_payment": 12,
+        "stream_trace": 12,
+        "ai_stream_events": 3,
+        "ai_stream_status": 6
+      },
+      "streams": {
+        "str_hQts2McbJ6tiAeNk": {
+          "stream_id": "str_hQts2McbJ6tiAeNk",
+          "request_id": "2a17e71f",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": null,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": null
+        },
+        "2638accb": {
+          "stream_id": "",
+          "request_id": "2638accb",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": null,
+          "total_payments_wei": 4810800000000000,
+          "payment_events": 2,
+          "avg_inference_fps": null
+        },
+        "str_s4qdN6F1p2mac1u5": {
+          "stream_id": "str_s4qdN6F1p2mac1u5",
+          "request_id": "a611b340",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": 0.0,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": null
+        },
+        "str_CERcn9QVqQPSoMke": {
+          "stream_id": "str_CERcn9QVqQPSoMke",
+          "request_id": "29f0eeed",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": null,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": null
+        },
+        "str_JTEn5vwyWswRWXGB": {
+          "stream_id": "str_JTEn5vwyWswRWXGB",
+          "request_id": "0daa82cd",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": null,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": null
+        },
+        "55dd864a": {
+          "stream_id": "",
+          "request_id": "55dd864a",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": null,
+          "total_payments_wei": 2412720000000000,
+          "payment_events": 1,
+          "avg_inference_fps": null
+        },
+        "69291738": {
+          "stream_id": "",
+          "request_id": "69291738",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": null,
+          "total_payments_wei": 4810800000000000,
+          "payment_events": 2,
+          "avg_inference_fps": null
+        },
+        "str_SkC28KXFEGhFD9Ni": {
+          "stream_id": "str_SkC28KXFEGhFD9Ni",
+          "request_id": "55dd864a",
+          "pipeline": "",
+          "orchs_seen": [
+            "0x395222df89b9d0523e426db6f05b44243b6f0133"
+          ],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": 9.167,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": null
+        },
+        "str_hisDR8Dz6Zj2TARq": {
+          "stream_id": "str_hisDR8Dz6Zj2TARq",
+          "request_id": "9d06d10a",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": null,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": null
+        },
+        "str_nkXAVAGHp5NYZqdD": {
+          "stream_id": "str_nkXAVAGHp5NYZqdD",
+          "request_id": "dbd5a98b",
+          "pipeline": "",
+          "orchs_seen": [
+            "0xfd7db765c9bfc1493b4c9ea6ddf61a7fc7d40d12"
+          ],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": 0.0,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": null
+        },
+        "str_pR4v1c2QyG6VUMvJ": {
+          "stream_id": "str_pR4v1c2QyG6VUMvJ",
+          "request_id": "6a47ba2e",
+          "pipeline": "streamdiffusion-sdxl-v2v",
+          "orchs_seen": [
+            "0xc4ea4fa2c0ebba54c09dddbd4d462fada562203e"
+          ],
+          "orch_swaps": 0,
+          "states_seen": [
+            "ONLINE"
+          ],
+          "restart_count": 1,
+          "had_failure": true,
+          "last_error": null,
+          "duration_sec": 0.082,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": 18.77
+        },
+        "ff4a6aa4": {
+          "stream_id": "",
+          "request_id": "ff4a6aa4",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": null,
+          "total_payments_wei": 2401440000000000,
+          "payment_events": 1,
+          "avg_inference_fps": null
+        },
+        "str_xA2afdyTexnNGJ1e": {
+          "stream_id": "str_xA2afdyTexnNGJ1e",
+          "request_id": "8235cc21",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": null,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": null
+        },
+        "str_4xbu2AgHXF7cmRqg": {
+          "stream_id": "str_4xbu2AgHXF7cmRqg",
+          "request_id": "d851db38",
+          "pipeline": "",
+          "orchs_seen": [
+            "0xfd7db765c9bfc1493b4c9ea6ddf61a7fc7d40d12"
+          ],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": 0.991,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": null
+        },
+        "str_v6gV5HyqzbGAf6Ae": {
+          "stream_id": "str_v6gV5HyqzbGAf6Ae",
+          "request_id": "1c4eabb8",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": null,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": null
+        },
+        "951a20a1": {
+          "stream_id": "",
+          "request_id": "951a20a1",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": null,
+          "total_payments_wei": 2403840000000000,
+          "payment_events": 1,
+          "avg_inference_fps": null
+        },
+        "str_F9j5LyndbdRbeKvX": {
+          "stream_id": "str_F9j5LyndbdRbeKvX",
+          "request_id": "918585cf",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": null,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": null
+        },
+        "str_DHwkyJa1Mcage875": {
+          "stream_id": "str_DHwkyJa1Mcage875",
+          "request_id": "7e04114b",
+          "pipeline": "streamdiffusion-sdxl",
+          "orchs_seen": [
+            "0xcdf93b13efcf63f84f2affb01bec48a5c096c69e"
+          ],
+          "orch_swaps": 0,
+          "states_seen": [
+            "DEGRADED_INPUT"
+          ],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": null,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": 0.0
+        },
+        "str_suWU4k7bydL9r1B7": {
+          "stream_id": "str_suWU4k7bydL9r1B7",
+          "request_id": "89bb6a0e",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": 0.0,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": null
+        },
+        "str_PkqZfa3kKXVC2EeD": {
+          "stream_id": "str_PkqZfa3kKXVC2EeD",
+          "request_id": "69f38234",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": null,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": null
+        },
+        "str_xxtqqCVE5Z7MPRKz": {
+          "stream_id": "str_xxtqqCVE5Z7MPRKz",
+          "request_id": "87bcd14d",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": null,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": null
+        },
+        "8bc84a3d": {
+          "stream_id": "",
+          "request_id": "8bc84a3d",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": null,
+          "total_payments_wei": 2403120000000000,
+          "payment_events": 1,
+          "avg_inference_fps": null
+        },
+        "str_yvXVQNCw5abev7xR": {
+          "stream_id": "str_yvXVQNCw5abev7xR",
+          "request_id": "d1853fa9",
+          "pipeline": "streamdiffusion-sdxl",
+          "orchs_seen": [
+            "0xc4ea4fa2c0ebba54c09dddbd4d462fada562203e"
+          ],
+          "orch_swaps": 0,
+          "states_seen": [
+            "ONLINE"
+          ],
+          "restart_count": 2,
+          "had_failure": true,
+          "last_error": "Error processing input frame: CUDA ERROR: 901, error code reference: https://nvidia.github.io/cuda-python/module/cudart.html#cuda.cudart.cudaError_t",
+          "duration_sec": null,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": 19.99
+        },
+        "str_uk6kUMzsgEiBEfAT": {
+          "stream_id": "str_uk6kUMzsgEiBEfAT",
+          "request_id": "",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": 0.0,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": null
+        },
+        "369ef0be": {
+          "stream_id": "",
+          "request_id": "369ef0be",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": null,
+          "total_payments_wei": 2412720000000000,
+          "payment_events": 1,
+          "avg_inference_fps": null
+        },
+        "8300ec67": {
+          "stream_id": "",
+          "request_id": "8300ec67",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": null,
+          "total_payments_wei": 2404320000000000,
+          "payment_events": 1,
+          "avg_inference_fps": null
+        },
+        "2372de33": {
+          "stream_id": "",
+          "request_id": "2372de33",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": null,
+          "total_payments_wei": 2400000000000000,
+          "payment_events": 1,
+          "avg_inference_fps": null
+        },
+        "str_gzbq2fxCgssftWTG": {
+          "stream_id": "str_gzbq2fxCgssftWTG",
+          "request_id": "afe37b63",
+          "pipeline": "streamdiffusion-sdxl",
+          "orchs_seen": [
+            "0xdbd0631bb91f10e38427026261a4d9c3a87b7352"
+          ],
+          "orch_swaps": 0,
+          "states_seen": [
+            "ONLINE"
+          ],
+          "restart_count": 1,
+          "had_failure": true,
+          "last_error": null,
+          "duration_sec": null,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": 17.37
+        },
+        "str_TkAncFHiZG5NuDq6": {
+          "stream_id": "str_TkAncFHiZG5NuDq6",
+          "request_id": "35c15492",
+          "pipeline": "streamdiffusion-sdxl",
+          "orchs_seen": [
+            "0xb120a72a9264e90092e8197c0fabd210c18bc5be"
+          ],
+          "orch_swaps": 0,
+          "states_seen": [
+            "ONLINE"
+          ],
+          "restart_count": 0,
+          "had_failure": true,
+          "last_error": "Error updating params: Failed to fetch image from URL: 403, message='Forbidden', url='https://storage.googleapis.com/lp-ai-assets/ipadapter_style_imgs/textures/fractal.jpeg'",
+          "duration_sec": null,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": 16.59
+        },
+        "938a760b": {
+          "stream_id": "",
+          "request_id": "938a760b",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": null,
+          "total_payments_wei": 2409120000000000,
+          "payment_events": 1,
+          "avg_inference_fps": null
+        },
+        "str_Afsd85xHVddtPtoB": {
+          "stream_id": "str_Afsd85xHVddtPtoB",
+          "request_id": "33c00a31",
+          "pipeline": "",
+          "orchs_seen": [
+            "0xfd7db765c9bfc1493b4c9ea6ddf61a7fc7d40d12"
+          ],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": 1.207,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": null
+        },
+        "str_hGiw1HBxjnF6PFFZ": {
+          "stream_id": "str_hGiw1HBxjnF6PFFZ",
+          "request_id": "69291738",
+          "pipeline": "streamdiffusion-sdxl-v2v",
+          "orchs_seen": [
+            "0xfd7db765c9bfc1493b4c9ea6ddf61a7fc7d40d12"
+          ],
+          "orch_swaps": 0,
+          "states_seen": [
+            "ONLINE"
+          ],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": null,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": 19.43
+        },
+        "str_v1JJzKT8rsx4emb4": {
+          "stream_id": "str_v1JJzKT8rsx4emb4",
+          "request_id": "",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": 0.0,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": null
+        }
+      },
+      "orchestrators": {
+        "0x22b1bcc0c0db224bfc56c9b95a2db407548666ee": {
+          "address": "0x22b1bcc0c0db224bfc56c9b95a2db407548666ee",
+          "local_address": "",
+          "uri": "https://lpt.thomasblock.io:20110",
+          "name": "lpt.thomasblock.io",
+          "version": "",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 2406480000000000,
+          "discovery_latency_ms_avg": null
+        },
+        "0xb120a72a9264e90092e8197c0fabd210c18bc5be": {
+          "address": "0xb120a72a9264e90092e8197c0fabd210c18bc5be",
+          "local_address": "",
+          "uri": "https://ai.lpt-4.moudi.network:18938",
+          "name": "ai.lpt-4.moudi.network",
+          "version": "",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 4808640000000000,
+          "discovery_latency_ms_avg": null
+        },
+        "0x3b28a7d785356dc67c7970666747e042305bfb79": {
+          "address": "0x3b28a7d785356dc67c7970666747e042305bfb79",
+          "local_address": "",
+          "uri": "https://ai3.ad-astra.live:9988",
+          "name": "ai3.ad-astra.live",
+          "version": "",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 4825440000000000,
+          "discovery_latency_ms_avg": null
+        },
+        "0x08f76e106a2dd4f6385efc8ea6c69a2816082461": {
+          "address": "0x08f76e106a2dd4f6385efc8ea6c69a2816082461",
+          "local_address": "",
+          "uri": "https://ai8.brzeczyszczykiewicz.work:30021",
+          "name": "ai8.brzeczyszczykiewicz.work",
+          "version": "",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 9621360000000000,
+          "discovery_latency_ms_avg": null
+        },
+        "0x395222df89b9d0523e426db6f05b44243b6f0133": {
+          "address": "0x395222df89b9d0523e426db6f05b44243b6f0133",
+          "local_address": "",
+          "uri": "https://ai3.ad-astra.live:9988",
+          "name": "ai3.ad-astra.live",
+          "version": "",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0xfd7db765c9bfc1493b4c9ea6ddf61a7fc7d40d12": {
+          "address": "0xfd7db765c9bfc1493b4c9ea6ddf61a7fc7d40d12",
+          "local_address": "",
+          "uri": "https://ai8.brzeczyszczykiewicz.work:30021",
+          "name": "ai8.brzeczyszczykiewicz.work",
+          "version": "",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0xcf5654abfaefc001a84aeb18fe4c13bfd0f8a77b": {
+          "address": "0xcf5654abfaefc001a84aeb18fe4c13bfd0f8a77b",
+          "local_address": "",
+          "uri": "https://lpt.gzp.link:8888",
+          "name": "lpt.gzp.link",
+          "version": "",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 2403840000000000,
+          "discovery_latency_ms_avg": null
+        },
+        "0x9d61ae5875e89036fbf6059f3116d01a22ace3c8": {
+          "address": "0x9d61ae5875e89036fbf6059f3116d01a22ace3c8",
+          "local_address": "",
+          "uri": "https://rtv.nullworks.xyz:9924",
+          "name": "rtv.nullworks.xyz",
+          "version": "",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 2403120000000000,
+          "discovery_latency_ms_avg": null
+        },
+        "0x733da28b0145ff561868e408d2ac8565ebe73aab": {
+          "address": "0x733da28b0145ff561868e408d2ac8565ebe73aab",
+          "local_address": "",
+          "uri": "https://legiocorp.link:8777",
+          "name": "legiocorp.link",
+          "version": "",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 2400000000000000,
+          "discovery_latency_ms_avg": null
+        }
+      },
+      "payments": {
+        "total_events": 12,
+        "total_wei": 28868880000000000,
+        "total_eth": 0.028868880000000003,
+        "unique_senders": 1,
+        "unique_recipients": 7,
+        "by_pipeline": {
+          "4a410085": 4810800000000000,
+          "streamdiffusion-sdxl": 2412720000000000,
+          "1b028707": 4810800000000000,
+          "c5ea799f": 2401440000000000,
+          "cb65e808": 2403840000000000,
+          "ed897741": 2403120000000000,
+          "7508cd5e": 2412720000000000,
+          "9fb3d5a6": 2404320000000000,
+          "ae4dae5e": 2400000000000000,
+          "e470dbb7": 2409120000000000
+        }
+      }
+    },
+    "streaming_events": {
+      "total_messages": 100,
+      "parse_errors": 0,
+      "time_range": {
+        "start": "2026-03-24 12:28:05 UTC",
+        "end": "2026-03-24 13:27:59 UTC"
+      },
+      "event_type_counts": {
+        "create_new_payment": 8,
+        "ai_stream_status": 12,
+        "network_capabilities": 4,
+        "discovery_results": 19,
+        "ai_stream_events": 21,
+        "stream_trace": 36
+      },
+      "streams": {
+        "f2e06558": {
+          "stream_id": "",
+          "request_id": "f2e06558",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": null,
+          "total_payments_wei": 2400000000000000,
+          "payment_events": 1,
+          "avg_inference_fps": null
+        },
+        "aiJobTesterStream-1774355288824756820": {
+          "stream_id": "aiJobTesterStream-1774355288824756820",
+          "request_id": "d112a0c1",
+          "pipeline": "streamdiffusion-sdxl-v2v",
+          "orchs_seen": [
+            "0xfd7db765c9bfc1493b4c9ea6ddf61a7fc7d40d12"
+          ],
+          "orch_swaps": 0,
+          "states_seen": [
+            "ONLINE"
+          ],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": null,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": 18.47
+        },
+        "888e39dd": {
+          "stream_id": "",
+          "request_id": "888e39dd",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": null,
+          "total_payments_wei": 2411760000000000,
+          "payment_events": 1,
+          "avg_inference_fps": null
+        },
+        "aiJobTesterStream-1774356091193513651": {
+          "stream_id": "aiJobTesterStream-1774356091193513651",
+          "request_id": "4a1a0d99",
+          "pipeline": "streamdiffusion-sdxl",
+          "orchs_seen": [
+            "0x5fd25374e1e87d6728ec8601c512dfabab375ab5"
+          ],
+          "orch_swaps": 0,
+          "states_seen": [
+            "ONLINE"
+          ],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": null,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": 0.0
+        },
+        "aiJobTesterStream-1774356221687891452": {
+          "stream_id": "aiJobTesterStream-1774356221687891452",
+          "request_id": "7ebc88cd",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": 0.304,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": null
+        },
+        "aiJobTesterStream-1774356258727466401": {
+          "stream_id": "aiJobTesterStream-1774356258727466401",
+          "request_id": "916712b0",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": 0.067,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": null
+        },
+        "aiJobTesterStream-1774356284086292193": {
+          "stream_id": "aiJobTesterStream-1774356284086292193",
+          "request_id": "a551f7a7",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": 0.101,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": null
+        },
+        "aiJobTesterStream-1774356361169483168": {
+          "stream_id": "aiJobTesterStream-1774356361169483168",
+          "request_id": "957b2b72",
+          "pipeline": "",
+          "orchs_seen": [
+            "0xd66e5c00725e0d87d57172191ebd5e865fd71cff"
+          ],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": 0.0,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": null
+        },
+        "aiJobTesterStream-1774356445587742661": {
+          "stream_id": "aiJobTesterStream-1774356445587742661",
+          "request_id": "8881cf63",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": 0.0,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": null
+        },
+        "aiJobTesterStream-1774356585054746373": {
+          "stream_id": "aiJobTesterStream-1774356585054746373",
+          "request_id": "436b1a24",
+          "pipeline": "streamdiffusion-sdxl-v2v",
+          "orchs_seen": [
+            "0xfd7db765c9bfc1493b4c9ea6ddf61a7fc7d40d12"
+          ],
+          "orch_swaps": 0,
+          "states_seen": [
+            "ONLINE"
+          ],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": 33.345,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": 18.26
+        },
+        "aa37b2d2": {
+          "stream_id": "",
+          "request_id": "aa37b2d2",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": null,
+          "total_payments_wei": 2416800000000000,
+          "payment_events": 1,
+          "avg_inference_fps": null
+        },
+        "aiJobTesterStream-1774357351359240935": {
+          "stream_id": "aiJobTesterStream-1774357351359240935",
+          "request_id": "9f8a340b",
+          "pipeline": "streamdiffusion-sdxl-v2v",
+          "orchs_seen": [
+            "0x5fd25374e1e87d6728ec8601c512dfabab375ab5"
+          ],
+          "orch_swaps": 0,
+          "states_seen": [
+            "DEGRADED_INPUT"
+          ],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": null,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": 9.69
+        },
+        "aiJobTesterStream-1774357408978312718": {
+          "stream_id": "aiJobTesterStream-1774357408978312718",
+          "request_id": "1cb8cf6d",
+          "pipeline": "streamdiffusion-sdxl",
+          "orchs_seen": [
+            "0x1b0c26fc2e310efb2649c24ec9aa966effda292f"
+          ],
+          "orch_swaps": 0,
+          "states_seen": [
+            "DEGRADED_INPUT"
+          ],
+          "restart_count": 0,
+          "had_failure": true,
+          "last_error": "[update_params] Error reloading pipeline, falling back to previous params: Acceleration has failed.",
+          "duration_sec": null,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": 8.09
+        },
+        "aiJobTesterStream-1774357470802904122": {
+          "stream_id": "aiJobTesterStream-1774357470802904122",
+          "request_id": "15a039f6",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": 0.0,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": null
+        },
+        "634bf8f1": {
+          "stream_id": "",
+          "request_id": "634bf8f1",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": null,
+          "total_payments_wei": 2401920000000000,
+          "payment_events": 1,
+          "avg_inference_fps": null
+        },
+        "aiJobTesterStream-1774357615352621991": {
+          "stream_id": "aiJobTesterStream-1774357615352621991",
+          "request_id": "539d0c08",
+          "pipeline": "streamdiffusion-sdxl",
+          "orchs_seen": [
+            "0xc4ea4fa2c0ebba54c09dddbd4d462fada562203e"
+          ],
+          "orch_swaps": 0,
+          "states_seen": [
+            "DEGRADED_INPUT"
+          ],
+          "restart_count": 2,
+          "had_failure": true,
+          "last_error": "Error processing input frame: CUDA ERROR: 901, error code reference: https://nvidia.github.io/cuda-python/module/cudart.html#cuda.cudart.cudaError_t",
+          "duration_sec": null,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": 3.16
+        },
+        "aiJobTesterStream-1774358433757559648": {
+          "stream_id": "aiJobTesterStream-1774358433757559648",
+          "request_id": "89a0af55",
+          "pipeline": "streamdiffusion-sdxl",
+          "orchs_seen": [
+            "0xdbd0631bb91f10e38427026261a4d9c3a87b7352"
+          ],
+          "orch_swaps": 0,
+          "states_seen": [
+            "ONLINE"
+          ],
+          "restart_count": 0,
+          "had_failure": true,
+          "last_error": "Error updating params: Request timeout while fetching image from URL",
+          "duration_sec": null,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": 12.88
+        },
+        "aiJobTesterStream-1774358503391737600": {
+          "stream_id": "aiJobTesterStream-1774358503391737600",
+          "request_id": "97583a14",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": 0.0,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": null
+        },
+        "aiJobTesterStream-1774358524801821697": {
+          "stream_id": "aiJobTesterStream-1774358524801821697",
+          "request_id": "5de8de14",
+          "pipeline": "",
+          "orchs_seen": [
+            "0x1f390a42884c76ded8d3ed9c07b213431f6611fb"
+          ],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": 0.84,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": null
+        },
+        "aiJobTesterStream-1774358581178103766": {
+          "stream_id": "aiJobTesterStream-1774358581178103766",
+          "request_id": "b7aeee0b",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": 0.101,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": null
+        },
+        "aiJobTesterStream-1774358642788974612": {
+          "stream_id": "aiJobTesterStream-1774358642788974612",
+          "request_id": "33a9b032",
+          "pipeline": "",
+          "orchs_seen": [
+            "0xc4ea4fa2c0ebba54c09dddbd4d462fada562203e"
+          ],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": 46.458,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": null
+        },
+        "aiJobTesterStream-1774358759577489405": {
+          "stream_id": "aiJobTesterStream-1774358759577489405",
+          "request_id": "9455b1b5",
+          "pipeline": "",
+          "orchs_seen": [
+            "0x395222df89b9d0523e426db6f05b44243b6f0133"
+          ],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": 13.231,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": null
+        },
+        "aiJobTesterStream-1774358819748590214": {
+          "stream_id": "aiJobTesterStream-1774358819748590214",
+          "request_id": "5db66fd5",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": 0.0,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": null
+        },
+        "aiJobTesterStream-1774356019019657231": {
+          "stream_id": "aiJobTesterStream-1774356019019657231",
+          "request_id": "2b207012",
+          "pipeline": "streamdiffusion-sdxl",
+          "orchs_seen": [
+            "0xdbd0631bb91f10e38427026261a4d9c3a87b7352"
+          ],
+          "orch_swaps": 0,
+          "states_seen": [
+            "ONLINE"
+          ],
+          "restart_count": 0,
+          "had_failure": true,
+          "last_error": "Error updating params: Request timeout while fetching image from URL",
+          "duration_sec": null,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": 11.79
+        },
+        "9a2c6865": {
+          "stream_id": "",
+          "request_id": "9a2c6865",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": null,
+          "total_payments_wei": 2403600000000000,
+          "payment_events": 1,
+          "avg_inference_fps": null
+        },
+        "aiJobTesterStream-1774356146241377894": {
+          "stream_id": "aiJobTesterStream-1774356146241377894",
+          "request_id": "d6ffc446",
+          "pipeline": "streamdiffusion-sdxl",
+          "orchs_seen": [
+            "0x1b0c26fc2e310efb2649c24ec9aa966effda292f"
+          ],
+          "orch_swaps": 0,
+          "states_seen": [
+            "LOADING"
+          ],
+          "restart_count": 0,
+          "had_failure": true,
+          "last_error": "[update_params] Error reloading pipeline, falling back to previous params: Acceleration has failed.",
+          "duration_sec": 0.268,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": 0.0
+        },
+        "aiJobTesterStream-1774356214559210055": {
+          "stream_id": "aiJobTesterStream-1774356214559210055",
+          "request_id": "30143d78",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": 0.0,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": null
+        },
+        "aiJobTesterStream-1774356229254062376": {
+          "stream_id": "aiJobTesterStream-1774356229254062376",
+          "request_id": "dc0c8bde",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": 0.0,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": null
+        },
+        "aiJobTesterStream-1774356243606213769": {
+          "stream_id": "aiJobTesterStream-1774356243606213769",
+          "request_id": "8933646c",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": 0.0,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": null
+        },
+        "aiJobTesterStream-1774356276175210746": {
+          "stream_id": "aiJobTesterStream-1774356276175210746",
+          "request_id": "90507d0e",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": 0.0,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": null
+        },
+        "aiJobTesterStream-1774356408060939307": {
+          "stream_id": "aiJobTesterStream-1774356408060939307",
+          "request_id": "0b7db14e",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": 0.0,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": null
+        },
+        "04cd7766": {
+          "stream_id": "",
+          "request_id": "04cd7766",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": null,
+          "total_payments_wei": 2409840000000000,
+          "payment_events": 1,
+          "avg_inference_fps": null
+        },
+        "aiJobTesterStream-1774356501246090361": {
+          "stream_id": "aiJobTesterStream-1774356501246090361",
+          "request_id": "b0990243",
+          "pipeline": "streamdiffusion-sdxl-v2v",
+          "orchs_seen": [
+            "0x22d4da4b5ce66601a7fca3cee56070d2deaa6072"
+          ],
+          "orch_swaps": 0,
+          "states_seen": [
+            "DEGRADED_INPUT"
+          ],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": 1.054,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": 0.0
+        },
+        "aiJobTesterStream-1774356563137514847": {
+          "stream_id": "aiJobTesterStream-1774356563137514847",
+          "request_id": "ba0f0baf",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": 0.0,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": null
+        },
+        "aiJobTesterStream-1774356570672761465": {
+          "stream_id": "aiJobTesterStream-1774356570672761465",
+          "request_id": "f1fc42fa",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": 0.0,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": null
+        },
+        "bfb00179": {
+          "stream_id": "",
+          "request_id": "bfb00179",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": null,
+          "total_payments_wei": 2421840000000000,
+          "payment_events": 1,
+          "avg_inference_fps": null
+        },
+        "aiJobTesterStream-1774357576943055471": {
+          "stream_id": "aiJobTesterStream-1774357576943055471",
+          "request_id": "30d844b5",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": 0.0,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": null
+        },
+        "539d0c08": {
+          "stream_id": "",
+          "request_id": "539d0c08",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": null,
+          "total_payments_wei": 2414160000000000,
+          "payment_events": 1,
+          "avg_inference_fps": null
+        },
+        "aiJobTesterStream-1774357745359135654": {
+          "stream_id": "aiJobTesterStream-1774357745359135654",
+          "request_id": "f6e64fbf",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": 0.0,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": null
+        },
+        "aiJobTesterStream-1774357794331937081": {
+          "stream_id": "aiJobTesterStream-1774357794331937081",
+          "request_id": "73de6c8d",
+          "pipeline": "",
+          "orchs_seen": [
+            "0xd66e5c00725e0d87d57172191ebd5e865fd71cff"
+          ],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": 0.0,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": null
+        },
+        "aiJobTesterStream-1774357852662872125": {
+          "stream_id": "aiJobTesterStream-1774357852662872125",
+          "request_id": "cbe6832c",
+          "pipeline": "",
+          "orchs_seen": [],
+          "orch_swaps": 0,
+          "states_seen": [],
+          "restart_count": 0,
+          "had_failure": false,
+          "last_error": null,
+          "duration_sec": 0.0,
+          "total_payments_wei": 0,
+          "payment_events": 0,
+          "avg_inference_fps": null
+        }
+      },
+      "orchestrators": {
+        "0x08f76e106a2dd4f6385efc8ea6c69a2816082461": {
+          "address": "0x08f76e106a2dd4f6385efc8ea6c69a2816082461",
+          "local_address": "0xfd7db765c9bfc1493b4c9ea6ddf61a7fc7d40d12",
+          "uri": "https://ai4.brzeczyszczykiewicz.work:8935",
+          "name": "ai4.brzeczyszczykiewicz.work",
+          "version": "0.8.8-79313ecf",
+          "gpu_count": 17,
+          "gpu_names": [
+            "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+            "NVIDIA GeForce RTX 5090"
+          ],
+          "total_gpu_vram_gb": 860.08,
+          "models": {
+            "35": [
+              "streamdiffusion-sdxl-v2v"
+            ]
+          },
+          "prices": [
+            {
+              "pricePerUnit": 2323,
+              "pixelsPerUnit": 1,
+              "capability": 35,
+              "constraint": "streamdiffusion-sdxl-v2v"
+            }
+          ],
+          "streams_handled": 0,
+          "total_payments_wei": 2400000000000000,
+          "discovery_latency_ms_avg": null
+        },
+        "0x4bd850175a4e43afee34ae7b7dcd079a572dd69b": {
+          "address": "0x4bd850175a4e43afee34ae7b7dcd079a572dd69b",
+          "local_address": "0x05f8075c82287328108d161cce66f894d797cc28",
+          "uri": "https://ai.tinyhoshi.xyz:18936",
+          "name": "ai.tinyhoshi.xyz",
+          "version": "0.8.10",
+          "gpu_count": 1,
+          "gpu_names": [
+            "NVIDIA GeForce RTX 5090"
+          ],
+          "total_gpu_vram_gb": 31.84,
+          "models": {
+            "35": [
+              "streamdiffusion-sdxl"
+            ]
+          },
+          "prices": [
+            {
+              "pricePerUnit": 2321,
+              "pixelsPerUnit": 1,
+              "capability": 35,
+              "constraint": "streamdiffusion-sdxl"
+            }
+          ],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0x733da28b0145ff561868e408d2ac8565ebe73aab": {
+          "address": "0x733da28b0145ff561868e408d2ac8565ebe73aab",
+          "local_address": "0x754372c3aaf682168373a86fa77b9faa483e3bf8",
+          "uri": "https://legiocorp.link:8777",
+          "name": "legiocorp.link",
+          "version": "0.8.10",
+          "gpu_count": 1,
+          "gpu_names": [
+            "NVIDIA GeForce RTX 5090"
+          ],
+          "total_gpu_vram_gb": 31.84,
+          "models": {
+            "35": [
+              "streamdiffusion-sdxl-v2v"
+            ]
+          },
+          "prices": [
+            {
+              "pricePerUnit": 2321,
+              "pixelsPerUnit": 1,
+              "capability": 35,
+              "constraint": "streamdiffusion-sdxl-v2v"
+            }
+          ],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0x5bdeedca9c6346b0ce6b17ffa8227a4dace37039": {
+          "address": "0x5bdeedca9c6346b0ce6b17ffa8227a4dace37039",
+          "local_address": "0x5bdeedca9c6346b0ce6b17ffa8227a4dace37039",
+          "uri": "https://45.137.88.208:48935",
+          "name": "45.137.88.208",
+          "version": "0.8.10",
+          "gpu_count": 1,
+          "gpu_names": [
+            "NVIDIA GeForce RTX 4090"
+          ],
+          "total_gpu_vram_gb": 23.99,
+          "models": {
+            "35": [
+              "streamdiffusion-sdxl"
+            ]
+          },
+          "prices": [
+            {
+              "pricePerUnit": 2321,
+              "pixelsPerUnit": 1,
+              "capability": 35,
+              "constraint": "streamdiffusion-sdxl"
+            }
+          ],
+          "streams_handled": 0,
+          "total_payments_wei": 4825440000000000,
+          "discovery_latency_ms_avg": null
+        },
+        "0x22b1bcc0c0db224bfc56c9b95a2db407548666ee": {
+          "address": "0x22b1bcc0c0db224bfc56c9b95a2db407548666ee",
+          "local_address": "0x64bc6c415baad5cbf46a5d11c6d763f7f17d84f6",
+          "uri": "https://lpt.thomasblock.io:20110",
+          "name": "lpt.thomasblock.io",
+          "version": "0.8.8-7dff8477",
+          "gpu_count": 2,
+          "gpu_names": [
+            "NVIDIA GeForce RTX 4070 Ti SUPER",
+            "NVIDIA GeForce RTX 4090"
+          ],
+          "total_gpu_vram_gb": 39.98,
+          "models": {
+            "35": [
+              "streamdiffusion-sdxl"
+            ],
+            "27": [
+              "SG161222/RealVisXL_V4.0_Lightning"
+            ]
+          },
+          "prices": [
+            {
+              "pricePerUnit": 4668371,
+              "pixelsPerUnit": 1,
+              "capability": 27,
+              "constraint": "SG161222/RealVisXL_V4.0_Lightning"
+            }
+          ],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0x10b21af759129f32c6064adfb85d3ea2a8c0209c": {
+          "address": "0x10b21af759129f32c6064adfb85d3ea2a8c0209c",
+          "local_address": "0x1f390a42884c76ded8d3ed9c07b213431f6611fb",
+          "uri": "https://ai.mangolpt.com:8936",
+          "name": "ai.mangolpt.com",
+          "version": "0.8.10",
+          "gpu_count": 1,
+          "gpu_names": [
+            "NVIDIA GeForce RTX 5090"
+          ],
+          "total_gpu_vram_gb": 31.84,
+          "models": {
+            "35": [
+              "streamdiffusion-sdxl"
+            ]
+          },
+          "prices": [
+            {
+              "pricePerUnit": 2323,
+              "pixelsPerUnit": 1,
+              "capability": 35,
+              "constraint": "streamdiffusion-sdxl"
+            }
+          ],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0xdef1c70578b2b5e8589a42e26980687fc5153079": {
+          "address": "0xdef1c70578b2b5e8589a42e26980687fc5153079",
+          "local_address": "0xa2868a9e9c0f880a4c3ef1930764d54e645ae389",
+          "uri": "https://stream.speedybird.xyz:18936",
+          "name": "stream.speedybird.xyz",
+          "version": "0.8.9-cd208259",
+          "gpu_count": 2,
+          "gpu_names": [
+            "NVIDIA GeForce RTX 5090",
+            "NVIDIA GeForce RTX 4090"
+          ],
+          "total_gpu_vram_gb": 55.83,
+          "models": {
+            "35": [
+              "streamdiffusion-sdxl-v2v"
+            ],
+            "33": [
+              "meta-llama/Meta-Llama-3.1-8B-Instruct"
+            ]
+          },
+          "prices": [
+            {
+              "pricePerUnit": 83262613,
+              "pixelsPerUnit": 1,
+              "capability": 33,
+              "constraint": "meta-llama/Llama-4-Scout-17B-16E-Instruct"
+            },
+            {
+              "pricePerUnit": 83262613,
+              "pixelsPerUnit": 1,
+              "capability": 33,
+              "constraint": "meta-llama/Meta-Llama-3.1-8B-Instruct"
+            }
+          ],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0x847791cbf03be716a7fe9dc8c9affe17bd49ae5e": {
+          "address": "0x847791cbf03be716a7fe9dc8c9affe17bd49ae5e",
+          "local_address": "0xb2e5628b7bae619a4b3ea7fb1b44c4bbc989ecf1",
+          "uri": "https://ai.stronk.rocks:9994",
+          "name": "ai.stronk.rocks",
+          "version": "0.8.6",
+          "gpu_count": 3,
+          "gpu_names": [
+            "NVIDIA RTX 6000 Ada Generation",
+            "NVIDIA GeForce RTX 4090"
+          ],
+          "total_gpu_vram_gb": 95.96,
+          "models": {
+            "35": [
+              "streamdiffusion-sdxl"
+            ],
+            "27": [
+              "black-forest-labs/FLUX.1-dev"
+            ]
+          },
+          "prices": [
+            {
+              "pricePerUnit": 19073484,
+              "pixelsPerUnit": 1,
+              "capability": 27,
+              "constraint": "black-forest-labs/FLUX.1-dev"
+            }
+          ],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0xd00354656922168815fcd1e51cbddb9e359e3c7f": {
+          "address": "0xd00354656922168815fcd1e51cbddb9e359e3c7f",
+          "local_address": "0x52cf2968b3dc6016778742d3539449a6597d5954",
+          "uri": "https://rtav-orch.xodeapp.xyz:28935",
+          "name": "rtav-orch.xodeapp.xyz",
+          "version": "0.8.9-4299e71b-dirty",
+          "gpu_count": 1,
+          "gpu_names": [
+            "NVIDIA GeForce RTX 4090"
+          ],
+          "total_gpu_vram_gb": 23.99,
+          "models": {
+            "35": [
+              "streamdiffusion-sdxl"
+            ]
+          },
+          "prices": [
+            {
+              "pricePerUnit": 2500,
+              "pixelsPerUnit": 1,
+              "capability": 37,
+              "constraint": "openai-chat-completions"
+            },
+            {
+              "pricePerUnit": 1000,
+              "pixelsPerUnit": 1,
+              "capability": 37,
+              "constraint": "openai-text-embeddings"
+            },
+            {
+              "pricePerUnit": 5000,
+              "pixelsPerUnit": 1,
+              "capability": 37,
+              "constraint": "openai-image-generation"
+            }
+          ],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0xd603d6bf88aa061fcab8fa552026694a7fd005ce": {
+          "address": "0xd603d6bf88aa061fcab8fa552026694a7fd005ce",
+          "local_address": "0x676f4844022ee121da0835991b453020d0a5e7c5",
+          "uri": "https://kilout.link:8999",
+          "name": "kilout.link",
+          "version": "0.8.10",
+          "gpu_count": 2,
+          "gpu_names": [
+            "NVIDIA GeForce RTX 5090"
+          ],
+          "total_gpu_vram_gb": 63.69,
+          "models": {
+            "35": [
+              "streamdiffusion-sdxl"
+            ]
+          },
+          "prices": [
+            {
+              "pricePerUnit": 2321,
+              "pixelsPerUnit": 1,
+              "capability": 35,
+              "constraint": "streamdiffusion-sdxl"
+            }
+          ],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0xdc28f2842810d1a013ad51de174d02eaba192dc7": {
+          "address": "0xdc28f2842810d1a013ad51de174d02eaba192dc7",
+          "local_address": "0xd66e5c00725e0d87d57172191ebd5e865fd71cff",
+          "uri": "https://ai4.pon-eth.com:9190",
+          "name": "ai4.pon-eth.com",
+          "version": "0.8.9-48c5d860",
+          "gpu_count": 10,
+          "gpu_names": [
+            "NVIDIA GeForce RTX 5090",
+            "NVIDIA GeForce RTX 4090"
+          ],
+          "total_gpu_vram_gb": 302.72,
+          "models": {
+            "35": [
+              "streamdiffusion-sdxl-v2v"
+            ]
+          },
+          "prices": [
+            {
+              "pricePerUnit": 2321,
+              "pixelsPerUnit": 1,
+              "capability": 35,
+              "constraint": "streamdiffusion-sdxl-v2v"
+            }
+          ],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0xcf5654abfaefc001a84aeb18fe4c13bfd0f8a77b": {
+          "address": "0xcf5654abfaefc001a84aeb18fe4c13bfd0f8a77b",
+          "local_address": "0xcf5654abfaefc001a84aeb18fe4c13bfd0f8a77b",
+          "uri": "https://lpt.gzp.link:8888",
+          "name": "lpt.gzp.link",
+          "version": "0.8.9",
+          "gpu_count": 1,
+          "gpu_names": [
+            "NVIDIA GeForce RTX 5090"
+          ],
+          "total_gpu_vram_gb": 31.84,
+          "models": {
+            "35": [
+              "streamdiffusion-sdxl"
+            ]
+          },
+          "prices": [
+            {
+              "pricePerUnit": 2321,
+              "pixelsPerUnit": 1,
+              "capability": 35,
+              "constraint": "streamdiffusion-sdxl"
+            }
+          ],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": 451.2
+        },
+        "0xbd677e96a755207d348578727aa57a512c2022bd": {
+          "address": "0xbd677e96a755207d348578727aa57a512c2022bd",
+          "local_address": "0x5fd25374e1e87d6728ec8601c512dfabab375ab5",
+          "uri": "https://ai2.arjo-node.uk:6655",
+          "name": "ai2.arjo-node.uk",
+          "version": "0.8.8",
+          "gpu_count": 4,
+          "gpu_names": [
+            "NVIDIA GeForce RTX 5090",
+            "NVIDIA GeForce RTX 4090"
+          ],
+          "total_gpu_vram_gb": 111.66,
+          "models": {
+            "35": [
+              "streamdiffusion-sdxl"
+            ]
+          },
+          "prices": [
+            {
+              "pricePerUnit": 2323,
+              "pixelsPerUnit": 1,
+              "capability": 35,
+              "constraint": "streamdiffusion-sdxl"
+            }
+          ],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0x66970f8b4a5376ed7961e8633a83809e49ad809d": {
+          "address": "0x66970f8b4a5376ed7961e8633a83809e49ad809d",
+          "local_address": "0x5fd25374e1e87d6728ec8601c512dfabab375ab5",
+          "uri": "https://server.ai-bitbender.xyz:1112",
+          "name": "server.ai-bitbender.xyz",
+          "version": "0.8.9-f117b442",
+          "gpu_count": 1,
+          "gpu_names": [
+            "NVIDIA GeForce RTX 5090"
+          ],
+          "total_gpu_vram_gb": 31.84,
+          "models": {
+            "35": [
+              "streamdiffusion-sdxl-v2v"
+            ]
+          },
+          "prices": [
+            {
+              "pricePerUnit": 2317,
+              "pixelsPerUnit": 1,
+              "capability": 35,
+              "constraint": "streamdiffusion-sdxl-v2v"
+            }
+          ],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0x0abe02f6ef1fa8c29f9b3f9f170c6f3681fd3031": {
+          "address": "0x0abe02f6ef1fa8c29f9b3f9f170c6f3681fd3031",
+          "local_address": "0x0abe02f6ef1fa8c29f9b3f9f170c6f3681fd3031",
+          "uri": "https://flowlivepeer.go.ro:8936",
+          "name": "flowlivepeer.go.ro",
+          "version": "0.8.10",
+          "gpu_count": 1,
+          "gpu_names": [
+            "NVIDIA GeForce RTX 5090"
+          ],
+          "total_gpu_vram_gb": 31.84,
+          "models": {
+            "35": [
+              "streamdiffusion-sdxl"
+            ]
+          },
+          "prices": [
+            {
+              "pricePerUnit": 464,
+              "pixelsPerUnit": 1,
+              "capability": 35,
+              "constraint": "streamdiffusion-sdxl"
+            }
+          ],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0x74a7839094b7f723b2c1c915e88928f49dfdc21f": {
+          "address": "0x74a7839094b7f723b2c1c915e88928f49dfdc21f",
+          "local_address": "0x4ba8a7c79f88b12e8f19bc18271162b22584664b",
+          "uri": "https://ai.livepeer-utopia.xyz:8935",
+          "name": "ai.livepeer-utopia.xyz",
+          "version": "0.8.8",
+          "gpu_count": 1,
+          "gpu_names": [
+            "NVIDIA GeForce RTX 4090"
+          ],
+          "total_gpu_vram_gb": 23.99,
+          "models": {
+            "35": [
+              "streamdiffusion-sdxl"
+            ]
+          },
+          "prices": [
+            {
+              "pricePerUnit": 2321,
+              "pixelsPerUnit": 1,
+              "capability": 35,
+              "constraint": "streamdiffusion-sdxl"
+            }
+          ],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0x2e3a21ae7cdeb48f57fcad1ce16b258d5502ac05": {
+          "address": "0x2e3a21ae7cdeb48f57fcad1ce16b258d5502ac05",
+          "local_address": "0xc4ea4fa2c0ebba54c09dddbd4d462fada562203e",
+          "uri": "https://ai.ultimaratio.link:18936",
+          "name": "ai.ultimaratio.link",
+          "version": "0.8.8",
+          "gpu_count": 2,
+          "gpu_names": [
+            "NVIDIA GeForce RTX 4090"
+          ],
+          "total_gpu_vram_gb": 47.98,
+          "models": {
+            "35": [
+              "streamdiffusion-sdxl"
+            ]
+          },
+          "prices": [
+            {
+              "pricePerUnit": 2323,
+              "pixelsPerUnit": 1,
+              "capability": 35,
+              "constraint": "streamdiffusion-sdxl"
+            }
+          ],
+          "streams_handled": 0,
+          "total_payments_wei": 2414160000000000,
+          "discovery_latency_ms_avg": null
+        },
+        "0x9d61ae5875e89036fbf6059f3116d01a22ace3c8": {
+          "address": "0x9d61ae5875e89036fbf6059f3116d01a22ace3c8",
+          "local_address": "0xcdf93b13efcf63f84f2affb01bec48a5c096c69e",
+          "uri": "https://rtv.nullworks.xyz:9924",
+          "name": "rtv.nullworks.xyz",
+          "version": "0.8.10",
+          "gpu_count": 1,
+          "gpu_names": [
+            "NVIDIA GeForce RTX 4090"
+          ],
+          "total_gpu_vram_gb": 23.99,
+          "models": {
+            "35": [
+              "streamdiffusion-sdxl"
+            ]
+          },
+          "prices": [
+            {
+              "pricePerUnit": 2321,
+              "pixelsPerUnit": 1,
+              "capability": 35,
+              "constraint": "streamdiffusion-sdxl"
+            }
+          ],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0x47a907a0bd1627d71cd14430a721d1550d6d6f58": {
+          "address": "0x47a907a0bd1627d71cd14430a721d1550d6d6f58",
+          "local_address": "0xedd45674825cd5a27c4c645014f37b9e402fdcbe",
+          "uri": "https://ai.nightnode.net:8888",
+          "name": "ai.nightnode.net",
+          "version": "0.8.9-48c5d860",
+          "gpu_count": 1,
+          "gpu_names": [
+            "NVIDIA GeForce RTX 5090"
+          ],
+          "total_gpu_vram_gb": 31.84,
+          "models": {
+            "35": [
+              "streamdiffusion-sdxl"
+            ]
+          },
+          "prices": [
+            {
+              "pricePerUnit": 2321,
+              "pixelsPerUnit": 1,
+              "capability": 35,
+              "constraint": "streamdiffusion-sdxl"
+            }
+          ],
+          "streams_handled": 0,
+          "total_payments_wei": 2409840000000000,
+          "discovery_latency_ms_avg": null
+        },
+        "0x104a7ca059a35fd4def5ecb16600b2caa1fe1361": {
+          "address": "0x104a7ca059a35fd4def5ecb16600b2caa1fe1361",
+          "local_address": "0x0074780feff1fd0277fad6ccdb5a29908df6051f",
+          "uri": "https://oh.eliteencoder.net:8936",
+          "name": "oh.eliteencoder.net",
+          "version": "0.8.10",
+          "gpu_count": 11,
+          "gpu_names": [
+            "NVIDIA GeForce RTX 5090",
+            "NVIDIA GeForce RTX 4090"
+          ],
+          "total_gpu_vram_gb": 295.29,
+          "models": {
+            "35": [
+              "streamdiffusion-sdxl"
+            ]
+          },
+          "prices": [
+            {
+              "pricePerUnit": 2323,
+              "pixelsPerUnit": 1,
+              "capability": 35,
+              "constraint": "streamdiffusion-sdxl"
+            }
+          ],
+          "streams_handled": 0,
+          "total_payments_wei": 2401920000000000,
+          "discovery_latency_ms_avg": null
+        },
+        "0x3b28a7d785356dc67c7970666747e042305bfb79": {
+          "address": "0x3b28a7d785356dc67c7970666747e042305bfb79",
+          "local_address": "0xa8cd908f9635fcbb04d4bf32e5740ea862930658",
+          "uri": "https://ai3.ad-astra.live:9988",
+          "name": "ai3.ad-astra.live",
+          "version": "0.8.6-1af243e4-dirty",
+          "gpu_count": 14,
+          "gpu_names": [
+            "NVIDIA GeForce RTX 5090",
+            "NVIDIA GeForce RTX 4090"
+          ],
+          "total_gpu_vram_gb": 359.4,
+          "models": {
+            "35": [
+              "streamdiffusion-sdxl-v2v"
+            ]
+          },
+          "prices": [
+            {
+              "pricePerUnit": 2321,
+              "pixelsPerUnit": 1,
+              "capability": 35,
+              "constraint": "streamdiffusion-sdxl-v2v"
+            }
+          ],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0xb8c66a19c2d4ccfe79e002d9e3a02dff73de4aba": {
+          "address": "0xb8c66a19c2d4ccfe79e002d9e3a02dff73de4aba",
+          "local_address": "0xc0a758e5fb196a79d3d60671f8230114038975cb",
+          "uri": "https://ai.organic-node.uk:59165",
+          "name": "ai.organic-node.uk",
+          "version": "0.8.6",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {
+            "35": [
+              "streamdiffusion-sdxl-v2v"
+            ]
+          },
+          "prices": [
+            {
+              "pricePerUnit": 2321,
+              "pixelsPerUnit": 1,
+              "capability": 35,
+              "constraint": "streamdiffusion-sdxl-v2v"
+            }
+          ],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0x9d5611bf0dadddb4441a709141d9229d7f6b3e47": {
+          "address": "0x9d5611bf0dadddb4441a709141d9229d7f6b3e47",
+          "local_address": "0x8c5bd7111043c5c59c799dcb30d9efa56ed778d9",
+          "uri": "https://rtvai.deficrypto.dev:8936",
+          "name": "rtvai.deficrypto.dev",
+          "version": "0.8.10",
+          "gpu_count": 1,
+          "gpu_names": [
+            "NVIDIA GeForce RTX 4090"
+          ],
+          "total_gpu_vram_gb": 23.99,
+          "models": {
+            "35": [
+              "streamdiffusion-sdxl"
+            ]
+          },
+          "prices": [
+            {
+              "pricePerUnit": 2321,
+              "pixelsPerUnit": 1,
+              "capability": 35,
+              "constraint": "streamdiffusion-sdxl"
+            }
+          ],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0x3bbe84023c11c4874f493d70b370d26390e3c580": {
+          "address": "0x3bbe84023c11c4874f493d70b370d26390e3c580",
+          "local_address": "0x3bbe84023c11c4874f493d70b370d26390e3c580",
+          "uri": "https://dexpeer-ai.code4.us:8935",
+          "name": "dexpeer-ai.code4.us",
+          "version": "0.8.10",
+          "gpu_count": 1,
+          "gpu_names": [
+            "NVIDIA GeForce RTX 5090"
+          ],
+          "total_gpu_vram_gb": 31.84,
+          "models": {
+            "35": [
+              "streamdiffusion-sdxl-v2v"
+            ]
+          },
+          "prices": [
+            {
+              "pricePerUnit": 2323,
+              "pixelsPerUnit": 1,
+              "capability": 35,
+              "constraint": "streamdiffusion-sdxl-v2v"
+            }
+          ],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": 329.8
+        },
+        "0x180859c337d14edf588c685f3f7ab4472ab6a252": {
+          "address": "0x180859c337d14edf588c685f3f7ab4472ab6a252",
+          "local_address": "0x180859c337d14edf588c685f3f7ab4472ab6a252",
+          "uri": "https://ida-9.lvpr.io:8888",
+          "name": "ida-9.lvpr.io",
+          "version": "0.8.8-110f9ca5",
+          "gpu_count": 1,
+          "gpu_names": [
+            "NVIDIA GeForce RTX 4090"
+          ],
+          "total_gpu_vram_gb": 23.99,
+          "models": {
+            "35": [
+              "streamdiffusion"
+            ]
+          },
+          "prices": [
+            {
+              "pricePerUnit": 2321,
+              "pixelsPerUnit": 1,
+              "capability": 35,
+              "constraint": "streamdiffusion"
+            }
+          ],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0x4416a274f86e1db860b513548b672154d43b81b2": {
+          "address": "0x4416a274f86e1db860b513548b672154d43b81b2",
+          "local_address": "0xdbd0631bb91f10e38427026261a4d9c3a87b7352",
+          "uri": "https://livepeer-msi-1.prod.dcg-labs.co:8935",
+          "name": "livepeer-msi-1.prod.dcg-labs.co",
+          "version": "0.8.8-0b54a8ec",
+          "gpu_count": 4,
+          "gpu_names": [
+            "NVIDIA GeForce RTX 4090"
+          ],
+          "total_gpu_vram_gb": 95.95,
+          "models": {
+            "35": [
+              "streamdiffusion-sdxl"
+            ]
+          },
+          "prices": [
+            {
+              "pricePerUnit": 2321,
+              "pixelsPerUnit": 1,
+              "capability": 35,
+              "constraint": "streamdiffusion-sdxl"
+            }
+          ],
+          "streams_handled": 0,
+          "total_payments_wei": 4828560000000000,
+          "discovery_latency_ms_avg": null
+        },
+        "0x1f390a42884c76ded8d3ed9c07b213431f6611fb": {
+          "address": "0x1f390a42884c76ded8d3ed9c07b213431f6611fb",
+          "local_address": "",
+          "uri": "https://ai.mangolpt.com:8936",
+          "name": "ai.mangolpt.com",
+          "version": "",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": 359.67
+        },
+        "0x64bc6c415baad5cbf46a5d11c6d763f7f17d84f6": {
+          "address": "0x64bc6c415baad5cbf46a5d11c6d763f7f17d84f6",
+          "local_address": "",
+          "uri": "https://45.153.35.148:20080",
+          "name": "45.153.35.148",
+          "version": "",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": 594.0
+        },
+        "0x52f6371fb26c311ea82ac2bfd28ab5c5fc29550e": {
+          "address": "0x52f6371fb26c311ea82ac2bfd28ab5c5fc29550e",
+          "local_address": "",
+          "uri": "https://2.9.173.59:8936",
+          "name": "2.9.173.59",
+          "version": "",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": 746.0
+        },
+        "0x0c36edc01585f01dc4571384ab6c91d6083b63ca": {
+          "address": "0x0c36edc01585f01dc4571384ab6c91d6083b63ca",
+          "local_address": "",
+          "uri": "https://lp-orch.j1v.co:8936",
+          "name": "lp-orch.j1v.co",
+          "version": "",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": 759.0
+        },
+        "0xb120a72a9264e90092e8197c0fabd210c18bc5be": {
+          "address": "0xb120a72a9264e90092e8197c0fabd210c18bc5be",
+          "local_address": "0xb120a72a9264e90092e8197c0fabd210c18bc5be",
+          "uri": "https://ai.lpt-1.moudi.network:18935",
+          "name": "ai.lpt-1.moudi.network",
+          "version": "0.8.9-patched",
+          "gpu_count": 12,
+          "gpu_names": [
+            "NVIDIA GeForce RTX 5090",
+            "NVIDIA GeForce RTX 4090"
+          ],
+          "total_gpu_vram_gb": 311.42,
+          "models": {
+            "35": [
+              "streamdiffusion-sdxl",
+              "streamdiffusion-sdxl-v2v"
+            ]
+          },
+          "prices": [
+            {
+              "pricePerUnit": 2323,
+              "pixelsPerUnit": 1,
+              "capability": 35,
+              "constraint": "streamdiffusion-sdxl"
+            },
+            {
+              "pricePerUnit": 2323,
+              "pixelsPerUnit": 1,
+              "capability": 35,
+              "constraint": "streamdiffusion-sdxl-v2v"
+            }
+          ],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0xd4c467d8c13752ab7bb9711bc77de2a9f52a65f6": {
+          "address": "0xd4c467d8c13752ab7bb9711bc77de2a9f52a65f6",
+          "local_address": "0x52f6371fb26c311ea82ac2bfd28ab5c5fc29550e",
+          "uri": "https://2.9.173.59:8936",
+          "name": "2.9.173.59",
+          "version": "0.8.9",
+          "gpu_count": 2,
+          "gpu_names": [
+            "NVIDIA GeForce RTX 3090",
+            "NVIDIA GeForce RTX 4070 Ti SUPER"
+          ],
+          "total_gpu_vram_gb": 39.99,
+          "models": {
+            "27": [
+              "SG161222/RealVisXL_V4.0_Lightning"
+            ],
+            "30": [
+              "stabilityai/stable-diffusion-x4-upscaler"
+            ],
+            "33": [
+              "glm-4.7-flash",
+              "llama3.2-vision",
+              "meta-llama/Meta-Llama-3.1-8B-Instruct"
+            ]
+          },
+          "prices": [
+            {
+              "pricePerUnit": 8822822,
+              "pixelsPerUnit": 1,
+              "capability": 30,
+              "constraint": "stabilityai/stable-diffusion-x4-upscaler"
+            },
+            {
+              "pricePerUnit": 8822822,
+              "pixelsPerUnit": 1,
+              "capability": 27,
+              "constraint": "black-forest-labs/FLUX.1-schnell"
+            },
+            {
+              "pricePerUnit": 37005605,
+              "pixelsPerUnit": 1,
+              "capability": 33,
+              "constraint": "meta-llama/Meta-Llama-3.1-8B-Instruct"
+            },
+            {
+              "pricePerUnit": 41631306,
+              "pixelsPerUnit": 1,
+              "capability": 33,
+              "constraint": "llama3.2-vision"
+            },
+            {
+              "pricePerUnit": 23128503,
+              "pixelsPerUnit": 1,
+              "capability": 33,
+              "constraint": "glm-4.7-flash"
+            }
+          ],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0xd18a02647d99dc9f79afbe0f58f8353178e6141f": {
+          "address": "0xd18a02647d99dc9f79afbe0f58f8353178e6141f",
+          "local_address": "0x0c36edc01585f01dc4571384ab6c91d6083b63ca",
+          "uri": "https://109.199.233.37:8935",
+          "name": "109.199.233.37",
+          "version": "0.8.9",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {
+            "27": [
+              "ByteDance/SDXL-Lightning",
+              "SG161222/RealVisXL_V4.0_Lightning"
+            ],
+            "28": [
+              "timbrooks/instruct-pix2pix"
+            ],
+            "29": [
+              "stabilityai/stable-video-diffusion-img2vid-xt-1-1"
+            ],
+            "30": [
+              "stabilityai/stable-diffusion-x4-upscaler"
+            ],
+            "31": [
+              "openai/whisper-large-v3"
+            ],
+            "32": [
+              "facebook/sam2-hiera-large"
+            ],
+            "35": [
+              "streamdiffusion-sdxl",
+              "streamdiffusion-sdxl-v2v"
+            ],
+            "36": [
+              "parler-tts/parler-tts-large-v1"
+            ]
+          },
+          "prices": [
+            {
+              "pricePerUnit": 12882811,
+              "pixelsPerUnit": 1,
+              "capability": 31,
+              "constraint": "openai/whisper-large-v3"
+            },
+            {
+              "pricePerUnit": 2384185,
+              "pixelsPerUnit": 1,
+              "capability": 32,
+              "constraint": "facebook/sam2-hiera-large"
+            },
+            {
+              "pricePerUnit": 2384185,
+              "pixelsPerUnit": 1,
+              "capability": 36,
+              "constraint": "parler-tts/parler-tts-large-v1"
+            },
+            {
+              "pricePerUnit": 3000,
+              "pixelsPerUnit": 1,
+              "capability": 35,
+              "constraint": "streamdiffusion-sdxl"
+            },
+            {
+              "pricePerUnit": 3000,
+              "pixelsPerUnit": 1,
+              "capability": 35,
+              "constraint": "streamdiffusion-sdxl-v2v"
+            },
+            {
+              "pricePerUnit": 2384185,
+              "pixelsPerUnit": 1,
+              "capability": 27,
+              "constraint": "SG161222/RealVisXL_V4.0_Lightning"
+            },
+            {
+              "pricePerUnit": 2384185,
+              "pixelsPerUnit": 1,
+              "capability": 27,
+              "constraint": "ByteDance/SDXL-Lightning"
+            },
+            {
+              "pricePerUnit": 2384185,
+              "pixelsPerUnit": 1,
+              "capability": 30,
+              "constraint": "stabilityai/stable-diffusion-x4-upscaler"
+            },
+            {
+              "pricePerUnit": 3905000,
+              "pixelsPerUnit": 1,
+              "capability": 29,
+              "constraint": "stabilityai/stable-video-diffusion-img2vid-xt-1-1"
+            },
+            {
+              "pricePerUnit": 2384185,
+              "pixelsPerUnit": 1,
+              "capability": 28,
+              "constraint": "timbrooks/instruct-pix2pix"
+            }
+          ],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": 138.0
+        },
+        "0x6cb1ce2516fb7d211038420a8cf9a843c7bd3b08": {
+          "address": "0x6cb1ce2516fb7d211038420a8cf9a843c7bd3b08",
+          "local_address": "0x6cb1ce2516fb7d211038420a8cf9a843c7bd3b08",
+          "uri": "https://livepeerservice.ddns.net:8936",
+          "name": "livepeerservice.ddns.net",
+          "version": "0.8.5",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0xf909ac60c647a14db3663da5ecf5f8ecbe324395": {
+          "address": "0xf909ac60c647a14db3663da5ecf5f8ecbe324395",
+          "local_address": "0x58f90ebc1f19bde9475556c647b0eaee34ece77d",
+          "uri": "https://adexlabs.go.ro:8936",
+          "name": "adexlabs.go.ro",
+          "version": "0.8.8",
+          "gpu_count": 1,
+          "gpu_names": [
+            "NVIDIA GeForce RTX 3090"
+          ],
+          "total_gpu_vram_gb": 24.0,
+          "models": {
+            "27": [
+              "SG161222/RealVisXL_V4.0_Lightning"
+            ]
+          },
+          "prices": [
+            {
+              "pricePerUnit": 4768371,
+              "pixelsPerUnit": 1,
+              "capability": 27,
+              "constraint": "SG161222/RealVisXL_V4.0_Lightning"
+            }
+          ],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0x5263e0ce3a97b634d8828ce4337ad0f70b30b077": {
+          "address": "0x5263e0ce3a97b634d8828ce4337ad0f70b30b077",
+          "local_address": "0x52cf2968b3dc6016778742d3539449a6597d5954",
+          "uri": "https://livepeer-ai.compute-node.xyz:19935",
+          "name": "livepeer-ai.compute-node.xyz",
+          "version": "0.8.10-3c7f4ba5-dirty",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [
+            {
+              "pricePerUnit": 1695421,
+              "pixelsPerUnit": 1,
+              "capability": 32,
+              "constraint": "facebook/sam2-hiera-large"
+            },
+            {
+              "pricePerUnit": 83262613,
+              "pixelsPerUnit": 1,
+              "capability": 33,
+              "constraint": "meta-llama/Meta-Llama-3.1-8B-Instruct"
+            },
+            {
+              "pricePerUnit": 83262613,
+              "pixelsPerUnit": 1,
+              "capability": 33,
+              "constraint": "meta-llama/Llama-4-Scout-17B-16E-Instruct"
+            },
+            {
+              "pricePerUnit": 4768371,
+              "pixelsPerUnit": 1,
+              "capability": 34,
+              "constraint": "Salesforce/blip-image-captioning-large"
+            },
+            {
+              "pricePerUnit": 4768371,
+              "pixelsPerUnit": 1,
+              "capability": 36,
+              "constraint": "parler-tts/parler-tts-large-v1"
+            },
+            {
+              "pricePerUnit": 3390842,
+              "pixelsPerUnit": 1,
+              "capability": 29,
+              "constraint": "stabilityai/stable-video-diffusion-img2vid-xt-1-1"
+            }
+          ],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0x4a43b1d7e6227c8b0512e413f406555647ff7bdb": {
+          "address": "0x4a43b1d7e6227c8b0512e413f406555647ff7bdb",
+          "local_address": "0x4a43b1d7e6227c8b0512e413f406555647ff7bdb",
+          "uri": "https://ai.ftklivepeer.net:6935",
+          "name": "ai.ftklivepeer.net",
+          "version": "0.8.9",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [
+            {
+              "pricePerUnit": 83262613,
+              "pixelsPerUnit": 1,
+              "capability": 33,
+              "constraint": "meta-llama/Meta-Llama-3.1-8B-Instruct"
+            }
+          ],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0xd66e5c00725e0d87d57172191ebd5e865fd71cff": {
+          "address": "0xd66e5c00725e0d87d57172191ebd5e865fd71cff",
+          "local_address": "",
+          "uri": "https://ai4.pon-eth.com:9190",
+          "name": "ai4.pon-eth.com",
+          "version": "",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": 365.69
+        },
+        "0x0074780feff1fd0277fad6ccdb5a29908df6051f": {
+          "address": "0x0074780feff1fd0277fad6ccdb5a29908df6051f",
+          "local_address": "",
+          "uri": "https://hky.eliteencoder.net:8936",
+          "name": "hky.eliteencoder.net",
+          "version": "",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": 241.82
+        },
+        "0x0bed8295866b81b80f9aff874455b82a887e185a": {
+          "address": "0x0bed8295866b81b80f9aff874455b82a887e185a",
+          "local_address": "0x0bed8295866b81b80f9aff874455b82a887e185a",
+          "uri": "https://207.6.81.49:8935",
+          "name": "207.6.81.49",
+          "version": "0.8.8",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0x9c5874aa481b9c652d5420d65ce8becaad9ff3a7": {
+          "address": "0x9c5874aa481b9c652d5420d65ce8becaad9ff3a7",
+          "local_address": "0x9c5874aa481b9c652d5420d65ce8becaad9ff3a7",
+          "uri": "https://104.6.154.179:8935",
+          "name": "104.6.154.179",
+          "version": "0.8.10",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0x1817efbeb9e934541ebcc12b6d37b49e45fbbf8f": {
+          "address": "0x1817efbeb9e934541ebcc12b6d37b49e45fbbf8f",
+          "local_address": "0x94f0c84a265d83e7db74b65f6f38d6414e809450",
+          "uri": "https://45.76.29.29:8936",
+          "name": "45.76.29.29",
+          "version": "0.8.9",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0x9d2b4e5c4b1fd81d06b883b0aca661b771c39ea3": {
+          "address": "0x9d2b4e5c4b1fd81d06b883b0aca661b771c39ea3",
+          "local_address": "0x9d2b4e5c4b1fd81d06b883b0aca661b771c39ea3",
+          "uri": "https://137.184.160.167:8935",
+          "name": "137.184.160.167",
+          "version": "0.8.10",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0xf5a88945ce64b5648b895e05eb1edf693dde8905": {
+          "address": "0xf5a88945ce64b5648b895e05eb1edf693dde8905",
+          "local_address": "0xf5a88945ce64b5648b895e05eb1edf693dde8905",
+          "uri": "https://54.144.38.201:8935",
+          "name": "54.144.38.201",
+          "version": "0.8.10",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0x186a59938baf5ca4023cd6f87cc00684bcffdf65": {
+          "address": "0x186a59938baf5ca4023cd6f87cc00684bcffdf65",
+          "local_address": "0x186a59938baf5ca4023cd6f87cc00684bcffdf65",
+          "uri": "https://173.208.173.42:8935",
+          "name": "173.208.173.42",
+          "version": "0.8.8",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0x4bcc9256418b29c482596443fa5c99ae114b3351": {
+          "address": "0x4bcc9256418b29c482596443fa5c99ae114b3351",
+          "local_address": "0x4bcc9256418b29c482596443fa5c99ae114b3351",
+          "uri": "https://98.109.53.48:8935",
+          "name": "98.109.53.48",
+          "version": "0.7.9",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0xdb22609515433e664e28067c81704d8266098986": {
+          "address": "0xdb22609515433e664e28067c81704d8266098986",
+          "local_address": "0xd8a05177413686912c52681945a7c5e17555059b",
+          "uri": "https://209.151.155.111:8935",
+          "name": "209.151.155.111",
+          "version": "0.8.10",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0xbac7744ada4ab1957cbaafef698b3c068beb4fe0": {
+          "address": "0xbac7744ada4ab1957cbaafef698b3c068beb4fe0",
+          "local_address": "0x0757eaf54e82251ac5328d83ea15a3b801f502da",
+          "uri": "https://167.17.77.43:8936",
+          "name": "167.17.77.43",
+          "version": "0.8.10",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0x882bac0da055d1826ee637c410c8d4c99be8b485": {
+          "address": "0x882bac0da055d1826ee637c410c8d4c99be8b485",
+          "local_address": "0x882bac0da055d1826ee637c410c8d4c99be8b485",
+          "uri": "https://gwiz-ai.duckdns.org:8935",
+          "name": "gwiz-ai.duckdns.org",
+          "version": "0.8.9-cd208259",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0xbb4c38fae6eef586f521e369117354e43ac7dd5b": {
+          "address": "0xbb4c38fae6eef586f521e369117354e43ac7dd5b",
+          "local_address": "0x7b65cd4c1cba720f296d74a9d2642478598aaf69",
+          "uri": "https://orchestrator.livepeer.mainnet.nodz.io:8935",
+          "name": "orchestrator.livepeer.mainnet.nodz.io",
+          "version": "0.8.9",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0xb5164d6b780786338c52f4787abba0e4a371af4d": {
+          "address": "0xb5164d6b780786338c52f4787abba0e4a371af4d",
+          "local_address": "0xb5164d6b780786338c52f4787abba0e4a371af4d",
+          "uri": "https://nycp.ddns.me:8935",
+          "name": "nycp.ddns.me",
+          "version": "0.8.9",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {
+            "27": [
+              "SG161222/RealVisXL_V4.0_Lightning"
+            ],
+            "30": [
+              "stabilityai/stable-diffusion-x4-upscaler"
+            ],
+            "31": [
+              "openai/whisper-large-v3"
+            ]
+          },
+          "prices": [
+            {
+              "pixelsPerUnit": 1,
+              "capability": 27,
+              "constraint": "SG161222/RealVisXL_V4.0_Lightning"
+            },
+            {
+              "pixelsPerUnit": 1,
+              "capability": 30,
+              "constraint": "stabilityai/stable-diffusion-x4-upscaler"
+            }
+          ],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0x02b6aac33a397aaadee5227c70c69bb97f2cc529": {
+          "address": "0x02b6aac33a397aaadee5227c70c69bb97f2cc529",
+          "local_address": "0x02b6aac33a397aaadee5227c70c69bb97f2cc529",
+          "uri": "https://209.222.17.12:8935",
+          "name": "209.222.17.12",
+          "version": "0.8.10",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0xe3a5793d7c1d2a04a903fa1695b3e3555d6084ca": {
+          "address": "0xe3a5793d7c1d2a04a903fa1695b3e3555d6084ca",
+          "local_address": "0xe3a5793d7c1d2a04a903fa1695b3e3555d6084ca",
+          "uri": "https://74.102.102.54:8935",
+          "name": "74.102.102.54",
+          "version": "0.8.10",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0xbdcbe92befbf36d63ec547bba5842997d77dc841": {
+          "address": "0xbdcbe92befbf36d63ec547bba5842997d77dc841",
+          "local_address": "0xbdcbe92befbf36d63ec547bba5842997d77dc841",
+          "uri": "https://74.88.137.84:8935",
+          "name": "74.88.137.84",
+          "version": "0.8.10",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0x0d509d8b46b072f8fc330942b2e3cc0ac34d6d8d": {
+          "address": "0x0d509d8b46b072f8fc330942b2e3cc0ac34d6d8d",
+          "local_address": "0xea6eb2033de0fbece9445fae407c596f3ffd81ae",
+          "uri": "https://47.206.114.82:8931",
+          "name": "47.206.114.82",
+          "version": "0.8.10",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0xea6eb2033de0fbece9445fae407c596f3ffd81ae": {
+          "address": "0xea6eb2033de0fbece9445fae407c596f3ffd81ae",
+          "local_address": "0xea6eb2033de0fbece9445fae407c596f3ffd81ae",
+          "uri": "https://47.206.114.82:8924",
+          "name": "47.206.114.82",
+          "version": "0.8.10",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0x75fbf65a3dfe93545c9768f163e59a02daf08d36": {
+          "address": "0x75fbf65a3dfe93545c9768f163e59a02daf08d36",
+          "local_address": "0xea6eb2033de0fbece9445fae407c596f3ffd81ae",
+          "uri": "https://47.206.114.82:8933",
+          "name": "47.206.114.82",
+          "version": "0.8.10",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0x6e07be22f953f716ac2e17bae1a4de3baa3a64b4": {
+          "address": "0x6e07be22f953f716ac2e17bae1a4de3baa3a64b4",
+          "local_address": "0xea6eb2033de0fbece9445fae407c596f3ffd81ae",
+          "uri": "https://47.206.114.82:8930",
+          "name": "47.206.114.82",
+          "version": "0.8.10",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0x58887c5fe7d021ec63b72ac4021980027e6fafe1": {
+          "address": "0x58887c5fe7d021ec63b72ac4021980027e6fafe1",
+          "local_address": "0x58887c5fe7d021ec63b72ac4021980027e6fafe1",
+          "uri": "https://47.206.114.81:2935",
+          "name": "47.206.114.81",
+          "version": "0.8.5",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0x980998e39d29dc5a92e7403fc9cd47e68b63ad5f": {
+          "address": "0x980998e39d29dc5a92e7403fc9cd47e68b63ad5f",
+          "local_address": "0x980998e39d29dc5a92e7403fc9cd47e68b63ad5f",
+          "uri": "https://82.65.173.160:8935",
+          "name": "82.65.173.160",
+          "version": "0.8.9",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0x16d335f6265ae2dcf6022863e9d9346ab8a73841": {
+          "address": "0x16d335f6265ae2dcf6022863e9d9346ab8a73841",
+          "local_address": "0xc0a758e5fb196a79d3d60671f8230114038975cb",
+          "uri": "https://154.61.61.108:8999",
+          "name": "154.61.61.108",
+          "version": "0.8.10",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0x597ad7f7a1c9f8d0121a9e949cca7530f2b25ef6": {
+          "address": "0x597ad7f7a1c9f8d0121a9e949cca7530f2b25ef6",
+          "local_address": "0x94f0c84a265d83e7db74b65f6f38d6414e809450",
+          "uri": "https://108.61.190.33:8935",
+          "name": "108.61.190.33",
+          "version": "0.8.9",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0x41239fb65360981316fcb4a8548320d305f9496d": {
+          "address": "0x41239fb65360981316fcb4a8548320d305f9496d",
+          "local_address": "0x41239fb65360981316fcb4a8548320d305f9496d",
+          "uri": "https://85.4.27.102:8935",
+          "name": "85.4.27.102",
+          "version": "0.8.10",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0x0fc80afb7876f579f1fb1c4d1c37cf1339038658": {
+          "address": "0x0fc80afb7876f579f1fb1c4d1c37cf1339038658",
+          "local_address": "0x0fc80afb7876f579f1fb1c4d1c37cf1339038658",
+          "uri": "https://livepeer.coef120.com:8935",
+          "name": "livepeer.coef120.com",
+          "version": "0.8.10",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0xaa1dd0958b7c5c5a49550315c9511a53c4d65fba": {
+          "address": "0xaa1dd0958b7c5c5a49550315c9511a53c4d65fba",
+          "local_address": "0xaa1dd0958b7c5c5a49550315c9511a53c4d65fba",
+          "uri": "https://livepeer.novignis.com:8935",
+          "name": "livepeer.novignis.com",
+          "version": "0.8.10",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0xf566161923750b162f0cbef901861bb134c371a9": {
+          "address": "0xf566161923750b162f0cbef901861bb134c371a9",
+          "local_address": "0xf566161923750b162f0cbef901861bb134c371a9",
+          "uri": "https://37.120.179.121:8935",
+          "name": "37.120.179.121",
+          "version": "0.8.8",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0x43942a3b2883ba56c67750de398d4f1d1b3a3fdb": {
+          "address": "0x43942a3b2883ba56c67750de398d4f1d1b3a3fdb",
+          "local_address": "0x43942a3b2883ba56c67750de398d4f1d1b3a3fdb",
+          "uri": "https://128.140.93.150:8935",
+          "name": "128.140.93.150",
+          "version": "0.8.5",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [
+            {
+              "pricePerUnit": 4768371,
+              "pixelsPerUnit": 1,
+              "capability": 27,
+              "constraint": "SG161222/RealVisXL_V4.0_Lightning"
+            }
+          ],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0x141e6d4953b933746c770272126db2bd691a9683": {
+          "address": "0x141e6d4953b933746c770272126db2bd691a9683",
+          "local_address": "0x5849878da4865c222d766fa52334908d14966d67",
+          "uri": "https://lpt.moudi.network:8935",
+          "name": "lpt.moudi.network",
+          "version": "0.8.10",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0xa20416801ac2eacf2372e825b4a90ef52490c2bb": {
+          "address": "0xa20416801ac2eacf2372e825b4a90ef52490c2bb",
+          "local_address": "0xa20416801ac2eacf2372e825b4a90ef52490c2bb",
+          "uri": "https://185.65.207.70:8935",
+          "name": "185.65.207.70",
+          "version": "0.8.5",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0xac2e50c8f7ac0f82923a7df9d9903f6ec4741919": {
+          "address": "0xac2e50c8f7ac0f82923a7df9d9903f6ec4741919",
+          "local_address": "0xac2e50c8f7ac0f82923a7df9d9903f6ec4741919",
+          "uri": "https://livepeer.flagshipnodes.com:8935",
+          "name": "livepeer.flagshipnodes.com",
+          "version": "0.8.6",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0xe9e284277648fcdb09b8efc1832c73c09b5ecf59": {
+          "address": "0xe9e284277648fcdb09b8efc1832c73c09b5ecf59",
+          "local_address": "0xe9e284277648fcdb09b8efc1832c73c09b5ecf59",
+          "uri": "https://livepeer-livepeer1.prod-eks-eu-north-1.staked.cloud:8935",
+          "name": "livepeer-livepeer1.prod-eks-eu-north-1.staked.cloud",
+          "version": "0.8.10",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0x21d1130dc36958db75fbb0e5a9e3e5f5680238ff": {
+          "address": "0x21d1130dc36958db75fbb0e5a9e3e5f5680238ff",
+          "local_address": "0x21d1130dc36958db75fbb0e5a9e3e5f5680238ff",
+          "uri": "https://93.115.27.44:8935",
+          "name": "93.115.27.44",
+          "version": "0.8.8-5629cca8",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0x6c06d3246fbb77c4ad75480e03d2a0a8eaf68121": {
+          "address": "0x6c06d3246fbb77c4ad75480e03d2a0a8eaf68121",
+          "local_address": "0x6c06d3246fbb77c4ad75480e03d2a0a8eaf68121",
+          "uri": "https://57.129.15.2:8955",
+          "name": "57.129.15.2",
+          "version": "0.8.9-48c5d860",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0xa6a9eb29e786b5233bd99c0ba28be882fe954a0e": {
+          "address": "0xa6a9eb29e786b5233bd99c0ba28be882fe954a0e",
+          "local_address": "0xa6a9eb29e786b5233bd99c0ba28be882fe954a0e",
+          "uri": "https://93.115.25.164:8935",
+          "name": "93.115.25.164",
+          "version": "0.8.8",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0xfd7db765c9bfc1493b4c9ea6ddf61a7fc7d40d12": {
+          "address": "0xfd7db765c9bfc1493b4c9ea6ddf61a7fc7d40d12",
+          "local_address": "",
+          "uri": "https://ai3.brzeczyszczykiewicz.work:8935",
+          "name": "ai3.brzeczyszczykiewicz.work",
+          "version": "",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": 408.25
+        },
+        "0x5fd25374e1e87d6728ec8601c512dfabab375ab5": {
+          "address": "0x5fd25374e1e87d6728ec8601c512dfabab375ab5",
+          "local_address": "",
+          "uri": "https://server.ai-bitbender.xyz:1112",
+          "name": "server.ai-bitbender.xyz",
+          "version": "",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": 394.62
+        },
+        "0xc0a758e5fb196a79d3d60671f8230114038975cb": {
+          "address": "0xc0a758e5fb196a79d3d60671f8230114038975cb",
+          "local_address": "",
+          "uri": "https://ai.organic-node.uk:59165",
+          "name": "ai.organic-node.uk",
+          "version": "",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": 242.0
+        },
+        "0xc4ea4fa2c0ebba54c09dddbd4d462fada562203e": {
+          "address": "0xc4ea4fa2c0ebba54c09dddbd4d462fada562203e",
+          "local_address": "",
+          "uri": "https://ai.ultimaratio.link:18936",
+          "name": "ai.ultimaratio.link",
+          "version": "",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": 173.71
+        },
+        "0x633a6ce23b4dfb7e92071f305c4edeec503560b0": {
+          "address": "0x633a6ce23b4dfb7e92071f305c4edeec503560b0",
+          "local_address": "",
+          "uri": "https://ai.ad-astra.live:9966",
+          "name": "ai.ad-astra.live",
+          "version": "",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": 189.0
+        },
+        "0xedd45674825cd5a27c4c645014f37b9e402fdcbe": {
+          "address": "0xedd45674825cd5a27c4c645014f37b9e402fdcbe",
+          "local_address": "",
+          "uri": "https://ai.nightnode.net:8888",
+          "name": "ai.nightnode.net",
+          "version": "",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": 225.33
+        },
+        "0x395222df89b9d0523e426db6f05b44243b6f0133": {
+          "address": "0x395222df89b9d0523e426db6f05b44243b6f0133",
+          "local_address": "",
+          "uri": "https://ai3.ad-astra.live:9988",
+          "name": "ai3.ad-astra.live",
+          "version": "",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": 241.83
+        },
+        "0xdbd0631bb91f10e38427026261a4d9c3a87b7352": {
+          "address": "0xdbd0631bb91f10e38427026261a4d9c3a87b7352",
+          "local_address": "",
+          "uri": "https://livepeer-msi-1.prod.dcg-labs.co:8935",
+          "name": "livepeer-msi-1.prod.dcg-labs.co",
+          "version": "",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": 314.6
+        },
+        "0x52cf2968b3dc6016778742d3539449a6597d5954": {
+          "address": "0x52cf2968b3dc6016778742d3539449a6597d5954",
+          "local_address": "",
+          "uri": "https://rtav-orch.xodeapp.xyz:28935",
+          "name": "rtav-orch.xodeapp.xyz",
+          "version": "",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": 350.4
+        },
+        "0x22d4da4b5ce66601a7fca3cee56070d2deaa6072": {
+          "address": "0x22d4da4b5ce66601a7fca3cee56070d2deaa6072",
+          "local_address": "",
+          "uri": "https://kilout.link:8999",
+          "name": "kilout.link",
+          "version": "",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": 337.57
+        },
+        "0x1b0c26fc2e310efb2649c24ec9aa966effda292f": {
+          "address": "0x1b0c26fc2e310efb2649c24ec9aa966effda292f",
+          "local_address": "",
+          "uri": "https://45.137.88.208:48935",
+          "name": "45.137.88.208",
+          "version": "",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": 314.6
+        },
+        "0x11b04d9a305abe978aeaddc67d9d09aaa4996090": {
+          "address": "0x11b04d9a305abe978aeaddc67d9d09aaa4996090",
+          "local_address": "0x11b04d9a305abe978aeaddc67d9d09aaa4996090",
+          "uri": "https://162.244.80.109:8935",
+          "name": "162.244.80.109",
+          "version": "0.8.7-d095d965",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0x6a15b9d078c2bf4814066a69392aa224fecae1c4": {
+          "address": "0x6a15b9d078c2bf4814066a69392aa224fecae1c4",
+          "local_address": "0xedd45674825cd5a27c4c645014f37b9e402fdcbe",
+          "uri": "https://node2.nightnode.net:8931",
+          "name": "node2.nightnode.net",
+          "version": "0.8.9-48c5d860",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0xb1c579757622d8ca7bd42542cb0325de1c8e1f8d": {
+          "address": "0xb1c579757622d8ca7bd42542cb0325de1c8e1f8d",
+          "local_address": "0x21a002496d5a019f9042590fb2dbe4c9805fe3b1",
+          "uri": "https://162.244.80.24:8443",
+          "name": "162.244.80.24",
+          "version": "0.7.8-1.2.4-2e3fae7a",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0x72a798ed05f3b445fba4bafdf643028fb5ed03cc": {
+          "address": "0x72a798ed05f3b445fba4bafdf643028fb5ed03cc",
+          "local_address": "0x2e50acf73085d1acf69aa3e0ab5bdd03f8b43042",
+          "uri": "https://eventhorizons.cc:8953",
+          "name": "eventhorizons.cc",
+          "version": "0.8.10",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0x942f0c28fb85ea0b50bfb76a3ecfa99861fa9b4b": {
+          "address": "0x942f0c28fb85ea0b50bfb76a3ecfa99861fa9b4b",
+          "local_address": "0x942f0c28fb85ea0b50bfb76a3ecfa99861fa9b4b",
+          "uri": "https://livepeer-livepeer2.prod-eks-eu-west-1.staked.cloud:8935",
+          "name": "livepeer-livepeer2.prod-eks-eu-west-1.staked.cloud",
+          "version": "0.8.9",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": null
+        },
+        "0x52538006bb9bb00d45fb53aaaa7c0a03deeb5e90": {
+          "address": "0x52538006bb9bb00d45fb53aaaa7c0a03deeb5e90",
+          "local_address": "",
+          "uri": "https://rtvai.deficrypto.dev:8936",
+          "name": "rtvai.deficrypto.dev",
+          "version": "",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": 230.0
+        },
+        "0x4ba8a7c79f88b12e8f19bc18271162b22584664b": {
+          "address": "0x4ba8a7c79f88b12e8f19bc18271162b22584664b",
+          "local_address": "",
+          "uri": "https://ai.livepeer-utopia.xyz:8935",
+          "name": "ai.livepeer-utopia.xyz",
+          "version": "",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": 293.5
+        },
+        "0x3a274438b30c0b98ae3717167d9f42607342b682": {
+          "address": "0x3a274438b30c0b98ae3717167d9f42607342b682",
+          "local_address": "",
+          "uri": "https://lpt.thomasblock.io:20110",
+          "name": "lpt.thomasblock.io",
+          "version": "",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": 383.8
+        },
+        "0xcdf93b13efcf63f84f2affb01bec48a5c096c69e": {
+          "address": "0xcdf93b13efcf63f84f2affb01bec48a5c096c69e",
+          "local_address": "",
+          "uri": "https://rtv.nullworks.xyz:9924",
+          "name": "rtv.nullworks.xyz",
+          "version": "",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": 249.0
+        },
+        "0x58f90ebc1f19bde9475556c647b0eaee34ece77d": {
+          "address": "0x58f90ebc1f19bde9475556c647b0eaee34ece77d",
+          "local_address": "",
+          "uri": "https://adexlabs.go.ro:8936",
+          "name": "adexlabs.go.ro",
+          "version": "",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": 787.0
+        },
+        "0xa2868a9e9c0f880a4c3ef1930764d54e645ae389": {
+          "address": "0xa2868a9e9c0f880a4c3ef1930764d54e645ae389",
+          "local_address": "",
+          "uri": "https://stream2.speedybird.xyz:18937",
+          "name": "stream2.speedybird.xyz",
+          "version": "",
+          "gpu_count": 0,
+          "gpu_names": [],
+          "total_gpu_vram_gb": 0,
+          "models": {},
+          "prices": [],
+          "streams_handled": 0,
+          "total_payments_wei": 0,
+          "discovery_latency_ms_avg": 216.5
+        }
+      },
+      "payments": {
+        "total_events": 8,
+        "total_wei": 19279920000000000,
+        "total_eth": 0.019279920000000002,
+        "unique_senders": 1,
+        "unique_recipients": 6,
+        "by_pipeline": {
+          "b5a165a5": 2400000000000000,
+          "502faa99": 2411760000000000,
+          "278f2266": 2416800000000000,
+          "a09539f3": 2401920000000000,
+          "46a974dc": 2403600000000000,
+          "f554f06b": 2409840000000000,
+          "6ee7027c": 2421840000000000,
+          "streamdiffusion-sdxl": 2414160000000000
+        }
+      }
+    }
+  }
+}

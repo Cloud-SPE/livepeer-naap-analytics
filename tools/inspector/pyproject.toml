@@ -1,0 +1,40 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "naap-inspector"
+version = "0.1.0"
+description = "Kafka event inspector — samples live topics and generates schema/analytics reports"
+requires-python = ">=3.12"
+dependencies = [
+    "confluent-kafka>=2.3.0",
+    "rich>=13.7.0",
+]
+
+[project.scripts]
+naap-inspect = "inspector.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/inspector"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "mypy>=1.9.0",
+    "ruff>=0.3.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "C4", "SIM"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

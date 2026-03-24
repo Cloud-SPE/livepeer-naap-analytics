@@ -1,0 +1,13 @@
+<clickhouse>
+    <!--
+        Allow ClickHouse to read JSON objects and arrays into String columns.
+        Required for Kafka engine tables where the `data` field can be either
+        a JSON object or a JSON array (e.g., network_capabilities events).
+    -->
+    <profiles>
+        <default>
+            <input_format_json_read_objects_as_strings>1</input_format_json_read_objects_as_strings>
+            <input_format_json_ignore_unknown_keys>1</input_format_json_ignore_unknown_keys>
+        </default>
+    </profiles>
+</clickhouse>

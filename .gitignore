@@ -1,0 +1,47 @@
+# Go
+api/bin/
+api/*.exe
+api/*.test
+api/vendor/
+
+# PDFs and local reference docs
+*.pdf
+
+# Python
+**/__pycache__/
+**/.venv/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/dist/
+**/*.egg-info/
+**/.coverage
+**/htmlcov/
+**/*.pyc
+**/*.pyo
+
+# UV — lock files ARE committed (reproducible builds)
+# .venv dirs are not
+**/.venv/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Docker
+.docker/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Generated
+docs/generated/*.md
+!docs/generated/.gitkeep

@@ -1,0 +1,47 @@
+package runtime_test
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/livepeer/naap-analytics/internal/config"
+	"github.com/livepeer/naap-analytics/internal/providers"
+	"github.com/livepeer/naap-analytics/internal/repo"
+	"github.com/livepeer/naap-analytics/internal/runtime"
+	"github.com/livepeer/naap-analytics/internal/service"
+)
+
+func newTestServer(t *testing.T) *runtime.Server {
+	t.Helper()
+	cfg := &config.Config{Port: "8000", Env: "development", LogLevel: "debug", KafkaBrokers: "localhost:9092"}
+	p, err := providers.New(cfg)
+	if err != nil {
+		t.Fatalf("init providers: %v", err)
+	}
+	t.Cleanup(func() { p.Close(context.Background()) })
+	return runtime.New(cfg, p, service.New(&repo.NoopAnalyticsRepo{}))
+}
+
+func TestHealthz(t *testing.T) {
+	srv := newTestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rr.Code)
+	}
+}
+
+func TestGetWindows_EmptyResponse(t *testing.T) {
+	srv := newTestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/v1/analytics/windows", nil)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rr.Code)
+	}
+}
