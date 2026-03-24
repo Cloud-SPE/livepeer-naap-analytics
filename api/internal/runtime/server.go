@@ -92,6 +92,10 @@ func (s *Server) buildRouter() chi.Router {
 
 	r.Get("/healthz", s.handleHealth)
 
+	// API documentation
+	r.Get("/docs", handleSwaggerUI)
+	r.Get("/docs/openapi.yaml", handleOpenAPISpec)
+
 	r.Route("/v1", func(r chi.Router) {
 		// Network state (R1)
 		r.Get("/net/summary", s.handleGetNetworkSummary)
