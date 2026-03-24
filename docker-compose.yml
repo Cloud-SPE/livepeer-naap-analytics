@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   # ── Kafka ───────────────────────────────────────────────────────────────────
 
@@ -101,9 +99,11 @@ services:
       CLICKHOUSE_USER: naap_admin
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_ADMIN_PASSWORD:-changeme}
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
-      # Kafka broker consumed by ClickHouse Kafka engine tables.
-      # Override to point at a local broker during offline development.
-      KAFKA_BROKER_LIST: ${KAFKA_BROKER_LIST:-infra1.livepeer.cloud:9092}
+      # Kafka runtime config consumed by 01_apply_kafka_config.sh on first start.
+      # KAFKA_BROKER_LIST: broker for ClickHouse Kafka Engine tables.
+      # KAFKA_AUTO_OFFSET_RESET: earliest = full history, latest = new data only.
+      KAFKA_BROKER_LIST: ${KAFKA_BROKER_LIST:-infra2.cloudspe.com:9092}
+      KAFKA_AUTO_OFFSET_RESET: ${KAFKA_AUTO_OFFSET_RESET:-earliest}
     volumes:
       - clickhouse_data:/var/lib/clickhouse
       - ./infra/clickhouse/config:/etc/clickhouse-server/config.d:ro

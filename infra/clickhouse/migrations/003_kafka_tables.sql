@@ -12,17 +12,17 @@
 -- rather than stalling the consumer. Broken messages are counted in
 -- system.kafka_consumers for monitoring.
 --
--- num_consumers: network_events is high-volume (~33M backlog, 16 partitions).
--- streaming_events is low-volume (~250K backlog). Consumers ≤ partitions.
+-- num_consumers: network_events is high-volume (~4.6M events/day, 16 partitions).
+-- streaming_events is low-volume (~35K events/day). Consumers ≤ partitions.
 --
--- kafka_consumer_config: auto.offset.reset=earliest ensures the full topic
--- history is consumed when the consumer group has no committed offsets (i.e.
--- on first run against a new broker). Without this, librdkafka defaults to
--- 'latest' and all historical data is skipped.
+-- ClickHouse Kafka Engine does not support ALTER TABLE MODIFY SETTING, so all
+-- connection and behaviour settings must be supplied at CREATE TABLE time.
+-- Both are substituted from environment variables by the init script:
+--   KAFKA_BROKER_LIST       — broker address (e.g. infra2.cloudspe.com:9092)
+--   KAFKA_AUTO_OFFSET_RESET — earliest (full history) | latest (new data only)
 --
--- KAFKA_BROKER_LIST is substituted by the init script from the environment.
--- To change the broker: ALTER TABLE naap.kafka_network_events MODIFY SETTING
---   kafka_broker_list = 'new-broker:9092';
+-- To change these on a running instance, drop and recreate the tables (and
+-- their dependent MVs). See infra/clickhouse/README.md for the procedure.
 
 CREATE TABLE IF NOT EXISTS naap.kafka_network_events
 (
@@ -42,8 +42,7 @@ SETTINGS
     kafka_group_name       = 'clickhouse-naap-network',
     kafka_format           = 'JSONEachRow',
     kafka_skip_broken_messages = 100,
-    kafka_num_consumers    = 2,
-    kafka_consumer_config  = 'auto.offset.reset=earliest';
+    kafka_num_consumers    = 2;
 
 CREATE TABLE IF NOT EXISTS naap.kafka_streaming_events
 (
@@ -60,5 +59,4 @@ SETTINGS
     kafka_group_name       = 'clickhouse-naap-streaming',
     kafka_format           = 'JSONEachRow',
     kafka_skip_broken_messages = 100,
-    kafka_num_consumers    = 1,
-    kafka_consumer_config  = 'auto.offset.reset=earliest';
+    kafka_num_consumers    = 1;

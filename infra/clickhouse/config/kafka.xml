@@ -1,0 +1,19 @@
+<clickhouse>
+    <!--
+        Global Kafka consumer settings applied to all Kafka Engine tables.
+        These are librdkafka settings passed through by ClickHouse.
+
+        auto_offset_reset controls where consumers start when no committed
+        offset exists for the consumer group (i.e. on first connect to a
+        new broker):
+          earliest — consume the full topic history (backfill)
+          latest   — start from the current end of the topic (new data only)
+
+        The value is read from the KAFKA_AUTO_OFFSET_RESET environment variable
+        at container startup. Set it in .env or docker-compose environment block.
+        Default: earliest (full historical backfill).
+    -->
+    <kafka>
+        <auto_offset_reset from_env="KAFKA_AUTO_OFFSET_RESET"/>
+    </kafka>
+</clickhouse>
