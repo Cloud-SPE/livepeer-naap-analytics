@@ -47,11 +47,12 @@ func (r *Repo) GetLeaderboard(ctx context.Context, p types.QueryParams) ([]types
 	var result []types.LeaderboardEntry
 	for rows.Next() {
 		var e types.LeaderboardEntry
-		var degraded int64
-		if err := rows.Scan(&e.Address, &e.Name, &e.StreamsHandled, &degraded, &e.LastSeen, &e.IsActive); err != nil {
+		var streamsHandled, degraded uint64
+		if err := rows.Scan(&e.Address, &e.Name, &streamsHandled, &degraded, &e.LastSeen, &e.IsActive); err != nil {
 			return nil, fmt.Errorf("clickhouse get leaderboard scan: %w", err)
 		}
-		e.DegradedRate = divSafe(float64(degraded), float64(e.StreamsHandled))
+		e.StreamsHandled = int64(streamsHandled)
+		e.DegradedRate = divSafe(float64(degraded), float64(streamsHandled))
 		// Score is 0.0 until Phase 6.
 		result = append(result, e)
 	}
@@ -89,9 +90,9 @@ func (r *Repo) GetOrchProfile(ctx context.Context, address string) (*types.OrchP
 		  AND hour >= now() - INTERVAL 7 DAY
 	`, address)
 
-	var streams, degraded int64
+	var streams, degraded uint64
 	if err := relRow.Scan(&streams, &degraded); err == nil {
-		pr.StreamsHandled = streams
+		pr.StreamsHandled = int64(streams)
 		pr.DegradedRate = divSafe(float64(degraded), float64(streams))
 	}
 

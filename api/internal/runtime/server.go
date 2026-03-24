@@ -92,16 +92,17 @@ func (s *Server) buildRouter() chi.Router {
 	r.Get("/healthz", s.handleHealth)
 
 	r.Route("/v1", func(r chi.Router) {
-		// Network state (R1) — Phase 4
-		r.Get("/net/summary", notImplemented)
-		r.Get("/net/orchestrators", notImplemented)
-		r.Get("/net/gpu", notImplemented)
-		r.Get("/net/models", notImplemented)
+		// Network state (R1)
+		r.Get("/net/summary", s.handleGetNetworkSummary)
+		r.Get("/net/orchestrators", s.handleListOrchestrators)
+		r.Get("/net/orchestrators/{address}", s.handleGetOrchProfile)
+		r.Get("/net/gpu", s.handleGetGPUSummary)
+		r.Get("/net/models", s.handleListModels)
 
-		// Stream activity (R2) — Phase 4
-		r.Get("/streams/active", notImplemented)
-		r.Get("/streams/summary", notImplemented)
-		r.Get("/streams/history", notImplemented)
+		// Stream activity (R2)
+		r.Get("/streams/active", s.handleGetActiveStreams)
+		r.Get("/streams/summary", s.handleGetStreamSummary)
+		r.Get("/streams/history", s.handleListStreamHistory)
 
 		// Performance (R3) — Phase 5
 		r.Get("/perf/fps", notImplemented)
@@ -161,4 +162,24 @@ func respondJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// problemDetail is the RFC 7807 error response body.
+type problemDetail struct {
+	Type   string `json:"type"`
+	Title  string `json:"title"`
+	Status int    `json:"status"`
+	Detail string `json:"detail,omitempty"`
+}
+
+// writeError writes an RFC 7807 problem+json response.
+func writeError(w http.ResponseWriter, status int, title, detail string) {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(problemDetail{
+		Type:   "about:blank",
+		Title:  title,
+		Status: status,
+		Detail: detail,
+	})
 }

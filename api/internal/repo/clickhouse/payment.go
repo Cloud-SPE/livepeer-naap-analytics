@@ -27,7 +27,7 @@ func (r *Repo) GetPaymentSummary(ctx context.Context, p types.QueryParams) (*typ
 		`+where, args...)
 
 	var totalWEI uint64
-	var eventCount, uniqueOrchs int64
+	var eventCount, uniqueOrchs uint64
 	if err := row.Scan(&totalWEI, &eventCount, &uniqueOrchs); err != nil {
 		return nil, fmt.Errorf("clickhouse get payment summary: %w", err)
 	}
@@ -48,11 +48,11 @@ func (r *Repo) GetPaymentSummary(ctx context.Context, p types.QueryParams) (*typ
 	for orgRows.Next() {
 		var org string
 		var wei uint64
-		var count int64
+		var count uint64
 		if err := orgRows.Scan(&org, &wei, &count); err != nil {
 			return nil, fmt.Errorf("clickhouse get payment summary org scan: %w", err)
 		}
-		byOrg[org] = types.OrgPaymentTotal{TotalWEI: types.WEI(wei), Count: count}
+		byOrg[org] = types.OrgPaymentTotal{TotalWEI: types.WEI(wei), Count: int64(count)}
 	}
 	if err := orgRows.Err(); err != nil {
 		return nil, fmt.Errorf("clickhouse get payment summary org rows: %w", err)
@@ -62,8 +62,8 @@ func (r *Repo) GetPaymentSummary(ctx context.Context, p types.QueryParams) (*typ
 		StartTime:           start,
 		EndTime:             end,
 		TotalPaymentsWEI:    types.WEI(totalWEI),
-		PaymentEventCount:   eventCount,
-		UniqueOrchestrators: uniqueOrchs,
+		PaymentEventCount:   int64(eventCount),
+		UniqueOrchestrators: int64(uniqueOrchs),
 		ByOrg:               byOrg,
 	}, nil
 }
@@ -97,11 +97,13 @@ func (r *Repo) ListPaymentHistory(ctx context.Context, p types.QueryParams) ([]t
 	var result []types.PaymentBucket
 	for rows.Next() {
 		var b types.PaymentBucket
-		var wei uint64
-		if err := rows.Scan(&b.Timestamp, &wei, &b.EventCount, &b.UniqueOrchs); err != nil {
+		var wei, eventCount, uniqueOrchs uint64
+		if err := rows.Scan(&b.Timestamp, &wei, &eventCount, &uniqueOrchs); err != nil {
 			return nil, fmt.Errorf("clickhouse list payment history scan: %w", err)
 		}
 		b.TotalWEI = types.WEI(wei)
+		b.EventCount = int64(eventCount)
+		b.UniqueOrchs = int64(uniqueOrchs)
 		result = append(result, b)
 	}
 	return result, rows.Err()
@@ -135,11 +137,12 @@ func (r *Repo) ListPaymentsByPipeline(ctx context.Context, p types.QueryParams) 
 	var result []types.PipelinePayment
 	for rows.Next() {
 		var pp types.PipelinePayment
-		var wei uint64
-		if err := rows.Scan(&pp.Pipeline, &wei, &pp.EventCount); err != nil {
+		var wei, eventCount uint64
+		if err := rows.Scan(&pp.Pipeline, &wei, &eventCount); err != nil {
 			return nil, fmt.Errorf("clickhouse list payments by pipeline scan: %w", err)
 		}
 		pp.TotalWEI = types.WEI(wei)
+		pp.EventCount = int64(eventCount)
 		result = append(result, pp)
 	}
 	return result, rows.Err()
@@ -177,11 +180,12 @@ func (r *Repo) ListPaymentsByOrch(ctx context.Context, p types.QueryParams) ([]t
 	var result []types.OrchPayment
 	for rows.Next() {
 		var op types.OrchPayment
-		var wei uint64
-		if err := rows.Scan(&op.Address, &wei, &op.PaymentCount); err != nil {
+		var wei, paymentCount uint64
+		if err := rows.Scan(&op.Address, &wei, &paymentCount); err != nil {
 			return nil, fmt.Errorf("clickhouse list payments by orch scan: %w", err)
 		}
 		op.TotalReceivedWEI = types.WEI(wei)
+		op.PaymentCount = int64(paymentCount)
 		result = append(result, op)
 	}
 	return result, rows.Err()

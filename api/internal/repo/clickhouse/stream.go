@@ -38,21 +38,21 @@ func (r *Repo) GetActiveStreams(ctx context.Context, p types.QueryParams) (*type
 	}
 	for rows.Next() {
 		var org, pipeline, state string
-		var n int64
+		var n uint64
 		if err := rows.Scan(&org, &pipeline, &state, &n); err != nil {
 			return nil, fmt.Errorf("clickhouse get active streams scan: %w", err)
 		}
-		result.TotalActive += n
-		result.ByOrg[org] += n
+		result.TotalActive += int64(n)
+		result.ByOrg[org] += int64(n)
 		label := pipeline
 		if label == "" {
 			label = "other"
 		}
-		result.ByPipeline[label] += n
+		result.ByPipeline[label] += int64(n)
 		if state == "" {
 			state = "UNKNOWN"
 		}
-		result.ByState[state] += n
+		result.ByState[state] += int64(n)
 	}
 	return result, rows.Err()
 }
@@ -76,7 +76,8 @@ func (r *Repo) GetStreamSummary(ctx context.Context, p types.QueryParams) (*type
 		FROM naap.agg_stream_hourly FINAL
 		`+where, args...)
 
-	var started, completed, noOrch, orchSwap int64
+	// sum() of UInt64 columns returns UInt64; scan into uint64 then cast.
+	var started, completed, noOrch, orchSwap uint64
 	if err := row.Scan(&started, &completed, &noOrch, &orchSwap); err != nil {
 		return nil, fmt.Errorf("clickhouse get stream summary: %w", err)
 	}
@@ -84,10 +85,10 @@ func (r *Repo) GetStreamSummary(ctx context.Context, p types.QueryParams) (*type
 	return &types.StreamSummary{
 		StartTime:            start,
 		EndTime:              end,
-		TotalStarted:         started,
-		TotalCompleted:       completed,
-		NoOrchAvailableCount: noOrch,
-		OrchSwapCount:        orchSwap,
+		TotalStarted:         int64(started),
+		TotalCompleted:       int64(completed),
+		NoOrchAvailableCount: int64(noOrch),
+		OrchSwapCount:        int64(orchSwap),
 		SuccessRate:          divSafe(float64(completed), float64(started)),
 		NoOrchAvailableRate:  divSafe(float64(noOrch), float64(started)),
 	}, nil
@@ -123,9 +124,14 @@ func (r *Repo) ListStreamHistory(ctx context.Context, p types.QueryParams) ([]ty
 	var result []types.StreamBucket
 	for rows.Next() {
 		var b types.StreamBucket
-		if err := rows.Scan(&b.Timestamp, &b.Started, &b.Completed, &b.NoOrchAvailable, &b.OrchSwap); err != nil {
+		var started, completed, noOrch, orchSwap uint64
+		if err := rows.Scan(&b.Timestamp, &started, &completed, &noOrch, &orchSwap); err != nil {
 			return nil, fmt.Errorf("clickhouse list stream history scan: %w", err)
 		}
+		b.Started = int64(started)
+		b.Completed = int64(completed)
+		b.NoOrchAvailable = int64(noOrch)
+		b.OrchSwap = int64(orchSwap)
 		result = append(result, b)
 	}
 	return result, rows.Err()

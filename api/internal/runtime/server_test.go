@@ -36,14 +36,8 @@ func TestHealthz(t *testing.T) {
 }
 
 func TestRoutes_NotImplemented(t *testing.T) {
+	// Only Phase 5+ routes remain as 501 stubs.
 	routes := []string{
-		"/v1/net/summary",
-		"/v1/net/orchestrators",
-		"/v1/net/gpu",
-		"/v1/net/models",
-		"/v1/streams/active",
-		"/v1/streams/summary",
-		"/v1/streams/history",
 		"/v1/perf/fps",
 		"/v1/perf/fps/history",
 		"/v1/perf/latency",
@@ -57,7 +51,6 @@ func TestRoutes_NotImplemented(t *testing.T) {
 		"/v1/reliability/orchs",
 		"/v1/failures",
 		"/v1/leaderboard",
-		"/v1/leaderboard/0xdeadbeef",
 	}
 
 	srv := newTestServer(t)

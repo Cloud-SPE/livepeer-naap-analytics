@@ -26,7 +26,8 @@ func (r *Repo) GetNetworkSummary(ctx context.Context, p types.QueryParams) (*typ
 	}
 
 	row := r.conn.QueryRow(ctx, query, args...)
-	var total, active int64
+	// count() returns UInt64 in ClickHouse; scan into uint64 then cast.
+	var total, active uint64
 	if err := row.Scan(&total, &active); err != nil {
 		return nil, fmt.Errorf("clickhouse get network summary: %w", err)
 	}
@@ -34,8 +35,8 @@ func (r *Repo) GetNetworkSummary(ctx context.Context, p types.QueryParams) (*typ
 	return &types.NetworkSummary{
 		Org:                    p.Org,
 		SnapshotTime:           time.Now().UTC(),
-		TotalRegistered:        total,
-		TotalActive:            active,
+		TotalRegistered:        int64(total),
+		TotalActive:            int64(active),
 		ActiveThresholdMinutes: activeOrchMinutes,
 	}, nil
 }

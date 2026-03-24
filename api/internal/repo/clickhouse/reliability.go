@@ -27,7 +27,7 @@ func (r *Repo) GetReliabilitySummary(ctx context.Context, p types.QueryParams) (
 		FROM naap.agg_stream_hourly FINAL
 		`+where, args...)
 
-	var started, completed, noOrch, orchSwap int64
+	var started, completed, noOrch, orchSwap uint64
 	if err := row.Scan(&started, &completed, &noOrch, &orchSwap); err != nil {
 		return nil, fmt.Errorf("clickhouse get reliability summary streams: %w", err)
 	}
@@ -42,7 +42,7 @@ func (r *Repo) GetReliabilitySummary(ctx context.Context, p types.QueryParams) (
 		FROM naap.agg_orch_reliability_hourly FINAL
 		`+where, args...)
 
-	var aiCount, degraded, restarts, errors int64
+	var aiCount, degraded, restarts, errors uint64
 	if err := relRow.Scan(&aiCount, &degraded, &restarts, &errors); err != nil {
 		return nil, fmt.Errorf("clickhouse get reliability summary inference: %w", err)
 	}
@@ -52,15 +52,15 @@ func (r *Repo) GetReliabilitySummary(ctx context.Context, p types.QueryParams) (
 		EndTime:              end,
 		StreamSuccessRate:    divSafe(float64(completed), float64(started)),
 		NoOrchAvailableRate:  divSafe(float64(noOrch), float64(started)),
-		OrchSwapCount:        orchSwap,
+		OrchSwapCount:        int64(orchSwap),
 		OrchSwapRate:         divSafe(float64(orchSwap), float64(started)),
 		InferenceRestartRate: divSafe(float64(restarts), float64(aiCount)),
 		DegradedStateRate:    divSafe(float64(degraded), float64(aiCount)),
 		FailureBreakdown: types.FailureBreakdown{
-			NoOrchAvailable:   noOrch,
-			OrchSwap:          orchSwap,
-			InferenceRestart:  restarts,
-			InferenceError:    errors,
+			NoOrchAvailable:   int64(noOrch),
+			OrchSwap:          int64(orchSwap),
+			InferenceRestart:  int64(restarts),
+			InferenceError:    int64(errors),
 			DegradedInference: 0, // TODO: split degraded_count by state in agg table
 			DegradedInput:     0,
 		},
@@ -96,13 +96,13 @@ func (r *Repo) ListReliabilityHistory(ctx context.Context, p types.QueryParams) 
 	var result []types.ReliabilityBucket
 	for rows.Next() {
 		var b types.ReliabilityBucket
-		var started, completed, noOrch int64
+		var started, completed, noOrch uint64
 		if err := rows.Scan(&b.Timestamp, &started, &completed, &noOrch); err != nil {
 			return nil, fmt.Errorf("clickhouse list reliability history scan: %w", err)
 		}
-		b.Started = started
-		b.SuccessRate = rateOrNil(completed, started)
-		b.NoOrchAvailableRate = rateOrNil(noOrch, started)
+		b.Started = int64(started)
+		b.SuccessRate = rateOrNil(int64(completed), int64(started))
+		b.NoOrchAvailableRate = rateOrNil(int64(noOrch), int64(started))
 		result = append(result, b)
 	}
 	return result, rows.Err()
@@ -147,11 +147,12 @@ func (r *Repo) ListOrchReliability(ctx context.Context, p types.QueryParams) ([]
 	var result []types.OrchReliability
 	for rows.Next() {
 		var o types.OrchReliability
-		var degraded, restarts, errors int64
-		if err := rows.Scan(&o.Address, &o.StreamsHandled, &degraded, &restarts, &errors); err != nil {
+		var streamCount, degraded, restarts, errors uint64
+		if err := rows.Scan(&o.Address, &streamCount, &degraded, &restarts, &errors); err != nil {
 			return nil, fmt.Errorf("clickhouse list orch reliability scan: %w", err)
 		}
-		n := float64(o.StreamsHandled)
+		o.StreamsHandled = int64(streamCount)
+		n := float64(streamCount)
 		o.DegradedRate = divSafe(float64(degraded), n)
 		o.RestartRate = divSafe(float64(restarts), n)
 		o.ErrorRate = divSafe(float64(errors), n)
