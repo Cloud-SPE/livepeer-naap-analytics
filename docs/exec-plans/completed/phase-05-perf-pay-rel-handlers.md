@@ -1,6 +1,6 @@
 # Plan: Phase 5 — PERF, PAY, REL HTTP Handlers
 
-**Status:** in_progress
+**Status:** complete
 **Started:** 2026-03-24
 **Depends on:** Phase 4 (NET/STR handlers)
 **Blocks:** Phase 6 (leaderboard scoring)
@@ -36,15 +36,15 @@ Phase ends when all 12 endpoints return real data from ClickHouse.
 ## Steps
 
 - [x] Create exec-plan
-- [ ] Fix UInt64 scan issues in performance.go
-- [ ] `handlers_perf.go`
-- [ ] `handlers_pay.go`
-- [ ] `handlers_rel.go`
-- [ ] Wire 12 routes in buildRouter
-- [ ] Update server_test.go
-- [ ] Handler tests (perf, pay, rel)
-- [ ] go build + go test pass
-- [ ] Validate live endpoints
+- [x] Fix UInt64 scan issues in performance.go
+- [x] `handlers_perf.go`
+- [x] `handlers_pay.go`
+- [x] `handlers_rel.go`
+- [x] Wire 12 routes in buildRouter
+- [x] Update server_test.go
+- [x] Handler tests (perf, pay, rel)
+- [x] go build + go test pass
+- [x] Validate live endpoints
 
 ---
 
