@@ -1,6 +1,6 @@
 # Plan: Phase 4 — NET and STR HTTP Handlers
 
-**Status:** in_progress
+**Status:** complete
 **Started:** 2026-03-24
 **Depends on:** Phase 3 (Go API repo layer)
 **Blocks:** Phase 5 (PERF/PAY/REL endpoints)
@@ -38,14 +38,14 @@ data from ClickHouse and all new tests pass.
 ## Steps
 
 - [x] Create exec-plan
-- [ ] `writeError` helper in server.go
-- [ ] `handlers_net.go` (4 handlers)
-- [ ] `handlers_stream.go` (3 handlers)
-- [ ] Wire 7 routes in buildRouter; remove notImplemented stubs
-- [ ] Update server_test.go (remove 7 routes from 501 table)
-- [ ] `handlers_net_test.go`
-- [ ] `handlers_stream_test.go`
-- [ ] go build + go test pass
+- [x] `writeError` helper in server.go
+- [x] `handlers_net.go` (4 handlers)
+- [x] `handlers_stream.go` (3 handlers)
+- [x] Wire 7 routes in buildRouter; remove notImplemented stubs
+- [x] Update server_test.go (remove 7 routes from 501 table)
+- [x] `handlers_net_test.go`
+- [x] `handlers_stream_test.go`
+- [x] go build + go test pass
 
 ---
 
