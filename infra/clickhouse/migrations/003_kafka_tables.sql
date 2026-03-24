@@ -12,8 +12,13 @@
 -- rather than stalling the consumer. Broken messages are counted in
 -- system.kafka_consumers for monitoring.
 --
--- num_consumers: network_events is high-volume (~4.6M events/day, 16 partitions).
--- streaming_events is low-volume (~35K events/day). Consumers ≤ partitions.
+-- num_consumers: network_events is high-volume (~33M backlog, 16 partitions).
+-- streaming_events is low-volume (~250K backlog). Consumers ≤ partitions.
+--
+-- kafka_consumer_config: auto.offset.reset=earliest ensures the full topic
+-- history is consumed when the consumer group has no committed offsets (i.e.
+-- on first run against a new broker). Without this, librdkafka defaults to
+-- 'latest' and all historical data is skipped.
 --
 -- KAFKA_BROKER_LIST is substituted by the init script from the environment.
 -- To change the broker: ALTER TABLE naap.kafka_network_events MODIFY SETTING
@@ -37,7 +42,8 @@ SETTINGS
     kafka_group_name       = 'clickhouse-naap-network',
     kafka_format           = 'JSONEachRow',
     kafka_skip_broken_messages = 100,
-    kafka_num_consumers    = 2;
+    kafka_num_consumers    = 2,
+    kafka_consumer_config  = 'auto.offset.reset=earliest';
 
 CREATE TABLE IF NOT EXISTS naap.kafka_streaming_events
 (
@@ -54,4 +60,5 @@ SETTINGS
     kafka_group_name       = 'clickhouse-naap-streaming',
     kafka_format           = 'JSONEachRow',
     kafka_skip_broken_messages = 100,
-    kafka_num_consumers    = 1;
+    kafka_num_consumers    = 1,
+    kafka_consumer_config  = 'auto.offset.reset=earliest';
