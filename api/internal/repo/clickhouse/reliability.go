@@ -200,7 +200,9 @@ func (r *Repo) ListFailures(ctx context.Context, p types.QueryParams) ([]types.F
 		args = append(args, p.Org)
 	}
 	if p.OrchAddress != "" {
-		where += " AND lower(JSONExtractString(data, 'orchestrator_info', 'address')) = ?"
+		// orchestrator_info.address carries the node's local key, not the ETH address.
+		// Resolve ETH address → URI via agg_orch_state, then match on orchestrator_info.url.
+		where += " AND lower(JSONExtractString(data, 'orchestrator_info', 'url')) IN (SELECT uri FROM naap.agg_orch_state FINAL WHERE orch_address = ?)"
 		args = append(args, p.OrchAddress)
 	}
 	args = append(args, limit, p.Offset)
