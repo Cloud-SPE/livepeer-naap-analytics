@@ -36,20 +36,8 @@ func TestHealthz(t *testing.T) {
 }
 
 func TestRoutes_NotImplemented(t *testing.T) {
-	// Only Phase 5+ routes remain as 501 stubs.
+	// Only Phase 6+ routes remain as 501 stubs.
 	routes := []string{
-		"/v1/perf/fps",
-		"/v1/perf/fps/history",
-		"/v1/perf/latency",
-		"/v1/perf/webrtc",
-		"/v1/payments/summary",
-		"/v1/payments/history",
-		"/v1/payments/by-pipeline",
-		"/v1/payments/by-orch",
-		"/v1/reliability/summary",
-		"/v1/reliability/history",
-		"/v1/reliability/orchs",
-		"/v1/failures",
 		"/v1/leaderboard",
 	}
 

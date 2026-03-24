@@ -104,25 +104,25 @@ func (s *Server) buildRouter() chi.Router {
 		r.Get("/streams/summary", s.handleGetStreamSummary)
 		r.Get("/streams/history", s.handleListStreamHistory)
 
-		// Performance (R3) — Phase 5
-		r.Get("/perf/fps", notImplemented)
-		r.Get("/perf/fps/history", notImplemented)
-		r.Get("/perf/latency", notImplemented)
-		r.Get("/perf/webrtc", notImplemented)
+		// Performance (R3)
+		r.Get("/perf/fps", s.handleGetFPSSummary)
+		r.Get("/perf/fps/history", s.handleListFPSHistory)
+		r.Get("/perf/latency", s.handleGetLatencySummary)
+		r.Get("/perf/webrtc", s.handleGetWebRTCQuality)
 
-		// Payments (R4) — Phase 5
-		r.Get("/payments/summary", notImplemented)
-		r.Get("/payments/history", notImplemented)
-		r.Get("/payments/by-pipeline", notImplemented)
-		r.Get("/payments/by-orch", notImplemented)
+		// Payments (R4)
+		r.Get("/payments/summary", s.handleGetPaymentSummary)
+		r.Get("/payments/history", s.handleListPaymentHistory)
+		r.Get("/payments/by-pipeline", s.handleListPaymentsByPipeline)
+		r.Get("/payments/by-orch", s.handleListPaymentsByOrch)
 
-		// Reliability (R5) — Phase 5
-		r.Get("/reliability/summary", notImplemented)
-		r.Get("/reliability/history", notImplemented)
-		r.Get("/reliability/orchs", notImplemented)
-		r.Get("/failures", notImplemented)
+		// Reliability (R5)
+		r.Get("/reliability/summary", s.handleGetReliabilitySummary)
+		r.Get("/reliability/history", s.handleListReliabilityHistory)
+		r.Get("/reliability/orchs", s.handleListOrchReliability)
+		r.Get("/failures", s.handleListFailures)
 
-		// Leaderboard (R6) — Phase 5
+		// Leaderboard (R6) — Phase 6
 		r.Get("/leaderboard", notImplemented)
 		r.Get("/leaderboard/{address}", notImplemented)
 	})

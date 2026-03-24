@@ -53,14 +53,16 @@ func (r *Repo) GetFPSSummary(ctx context.Context, p types.QueryParams) (*types.F
 	var byPipeline []types.PipelineFPS
 	for pipeRows.Next() {
 		var pf types.PipelineFPS
+		var n uint64
 		if err := pipeRows.Scan(
 			&pf.Pipeline,
 			&pf.InferenceFPS.Avg, &pf.InferenceFPS.P5, &pf.InferenceFPS.P50, &pf.InferenceFPS.P99,
 			&pf.InputFPS.Avg, &pf.InputFPS.P5, &pf.InputFPS.P50, &pf.InputFPS.P99,
-			&pf.SampleCount,
+			&n,
 		); err != nil {
 			return nil, fmt.Errorf("clickhouse get fps summary pipeline scan: %w", err)
 		}
+		pf.SampleCount = int64(n)
 		byPipeline = append(byPipeline, pf)
 	}
 	if err := pipeRows.Err(); err != nil {
@@ -96,14 +98,16 @@ func (r *Repo) GetFPSSummary(ctx context.Context, p types.QueryParams) (*types.F
 	var byOrch []types.OrchFPS
 	for orchRows.Next() {
 		var of types.OrchFPS
+		var n uint64
 		if err := orchRows.Scan(
 			&of.Address, &of.Pipeline,
 			&of.InferenceFPS.Avg, &of.InferenceFPS.P5, &of.InferenceFPS.P50, &of.InferenceFPS.P99,
 			&of.InputFPS.Avg, &of.InputFPS.P5, &of.InputFPS.P50, &of.InputFPS.P99,
-			&of.SampleCount,
+			&n,
 		); err != nil {
 			return nil, fmt.Errorf("clickhouse get fps summary orch scan: %w", err)
 		}
+		of.SampleCount = int64(n)
 		byOrch = append(byOrch, of)
 	}
 	if err := orchRows.Err(); err != nil {
@@ -151,9 +155,11 @@ func (r *Repo) ListFPSHistory(ctx context.Context, p types.QueryParams) ([]types
 	var prevAvg float64
 	for rows.Next() {
 		var b types.FPSBucket
-		if err := rows.Scan(&b.Timestamp, &b.AvgInferenceFPS, &b.AvgInputFPS, &b.SampleCount); err != nil {
+		var n uint64
+		if err := rows.Scan(&b.Timestamp, &b.AvgInferenceFPS, &b.AvgInputFPS, &n); err != nil {
 			return nil, fmt.Errorf("clickhouse list fps history scan: %w", err)
 		}
+		b.SampleCount = int64(n)
 		// PERF-002-a: flag bucket as degraded if avg FPS drops ≥20% from prior bucket.
 		if prevAvg > 0 && b.AvgInferenceFPS < prevAvg*0.8 {
 			b.Degraded = true
@@ -168,10 +174,11 @@ func (r *Repo) ListFPSHistory(ctx context.Context, p types.QueryParams) ([]types
 // Percentiles are computed from raw naap.events for accuracy (PERF-003-b).
 func (r *Repo) GetLatencySummary(ctx context.Context, p types.QueryParams) (*types.LatencySummary, error) {
 	start, end := effectiveWindow(p)
-	where := "WHERE event_ts >= ? AND event_ts < ? AND data NOT IN ('', '[]', 'null')"
+	// Build inner WHERE conditions (no WHERE keyword — appended after fixed predicates).
+	innerConds := "event_ts >= ? AND event_ts < ? AND data NOT IN ('', '[]', 'null')"
 	args := []any{start, end}
 	if p.Org != "" {
-		where += " AND org = ?"
+		innerConds += " AND org = ?"
 		args = append(args, p.Org)
 	}
 
@@ -189,7 +196,7 @@ func (r *Repo) GetLatencySummary(ctx context.Context, p types.QueryParams) (*typ
 				arrayJoin(JSONExtractArrayRaw(data)) AS orch_json
 			FROM naap.events
 			WHERE event_type = 'discovery_results'
-			  AND `+where+`
+			  AND `+innerConds+`
 		)
 		WHERE addr != ''
 		  AND toUInt64OrDefault(JSONExtractString(orch_json, 'latency_ms')) > 0
@@ -206,9 +213,11 @@ func (r *Repo) GetLatencySummary(ctx context.Context, p types.QueryParams) (*typ
 	var totalAvgSum float64
 	for rows.Next() {
 		var o types.OrchLatency
-		if err := rows.Scan(&o.Address, &o.AvgMS, &o.P50MS, &o.P95MS, &o.P99MS, &o.SampleCount); err != nil {
+		var n uint64
+		if err := rows.Scan(&o.Address, &o.AvgMS, &o.P50MS, &o.P95MS, &o.P99MS, &n); err != nil {
 			return nil, fmt.Errorf("clickhouse get latency summary scan: %w", err)
 		}
+		o.SampleCount = int64(n)
 		totalAvgSum += o.AvgMS
 		orchs = append(orchs, o)
 	}
