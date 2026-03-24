@@ -6,7 +6,7 @@ Index of execution plans. Plans are first-class artifacts in this repository.
 
 See `docs/exec-plans/active/` for in-progress work.
 
-*(None — Phases 1, 3, 4, 5, and 6 complete. Start Phase 7 next.)*
+*(None — Phases 1, 3, 4, 5, 6, and 7 complete. Start Phase 8 next.)*
 
 ## Implementation sequencing
 
@@ -18,7 +18,7 @@ See `docs/exec-plans/active/` for in-progress work.
 | 4 | Go API — service + runtime for NET, STR endpoints | Phase 3 | ✅ complete |
 | 5 | Go API — PERF, PAY, REL endpoints | Phase 4 | ✅ complete |
 | 6 | Go API — leaderboard + scoring | Phase 5 | ✅ complete |
-| 7 | Rate limiting middleware | Phase 4 | pending |
+| 7 | Rate limiting middleware | Phase 4 | ✅ complete |
 | 8 | Integration tests + load tests | Phase 6 | pending |
 
 Create an exec-plan in `docs/exec-plans/active/` before starting each phase.

@@ -32,6 +32,10 @@ type Config struct {
 	ClickHousePassword string        `envconfig:"CLICKHOUSE_PASSWORD" default:"naap_reader_changeme"`
 	ClickHouseTimeout  time.Duration `envconfig:"CLICKHOUSE_TIMEOUT" default:"30s"`
 
+	// Rate limiting — per-IP token bucket. Set RateLimitRPS to 0 to disable.
+	RateLimitRPS   float64 `envconfig:"RATE_LIMIT_RPS" default:"30"`
+	RateLimitBurst int     `envconfig:"RATE_LIMIT_BURST" default:"60"`
+
 	// Telemetry
 	OTLPEndpoint string `envconfig:"OTLP_ENDPOINT" default:""`
 }

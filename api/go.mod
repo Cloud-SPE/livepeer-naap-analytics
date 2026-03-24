@@ -7,6 +7,7 @@ require (
 	github.com/go-chi/chi/v5 v5.0.12
 	github.com/kelseyhightower/envconfig v1.4.0
 	go.uber.org/zap v1.27.1
+	golang.org/x/time v0.9.0
 )
 
 require (
