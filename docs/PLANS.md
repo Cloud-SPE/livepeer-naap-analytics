@@ -6,7 +6,7 @@ Index of execution plans. Plans are first-class artifacts in this repository.
 
 See `docs/exec-plans/active/` for in-progress work.
 
-*(None — Phase 1 complete. Start Phase 2 or Phase 3 next.)*
+*(None — Phases 1 and 3 complete. Start Phase 4 next.)*
 
 ## Implementation sequencing
 
@@ -14,7 +14,7 @@ See `docs/exec-plans/active/` for in-progress work.
 |-------|------|------------|--------|
 | 1 | ClickHouse schema + Kafka engine tables | Nothing | ✅ complete |
 | 2 | Python pipeline decommission / ClickHouse direct ingest | Phase 1 | pending |
-| 3 | Go API — ClickHouse repo layer | Phase 1 | pending |
+| 3 | Go API — ClickHouse repo layer | Phase 1 | ✅ complete |
 | 4 | Go API — service + runtime for NET, STR endpoints | Phase 3 | pending |
 | 5 | Go API — PERF, PAY, REL endpoints | Phase 4 | pending |
 | 6 | Go API — leaderboard + scoring | Phase 5 | pending |
