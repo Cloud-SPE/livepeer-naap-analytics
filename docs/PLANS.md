@@ -13,7 +13,7 @@ See `docs/exec-plans/active/` for in-progress work.
 | Phase | Work | Depends on | Status |
 |-------|------|------------|--------|
 | 1 | ClickHouse schema + Kafka engine tables | Nothing | ✅ complete |
-| 2 | Python pipeline decommission / ClickHouse direct ingest | Phase 1 | pending |
+| 2 | Python pipeline decommission / ClickHouse direct ingest | Phase 1 | deferred (ClickHouse Kafka Engine handles ingest; Python pipeline is a non-running scaffold) |
 | 3 | Go API — ClickHouse repo layer | Phase 1 | ✅ complete |
 | 4 | Go API — service + runtime for NET, STR endpoints | Phase 3 | ✅ complete |
 | 5 | Go API — PERF, PAY, REL endpoints | Phase 4 | ✅ complete |

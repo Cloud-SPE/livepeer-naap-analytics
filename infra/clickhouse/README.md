@@ -26,6 +26,8 @@ infra/clickhouse/
 | `007_payments.sql` | `agg_payment_hourly` (R4) |
 | `008_reliability.sql` | `agg_orch_reliability_hourly` (R5) |
 | `009_performance.sql` | `agg_fps_hourly`, `agg_discovery_latency_hourly`, `agg_webrtc_hourly` (R3) |
+| `010_fix_orch_uri.sql` | Fix `uri` extraction in `mv_orch_state` (`orch_uri` not `uri`) |
+| `011_fix_orch_address.sql` | Fix `orch_address` in stream state and reliability tables (use ETH addr not local key) |
 
 Migrations are idempotent (`CREATE TABLE IF NOT EXISTS`, `CREATE USER IF NOT EXISTS`).
 
@@ -48,14 +50,26 @@ clickhouse-client --query "SELECT sum(started) FROM naap.agg_stream_hourly"
 
 ## Changing the Kafka broker
 
-The broker is configured at migration time via the `KAFKA_BROKER_LIST` environment
-variable (default: `infra1.livepeer.cloud:9092`).
+The broker address is substituted into the Kafka Engine DDL at migration time via
+`KAFKA_BROKER_LIST` (default: `infra2.cloudspe.com:9092`).
 
-To point an already-running ClickHouse at a different broker:
-```sql
-ALTER TABLE naap.kafka_network_events MODIFY SETTING kafka_broker_list = 'new-broker:9092';
-ALTER TABLE naap.kafka_streaming_events MODIFY SETTING kafka_broker_list = 'new-broker:9092';
-```
+> **ClickHouse Kafka Engine does not support `ALTER TABLE MODIFY SETTING`.**
+> The broker cannot be changed on a live table without recreating it.
+
+To point ClickHouse at a different broker:
+
+1. Set the new broker in `.env`:
+   ```
+   KAFKA_BROKER_LIST=new-broker:9092
+   ```
+2. Restart the stack so migrations re-apply on a fresh ClickHouse container:
+   ```bash
+   make down && make up
+   ```
+
+This drops and recreates the Kafka Engine tables and their dependent MVs, then
+repopulates aggregate tables from new events. Set `KAFKA_AUTO_OFFSET_RESET=earliest`
+beforehand if a full historical backfill is needed.
 
 ## Changing the TTL
 
