@@ -46,6 +46,15 @@ test:
 test-integration:
 	cd api && CLICKHOUSE_ADDR=localhost:9000 go test -tags=integration ./internal/repo/clickhouse/... -v -timeout=60s
 
+# Validation tests: scenario-based data-quality harness (make up first).
+# Inserts synthetic events directly into naap.events and asserts on aggregate tables.
+# Each test uses a unique org tag for isolation — no cleanup required.
+test-validation:
+	cd api && CLICKHOUSE_ADDR=localhost:9000 \
+	         CLICKHOUSE_WRITER_USER=naap_writer \
+	         CLICKHOUSE_WRITER_PASSWORD=naap_writer_changeme \
+	         go test -tags=validation ./internal/validation/... -v -timeout=120s
+
 # Benchmarks: measures handler+JSON overhead using the noop repo.
 bench:
 	cd api && go test ./internal/runtime/... -bench=. -benchmem -run='^$$' -count=3
