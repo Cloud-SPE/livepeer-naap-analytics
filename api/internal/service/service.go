@@ -12,9 +12,43 @@ import (
 )
 
 // AnalyticsService provides analytics query operations.
+// Phase 3: thin delegation to repo. Business logic added in Phase 4+.
 type AnalyticsService interface {
-	QueryWindows(ctx context.Context, params types.QueryParams) ([]types.AggregatedWindow, error)
-	QueryAlerts(ctx context.Context, params types.QueryParams) ([]types.Alert, error)
+	// Network state (R1)
+	GetNetworkSummary(ctx context.Context, p types.QueryParams) (*types.NetworkSummary, error)
+	ListOrchestrators(ctx context.Context, p types.QueryParams) ([]types.Orchestrator, error)
+	GetGPUSummary(ctx context.Context, p types.QueryParams) (*types.GPUSummary, error)
+	ListModels(ctx context.Context, p types.QueryParams) ([]types.ModelAvailability, error)
+
+	// Stream activity (R2)
+	GetActiveStreams(ctx context.Context, p types.QueryParams) (*types.ActiveStreamsSummary, error)
+	GetStreamSummary(ctx context.Context, p types.QueryParams) (*types.StreamSummary, error)
+	ListStreamHistory(ctx context.Context, p types.QueryParams) ([]types.StreamBucket, error)
+
+	// Performance (R3)
+	GetFPSSummary(ctx context.Context, p types.QueryParams) (*types.FPSSummary, error)
+	ListFPSHistory(ctx context.Context, p types.QueryParams) ([]types.FPSBucket, error)
+	GetLatencySummary(ctx context.Context, p types.QueryParams) (*types.LatencySummary, error)
+	GetWebRTCQuality(ctx context.Context, p types.QueryParams) (*types.WebRTCQuality, error)
+
+	// Payments (R4)
+	GetPaymentSummary(ctx context.Context, p types.QueryParams) (*types.PaymentSummary, error)
+	ListPaymentHistory(ctx context.Context, p types.QueryParams) ([]types.PaymentBucket, error)
+	ListPaymentsByPipeline(ctx context.Context, p types.QueryParams) ([]types.PipelinePayment, error)
+	ListPaymentsByOrch(ctx context.Context, p types.QueryParams) ([]types.OrchPayment, error)
+
+	// Reliability (R5)
+	GetReliabilitySummary(ctx context.Context, p types.QueryParams) (*types.ReliabilitySummary, error)
+	ListReliabilityHistory(ctx context.Context, p types.QueryParams) ([]types.ReliabilityBucket, error)
+	ListOrchReliability(ctx context.Context, p types.QueryParams) ([]types.OrchReliability, error)
+	ListFailures(ctx context.Context, p types.QueryParams) ([]types.FailureEvent, error)
+
+	// Leaderboard (R6)
+	GetLeaderboard(ctx context.Context, p types.QueryParams) ([]types.LeaderboardEntry, error)
+	GetOrchProfile(ctx context.Context, address string) (*types.OrchProfile, error)
+
+	// Health
+	Ping(ctx context.Context) error
 }
 
 type analyticsService struct {
@@ -26,18 +60,174 @@ func New(r repo.AnalyticsRepo) AnalyticsService {
 	return &analyticsService{repo: r}
 }
 
-func (s *analyticsService) QueryWindows(ctx context.Context, params types.QueryParams) ([]types.AggregatedWindow, error) {
-	windows, err := s.repo.GetWindows(ctx, params)
+func (s *analyticsService) GetNetworkSummary(ctx context.Context, p types.QueryParams) (*types.NetworkSummary, error) {
+	v, err := s.repo.GetNetworkSummary(ctx, p)
 	if err != nil {
-		return nil, fmt.Errorf("query windows: %w", err)
+		return nil, fmt.Errorf("get network summary: %w", err)
 	}
-	return windows, nil
+	return v, nil
 }
 
-func (s *analyticsService) QueryAlerts(ctx context.Context, params types.QueryParams) ([]types.Alert, error) {
-	alerts, err := s.repo.GetAlerts(ctx, params)
+func (s *analyticsService) ListOrchestrators(ctx context.Context, p types.QueryParams) ([]types.Orchestrator, error) {
+	v, err := s.repo.ListOrchestrators(ctx, p)
 	if err != nil {
-		return nil, fmt.Errorf("query alerts: %w", err)
+		return nil, fmt.Errorf("list orchestrators: %w", err)
 	}
-	return alerts, nil
+	return v, nil
+}
+
+func (s *analyticsService) GetGPUSummary(ctx context.Context, p types.QueryParams) (*types.GPUSummary, error) {
+	v, err := s.repo.GetGPUSummary(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("get gpu summary: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) ListModels(ctx context.Context, p types.QueryParams) ([]types.ModelAvailability, error) {
+	v, err := s.repo.ListModels(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("list models: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) GetActiveStreams(ctx context.Context, p types.QueryParams) (*types.ActiveStreamsSummary, error) {
+	v, err := s.repo.GetActiveStreams(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("get active streams: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) GetStreamSummary(ctx context.Context, p types.QueryParams) (*types.StreamSummary, error) {
+	v, err := s.repo.GetStreamSummary(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("get stream summary: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) ListStreamHistory(ctx context.Context, p types.QueryParams) ([]types.StreamBucket, error) {
+	v, err := s.repo.ListStreamHistory(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("list stream history: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) GetFPSSummary(ctx context.Context, p types.QueryParams) (*types.FPSSummary, error) {
+	v, err := s.repo.GetFPSSummary(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("get fps summary: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) ListFPSHistory(ctx context.Context, p types.QueryParams) ([]types.FPSBucket, error) {
+	v, err := s.repo.ListFPSHistory(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("list fps history: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) GetLatencySummary(ctx context.Context, p types.QueryParams) (*types.LatencySummary, error) {
+	v, err := s.repo.GetLatencySummary(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("get latency summary: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) GetWebRTCQuality(ctx context.Context, p types.QueryParams) (*types.WebRTCQuality, error) {
+	v, err := s.repo.GetWebRTCQuality(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("get webrtc quality: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) GetPaymentSummary(ctx context.Context, p types.QueryParams) (*types.PaymentSummary, error) {
+	v, err := s.repo.GetPaymentSummary(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("get payment summary: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) ListPaymentHistory(ctx context.Context, p types.QueryParams) ([]types.PaymentBucket, error) {
+	v, err := s.repo.ListPaymentHistory(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("list payment history: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) ListPaymentsByPipeline(ctx context.Context, p types.QueryParams) ([]types.PipelinePayment, error) {
+	v, err := s.repo.ListPaymentsByPipeline(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("list payments by pipeline: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) ListPaymentsByOrch(ctx context.Context, p types.QueryParams) ([]types.OrchPayment, error) {
+	v, err := s.repo.ListPaymentsByOrch(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("list payments by orch: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) GetReliabilitySummary(ctx context.Context, p types.QueryParams) (*types.ReliabilitySummary, error) {
+	v, err := s.repo.GetReliabilitySummary(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("get reliability summary: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) ListReliabilityHistory(ctx context.Context, p types.QueryParams) ([]types.ReliabilityBucket, error) {
+	v, err := s.repo.ListReliabilityHistory(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("list reliability history: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) ListOrchReliability(ctx context.Context, p types.QueryParams) ([]types.OrchReliability, error) {
+	v, err := s.repo.ListOrchReliability(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("list orch reliability: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) ListFailures(ctx context.Context, p types.QueryParams) ([]types.FailureEvent, error) {
+	v, err := s.repo.ListFailures(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("list failures: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) GetLeaderboard(ctx context.Context, p types.QueryParams) ([]types.LeaderboardEntry, error) {
+	v, err := s.repo.GetLeaderboard(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("get leaderboard: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) GetOrchProfile(ctx context.Context, address string) (*types.OrchProfile, error) {
+	v, err := s.repo.GetOrchProfile(ctx, address)
+	if err != nil {
+		return nil, fmt.Errorf("get orch profile: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) Ping(ctx context.Context) error {
+	return s.repo.Ping(ctx)
 }

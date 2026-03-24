@@ -35,13 +35,40 @@ func TestHealthz(t *testing.T) {
 	}
 }
 
-func TestGetWindows_EmptyResponse(t *testing.T) {
-	srv := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/v1/analytics/windows", nil)
-	rr := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rr, req)
+func TestRoutes_NotImplemented(t *testing.T) {
+	routes := []string{
+		"/v1/net/summary",
+		"/v1/net/orchestrators",
+		"/v1/net/gpu",
+		"/v1/net/models",
+		"/v1/streams/active",
+		"/v1/streams/summary",
+		"/v1/streams/history",
+		"/v1/perf/fps",
+		"/v1/perf/fps/history",
+		"/v1/perf/latency",
+		"/v1/perf/webrtc",
+		"/v1/payments/summary",
+		"/v1/payments/history",
+		"/v1/payments/by-pipeline",
+		"/v1/payments/by-orch",
+		"/v1/reliability/summary",
+		"/v1/reliability/history",
+		"/v1/reliability/orchs",
+		"/v1/failures",
+		"/v1/leaderboard",
+		"/v1/leaderboard/0xdeadbeef",
+	}
 
-	if rr.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rr.Code)
+	srv := newTestServer(t)
+	for _, path := range routes {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			rr := httptest.NewRecorder()
+			srv.Handler().ServeHTTP(rr, req)
+			if rr.Code != http.StatusNotImplemented {
+				t.Errorf("%s: expected 501, got %d", path, rr.Code)
+			}
+		})
 	}
 }

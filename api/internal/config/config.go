@@ -19,11 +19,18 @@ type Config struct {
 	Env      string `envconfig:"ENV" default:"development"`
 	LogLevel string `envconfig:"LOG_LEVEL" default:"info"`
 
-	// Kafka
-	KafkaBrokers      string        `envconfig:"KAFKA_BROKERS" required:"true"`
+	// Kafka (retained for pipeline compatibility; not used by Go API in Phase 3+)
+	KafkaBrokers      string        `envconfig:"KAFKA_BROKERS" default:"localhost:9092"`
 	KafkaDialTimeout  time.Duration `envconfig:"KAFKA_DIAL_TIMEOUT" default:"10s"`
 	KafkaReadTimeout  time.Duration `envconfig:"KAFKA_READ_TIMEOUT" default:"10s"`
 	KafkaWriteTimeout time.Duration `envconfig:"KAFKA_WRITE_TIMEOUT" default:"10s"`
+
+	// ClickHouse — native protocol (port 9000)
+	ClickHouseAddr     string        `envconfig:"CLICKHOUSE_ADDR" default:"localhost:9000"`
+	ClickHouseDB       string        `envconfig:"CLICKHOUSE_DB" default:"naap"`
+	ClickHouseUser     string        `envconfig:"CLICKHOUSE_USER" default:"naap_reader"`
+	ClickHousePassword string        `envconfig:"CLICKHOUSE_PASSWORD" default:"naap_reader_changeme"`
+	ClickHouseTimeout  time.Duration `envconfig:"CLICKHOUSE_TIMEOUT" default:"30s"`
 
 	// Telemetry
 	OTLPEndpoint string `envconfig:"OTLP_ENDPOINT" default:""`

@@ -90,39 +90,71 @@ func (s *Server) buildRouter() chi.Router {
 	r.Use(middleware.Timeout(30 * time.Second))
 
 	r.Get("/healthz", s.handleHealth)
+
 	r.Route("/v1", func(r chi.Router) {
-		r.Get("/analytics/windows", s.handleGetWindows)
-		r.Get("/analytics/alerts", s.handleGetAlerts)
+		// Network state (R1) — Phase 4
+		r.Get("/net/summary", notImplemented)
+		r.Get("/net/orchestrators", notImplemented)
+		r.Get("/net/gpu", notImplemented)
+		r.Get("/net/models", notImplemented)
+
+		// Stream activity (R2) — Phase 4
+		r.Get("/streams/active", notImplemented)
+		r.Get("/streams/summary", notImplemented)
+		r.Get("/streams/history", notImplemented)
+
+		// Performance (R3) — Phase 5
+		r.Get("/perf/fps", notImplemented)
+		r.Get("/perf/fps/history", notImplemented)
+		r.Get("/perf/latency", notImplemented)
+		r.Get("/perf/webrtc", notImplemented)
+
+		// Payments (R4) — Phase 5
+		r.Get("/payments/summary", notImplemented)
+		r.Get("/payments/history", notImplemented)
+		r.Get("/payments/by-pipeline", notImplemented)
+		r.Get("/payments/by-orch", notImplemented)
+
+		// Reliability (R5) — Phase 5
+		r.Get("/reliability/summary", notImplemented)
+		r.Get("/reliability/history", notImplemented)
+		r.Get("/reliability/orchs", notImplemented)
+		r.Get("/failures", notImplemented)
+
+		// Leaderboard (R6) — Phase 5
+		r.Get("/leaderboard", notImplemented)
+		r.Get("/leaderboard/{address}", notImplemented)
 	})
 
 	return r
 }
 
-func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+// handleHealth returns 200 if the service is up, including a ClickHouse ping.
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	status := "ok"
+	httpStatus := http.StatusOK
+
+	if err := s.svc.Ping(r.Context()); err != nil {
+		status = "degraded"
+		httpStatus = http.StatusServiceUnavailable
+		s.providers.Logger.Sugar().Warnw("healthz: clickhouse ping failed", "error", err)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	w.WriteHeader(httpStatus)
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": status})
 }
 
-func (s *Server) handleGetWindows(w http.ResponseWriter, r *http.Request) {
-	// TODO: parse QueryParams from request, pass to service
-	windows, err := s.svc.QueryWindows(r.Context(), parseQueryParams(r))
-	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		s.providers.Logger.Sugar().Errorw("query windows failed", "error", err)
-		return
-	}
-	respondJSON(w, http.StatusOK, windows)
-}
-
-func (s *Server) handleGetAlerts(w http.ResponseWriter, r *http.Request) {
-	alerts, err := s.svc.QueryAlerts(r.Context(), parseQueryParams(r))
-	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		s.providers.Logger.Sugar().Errorw("query alerts failed", "error", err)
-		return
-	}
-	respondJSON(w, http.StatusOK, alerts)
+// notImplemented is a placeholder handler for routes not yet implemented.
+// Returns RFC 7807-style JSON error with 501 Not Implemented.
+func notImplemented(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(http.StatusNotImplemented)
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"type":   "about:blank",
+		"title":  "Not Implemented",
+		"status": "501",
+	})
 }
 
 func respondJSON(w http.ResponseWriter, status int, v any) {

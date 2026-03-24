@@ -2,52 +2,39 @@
 // This is layer 1 — no imports from other internal packages.
 package types
 
-import "time"
-
-// EventType represents the kind of network event.
-type EventType string
-
-const (
-	EventTypeStreamStarted       EventType = "stream_started"
-	EventTypeStreamEnded         EventType = "stream_ended"
-	EventTypeTranscodeCompleted  EventType = "transcode_completed"
-	EventTypeTranscodeFailed     EventType = "transcode_failed"
+import (
+	"strconv"
+	"time"
 )
 
-// RawEvent is a network event as received from Kafka.
-type RawEvent struct {
-	EventID   string            `json:"event_id"`
-	EventType EventType         `json:"event_type"`
-	NodeID    string            `json:"node_id"`
-	StreamID  string            `json:"stream_id"`
-	Timestamp time.Time         `json:"timestamp"`
-	Payload   map[string]any    `json:"payload"`
-}
-
-// AggregatedWindow is a time-windowed analytics aggregate.
-type AggregatedWindow struct {
-	WindowStart          time.Time `json:"window_start"`
-	WindowEnd            time.Time `json:"window_end"`
-	NodeID               string    `json:"node_id"`
-	StreamCount          int64     `json:"stream_count"`
-	TranscodeSuccessRate float64   `json:"transcode_success_rate"`
-	TotalDurationSeconds float64   `json:"total_duration_seconds"`
-}
-
-// Alert is a threshold breach notification.
-type Alert struct {
-	AlertID       string    `json:"alert_id"`
-	AlertType     string    `json:"alert_type"`
-	NodeID        string    `json:"node_id"`
-	TriggeredAt   time.Time `json:"triggered_at"`
-	Threshold     float64   `json:"threshold"`
-	ObservedValue float64   `json:"observed_value"`
-}
-
-// QueryParams holds common query parameters for analytics endpoints.
+// QueryParams holds common query parameters passed from the runtime to the repo.
+// Zero values signal "use default": empty Org means all orgs, zero Start/End means
+// the service layer applies a default window (typically last 24 hours).
 type QueryParams struct {
-	NodeID    string
-	StartTime time.Time
-	EndTime   time.Time
-	Limit     int
+	Org          string    // "daydream" | "cloudspe" | "" for all
+	Pipeline     string    // filter by pipeline name
+	OrchAddress  string    // filter by orch ETH address (normalised lowercase)
+	StreamID     string    // filter by stream ID
+	FailureType  string    // "no_orch_available" | "orch_swap" | "inference_restart" | "inference_error"
+	StartTime    time.Time // time window start (zero = service-layer default)
+	EndTime      time.Time // time window end (zero = now)
+	Granularity  string    // "1m" | "5m" | "1h" | "1d"
+	ActiveOnly   bool      // for orch list: return only orchs active within threshold
+	Limit        int       // max results (0 = default 50)
+	Offset       int       // pagination offset
+}
+
+// WEI is a value in wei (1e-18 ETH).
+// Marshalled as a decimal string in JSON to prevent float64 precision loss.
+// See PAY-001-a for the requirement.
+type WEI uint64
+
+func (w WEI) MarshalJSON() ([]byte, error) {
+	s := `"` + strconv.FormatUint(uint64(w), 10) + `"`
+	return []byte(s), nil
+}
+
+// ToETH converts WEI to ETH as a float64 (for display only, not storage).
+func (w WEI) ToETH() float64 {
+	return float64(w) / 1e18
 }

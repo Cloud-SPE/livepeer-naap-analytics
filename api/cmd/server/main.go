@@ -8,7 +8,7 @@ import (
 
 	"github.com/livepeer/naap-analytics/internal/config"
 	"github.com/livepeer/naap-analytics/internal/providers"
-	"github.com/livepeer/naap-analytics/internal/repo"
+	chrepo "github.com/livepeer/naap-analytics/internal/repo/clickhouse"
 	"github.com/livepeer/naap-analytics/internal/runtime"
 	"github.com/livepeer/naap-analytics/internal/service"
 )
@@ -26,9 +26,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	// TODO: replace NoopAnalyticsRepo with a real implementation once
-	// storage backend is chosen. See docs/exec-plans/ for that work.
-	r := &repo.NoopAnalyticsRepo{}
+	r, err := chrepo.New(cfg)
+	if err != nil {
+		log.Printf("fatal: init clickhouse repo: %v", err)
+		os.Exit(1)
+	}
+
 	svc := service.New(r)
 	srv := runtime.New(cfg, p, svc)
 
