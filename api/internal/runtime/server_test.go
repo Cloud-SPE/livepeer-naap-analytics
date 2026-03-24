@@ -13,14 +13,14 @@ import (
 	"github.com/livepeer/naap-analytics/internal/service"
 )
 
-func newTestServer(t *testing.T) *runtime.Server {
-	t.Helper()
+func newTestServer(tb testing.TB) *runtime.Server {
+	tb.Helper()
 	cfg := &config.Config{Port: "8000", Env: "development", LogLevel: "debug", KafkaBrokers: "localhost:9092"}
 	p, err := providers.New(cfg)
 	if err != nil {
-		t.Fatalf("init providers: %v", err)
+		tb.Fatalf("init providers: %v", err)
 	}
-	t.Cleanup(func() { p.Close(context.Background()) })
+	tb.Cleanup(func() { p.Close(context.Background()) })
 	return runtime.New(cfg, p, service.New(&repo.NoopAnalyticsRepo{}))
 }
 

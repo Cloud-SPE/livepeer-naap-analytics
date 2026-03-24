@@ -1,4 +1,4 @@
-.PHONY: up down build test lint dev-api dev-pipeline setup fmt ch-smoke ch-query
+.PHONY: up down build test test-integration bench load-test lint dev-api dev-pipeline setup fmt ch-smoke ch-query
 
 # ── Infrastructure ────────────────────────────────────────────────────────────
 
@@ -30,6 +30,18 @@ test-api:
 
 test-pipeline:
 	cd pipeline && python -m pytest tests/ -v
+
+# Integration tests: require a running ClickHouse (make up first).
+test-integration:
+	cd api && CLICKHOUSE_ADDR=localhost:9000 go test -tags=integration ./internal/repo/clickhouse/... -v -timeout=60s
+
+# Benchmarks: measures handler+JSON overhead using the noop repo.
+bench:
+	cd api && go test ./internal/runtime/... -bench=. -benchmem -run='^$$' -count=3
+
+# Load test: requires k6 (https://k6.io) and a running API (make up first).
+load-test:
+	k6 run tests/load/script.js
 
 # ── Lint ──────────────────────────────────────────────────────────────────────
 
