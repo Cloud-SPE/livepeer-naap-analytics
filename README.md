@@ -45,9 +45,6 @@ api/                    Go REST API (port 8000)
     runtime/            HTTP handlers, middleware, server wiring
       static/           Embedded assets (openapi.yaml)
 
-pipeline/               Python Kafka consumer (scaffold — not used in prod)
-                        ClickHouse ingests directly from Kafka via Kafka Engine
-
 infra/
   clickhouse/
     config/             ClickHouse server config overrides
@@ -75,7 +72,6 @@ tools/inspector/        Event inspection utility
 | Go | 1.24+ | API service |
 | Docker + Docker Compose | v2 | Full local stack |
 | k6 | any | Load testing (optional) |
-| Python 3.11+ | | Pipeline (optional) |
 
 ## Running locally
 
@@ -126,9 +122,7 @@ cd api && go build -o bin/server ./cmd/server
 ## Testing
 
 ```bash
-make test             # All tests (unit + fast integration)
-make test-api         # Go unit tests with race detector
-make test-pipeline    # Python tests (pytest)
+make test             # Go unit tests with race detector
 
 # Integration tests — requires a running ClickHouse
 CLICKHOUSE_ADDR=localhost:9000 make test-integration
@@ -304,7 +298,7 @@ See `infra/clickhouse/README.md` for the full ClickHouse operations guide.
 - **Layer rule:** dependencies flow forward only — `Types → Config → Repo → Service → Runtime`. No layer imports from a layer ahead of it.
 - **Orch address resolution:** `ai_stream_status` events carry a node-local keypair address, not the on-chain ETH address. Migration 011 resolves this via `orchestrator_info.url → agg_orch_state.uri → orch_address`.
 - **Deduplication:** `naap.events` is `ReplacingMergeTree` keyed on `event_id`. Kafka at-least-once duplicates are collapsed in background merges. Queries on raw `naap.events` without `FINAL` may transiently over-count until a merge runs; aggregate tables are not affected.
-- **Python pipeline:** the `pipeline/` service is a scaffold and is not used in production. ClickHouse ingests from Kafka directly via the Kafka Engine.
+- **Ingest path:** ClickHouse consumes from Kafka directly via the Kafka Engine — there is no application-layer consumer between Kafka and ClickHouse.
 
 ## Documentation
 

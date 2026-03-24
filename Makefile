@@ -1,4 +1,4 @@
-.PHONY: up down build test test-integration bench load-test lint dev-api dev-pipeline setup fmt ch-smoke ch-query
+.PHONY: up down build test test-integration bench load-test lint dev-api setup fmt ch-smoke ch-query
 
 # ── Infrastructure ────────────────────────────────────────────────────────────
 
@@ -13,23 +13,13 @@ logs:
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 
-build: build-api build-pipeline
-
-build-api:
+build:
 	cd api && go build ./...
-
-build-pipeline:
-	cd pipeline && python -m py_compile $$(find src -name "*.py")
 
 # ── Test ──────────────────────────────────────────────────────────────────────
 
-test: test-api test-pipeline
-
-test-api:
+test:
 	cd api && go test ./... -race -count=1
-
-test-pipeline:
-	cd pipeline && python -m pytest tests/ -v
 
 # Integration tests: require a running ClickHouse (make up first).
 test-integration:
@@ -45,33 +35,19 @@ load-test:
 
 # ── Lint ──────────────────────────────────────────────────────────────────────
 
-lint: lint-api lint-pipeline
-
-lint-api:
+lint:
 	cd api && go vet ./...
 	cd api && staticcheck ./... || true
 
-lint-pipeline:
-	cd pipeline && ruff check src/ tests/
-	cd pipeline && mypy src/
-
 # ── Format ───────────────────────────────────────────────────────────────────
 
-fmt: fmt-api fmt-pipeline
-
-fmt-api:
+fmt:
 	cd api && gofmt -w .
-
-fmt-pipeline:
-	cd pipeline && ruff format src/ tests/
 
 # ── Dev ───────────────────────────────────────────────────────────────────────
 
 dev-api:
 	cd api && go run ./cmd/server
-
-dev-pipeline:
-	cd pipeline && python -m src.runtime.consumer
 
 # ── ClickHouse ────────────────────────────────────────────────────────────────
 
@@ -97,10 +73,10 @@ ch-query:
 # ── Inspector ─────────────────────────────────────────────────────────────────
 
 inspect:
-	cd tools/inspector && uv run naap-inspect --broker infra1.livepeer.cloud:9092
+	cd tools/inspector && uv run naap-inspect --broker infra2.cloudspe.com:9092
 
 inspect-json:
-	cd tools/inspector && uv run naap-inspect --broker infra1.livepeer.cloud:9092 --json
+	cd tools/inspector && uv run naap-inspect --broker infra2.cloudspe.com:9092 --json
 
 inspect-setup:
 	cd tools/inspector && uv sync

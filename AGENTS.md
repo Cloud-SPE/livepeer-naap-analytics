@@ -5,8 +5,8 @@ Do not add detailed rules here — add them to the appropriate `docs/` file and 
 
 ## What this project is
 
-Livepeer NAAP Analytics — a multi-stack Kafka analytics pipeline with a Go REST API.
-Events flow through Kafka, are processed by a Python pipeline, and surfaced via a Go API.
+Livepeer NAAP Analytics — a ClickHouse-backed analytics API for the Livepeer AI Network.
+Events flow from Kafka into ClickHouse via the Kafka Engine and are surfaced via a Go REST API.
 
 See `docs/PRODUCT_SENSE.md` for product principles and goals.
 
@@ -14,8 +14,7 @@ See `docs/PRODUCT_SENSE.md` for product principles and goals.
 
 ```
 api/        — Go REST API service
-pipeline/   — Python Kafka analytics pipeline
-infra/      — Docker, Kafka, and infrastructure configuration
+infra/      — Docker, Kafka, ClickHouse infrastructure and migrations
 scripts/    — Developer and ops utilities
 docs/       — System of record (start here for context)
 ```
@@ -77,11 +76,8 @@ Full detail in `docs/design-docs/core-beliefs.md`.
 # Full stack
 make up
 
-# API only
+# API only (without Docker)
 make dev-api        # cd api && go run ./cmd/server
-
-# Pipeline only
-make dev-pipeline   # cd pipeline && python -m src.runtime.consumer
 
 # Run all tests
 make test

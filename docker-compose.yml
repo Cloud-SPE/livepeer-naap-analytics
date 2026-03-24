@@ -71,22 +71,6 @@ services:
       - ./api:/app/api
     restart: on-failure
 
-  pipeline:
-    build:
-      context: .
-      dockerfile: infra/docker/pipeline.Dockerfile
-    depends_on:
-      kafka:
-        condition: service_healthy
-    environment:
-      ENV: development
-      KAFKA_BROKERS: kafka:29092
-      KAFKA_GROUP_ID: naap-analytics-pipeline
-      LOG_LEVEL: debug
-    volumes:
-      - ./pipeline:/app/pipeline
-    restart: on-failure
-
   # ── ClickHouse ───────────────────────────────────────────────────────────────
 
   clickhouse:
