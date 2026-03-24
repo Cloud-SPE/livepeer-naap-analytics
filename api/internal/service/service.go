@@ -6,6 +6,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/livepeer/naap-analytics/internal/repo"
 	"github.com/livepeer/naap-analytics/internal/types"
@@ -212,12 +213,70 @@ func (s *analyticsService) ListFailures(ctx context.Context, p types.QueryParams
 	return v, nil
 }
 
+// GetLeaderboard fetches raw entries from the repo and applies composite scoring.
+// Score = 0.30*normFPS + 0.30*(1-normDegraded) + 0.20*normVolume + 0.20*(1-normLatency), scaled 0-100.
 func (s *analyticsService) GetLeaderboard(ctx context.Context, p types.QueryParams) ([]types.LeaderboardEntry, error) {
-	v, err := s.repo.GetLeaderboard(ctx, p)
+	entries, err := s.repo.GetLeaderboard(ctx, p)
 	if err != nil {
 		return nil, fmt.Errorf("get leaderboard: %w", err)
 	}
-	return v, nil
+	if len(entries) > 0 {
+		scoreLeaderboard(entries)
+	}
+	return entries, nil
+}
+
+// scoreLeaderboard applies min-max normalised composite scoring in-place and
+// re-sorts entries by Score DESC.
+func scoreLeaderboard(entries []types.LeaderboardEntry) {
+	n := len(entries)
+	fps := make([]float64, n)
+	deg := make([]float64, n)
+	vol := make([]float64, n)
+	lat := make([]float64, n)
+	for i, e := range entries {
+		fps[i] = e.AvgInferenceFPS
+		deg[i] = e.DegradedRate
+		vol[i] = float64(e.StreamsHandled)
+		lat[i] = e.AvgLatencyMS
+	}
+
+	nFPS := normMinMax(fps)
+	nDeg := normMinMax(deg)
+	nVol := normMinMax(vol)
+	nLat := normMinMax(lat)
+
+	for i := range entries {
+		entries[i].Score = (0.30*nFPS[i] + 0.30*(1-nDeg[i]) + 0.20*nVol[i] + 0.20*(1-nLat[i])) * 100
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Score > entries[j].Score
+	})
+}
+
+// normMinMax returns a slice of values normalised to [0,1] using min-max scaling.
+// When all values are equal the normalised value is 1.0.
+func normMinMax(vals []float64) []float64 {
+	mn, mx := vals[0], vals[0]
+	for _, v := range vals[1:] {
+		if v < mn {
+			mn = v
+		}
+		if v > mx {
+			mx = v
+		}
+	}
+	out := make([]float64, len(vals))
+	rng := mx - mn
+	for i, v := range vals {
+		if rng == 0 {
+			out[i] = 1.0
+		} else {
+			out[i] = (v - mn) / rng
+		}
+	}
+	return out
 }
 
 func (s *analyticsService) GetOrchProfile(ctx context.Context, address string) (*types.OrchProfile, error) {

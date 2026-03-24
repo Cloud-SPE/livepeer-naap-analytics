@@ -122,9 +122,9 @@ func (s *Server) buildRouter() chi.Router {
 		r.Get("/reliability/orchs", s.handleListOrchReliability)
 		r.Get("/failures", s.handleListFailures)
 
-		// Leaderboard (R6) — Phase 6
-		r.Get("/leaderboard", notImplemented)
-		r.Get("/leaderboard/{address}", notImplemented)
+		// Leaderboard (R6)
+		r.Get("/leaderboard", s.handleGetLeaderboard)
+		r.Get("/leaderboard/{address}", s.handleGetLeaderboardProfile)
 	})
 
 	return r

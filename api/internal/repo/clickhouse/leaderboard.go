@@ -7,38 +7,56 @@ import (
 	"github.com/livepeer/naap-analytics/internal/types"
 )
 
-// GetLeaderboard returns orchestrators ranked by activity (LDR-001).
-// Score is 0.0 in Phase 3; composite scoring is implemented in Phase 6.
+// GetLeaderboard returns orchestrators with activity, FPS, and latency metrics (LDR-001).
+// Composite scoring is applied in the service layer.
 func (r *Repo) GetLeaderboard(ctx context.Context, p types.QueryParams) ([]types.LeaderboardEntry, error) {
 	start, end := effectiveWindow(p)
-	where := "WHERE r.hour >= ? AND r.hour < ?"
-	args := []any{start, end}
+	limit := effectiveLimit(p)
+
+	mainWhere := "WHERE r.hour >= ? AND r.hour < ?"
+	// args order: activeOrchMinutes, fps(start,end), lat(start,end), main(start,end), [org], limit, offset
+	args := []any{activeOrchMinutes, start, end, start, end, start, end}
 	if p.Org != "" {
-		where += " AND r.org = ?"
+		mainWhere += " AND r.org = ?"
 		args = append(args, p.Org)
 	}
-	limit := effectiveLimit(p)
 	args = append(args, limit, p.Offset)
 
 	rows, err := r.conn.Query(ctx, `
 		SELECT
 			r.orch_address,
-			any(s.name)                               AS name,
-			sum(r.ai_stream_count)                    AS streams_handled,
-			sum(r.degraded_count)                     AS degraded,
-			any(s.last_seen)                          AS last_seen,
-			last_seen > now() - INTERVAL ? MINUTE     AS is_active
+			any(s.name)                                                        AS name,
+			sum(r.ai_stream_count)                                             AS streams_handled,
+			sum(r.degraded_count)                                              AS degraded,
+			any(s.last_seen)                                                   AS last_seen,
+			any(s.last_seen) > now() - INTERVAL ? MINUTE                      AS is_active,
+			any(f.avg_fps)                                                     AS avg_fps,
+			any(l.avg_lat)                                                     AS avg_lat
 		FROM naap.agg_orch_reliability_hourly AS r FINAL
 		LEFT JOIN (
 			SELECT orch_address, name, last_seen
 			FROM naap.agg_orch_state FINAL
 		) AS s ON r.orch_address = s.orch_address
-		`+where+`
+		LEFT JOIN (
+			SELECT orch_address,
+			       sum(inference_fps_sum) / nullIf(sum(sample_count), 0) AS avg_fps
+			FROM naap.agg_fps_hourly FINAL
+			WHERE hour >= ? AND hour < ?
+			GROUP BY orch_address
+		) AS f ON r.orch_address = f.orch_address
+		LEFT JOIN (
+			SELECT orch_address,
+			       sum(latency_ms_sum) / nullIf(sum(sample_count), 0) AS avg_lat
+			FROM naap.agg_discovery_latency_hourly FINAL
+			WHERE hour >= ? AND hour < ?
+			GROUP BY orch_address
+		) AS l ON r.orch_address = l.orch_address
+		`+mainWhere+`
 		GROUP BY r.orch_address
 		HAVING streams_handled >= 10
 		ORDER BY streams_handled DESC
 		LIMIT ? OFFSET ?
-	`, append([]any{activeOrchMinutes}, args...)...)
+	`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("clickhouse get leaderboard: %w", err)
 	}
@@ -48,12 +66,23 @@ func (r *Repo) GetLeaderboard(ctx context.Context, p types.QueryParams) ([]types
 	for rows.Next() {
 		var e types.LeaderboardEntry
 		var streamsHandled, degraded uint64
-		if err := rows.Scan(&e.Address, &e.Name, &streamsHandled, &degraded, &e.LastSeen, &e.IsActive); err != nil {
+		var avgFPS, avgLat *float64
+		if err := rows.Scan(
+			&e.Address, &e.Name,
+			&streamsHandled, &degraded,
+			&e.LastSeen, &e.IsActive,
+			&avgFPS, &avgLat,
+		); err != nil {
 			return nil, fmt.Errorf("clickhouse get leaderboard scan: %w", err)
 		}
 		e.StreamsHandled = int64(streamsHandled)
 		e.DegradedRate = divSafe(float64(degraded), float64(streamsHandled))
-		// Score is 0.0 until Phase 6.
+		if avgFPS != nil {
+			e.AvgInferenceFPS = *avgFPS
+		}
+		if avgLat != nil {
+			e.AvgLatencyMS = *avgLat
+		}
 		result = append(result, e)
 	}
 	return result, rows.Err()

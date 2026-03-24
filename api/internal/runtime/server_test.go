@@ -35,21 +35,3 @@ func TestHealthz(t *testing.T) {
 	}
 }
 
-func TestRoutes_NotImplemented(t *testing.T) {
-	// Only Phase 6+ routes remain as 501 stubs.
-	routes := []string{
-		"/v1/leaderboard",
-	}
-
-	srv := newTestServer(t)
-	for _, path := range routes {
-		t.Run(path, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, path, nil)
-			rr := httptest.NewRecorder()
-			srv.Handler().ServeHTTP(rr, req)
-			if rr.Code != http.StatusNotImplemented {
-				t.Errorf("%s: expected 501, got %d", path, rr.Code)
-			}
-		})
-	}
-}
