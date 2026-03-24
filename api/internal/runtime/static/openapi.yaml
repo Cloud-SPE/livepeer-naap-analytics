@@ -7,8 +7,8 @@ info:
     Backed by ClickHouse materialized views fed from two Kafka topics:
     `network_events` (daydream org) and `streaming_events` (cloudspe org).
 
-    **Rate limiting:** 30 req/s sustained, burst 60 per IP.
-    Exceeded requests receive `429 Too Many Requests` with a `Retry-After: 1` header.
+    **Rate limiting:** 100 req/s sustained, burst 200 per IP.
+    Exceeded requests receive `429 Too Many Requests`.
 
     **Default time window:** last 24 hours when `start`/`end` are omitted.
 
@@ -16,9 +16,11 @@ info:
     float64 precision loss (e.g. `"1234500000000000000"`).
 
 servers:
+  - url: https://naap-api.cloudspe.com
+    description: Production
   - url: http://localhost:8000
     description: Local development
-  - url: https://analytics.livepeer.cloud
+  - url: https://naap-api.livepeer.cloud
     description: Production
 
 tags:

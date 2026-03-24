@@ -88,6 +88,8 @@ services:
       # KAFKA_AUTO_OFFSET_RESET: earliest = full history, latest = new data only.
       KAFKA_BROKER_LIST: ${KAFKA_BROKER_LIST:-infra2.cloudspe.com:9092}
       KAFKA_AUTO_OFFSET_RESET: ${KAFKA_AUTO_OFFSET_RESET:-earliest}
+      KAFKA_NETWORK_GROUP: ${KAFKA_NETWORK_GROUP:-clickhouse-naap-network}
+      KAFKA_STREAMING_GROUP: ${KAFKA_STREAMING_GROUP:-clickhouse-naap-streaming}
     volumes:
       - clickhouse_data:/var/lib/clickhouse
       - ./infra/clickhouse/config:/etc/clickhouse-server/config.d:ro

@@ -86,7 +86,6 @@ func (s *Server) buildRouter() chi.Router {
 
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
-	r.Use(rateLimitMiddleware(s.cfg.RateLimitRPS, s.cfg.RateLimitBurst))
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(30 * time.Second))
 

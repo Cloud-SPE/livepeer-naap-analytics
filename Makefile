@@ -1,4 +1,7 @@
-.PHONY: up down build test test-integration bench load-test lint dev-api setup fmt ch-smoke ch-query
+.PHONY: up down build test test-integration bench load-test lint dev-api setup fmt ch-smoke ch-query push push-api push-clickhouse
+
+REGISTRY  ?= tztcloud
+IMAGE_TAG ?= latest
 
 # ── Infrastructure ────────────────────────────────────────────────────────────
 
@@ -15,6 +18,24 @@ logs:
 
 build:
 	cd api && go build ./...
+
+# Build and push production images to the registry.
+# Requires: docker login tztcloud
+push: push-api push-clickhouse
+
+push-api:
+	docker build \
+	    -f infra/docker/api.Dockerfile \
+	    -t $(REGISTRY)/naap-api:$(IMAGE_TAG) \
+	    .
+	docker push $(REGISTRY)/naap-api:$(IMAGE_TAG)
+
+push-clickhouse:
+	docker build \
+	    -f infra/docker/clickhouse.Dockerfile \
+	    -t $(REGISTRY)/naap-clickhouse:$(IMAGE_TAG) \
+	    .
+	docker push $(REGISTRY)/naap-clickhouse:$(IMAGE_TAG)
 
 # ── Test ──────────────────────────────────────────────────────────────────────
 
