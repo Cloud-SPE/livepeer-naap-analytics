@@ -56,6 +56,8 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+      clickhouse:
+        condition: service_healthy
     ports:
       - "8000:8000"
     environment:
@@ -63,6 +65,10 @@ services:
       ENV: development
       KAFKA_BROKERS: kafka:29092
       LOG_LEVEL: debug
+      CLICKHOUSE_ADDR: clickhouse:9000
+      CLICKHOUSE_DB: naap
+      CLICKHOUSE_USER: naap_reader
+      CLICKHOUSE_PASSWORD: naap_reader_changeme
     volumes:
       - ./api:/app/api
     restart: on-failure
