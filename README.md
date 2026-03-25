@@ -141,6 +141,7 @@ make inspect          # Run event inspector against production broker
 | 9308 | Kafka exporter metrics |
 | 8123 | ClickHouse HTTP |
 | 9000 | ClickHouse native |
+| 9100 | node-exporter host metrics (internal) |
 
 ## Building
 

@@ -102,8 +102,10 @@ docker volume create naap-analytics_clickhouse_data
 
 ## Grafana dashboards
 
-Five dashboards are baked into the API image at `infra/grafana/dashboards/` and auto-provisioned
-on startup:
+Ten dashboards are baked into the API image at `infra/grafana/dashboards/` and auto-provisioned
+on startup.
+
+### NAAP application dashboards (General folder)
 
 | Dashboard | Description |
 |-----------|-------------|
@@ -112,6 +114,19 @@ on startup:
 | `naap-economics` | Payment volume (ETH), latest quoted prices by orchestrator |
 | `naap-performance-drilldown` | E2E latency, FPS per orch, jitter, network FPS by pipeline |
 | `naap-supply-inventory` | GPU count by model, full GPU inventory with VRAM |
+
+### Infrastructure dashboards (infra folder)
+
+Community dashboards from grafana.com, stored under `infra/grafana/dashboards/infra/`.
+All query the **Prometheus** datasource (uid `prometheus`).
+
+| Dashboard | grafana.com ID | Description |
+|-----------|----------------|-------------|
+| `node-exporter-full` | 1860 | Host CPU, memory, disk I/O, network — via `node-exporter` |
+| `cadvisor-docker` | 893 | Per-container CPU, memory, network, disk I/O — via cAdvisor |
+| `kafka-exporter-overview` | 7589 | Consumer group lag, topic throughput, broker health |
+| `clickhouse-overview` | 14192 | ClickHouse queries/sec, merges, memory, insert rates |
+| `prometheus-overview` | 3662 | Prometheus scrape health, TSDB size, target status |
 
 ### ClickHouse datasource
 
