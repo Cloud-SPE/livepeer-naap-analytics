@@ -689,7 +689,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT if(gateway = '', 'unknown_gateway', gateway) AS \"Gateway\",\n    sum(started) AS \"Started Sessions\",\n    sum(no_orch) AS \"Unserved (No Orch)\",\n    sum(orch_swap) AS \"Orch Swaps\",\n    if(sum(started) + sum(no_orch) > 0,\n        toFloat64(sum(no_orch)) / toFloat64(sum(started) + sum(no_orch)), 0.0) AS \"Unmet Rate\"\nFROM naap.agg_stream_hourly\nWHERE $__timeFilter(hour)\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY \"Gateway\"\nORDER BY \"Unserved (No Orch)\" DESC",
+          "rawSql": "SELECT if(gateway = '', 'unknown_gateway', gateway) AS \"Gateway\",\n    sum(started) AS \"Started Sessions\",\n    sum(no_orch) AS \"Unserved (No Orch)\",\n    sum(orch_swap) AS \"Orch Swaps\",\n    if(sum(started) + sum(no_orch) > 0,\n        toFloat64(sum(no_orch)) / toFloat64(sum(started) + sum(no_orch)), 0.0) AS \"Unmet Rate\"\nFROM naap.serving_stream_hourly\nWHERE $__timeFilter(hour)\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY \"Gateway\"\nORDER BY \"Unserved (No Orch)\" DESC",
           "refId": "A"
         }
       ],
@@ -744,7 +744,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT ifNull(pipeline, '') AS \"Pipeline\",\n    ifNull(gateway, '') AS \"Gateway\",\n    sum(no_orch) AS \"Unserved Sessions\",\n    sum(started) + sum(no_orch) AS \"Total Demand Sessions\",\n    if(sum(started) + sum(no_orch) > 0,\n        toFloat64(sum(no_orch)) / toFloat64(sum(started) + sum(no_orch)), 0.0) AS \"Unmet Rate\"\nFROM naap.agg_stream_hourly\nWHERE $__timeFilter(hour)\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY \"Pipeline\", \"Gateway\"\nHAVING \"Unserved Sessions\" > 0\nORDER BY \"Unserved Sessions\" DESC\nLIMIT 12",
+          "rawSql": "SELECT ifNull(pipeline, '') AS \"Pipeline\",\n    ifNull(gateway, '') AS \"Gateway\",\n    sum(no_orch) AS \"Unserved Sessions\",\n    sum(started) + sum(no_orch) AS \"Total Demand Sessions\",\n    if(sum(started) + sum(no_orch) > 0,\n        toFloat64(sum(no_orch)) / toFloat64(sum(started) + sum(no_orch)), 0.0) AS \"Unmet Rate\"\nFROM naap.serving_stream_hourly\nWHERE $__timeFilter(hour)\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY \"Pipeline\", \"Gateway\"\nHAVING \"Unserved Sessions\" > 0\nORDER BY \"Unserved Sessions\" DESC\nLIMIT 12",
           "refId": "A"
         }
       ],
