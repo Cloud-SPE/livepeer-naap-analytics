@@ -32,6 +32,15 @@ type Config struct {
 	ClickHousePassword string        `envconfig:"CLICKHOUSE_PASSWORD" default:"naap_reader_changeme"`
 	ClickHouseTimeout  time.Duration `envconfig:"CLICKHOUSE_TIMEOUT" default:"30s"`
 
+	// ClickHouse writer — used by the enrichment worker for INSERT operations.
+	ClickHouseWriterUser     string `envconfig:"CLICKHOUSE_WRITER_USER" default:"naap_writer"`
+	ClickHouseWriterPassword string `envconfig:"CLICKHOUSE_WRITER_PASSWORD" default:"naap_writer_changeme"`
+
+	// Enrichment — periodic fetch of orchestrator/gateway metadata from the Livepeer API.
+	EnrichmentEnabled  bool          `envconfig:"ENRICHMENT_ENABLED" default:"true"`
+	EnrichmentInterval time.Duration `envconfig:"ENRICHMENT_INTERVAL" default:"5m"`
+	LivepeerAPIURL     string        `envconfig:"LIVEPEER_API_URL" default:"https://livepeer-api.livepeer.cloud"`
+
 	// Telemetry
 	OTLPEndpoint string `envconfig:"OTLP_ENDPOINT" default:""`
 }

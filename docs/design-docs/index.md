@@ -6,6 +6,7 @@
 | [`architecture.md`](architecture.md) | ✅ current | 2026-03-24 | Layer rules, enforcement model, DI pattern |
 | [`adr-001-storage-architecture.md`](adr-001-storage-architecture.md) | ✅ current | 2026-03-24 | ClickHouse + Kafka engine decision, compression, retention |
 | [`adr-002-api-design.md`](adr-002-api-design.md) | ✅ current | 2026-03-24 | REST/JSON, auth model, org model, rate limiting |
+| [`data-validation-rules.md`](data-validation-rules.md) | ✅ current | 2026-03-25 | Architecture-independent behavioral contract for all 17 data validation rules; maps 1:1 to the 31-test validation harness |
 
 ## Status legend
 

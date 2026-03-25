@@ -3,10 +3,12 @@
 package main
 
 import (
+	"context"
 	"log"
 	"os"
 
 	"github.com/livepeer/naap-analytics/internal/config"
+	"github.com/livepeer/naap-analytics/internal/enrichment"
 	"github.com/livepeer/naap-analytics/internal/providers"
 	chrepo "github.com/livepeer/naap-analytics/internal/repo/clickhouse"
 	"github.com/livepeer/naap-analytics/internal/runtime"
@@ -30,6 +32,17 @@ func main() {
 	if err != nil {
 		log.Printf("fatal: init clickhouse repo: %v", err)
 		os.Exit(1)
+	}
+
+	if cfg.EnrichmentEnabled {
+		w, err := enrichment.New(cfg, p.Logger)
+		if err != nil {
+			p.Logger.Sugar().Warnf("enrichment worker init failed (continuing without enrichment): %v", err)
+		} else {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			go w.Run(ctx)
+		}
 	}
 
 	svc := service.New(r)

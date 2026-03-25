@@ -18,6 +18,11 @@ streaming_events ──Engine──►  tables          │      │
                                               │             agg_payment_*
                                               │             agg_*_hourly
                                               └──────────────────► HTTP :8000
+
+Livepeer API (poll every 5m)   enrichment worker        ClickHouse
+─────────────────────────────────────────────────────────────────────
+/api/orchestrator  ──HTTP──►  Go goroutine  ──INSERT──►  naap.orch_metadata
+/api/gateways      ──poll──►  (in API proc) ──INSERT──►  naap.gateway_metadata
 ```
 
 Two Kafka topics are consumed directly by ClickHouse:
@@ -31,6 +36,10 @@ Events land in `naap.events` (raw, 365-day TTL) and fan out to pre-aggregated
 tables via Materialized Views. The Go API queries only the aggregate tables — no
 raw-event queries at request time.
 
+A background enrichment worker polls the [Livepeer public API](https://livepeer-api.livepeer.cloud)
+every 5 minutes and upserts orchestrator and gateway metadata (ENS names, stake, service URIs,
+deposits) into `naap.orch_metadata` and `naap.gateway_metadata`.
+
 ## Project structure
 
 ```
@@ -38,26 +47,32 @@ api/                    Go REST API (port 8000)
   cmd/server/           Entrypoint
   internal/
     config/             Environment config (envconfig)
+    enrichment/         Livepeer API polling worker (ENS names, stake, gateway data)
     providers/          Cross-cutting: logger, telemetry, Kafka client
     repo/clickhouse/    ClickHouse query layer (R1–R6)
     service/            Business logic (leaderboard scoring, etc.)
     types/              Domain types shared across layers
-    runtime/            HTTP handlers, middleware, server wiring
+    runtime/            HTTP handlers, middleware, Prometheus metrics, server wiring
       static/           Embedded assets (openapi.yaml)
+    validation/         Scenario-based data-quality test harness (31 tests)
 
 infra/
   clickhouse/
-    config/             ClickHouse server config overrides
+    config/             ClickHouse server config overrides (including Prometheus endpoint)
     init/               Docker entrypoint migration runner
     migrations/         SQL migrations (applied in sort order on first start)
-  docker/               Dockerfiles for api and pipeline
+  docker/               Dockerfiles for api
+  grafana/
+    dashboards/         Drop .json dashboard exports here — auto-loaded by Grafana
+    provisioning/       Grafana datasource and dashboard provider config
   kafka/                Kafka topic definitions
+  prometheus/           Prometheus scrape configuration
 
 docs/
   DESIGN.md             Architecture overview and layer rules
   PLANS.md              Phase planning and status
   PRODUCT_SENSE.md      Product goals and success criteria
-  design-docs/          Architecture decision records (ADRs)
+  design-docs/          Architecture decision records (ADRs) and behavioral contracts
   exec-plans/           Per-phase execution plans (active + completed)
   product-specs/        Feature requirements (R1–R6)
 
@@ -80,17 +95,17 @@ tools/inspector/        Event inspection utility
 cp .env.example .env
 # Edit .env — at minimum set passwords; see Configuration below
 
-# 2. Start the full stack (ClickHouse + Kafka + API + Pipeline)
+# 2. Start the full stack
 make up
 
 # 3. Verify everything is healthy (~30s for migrations to apply)
 curl http://localhost:8000/healthz
 # → {"status":"ok"}
 
-# 4. Browse the API
-open http://localhost:8000/docs        # Swagger UI
-# or
-curl http://localhost:8000/docs/openapi.yaml  # raw spec
+# 4. Browse the API and observability stack
+open http://localhost:8000/docs   # Swagger UI
+open http://localhost:9090        # Prometheus
+open http://localhost:3000        # Grafana (anonymous admin, no login required)
 
 # 5. Stop
 make down
@@ -104,6 +119,18 @@ make ch-query         # Interactive ClickHouse shell
 make ch-smoke         # Quick smoke test (event counts, agg table rows)
 make inspect          # Run event inspector against production broker
 ```
+
+**Service ports (local):**
+
+| Port | Service |
+|---|---|
+| 8000 | Go API (REST + `/metrics`) |
+| 8080 | Kafka UI |
+| 9090 | Prometheus |
+| 3000 | Grafana |
+| 9308 | Kafka exporter metrics |
+| 8123 | ClickHouse HTTP |
+| 9000 | ClickHouse native |
 
 ## Building
 
@@ -122,10 +149,13 @@ cd api && go build -o bin/server ./cmd/server
 ## Testing
 
 ```bash
-make test             # Go unit tests with race detector
+make test             # Go unit tests with race detector (includes enrichment client tests)
 
-# Integration tests — requires a running ClickHouse
+# Integration tests — requires a running ClickHouse (make up first)
 CLICKHOUSE_ADDR=localhost:9000 make test-integration
+
+# Data-quality validation tests — requires a running ClickHouse (make up first)
+make test-validation
 
 # Benchmarks
 make bench
@@ -142,6 +172,7 @@ The raw spec is at **`GET /docs/openapi.yaml`**.
 | Group | Prefix | Endpoints |
 |---|---|---|
 | Health | `/healthz` | `GET /healthz` |
+| Metrics | `/metrics` | `GET /metrics` (Prometheus exposition format) |
 | Network (R1) | `/v1/net/` | summary, orchestrators, `/{address}`, gpu, models |
 | Streams (R2) | `/v1/streams/` | active, summary, history |
 | Performance (R3) | `/v1/perf/` | fps, fps/history, latency, webrtc |
@@ -150,6 +181,14 @@ The raw spec is at **`GET /docs/openapi.yaml`**.
 | Leaderboard (R6) | `/v1/leaderboard` | list, `/{address}` |
 
 Common query parameters: `org`, `start`, `end`, `limit`, `offset`, `active_only`.
+
+Prometheus metrics exposed on `/metrics`:
+
+| Metric | Type | Labels |
+|---|---|---|
+| `http_requests_total` | Counter | `method`, `route`, `status` |
+| `http_request_duration_seconds` | Histogram | `method`, `route` |
+| Standard Go runtime metrics | — | — |
 
 ## Configuration
 
@@ -164,12 +203,22 @@ All configuration is via environment variables. Copy `.env.example` to `.env`.
 | `LOG_LEVEL` | `debug` | `debug`, `info`, `warn`, `error` |
 | `CLICKHOUSE_ADDR` | `localhost:9000` | ClickHouse native address |
 | `CLICKHOUSE_DB` | `naap` | Database name |
-| `CLICKHOUSE_USER` | `naap_reader` | Read-only user |
+| `CLICKHOUSE_USER` | `naap_reader` | Read-only user for API queries |
 | `CLICKHOUSE_PASSWORD` | *(required)* | Reader password |
+| `CLICKHOUSE_WRITER_USER` | `naap_writer` | Write user for the enrichment worker |
+| `CLICKHOUSE_WRITER_PASSWORD` | *(required)* | Writer password |
 | `KAFKA_BROKERS` | `localhost:9092` | Kafka broker(s) for the API service |
 | `RATE_LIMIT_RPS` | `30` | Requests/sec per IP (0 = disabled) |
 | `RATE_LIMIT_BURST` | `60` | Burst allowance |
 | `OTLP_ENDPOINT` | *(empty)* | OTLP trace endpoint; empty disables telemetry |
+
+### Enrichment worker
+
+| Variable | Default | Description |
+|---|---|---|
+| `ENRICHMENT_ENABLED` | `true` | Enable/disable the enrichment worker |
+| `ENRICHMENT_INTERVAL` | `5m` | How often to poll the Livepeer API |
+| `LIVEPEER_API_URL` | `https://livepeer-api.livepeer.cloud` | Base URL for the Livepeer public API |
 
 ### ClickHouse Kafka Engine
 
@@ -236,14 +285,15 @@ curl https://your-domain/healthz
 
 ### Production checklist
 
-- [ ] All default passwords changed in `.env`
+- [ ] All default passwords changed in `.env` (admin, reader, writer)
 - [ ] `ENV=production` and `LOG_LEVEL=info`
 - [ ] TLS terminated at reverse proxy (Caddy or nginx)
 - [ ] `KAFKA_AUTO_OFFSET_RESET=latest` (after initial backfill is complete)
 - [ ] Rate limits tuned (`RATE_LIMIT_RPS`, `RATE_LIMIT_BURST`)
 - [ ] ClickHouse data volume backed up or on persistent block storage
-- [ ] `OTLP_ENDPOINT` set for observability
-- [ ] Firewall: only ports 80/443 exposed externally; 8123/9000 internal only
+- [ ] `OTLP_ENDPOINT` set for OTLP tracing (optional; Prometheus metrics are always on)
+- [ ] Firewall: only ports 80/443 exposed externally; 8123/9000/9363 internal only
+- [ ] Enrichment worker: `ENRICHMENT_ENABLED=true`, `LIVEPEER_API_URL` reachable from host
 
 ### Initial backfill
 
@@ -306,9 +356,11 @@ See `infra/clickhouse/README.md` for the full ClickHouse operations guide.
 |---|---|
 | `docs/DESIGN.md` | System architecture and layer rules |
 | `docs/PRODUCT_SENSE.md` | Product goals and success criteria |
-| `docs/design-docs/` | Architecture decision records |
+| `docs/design-docs/` | Architecture decision records and behavioral contracts |
+| `docs/design-docs/data-validation-rules.md` | Data validation behavioral contract (17 rules, 31 tests) |
 | `docs/product-specs/` | Per-feature requirements (R1–R6) |
 | `docs/exec-plans/` | Phase execution plans and history |
 | `infra/clickhouse/README.md` | ClickHouse operations guide |
+| `deploy/README.md` | Production deployment guide (Portainer) |
 | `GET /docs` | Interactive API documentation (Swagger UI) |
 | `GET /docs/openapi.yaml` | OpenAPI 3.0.3 spec |

@@ -44,8 +44,8 @@ Any change to migrations or config requires a new image build and push.
 | Variable | Description |
 |---|---|
 | `CLICKHOUSE_ADMIN_PASSWORD` | Admin password for the `naap_admin` ClickHouse user |
-| `CLICKHOUSE_READER_PASSWORD` | Password for `naap_reader` (used by the API) |
-| `CLICKHOUSE_WRITER_PASSWORD` | Password for `naap_writer` (reserved) |
+| `CLICKHOUSE_READER_PASSWORD` | Password for `naap_reader` (used by the API for read queries) |
+| `CLICKHOUSE_WRITER_PASSWORD` | Password for `naap_writer` (used by the enrichment worker for inserts) |
 
 ### Optional environment variables
 
@@ -62,6 +62,9 @@ Any change to migrations or config requires a new image build and push.
 | `RATE_LIMIT_BURST` | `200` | Burst allowance |
 | `OTLP_ENDPOINT` | *(empty)* | OTLP trace endpoint; empty disables telemetry |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
+| `ENRICHMENT_ENABLED` | `true` | Enable/disable the Livepeer API enrichment worker |
+| `ENRICHMENT_INTERVAL` | `5m` | How often the enrichment worker polls the Livepeer API |
+| `LIVEPEER_API_URL` | `https://livepeer-api.livepeer.cloud` | Livepeer public API base URL |
 
 ### Traefik routing
 

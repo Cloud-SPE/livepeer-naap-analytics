@@ -28,6 +28,7 @@ infra/clickhouse/
 | `009_performance.sql` | `agg_fps_hourly`, `agg_discovery_latency_hourly`, `agg_webrtc_hourly` (R3) |
 | `010_fix_orch_uri.sql` | Fix `uri` extraction in `mv_orch_state` (`orch_uri` not `uri`) |
 | `011_fix_orch_address.sql` | Fix `orch_address` in stream state and reliability tables (use ETH addr not local key) |
+| `012_enrichment.sql` | `naap.orch_metadata` + `naap.gateway_metadata` — Livepeer API enrichment tables (ENS names, stake, deposits) |
 
 Migrations are idempotent (`CREATE TABLE IF NOT EXISTS`, `CREATE USER IF NOT EXISTS`).
 
@@ -97,6 +98,7 @@ These groups must not conflict. Verified distinct at time of creation.
 |------|---------|-----|
 | 8123 | HTTP | Browser / curl / healthcheck |
 | 9000 | Native | `clickhouse-client`, Go driver |
+| 9363 | HTTP | Prometheus metrics endpoint (internal only; scraped by Prometheus container) |
 
 ## Replication
 

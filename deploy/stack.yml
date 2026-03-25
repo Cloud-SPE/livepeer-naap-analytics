@@ -5,8 +5,8 @@
 # Required environment variables (set in Portainer stack configuration):
 #
 #   CLICKHOUSE_ADMIN_PASSWORD   — ClickHouse admin/naap_admin user password
-#   CLICKHOUSE_READER_PASSWORD  — naap_reader password (used by the API)
-#   CLICKHOUSE_WRITER_PASSWORD  — naap_writer password (reserved for future use)
+#   CLICKHOUSE_READER_PASSWORD  — naap_reader password (used by the API for read queries)
+#   CLICKHOUSE_WRITER_PASSWORD  — naap_writer password (used by the enrichment worker for inserts)
 #
 # Optional environment variables (have sensible defaults):
 #
@@ -21,6 +21,9 @@
 #   RATE_LIMIT_BURST            — burst allowance (default: 200)
 #   OTLP_ENDPOINT               — OTLP trace endpoint; empty disables telemetry (default: "")
 #   LOG_LEVEL                   — info | debug | warn | error (default: info)
+#   ENRICHMENT_ENABLED          — enable/disable Livepeer API enrichment worker (default: true)
+#   ENRICHMENT_INTERVAL         — poll interval for enrichment worker (default: 5m)
+#   LIVEPEER_API_URL            — base URL for Livepeer public API (default: https://livepeer-api.livepeer.cloud)
 
 services:
 
@@ -75,10 +78,15 @@ services:
       CLICKHOUSE_DB: naap
       CLICKHOUSE_USER: naap_reader
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_READER_PASSWORD}
+      CLICKHOUSE_WRITER_USER: naap_writer
+      CLICKHOUSE_WRITER_PASSWORD: ${CLICKHOUSE_WRITER_PASSWORD}
       KAFKA_BROKERS: ${KAFKA_BROKERS:-infra2.cloudspe.com:9092}
       RATE_LIMIT_RPS: ${RATE_LIMIT_RPS:-100}
       RATE_LIMIT_BURST: ${RATE_LIMIT_BURST:-200}
       OTLP_ENDPOINT: ${OTLP_ENDPOINT:-}
+      ENRICHMENT_ENABLED: ${ENRICHMENT_ENABLED:-true}
+      ENRICHMENT_INTERVAL: ${ENRICHMENT_INTERVAL:-5m}
+      LIVEPEER_API_URL: ${LIVEPEER_API_URL:-https://livepeer-api.livepeer.cloud}
     depends_on:
       clickhouse-db:
         condition: service_healthy

@@ -43,6 +43,7 @@ See `docs/design-docs/architecture.md` for per-component layer rules.
 | `docs/design-docs/index.md` | All design documents with status |
 | `docs/design-docs/core-beliefs.md` | Agent-first operating principles |
 | `docs/design-docs/architecture.md` | Detailed per-component architecture |
+| `docs/design-docs/data-validation-rules.md` | Behavioral contract for all data validation rules (17 rules, 31 tests) |
 | `docs/exec-plans/active/` | In-progress execution plans |
 | `docs/exec-plans/completed/` | Historical execution plans |
 | `docs/exec-plans/tech-debt-tracker.md` | Known technical debt |

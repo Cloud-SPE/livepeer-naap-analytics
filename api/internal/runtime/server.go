@@ -15,6 +15,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/livepeer/naap-analytics/internal/config"
 	"github.com/livepeer/naap-analytics/internal/providers"
@@ -88,7 +89,9 @@ func (s *Server) buildRouter() chi.Router {
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(30 * time.Second))
+	r.Use(metricsMiddleware)
 
+	r.Handle("/metrics", promhttp.Handler())
 	r.Get("/healthz", s.handleHealth)
 
 	// API documentation

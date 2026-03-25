@@ -1,0 +1,19 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: naap-api
+    static_configs:
+      - targets: ["api:8000"]
+    metrics_path: /metrics
+
+  - job_name: clickhouse
+    static_configs:
+      - targets: ["clickhouse:9363"]
+    metrics_path: /metrics
+
+  - job_name: kafka
+    static_configs:
+      - targets: ["kafka-exporter:9308"]
+    metrics_path: /metrics
