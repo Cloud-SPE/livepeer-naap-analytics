@@ -37,8 +37,8 @@ func (r *Repo) ListModelPerformance(ctx context.Context, p types.QueryParams) ([
 			sum(fh.inference_fps_sum)               AS fps_sum,
 			sum(fh.sample_count)                    AS samp,
 			count(DISTINCT gi.orch_address)          AS warm_orchs
-		FROM naap.agg_gpu_inventory AS gi FINAL
-		JOIN naap.agg_fps_hourly AS fh FINAL
+		FROM naap.serving_gpu_inventory AS gi
+		JOIN naap.serving_fps_hourly AS fh
 			ON gi.orch_address = fh.orch_address AND gi.pipeline = fh.pipeline
 		WHERE `+warmCond+` AND `+fpsCond+`
 		GROUP BY gi.model_id, gi.pipeline
@@ -75,7 +75,7 @@ func (r *Repo) GetModelDetail(ctx context.Context, modelID string, p types.Query
 	if p.Pipeline == "" {
 		// Resolve pipeline from GPU inventory
 		row := r.conn.QueryRow(ctx, `
-			SELECT pipeline FROM naap.agg_gpu_inventory FINAL
+			SELECT pipeline FROM naap.serving_gpu_inventory
 			WHERE model_id = ? LIMIT 1
 		`, modelID)
 		_ = row.Scan(&p.Pipeline)
@@ -88,9 +88,9 @@ func (r *Repo) GetModelDetail(ctx context.Context, modelID string, p types.Query
 			coalesce(os.name, gi.orch_address)                                   AS name,
 			gi.last_seen > now() - INTERVAL ? MINUTE                             AS is_warm,
 			sum(fh.inference_fps_sum) / greatest(sum(fh.sample_count), 1)        AS avg_fps
-		FROM naap.agg_gpu_inventory AS gi FINAL
-		LEFT JOIN naap.agg_orch_state AS os FINAL ON gi.orch_address = os.orch_address
-		LEFT JOIN naap.agg_fps_hourly AS fh FINAL
+		FROM naap.serving_gpu_inventory AS gi
+		LEFT JOIN naap.serving_latest_orchestrator_state AS os ON gi.orch_address = os.orch_address
+		LEFT JOIN naap.serving_fps_hourly AS fh
 			ON gi.orch_address = fh.orch_address
 			AND fh.hour >= ? AND fh.hour < ?
 		WHERE gi.model_id = ?

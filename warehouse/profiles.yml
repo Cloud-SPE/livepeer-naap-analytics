@@ -1,0 +1,16 @@
+naap_analytics:
+  target: default
+  outputs:
+    default:
+      type: clickhouse
+      driver: http
+      schema: "{{ env_var('CLICKHOUSE_DB', 'naap') }}"
+      host: "{{ env_var('CLICKHOUSE_HOST', 'clickhouse') }}"
+      port: "{{ env_var('CLICKHOUSE_PORT', '8123') | int }}"
+      user: "{{ env_var('CLICKHOUSE_USER', 'naap_reader') }}"
+      password: "{{ env_var('CLICKHOUSE_PASSWORD', 'naap_reader_changeme') }}"
+      secure: false
+      retries: 1
+      connect_timeout: 10
+      send_receive_timeout: 60
+      sync_request_timeout: 60

@@ -1,0 +1,22 @@
+name: "naap_analytics"
+version: "1.0.0"
+config-version: 2
+
+profile: "naap_analytics"
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+models:
+  naap_analytics:
+    staging:
+      +materialized: view
+    facts:
+      +materialized: view
+    serving:
+      +materialized: view

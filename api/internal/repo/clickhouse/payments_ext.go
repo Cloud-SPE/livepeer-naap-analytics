@@ -8,12 +8,11 @@ import (
 )
 
 // ListPaymentsByGateway returns payment totals aggregated by gateway address (GPAY-001).
-// Reads from raw naap.events since agg_payment_hourly does not track gateway.
 func (r *Repo) ListPaymentsByGateway(ctx context.Context, p types.QueryParams) ([]types.GatewayPayment, error) {
 	start, end := effectiveWindow(p)
 	limit := effectiveLimit(p)
 
-	where := "WHERE event_type = 'create_new_payment' AND event_ts >= ? AND event_ts < ?"
+	where := "WHERE event_ts >= ? AND event_ts < ?"
 	args := []any{start, end}
 	if p.Org != "" {
 		where += " AND org = ?"
@@ -24,10 +23,10 @@ func (r *Repo) ListPaymentsByGateway(ctx context.Context, p types.QueryParams) (
 	rows, err := r.conn.Query(ctx, `
 		SELECT
 			gateway,
-			sum(toUInt64OrZero(JSONExtractString(data, 'face_value'))) AS total_wei,
-			count()                                                     AS event_count,
-			count(DISTINCT JSONExtractString(data, 'recipient'))        AS unique_orchs
-		FROM naap.events
+			sum(face_value_wei) AS total_wei,
+			count() AS event_count,
+			uniqExact(recipient_address) AS unique_orchs
+		FROM naap.serving_payment_links
 		`+where+`
 		GROUP BY gateway
 		ORDER BY total_wei DESC
@@ -66,28 +65,28 @@ func (r *Repo) ListPaymentsByStream(ctx context.Context, p types.QueryParams) ([
 	start, end := effectiveWindow(p)
 	limit := effectiveLimit(p)
 
-	where := "WHERE event_type = 'create_new_payment' AND event_ts >= ? AND event_ts < ?"
+	where := "WHERE p.event_ts >= ? AND p.event_ts < ? AND p.canonical_session_key IS NOT NULL"
 	args := []any{start, end}
 	if p.Org != "" {
-		where += " AND org = ?"
+		where += " AND p.org = ?"
 		args = append(args, p.Org)
 	}
 	if p.StreamID != "" {
-		where += " AND JSONExtractString(data, 'stream_id') = ?"
+		where += " AND fs.stream_id = ?"
 		args = append(args, p.StreamID)
 	}
 	args = append(args, limit)
 
 	rows, err := r.conn.Query(ctx, `
 		SELECT
-			JSONExtractString(data, 'stream_id')                              AS stream_id,
-			org,
-			JSONExtractString(data, 'pipeline')                               AS pipeline,
-			sum(toUInt64OrZero(JSONExtractString(data, 'face_value')))        AS total_wei,
-			count()                                                           AS event_count
-		FROM naap.events
+			fs.stream_id AS stream_id,
+			p.org,
+			coalesce(fs.canonical_pipeline, p.pipeline_hint) AS pipeline,
+			sum(p.face_value_wei) AS total_wei,
+			count() AS event_count
+		FROM naap.fact_workflow_payment_links p
+		LEFT JOIN naap.fact_workflow_sessions fs ON p.canonical_session_key = fs.canonical_session_key
 		`+where+`
-		  AND JSONExtractString(data, 'stream_id') != ''
 		GROUP BY stream_id, org, pipeline
 		ORDER BY total_wei DESC
 		LIMIT ?

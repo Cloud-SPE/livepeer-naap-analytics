@@ -20,13 +20,12 @@ func (r *Repo) ListFailuresByPipeline(ctx context.Context, p types.QueryParams) 
 	}
 	args = append(args, limit)
 
-	// Use stream hourly for no_orch + orch_swap; inference errors not available at pipeline level.
 	streamRows, err := r.conn.Query(ctx, `
 		SELECT pipeline,
 			sum(started)   AS started,
 			sum(no_orch)   AS no_orch,
 			sum(orch_swap) AS orch_swap
-		FROM naap.agg_stream_hourly FINAL
+		FROM naap.serving_stream_hourly
 		`+where+`
 		GROUP BY pipeline
 		ORDER BY no_orch + orch_swap DESC
@@ -81,8 +80,8 @@ func (r *Repo) ListFailuresByOrch(ctx context.Context, p types.QueryParams) ([]t
 			sum(r.ai_stream_count)             AS streams_handled,
 			sum(r.error_count)                 AS inference_errors,
 			sum(r.restart_count)               AS inference_restarts
-		FROM naap.agg_orch_reliability_hourly AS r FINAL
-		LEFT JOIN naap.agg_orch_state AS s FINAL ON r.orch_address = s.orch_address
+		FROM naap.serving_orch_reliability_hourly AS r
+		LEFT JOIN naap.serving_latest_orchestrator_state AS s ON r.orch_address = s.orch_address
 		`+where+`
 		GROUP BY r.orch_address, name
 		ORDER BY inference_errors + inference_restarts DESC

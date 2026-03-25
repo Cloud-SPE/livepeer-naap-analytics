@@ -10,7 +10,7 @@ import (
 // GetActiveStreams returns currently active stream counts by org, pipeline, state (STR-001).
 func (r *Repo) GetActiveStreams(ctx context.Context, p types.QueryParams) (*types.ActiveStreamsSummary, error) {
 	where := fmt.Sprintf(
-		"WHERE last_seen > now() - INTERVAL %d SECOND AND is_closed = 0",
+		"WHERE sample_ts > now() - INTERVAL %d SECOND",
 		activeStreamSecs,
 	)
 	args := []any{}
@@ -21,7 +21,7 @@ func (r *Repo) GetActiveStreams(ctx context.Context, p types.QueryParams) (*type
 
 	rows, err := r.conn.Query(ctx, `
 		SELECT org, pipeline, state, count() AS n
-		FROM naap.agg_stream_state FINAL
+		FROM naap.serving_active_stream_state
 		`+where+`
 		GROUP BY org, pipeline, state
 	`, args...)
@@ -60,7 +60,7 @@ func (r *Repo) GetActiveStreams(ctx context.Context, p types.QueryParams) (*type
 // GetStreamSummary returns aggregate stream lifecycle counts for a time window (STR-002).
 func (r *Repo) GetStreamSummary(ctx context.Context, p types.QueryParams) (*types.StreamSummary, error) {
 	start, end := effectiveWindow(p)
-	where := "WHERE hour >= ? AND hour < ?"
+	where := "WHERE coalesce(started_at, last_seen) >= ? AND coalesce(started_at, last_seen) < ?"
 	args := []any{start, end}
 	if p.Org != "" {
 		where += " AND org = ?"
@@ -69,11 +69,11 @@ func (r *Repo) GetStreamSummary(ctx context.Context, p types.QueryParams) (*type
 
 	row := r.conn.QueryRow(ctx, `
 		SELECT
-			sum(started)   AS total_started,
-			sum(completed) AS total_completed,
-			sum(no_orch)   AS no_orch_count,
-			sum(orch_swap) AS orch_swap_count
-		FROM naap.agg_stream_hourly FINAL
+			countIf(started = 1) AS total_started,
+			countIf(playable_seen = 1 OR completed = 1 OR startup_outcome = 'excused') AS total_completed,
+			countIf(no_orch = 1) AS no_orch_count,
+			countIf(swap_count > 0) AS orch_swap_count
+		FROM naap.serving_stream_sessions
 		`+where, args...)
 
 	// sum() of UInt64 columns returns UInt64; scan into uint64 then cast.
@@ -111,7 +111,7 @@ func (r *Repo) ListStreamHistory(ctx context.Context, p types.QueryParams) ([]ty
 			sum(completed),
 			sum(no_orch),
 			sum(orch_swap)
-		FROM naap.agg_stream_hourly FINAL
+		FROM naap.serving_stream_hourly
 		`+where+`
 		GROUP BY ts
 		ORDER BY ts ASC

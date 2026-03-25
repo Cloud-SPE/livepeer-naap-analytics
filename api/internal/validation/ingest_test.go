@@ -60,7 +60,7 @@ func TestRuleIngest001_SupportedFamiliesAreContracted(t *testing.T) {
 	for i, family := range contractedFamilies {
 		h.insert(t, []rawEvent{{
 			EventID: uid("e"), EventType: family, EventTs: ts, Org: h.org,
-			Data: fmt.Sprintf(`{"stream_id":"s%d","type":"gateway_receive_stream_request"}`, i),
+			Data:       fmt.Sprintf(`{"stream_id":"s%d","type":"gateway_receive_stream_request"}`, i),
 			IngestedAt: ts,
 		}})
 	}
@@ -160,25 +160,27 @@ func TestRuleIngest002_PaymentHasRequiredFields(t *testing.T) {
 // ── RULE-INGEST-003 ──────────────────────────────────────────────────────────
 // Ignored Raw Families And Subtypes Must Be Explicit
 // app_send_stream_request traces and scope-client traces (no stream_id) must
-// not contribute to agg_stream_hourly.started or any canonical aggregate.
+// not contribute to canonical started-session facts.
 
 func TestRuleIngest003_AppSendStreamRequestDoesNotCountAsStarted(t *testing.T) {
 	h := newHarness(t)
 	ts := anchor()
+	streamID := uid("s")
+	requestID := "r1"
+	key := canonicalSessionKey(h.org, streamID, requestID)
 
 	// This trace type is in the explicit ignore list (RULE-INGEST-003).
 	h.insert(t, []rawEvent{{
 		EventID: uid("e"), EventType: "stream_trace", EventTs: ts, Org: h.org,
-		Data:       fmt.Sprintf(`{"stream_id":%q,"request_id":"r1","type":"app_send_stream_request"}`, uid("s")),
+		Data:       fmt.Sprintf(`{"stream_id":%q,"request_id":%q,"type":"app_send_stream_request"}`, streamID, requestID),
 		IngestedAt: ts,
 	}})
 
-	// agg_stream_hourly.started is driven by gateway_receive_stream_request only.
 	started := h.queryInt(t,
-		`SELECT sum(started) FROM naap.agg_stream_hourly FINAL WHERE org = ?`,
-		h.org)
+		`SELECT toUInt64(started) FROM naap.fact_workflow_sessions WHERE canonical_session_key = ?`,
+		key)
 	if started != 0 {
-		t.Errorf("RULE-INGEST-003: app_send_stream_request contributed %d to started count (expected 0)", started)
+		t.Errorf("RULE-INGEST-003: app_send_stream_request contributed %d to canonical started semantics (expected 0)", started)
 	}
 }
 
@@ -186,7 +188,7 @@ func TestRuleIngest003_ScopeClientTracesDoNotCountAsStarted(t *testing.T) {
 	h := newHarness(t)
 	ts := anchor()
 
-	// Scope client traces have no stream_id; they must not reach agg_stream_hourly.
+	// Scope client traces have no stream_id; they must not produce canonical session rows.
 	scopeTypes := []string{
 		"stream_heartbeat", "pipeline_load_start", "pipeline_loaded",
 		"session_created", "stream_started", "playback_ready",
@@ -205,12 +207,8 @@ func TestRuleIngest003_ScopeClientTracesDoNotCountAsStarted(t *testing.T) {
 	}
 	h.insert(t, events)
 
-	// MV mv_stream_hourly only fires on stream_trace with gateway_* subtypes.
-	// These scope types hit the MV but produce no gateway_receive_stream_request counts.
-	started := h.queryInt(t,
-		`SELECT sum(started) FROM naap.agg_stream_hourly FINAL WHERE org = ?`, h.org)
-	if started != 0 {
-		t.Errorf("RULE-INGEST-003: scope client traces contributed %d to started count (expected 0)", started)
+	if h.queryInt(t, `SELECT count() FROM naap.fact_workflow_sessions WHERE org = ?`, h.org) != 0 {
+		t.Errorf("RULE-INGEST-003: scope client traces unexpectedly produced canonical session rows")
 	}
 }
 
@@ -224,11 +222,11 @@ func TestRuleIngest003_UnknownTraceTypesAreDetectable(t *testing.T) {
 	h.insert(t, []rawEvent{
 		// Contracted type
 		{EventID: uid("e"), EventType: "stream_trace", EventTs: ts, Org: h.org,
-			Data: fmt.Sprintf(`{"stream_id":%q,"type":"gateway_receive_stream_request"}`, uid("s")),
+			Data:       fmt.Sprintf(`{"stream_id":%q,"type":"gateway_receive_stream_request"}`, uid("s")),
 			IngestedAt: ts},
 		// Unknown type
 		{EventID: uid("e"), EventType: "stream_trace", EventTs: ts, Org: h.org,
-			Data: fmt.Sprintf(`{"stream_id":%q,"type":"some_new_unknown_type_xyz"}`, uid("s")),
+			Data:       fmt.Sprintf(`{"stream_id":%q,"type":"some_new_unknown_type_xyz"}`, uid("s")),
 			IngestedAt: ts},
 	})
 

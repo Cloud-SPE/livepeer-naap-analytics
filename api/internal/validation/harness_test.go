@@ -3,8 +3,8 @@
 // Package validation is a scenario-based data-quality test harness.
 //
 // Each test inserts synthetic raw events directly into naap.events, then
-// asserts on the aggregate tables that ClickHouse materialized views
-// populate automatically. Tests are fully isolated via a unique per-run org
+// asserts on the canonical typed, fact, and serving tables/views that are
+// rebuilt from those events. Tests are fully isolated via a unique per-run org
 // tag, so they can run against a live cluster without polluting real data.
 //
 // Usage:
@@ -30,7 +30,8 @@ import (
 
 // rawEvent mirrors a row in naap.events.
 // Tests insert directly into this table; ClickHouse MVs fire synchronously
-// and populate all aggregate tables before Insert returns.
+// and populate typed tables before Insert returns, while canonical fact and
+// serving views reflect the new raw state immediately because they are views.
 type rawEvent struct {
 	EventID    string
 	EventType  string
@@ -83,8 +84,8 @@ func newHarness(t *testing.T) *harness {
 }
 
 // insert writes a batch of raw events into naap.events.
-// ClickHouse materialized views fire synchronously, so aggregate tables
-// are populated by the time this function returns.
+// ClickHouse materialized views fire synchronously, so typed tables are
+// populated by the time this function returns.
 func (h *harness) insert(t *testing.T, events []rawEvent) {
 	t.Helper()
 	batch, err := h.conn.PrepareBatch(
@@ -114,6 +115,41 @@ func (h *harness) queryInt(t *testing.T, sql string, args ...any) uint64 {
 		t.Fatalf("queryInt %q: %v", sql, err)
 	}
 	return n
+}
+
+// queryString runs a single-column String query and returns the value.
+func (h *harness) queryString(t *testing.T, sql string, args ...any) string {
+	t.Helper()
+	var s string
+	if err := h.conn.QueryRow(context.Background(), sql, args...).Scan(&s); err != nil {
+		t.Fatalf("queryString %q: %v", sql, err)
+	}
+	return s
+}
+
+// queryFloat runs a single-column Float64 query and returns the value.
+func (h *harness) queryFloat(t *testing.T, sql string, args ...any) float64 {
+	t.Helper()
+	var f float64
+	if err := h.conn.QueryRow(context.Background(), sql, args...).Scan(&f); err != nil {
+		t.Fatalf("queryFloat %q: %v", sql, err)
+	}
+	return f
+}
+
+func canonicalSessionKey(org, streamID, requestID string) string {
+	switch {
+	case org == "":
+		return ""
+	case streamID != "" && requestID != "":
+		return fmt.Sprintf("%s|%s|%s", org, streamID, requestID)
+	case streamID != "":
+		return fmt.Sprintf("%s|%s|_missing_request", org, streamID)
+	case requestID != "":
+		return fmt.Sprintf("%s|_missing_stream|%s", org, requestID)
+	default:
+		return ""
+	}
 }
 
 // uid generates a short unique string suitable for IDs and addresses.

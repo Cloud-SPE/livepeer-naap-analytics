@@ -32,22 +32,22 @@ func (r *Repo) GetLeaderboard(ctx context.Context, p types.QueryParams) ([]types
 			any(s.last_seen) > now() - INTERVAL ? MINUTE                      AS is_active,
 			any(f.avg_fps)                                                     AS avg_fps,
 			any(l.avg_lat)                                                     AS avg_lat
-		FROM naap.agg_orch_reliability_hourly AS r FINAL
+		FROM naap.serving_orch_reliability_hourly AS r
 		LEFT JOIN (
 			SELECT orch_address, name, last_seen
-			FROM naap.agg_orch_state FINAL
+			FROM naap.serving_latest_orchestrator_state
 		) AS s ON r.orch_address = s.orch_address
 		LEFT JOIN (
 			SELECT orch_address,
 			       sum(inference_fps_sum) / nullIf(sum(sample_count), 0) AS avg_fps
-			FROM naap.agg_fps_hourly FINAL
+			FROM naap.serving_fps_hourly
 			WHERE hour >= ? AND hour < ?
 			GROUP BY orch_address
 		) AS f ON r.orch_address = f.orch_address
 		LEFT JOIN (
 			SELECT orch_address,
-			       sum(latency_ms_sum) / nullIf(sum(sample_count), 0) AS avg_lat
-			FROM naap.agg_discovery_latency_hourly FINAL
+			       avg(avg_latency_ms) AS avg_lat
+			FROM naap.serving_discovery_latency_hourly
 			WHERE hour >= ? AND hour < ?
 			GROUP BY orch_address
 		) AS l ON r.orch_address = l.orch_address
@@ -94,13 +94,13 @@ func (r *Repo) GetOrchProfile(ctx context.Context, address string) (*types.OrchP
 		SELECT
 			orch_address,
 			name,
-			JSONExtractString(raw_capabilities, 'orch_uri') AS uri,
+			uri,
 			version,
 			org,
 			last_seen,
 			last_seen > now() - INTERVAL ? MINUTE           AS is_active,
 			raw_capabilities
-		FROM naap.agg_orch_state FINAL
+		FROM naap.serving_latest_orchestrator_state
 		WHERE orch_address = ?
 	`, activeOrchMinutes, address)
 
@@ -114,7 +114,7 @@ func (r *Repo) GetOrchProfile(ctx context.Context, address string) (*types.OrchP
 		SELECT
 			sum(ai_stream_count),
 			sum(degraded_count)
-		FROM naap.agg_orch_reliability_hourly FINAL
+		FROM naap.serving_orch_reliability_hourly
 		WHERE orch_address = ?
 		  AND hour >= now() - INTERVAL 7 DAY
 	`, address)

@@ -10,21 +10,20 @@ import (
 // GetReliabilitySummary returns network-level failure rates for a time window (REL-001).
 func (r *Repo) GetReliabilitySummary(ctx context.Context, p types.QueryParams) (*types.ReliabilitySummary, error) {
 	start, end := effectiveWindow(p)
-	where := "WHERE hour >= ? AND hour < ?"
+	where := "WHERE coalesce(started_at, last_seen) >= ? AND coalesce(started_at, last_seen) < ?"
 	args := []any{start, end}
 	if p.Org != "" {
 		where += " AND org = ?"
 		args = append(args, p.Org)
 	}
 
-	// Stream-level counts from agg_stream_hourly.
 	row := r.conn.QueryRow(ctx, `
 		SELECT
-			sum(started),
-			sum(completed),
-			sum(no_orch),
-			sum(orch_swap)
-		FROM naap.agg_stream_hourly FINAL
+			countIf(started = 1),
+			countIf(playable_seen = 1 OR completed = 1 OR startup_outcome = 'excused'),
+			countIf(no_orch = 1),
+			countIf(swap_count > 0)
+		FROM naap.serving_stream_sessions
 		`+where, args...)
 
 	var started, completed, noOrch, orchSwap uint64
@@ -32,18 +31,25 @@ func (r *Repo) GetReliabilitySummary(ctx context.Context, p types.QueryParams) (
 		return nil, fmt.Errorf("clickhouse get reliability summary streams: %w", err)
 	}
 
-	// Inference-level counts from agg_orch_reliability_hourly.
+	statusWhere := "WHERE hour >= ? AND hour < ?"
+	statusArgs := []any{start, end}
+	if p.Org != "" {
+		statusWhere += " AND org = ?"
+		statusArgs = append(statusArgs, p.Org)
+	}
 	relRow := r.conn.QueryRow(ctx, `
 		SELECT
 			sum(ai_stream_count),
 			sum(degraded_count),
 			sum(restart_count),
-			sum(error_count)
-		FROM naap.agg_orch_reliability_hourly FINAL
-		`+where, args...)
+			sum(error_count),
+			sum(degraded_inference_count),
+			sum(degraded_input_count)
+		FROM naap.serving_orch_reliability_hourly
+		`+statusWhere, statusArgs...)
 
-	var aiCount, degraded, restarts, errors uint64
-	if err := relRow.Scan(&aiCount, &degraded, &restarts, &errors); err != nil {
+	var aiCount, degraded, restarts, errors, degradedInference, degradedInput uint64
+	if err := relRow.Scan(&aiCount, &degraded, &restarts, &errors, &degradedInference, &degradedInput); err != nil {
 		return nil, fmt.Errorf("clickhouse get reliability summary inference: %w", err)
 	}
 
@@ -61,8 +67,8 @@ func (r *Repo) GetReliabilitySummary(ctx context.Context, p types.QueryParams) (
 			OrchSwap:          int64(orchSwap),
 			InferenceRestart:  int64(restarts),
 			InferenceError:    int64(errors),
-			DegradedInference: 0, // TODO: split degraded_count by state in agg table
-			DegradedInput:     0,
+			DegradedInference: int64(degradedInference),
+			DegradedInput:     int64(degradedInput),
 		},
 	}, nil
 }
@@ -83,7 +89,7 @@ func (r *Repo) ListReliabilityHistory(ctx context.Context, p types.QueryParams) 
 			sum(started),
 			sum(completed),
 			sum(no_orch)
-		FROM naap.agg_stream_hourly FINAL
+		FROM naap.serving_stream_hourly
 		`+where+`
 		GROUP BY ts
 		ORDER BY ts ASC
@@ -132,7 +138,7 @@ func (r *Repo) ListOrchReliability(ctx context.Context, p types.QueryParams) ([]
 			sum(degraded_count)   AS degraded,
 			sum(restart_count)    AS restarts,
 			sum(error_count)      AS errors
-		FROM naap.agg_orch_reliability_hourly FINAL
+		FROM naap.serving_orch_reliability_hourly
 		`+where+`
 		GROUP BY orch_address
 		HAVING stream_count >= 10
@@ -169,61 +175,49 @@ func (r *Repo) ListFailures(ctx context.Context, p types.QueryParams) ([]types.F
 		limit = maxFailureLimit
 	}
 
-	// Build WHERE across two event types:
-	// - stream_trace with failure subtypes
-	// - ai_stream_status with restart/error signals
 	var typeFilter string
 	switch p.FailureType {
 	case "no_orch_available":
-		typeFilter = `event_type = 'stream_trace' AND JSONExtractString(data, 'type') = 'gateway_no_orchestrators_available'`
+		typeFilter = `failure_type = 'gateway_no_orchestrators_available'`
 	case "orch_swap":
-		typeFilter = `event_type = 'stream_trace' AND JSONExtractString(data, 'type') = 'orchestrator_swap'`
+		typeFilter = `failure_type = 'orchestrator_swap'`
 	case "inference_restart":
-		typeFilter = `event_type = 'ai_stream_status' AND JSONExtractUInt(data, 'inference_status', 'restart_count') > 0`
+		typeFilter = `failure_type = 'inference_restart'`
 	case "inference_error":
-		typeFilter = `event_type = 'ai_stream_status' AND JSONExtractString(data, 'inference_status', 'last_error') NOT IN ('', 'null')`
+		typeFilter = `failure_type = 'inference_error'`
 	default:
-		typeFilter = `(
-			(event_type = 'stream_trace' AND JSONExtractString(data, 'type') IN ('gateway_no_orchestrators_available','orchestrator_swap'))
-			OR
-			(event_type = 'ai_stream_status' AND (
-				JSONExtractUInt(data, 'inference_status', 'restart_count') > 0
-				OR JSONExtractString(data, 'inference_status', 'last_error') NOT IN ('', 'null')
-			))
-		)`
+		typeFilter = `failure_type IN ('gateway_no_orchestrators_available', 'orchestrator_swap', 'inference_restart', 'inference_error')`
 	}
 
-	where := fmt.Sprintf("WHERE event_ts >= ? AND event_ts < ? AND (%s)", typeFilter)
+	where := fmt.Sprintf("WHERE failure_ts >= ? AND failure_ts < ? AND (%s)", typeFilter)
 	args := []any{start, end}
 	if p.Org != "" {
 		where += " AND org = ?"
 		args = append(args, p.Org)
 	}
 	if p.OrchAddress != "" {
-		// orchestrator_info.address carries the node's local key, not the ETH address.
-		// Resolve ETH address → URI via agg_orch_state, then match on orchestrator_info.url.
-		where += " AND lower(JSONExtractString(data, 'orchestrator_info', 'url')) IN (SELECT uri FROM naap.agg_orch_state FINAL WHERE orch_address = ?)"
+		where += " AND orch_address = ?"
 		args = append(args, p.OrchAddress)
 	}
 	args = append(args, limit, p.Offset)
 
 	rows, err := r.conn.Query(ctx, `
 		SELECT
-			event_ts,
+			failure_ts,
 			multiIf(
-				event_type = 'stream_trace' AND JSONExtractString(data, 'type') = 'gateway_no_orchestrators_available', 'no_orch_available',
-				event_type = 'stream_trace' AND JSONExtractString(data, 'type') = 'orchestrator_swap', 'orch_swap',
-				event_type = 'ai_stream_status' AND JSONExtractUInt(data, 'inference_status', 'restart_count') > 0, 'inference_restart',
+				failure_type = 'gateway_no_orchestrators_available', 'no_orch_available',
+				failure_type = 'orchestrator_swap', 'orch_swap',
+				failure_type = 'inference_restart', 'inference_restart',
 				'inference_error'
-			)                                                           AS failure_type,
-			JSONExtractString(data, 'stream_id')                        AS stream_id,
-			JSONExtractString(data, 'request_id')                       AS request_id,
+			)                                      AS failure_type,
+			stream_id,
+			request_id,
 			org,
 			gateway,
-			data
-		FROM naap.events
+			detail
+		FROM naap.serving_failure_events
 		`+where+`
-		ORDER BY event_ts DESC
+		ORDER BY failure_ts DESC
 		LIMIT ? OFFSET ?
 	`, args...)
 	if err != nil {

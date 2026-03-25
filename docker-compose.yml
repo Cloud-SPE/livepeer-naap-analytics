@@ -76,6 +76,46 @@ services:
       - ./api:/app/api
     restart: on-failure
 
+  warehouse:
+    build:
+      context: .
+      dockerfile: infra/docker/dbt.Dockerfile
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    environment:
+      DBT_PROFILES_DIR: /workspace/warehouse
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_DB: naap
+      CLICKHOUSE_USER: naap_admin
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_ADMIN_PASSWORD:-changeme}
+    volumes:
+      - ./warehouse:/workspace/warehouse
+    working_dir: /workspace/warehouse
+    command: ["run"]
+    restart: "no"
+
+  validation-go:
+    image: golang:1.24-alpine
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    environment:
+      CLICKHOUSE_ADDR: clickhouse:9000
+      CLICKHOUSE_DB: naap
+      CLICKHOUSE_WRITER_USER: naap_writer
+      CLICKHOUSE_WRITER_PASSWORD: naap_writer_changeme
+      GOCACHE: /tmp/go-build-cache
+      GOMODCACHE: /go/pkg/mod
+    working_dir: /workspace/api
+    volumes:
+      - ./api:/workspace/api
+      - /tmp/go-build-cache:/tmp/go-build-cache
+      - /tmp/go-mod-cache:/go/pkg/mod
+    command: ["go", "test", "-tags=validation", "./internal/validation/...", "-v", "-count=1", "-timeout=120s"]
+    restart: "no"
+
   # ── Observability ────────────────────────────────────────────────────────────
 
   kafka-exporter:

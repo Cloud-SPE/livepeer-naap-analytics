@@ -45,3 +45,4 @@ Thumbs.db
 # Generated
 docs/generated/*.md
 !docs/generated/.gitkeep
+warehouse/target/

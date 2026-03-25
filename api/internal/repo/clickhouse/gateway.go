@@ -12,7 +12,7 @@ import (
 func (r *Repo) ListGateways(ctx context.Context, p types.QueryParams) ([]types.Gateway, error) {
 	limit := effectiveLimit(p)
 
-	// Base: gateway_metadata with active stream count from agg_stream_status_samples
+	// Base: gateway_metadata with active stream count from canonical serving samples.
 	rows, err := r.conn.Query(ctx, fmt.Sprintf(`
 		SELECT
 			gm.eth_address                                                     AS address,
@@ -21,9 +21,9 @@ func (r *Repo) ListGateways(ctx context.Context, p types.QueryParams) ([]types.G
 			toUInt64(gm.deposit)                                               AS deposit_wei,
 			toUInt64(gm.reserve)                                               AS reserve_wei,
 			gm.updated_at,
-			countIf(ss.sample_ts > now() - INTERVAL %d SECOND)                AS active_streams
+			uniqExactIf(ss.stream_id, ss.sample_ts > now() - INTERVAL %d SECOND) AS active_streams
 		FROM naap.gateway_metadata AS gm FINAL
-		LEFT JOIN naap.agg_stream_status_samples AS ss
+		LEFT JOIN naap.serving_status_samples AS ss
 			ON lower(ss.gateway) = lower(gm.eth_address)
 			AND ss.sample_ts > now() - INTERVAL %d SECOND
 		GROUP BY gm.eth_address, gm.name, gm.avatar, gm.deposit, gm.reserve, gm.updated_at
@@ -75,8 +75,8 @@ func (r *Repo) GetGatewayProfile(ctx context.Context, address string) (*types.Ga
 	statsRow := r.conn.QueryRow(ctx, fmt.Sprintf(`
 		SELECT
 			count(DISTINCT stream_id)                                              AS streams_routed,
-			countIf(sample_ts > now() - INTERVAL %d SECOND AND state = 'ONLINE') AS active_streams
-		FROM naap.agg_stream_status_samples
+			uniqExactIf(stream_id, sample_ts > now() - INTERVAL %d SECOND AND state = 'ONLINE') AS active_streams
+		FROM naap.serving_status_samples
 		WHERE lower(gateway) = lower(?)
 	`, activeStreamSecs), address)
 
@@ -89,10 +89,9 @@ func (r *Repo) GetGatewayProfile(ctx context.Context, address string) (*types.Ga
 
 	// Total payments (raw events — gateway is top-level column)
 	payRow := r.conn.QueryRow(ctx, `
-		SELECT sum(toUInt64OrZero(JSONExtractString(data, 'face_value')))
-		FROM naap.events
-		WHERE event_type = 'create_new_payment'
-		  AND lower(gateway) = lower(?)
+		SELECT sum(face_value_wei)
+		FROM naap.serving_payment_links
+		WHERE lower(gateway) = lower(?)
 	`, address)
 	var totalWEI uint64
 	if err := payRow.Scan(&totalWEI); err != nil {
@@ -104,7 +103,7 @@ func (r *Repo) GetGatewayProfile(ctx context.Context, address string) (*types.Ga
 	// Orchs used
 	orchRows, err := r.conn.Query(ctx, `
 		SELECT DISTINCT orch_address
-		FROM naap.agg_stream_status_samples
+		FROM naap.serving_status_samples
 		WHERE lower(gateway) = lower(?) AND orch_address != ''
 		LIMIT 100
 	`, address)
@@ -140,8 +139,8 @@ func (r *Repo) ListGatewayOrchestrators(ctx context.Context, address string, p t
 			any(os.name)                   AS name,
 			count(DISTINCT ss.stream_id)   AS stream_count,
 			max(ss.sample_ts)              AS last_seen
-		FROM naap.agg_stream_status_samples AS ss
-		LEFT JOIN naap.agg_orch_state FINAL AS os
+		FROM naap.serving_status_samples AS ss
+		LEFT JOIN naap.serving_latest_orchestrator_state AS os
 			ON ss.orch_address = os.orch_address
 		WHERE lower(ss.gateway) = lower(?)
 		  AND ss.orch_address != ''
