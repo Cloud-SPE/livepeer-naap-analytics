@@ -29,8 +29,19 @@ infra/clickhouse/
 | `010_fix_orch_uri.sql` | Fix `uri` extraction in `mv_orch_state` (`orch_uri` not `uri`) |
 | `011_fix_orch_address.sql` | Fix `orch_address` in stream state and reliability tables (use ETH addr not local key) |
 | `012_enrichment.sql` | `naap.orch_metadata` + `naap.gateway_metadata` — Livepeer API enrichment tables (ENS names, stake, deposits) |
+| `013_stream_status_samples.sql` | `naap.agg_stream_status_samples` — per-sample stream status (MV-populated from `ai_stream_status` events, 30-day TTL). Resolves canonical ETH orch address via `agg_orch_state.uri` JOIN (same pattern as migration 011). Powers Grafana live-operations and overview dashboards. |
+| `014_gpu_inventory.sql` | `naap.agg_gpu_inventory` — structured GPU inventory (worker-populated, not MV). The enrichment worker reads `agg_orch_state.raw_capabilities`, parses the `gpu_info` map in Go, and batch-inserts into this table every 5m. ReplacingMergeTree(last_seen) deduplicates on (orch_address, gpu_id); 7-day TTL. Powers the Supply & Inventory dashboard. |
 
 Migrations are idempotent (`CREATE TABLE IF NOT EXISTS`, `CREATE USER IF NOT EXISTS`).
+
+### Table population strategies
+
+| Strategy | Tables | Trigger |
+|----------|--------|---------|
+| **MV-populated** | `agg_orch_state`, `agg_stream_*`, `agg_stream_status_samples`, `agg_payment_*`, `agg_*_hourly` | Fires synchronously as rows land in `naap.events` via Kafka Engine |
+| **Worker-populated** | `orch_metadata`, `gateway_metadata`, `agg_gpu_inventory` | API enrichment worker polls every 5m and batch-inserts |
+
+Worker-populated tables are applied manually on existing volumes — migrations only create the table schema. The enrichment worker will populate them on next startup.
 
 ## Running locally
 

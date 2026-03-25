@@ -79,6 +79,9 @@ func (w *Worker) sync(ctx context.Context) {
 	if err := w.syncGateways(ctx); err != nil {
 		w.log.Warn("enrichment: gateway sync failed", zap.Error(err))
 	}
+	if err := w.syncGPUInventory(ctx); err != nil {
+		w.log.Warn("enrichment: gpu inventory sync failed", zap.Error(err))
+	}
 }
 
 func (w *Worker) syncOrchestrators(ctx context.Context) error {

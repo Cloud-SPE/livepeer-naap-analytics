@@ -9,24 +9,27 @@ Top-level architecture map for Livepeer NAAP Analytics.
   ─────────────────────────────────────────────────────────────────────────────
   network_events    ──Kafka──► ClickHouse Kafka Engine ──MV──► naap.events
   streaming_events  ──Engine──► tables                    │         │
-                                                           │         └──► Aggregate MVs
+                                                           │         └──► Aggregate MVs (event-driven)
                                                            │               agg_orch_state
                                                            │               agg_stream_*
+                                                           │               agg_stream_status_samples
                                                            │               agg_payment_*
                                                            │               agg_*_hourly
                                                            └──────────────────► HTTP :8000
                                                                                 (Go API)
 
-  Livepeer Public API
+  Livepeer Public API                                                     Grafana :3000
   ─────────────────────────────────────────────────────────────────────────────
   /api/orchestrator  ──HTTP (5m)──► enrichment worker ──INSERT──► naap.orch_metadata
   /api/gateways      ──poll──►      (Go goroutine)     ──INSERT──► naap.gateway_metadata
+  agg_orch_state     ──read──►      (same worker)      ──INSERT──► naap.agg_gpu_inventory
 
   Observability
   ─────────────────────────────────────────────────────────────────────────────
   Go API :8000/metrics  ──scrape──► Prometheus :9090 ──► Grafana :3000
-  ClickHouse :9363      ──scrape──► Prometheus
-  Kafka exporter :9308  ──scrape──► Prometheus
+  ClickHouse :9363      ──scrape──► Prometheus               │
+  Kafka exporter :9308  ──scrape──► Prometheus               │
+  naap.* tables         ◄──query───────────────────────────────
 ```
 
 **Ingest path:** Two Kafka topics are consumed directly by ClickHouse via the Kafka Engine.
@@ -34,7 +37,13 @@ No application-layer consumer sits between Kafka and ClickHouse.
 
 **Enrichment path:** A background Go goroutine polls the Livepeer public API every 5 minutes
 and upserts orchestrator and gateway metadata (ENS names, stake, service URIs, deposits) into
-dedicated ClickHouse tables. These tables can be JOINed from any aggregate query.
+dedicated ClickHouse tables. It also reads the current `agg_orch_state` snapshot to build a
+structured GPU inventory in `agg_gpu_inventory`. All enrichment tables can be JOINed from any
+aggregate query.
+
+**Table population strategies:** Two distinct strategies are used for aggregate tables:
+- **MV-populated** (event-driven): `agg_orch_state`, `agg_stream_*`, `agg_stream_status_samples`, `agg_payment_*`, `agg_*_hourly` — written synchronously as Kafka events land in `naap.events`.
+- **Worker-populated** (polled): `orch_metadata`, `gateway_metadata`, `agg_gpu_inventory` — written by the enrichment worker on a 5-minute interval. GPU inventory uses this strategy because `gpu_info` is a JSON map with dynamic integer keys that are trivial to iterate in Go but awkward in ClickHouse SQL.
 
 **Serving path:** The Go API queries only pre-aggregated ClickHouse tables. No raw-event
 queries at request time; all heavy lifting happens at ingest via Materialized Views.
@@ -65,7 +74,7 @@ Violations are caught by structural linters. See `docs/design-docs/architecture.
 ## Key design decisions
 
 - **ClickHouse Kafka Engine for ingest**: no application-layer consumer; ClickHouse reads Kafka directly.
-- **Pre-aggregated serving**: all aggregate tables are populated by Materialized Views at ingest time; the API never fans out raw events at query time.
+- **Pre-aggregated serving**: aggregate tables are populated at ingest time (via MVs) or on a poll interval (via enrichment worker); the API and Grafana dashboards never fan out raw events at query time.
 - **Enrichment as a sidecar**: ENS name resolution and stake data come from the Livepeer public API via a background goroutine; kept separate from the ingest path so a slow or down enrichment API does not affect event processing.
 - **Prometheus-native observability**: `/metrics` endpoint on the Go API; ClickHouse built-in endpoint on port 9363; Kafka Exporter as a sidecar. No custom instrumentation library.
 - **Validate at boundaries**: every Kafka message is validated against a typed schema on ingestion. See `docs/design-docs/data-validation-rules.md` for the full behavioral contract.

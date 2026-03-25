@@ -20,6 +20,8 @@ See `docs/exec-plans/active/` for in-progress work.
 | 6 | Go API — leaderboard + scoring | Phase 5 | ✅ complete |
 | 7 | Rate limiting middleware | Phase 4 | ✅ complete |
 | 8 | Integration tests + load tests | Phase 6 | ✅ complete |
+| 9 | Grafana dashboard migration (naap.* schema) | Phase 3 | ✅ complete |
+| 10 | GPU inventory: migration 014 + enrichment worker sync | Phase 9 | ✅ complete |
 
 Create an exec-plan in `docs/exec-plans/active/` before starting each phase.
 

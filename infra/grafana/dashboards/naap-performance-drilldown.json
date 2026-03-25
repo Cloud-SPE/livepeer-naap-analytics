@@ -1,0 +1,710 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Queries public org-aware API views such as v_api_gpu_metrics_by_org and v_api_network_demand_by_org; internal v_base_*_by_org views are not dashboard surfaces.",
+  "editable": true,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "dashboard",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false,
+      "title": "Overview",
+      "type": "link",
+      "url": "/d/naap-overview"
+    },
+    {
+      "asDropdown": false,
+      "icon": "cloud",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false,
+      "title": "Live Ops",
+      "type": "link",
+      "url": "/d/naap-live-operations"
+    },
+    {
+      "asDropdown": false,
+      "icon": "bolt",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false,
+      "title": "Performance",
+      "type": "link",
+      "url": "/d/naap-performance-drilldown"
+    },
+    {
+      "asDropdown": false,
+      "icon": "doc",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false,
+      "title": "Supply",
+      "type": "link",
+      "url": "/d/naap-supply-inventory"
+    },
+    {
+      "asDropdown": false,
+      "icon": "info",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false,
+      "title": "Economics",
+      "type": "link",
+      "url": "/d/naap-economics"
+    }
+  ],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 100,
+      "panels": [],
+      "title": "Latency and FPS",
+      "type": "row"
+    },
+    {
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "seconds",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "showValues": false,
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 1
+      },
+      "id": 1,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT toStartOfInterval(sample_ts, INTERVAL 1 HOUR) AS time,\n    avg(e2e_latency_ms) / 1000.0 AS avg_e2e_latency_s,\n    quantileTDigest(0.95)(e2e_latency_ms) / 1000.0 AS p95_e2e_latency_s\nFROM naap.agg_stream_status_samples\nWHERE $__timeFilter(sample_ts) AND e2e_latency_ms > 0\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nAND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address))\nGROUP BY time ORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "title": "End-to-End (e2e) Stream Latency",
+      "type": "timeseries"
+    },
+    {
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "fps",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "showValues": false,
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "fps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 1
+      },
+      "id": 2,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "WITH ens AS (SELECT eth_address AS addr, name AS ens_name FROM naap.orch_metadata FINAL),\ntop_orch AS (\n    SELECT orch_address FROM naap.agg_stream_status_samples\n    WHERE $__timeFilter(sample_ts) AND is_attributed = 1 AND orch_address != ''\n    AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n    GROUP BY orch_address ORDER BY avg(output_fps) DESC LIMIT 8\n)\nSELECT toStartOfInterval(s.sample_ts, INTERVAL 5 MINUTE) AS time,\n    if(ifNull(ens.ens_name, '') != '' AND NOT startsWith(lower(ens.ens_name), '0x'), ens.ens_name, s.orch_address) AS \"Orchestrator ENS\",\n    avg(s.output_fps) AS \"Avg FPS\"\nFROM naap.agg_stream_status_samples s\nLEFT JOIN ens ON ens.addr = s.orch_address\nWHERE $__timeFilter(s.sample_ts) AND s.is_attributed = 1 AND s.orch_address != ''\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), s.org))\nAND (\n    (('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '') AND s.orch_address GLOBAL IN (SELECT orch_address FROM top_orch))\n    OR ('${orchestrator:csv}' != '__all' AND '${orchestrator:csv}' != '' AND has(splitByChar(',', '${orchestrator:csv}'), s.orch_address))\n)\nGROUP BY time, \"Orchestrator ENS\" ORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "title": "FPS Average by Orchestrator (5-min intervals)",
+      "type": "timeseries"
+    },
+    {
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "ratio",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "showValues": false,
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 0.3
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 9
+      },
+      "id": 3,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "WITH ens AS (SELECT eth_address AS addr, name AS ens_name FROM naap.orch_metadata FINAL),\nstream_orch AS (\n    SELECT stream_id, argMax(orch_address, sample_ts) AS orch_address\n    FROM naap.agg_stream_status_samples\n    WHERE $__timeFilter(sample_ts) AND is_attributed = 1\n    AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n    GROUP BY stream_id\n),\ntop_orch AS (\n    SELECT orch_address FROM stream_orch GROUP BY orch_address LIMIT 8\n)\nSELECT w.hour AS time,\n    if(ifNull(ens.ens_name, '') != '' AND NOT startsWith(lower(ens.ens_name), '0x'), ens.ens_name, so.orch_address) AS \"Orchestrator ENS\",\n    sum(w.video_jitter_sum) / nullIf(sum(w.sample_count), 0) AS \"Avg Video Jitter\"\nFROM naap.agg_webrtc_hourly w\nJOIN stream_orch so ON so.stream_id = w.stream_id\nLEFT JOIN ens e ON e.addr = so.orch_address\nWHERE $__timeFilter(w.hour)\nAND (\n    (('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '') AND so.orch_address GLOBAL IN (SELECT orch_address FROM top_orch))\n    OR ('${orchestrator:csv}' != '__all' AND '${orchestrator:csv}' != '' AND has(splitByChar(',', '${orchestrator:csv}'), so.orch_address))\n)\nGROUP BY time, \"Orchestrator ENS\" ORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "title": "Jitter Coefficient by Orchestrator",
+      "type": "timeseries"
+    },
+    {
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "fps",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "showValues": false,
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "fps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 9
+      },
+      "id": 4,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT toStartOfInterval(hour, INTERVAL 1 HOUR) AS time,\n    pipeline,\n    sum(inference_fps_sum) / nullIf(sum(sample_count), 0) AS avg_fps\nFROM naap.agg_fps_hourly\nWHERE $__timeFilter(hour)\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nAND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address))\nGROUP BY time, pipeline ORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "title": "Network FPS by Pipeline (1h avg)",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 17
+      },
+      "id": 101,
+      "panels": [],
+      "title": "Orchestrator Drilldown",
+      "type": "row"
+    },
+    {
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "fps",
+            "axisPlacement": "auto",
+            "fillOpacity": 80,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineWidth": 1,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 18
+      },
+      "id": 5,
+      "options": {
+        "barRadius": 0,
+        "barWidth": 0.95,
+        "fullHighlight": false,
+        "groupWidth": 0.7,
+        "legend": {
+          "calcs": [],
+          "displayMode": "hidden",
+          "placement": "bottom",
+          "showLegend": false
+        },
+        "orientation": "vertical",
+        "showValue": "never",
+        "stacking": "none",
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        },
+        "xField": "Orchestrator ENS",
+        "xTickLabelRotation": 0,
+        "xTickLabelSpacing": 0
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "WITH ens AS (SELECT eth_address AS addr, name AS ens_name FROM naap.orch_metadata FINAL),\nfps AS (\n    SELECT orch_address, avg(output_fps) AS avg_fps\n    FROM naap.agg_stream_status_samples\n    WHERE $__timeFilter(sample_ts) AND is_attributed = 1 AND orch_address != ''\n    AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n    AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address))\n    GROUP BY orch_address\n)\nSELECT if(ifNull(ens.ens_name, '') != '' AND NOT startsWith(lower(ens.ens_name), '0x'), ens.ens_name, fps.orch_address) AS \"Orchestrator ENS\",\n    fps.avg_fps AS \"Avg FPS\"\nFROM fps\nLEFT JOIN ens ON ens.addr = fps.orch_address\nORDER BY \"Avg FPS\" DESC\nLIMIT 10",
+          "refId": "A"
+        }
+      ],
+      "title": "Top 10 Orchestrators by Avg FPS (Bar Chart)",
+      "type": "barchart"
+    },
+    {
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "footer": {
+              "reducers": []
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 18
+      },
+      "id": 6,
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Avg FPS"
+          }
+        ]
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "WITH ens AS (SELECT eth_address AS addr, name AS ens_name FROM naap.orch_metadata FINAL),\nstatus_24h AS (\n    SELECT orch_address,\n        ifNull(nullIf(pipeline, ''), 'unknown') AS pipeline,\n        countDistinct(stream_id) AS active_streams,\n        avg(output_fps) AS avg_fps,\n        quantileTDigest(0.95)(output_fps) AS p95_fps,\n        avgIf(e2e_latency_ms, e2e_latency_ms > 0) / 1000.0 AS avg_e2e_latency_s,\n        quantileTDigestIf(0.95)(e2e_latency_ms, e2e_latency_ms > 0) / 1000.0 AS p95_e2e_latency_s\n    FROM naap.agg_stream_status_samples\n    WHERE sample_ts >= now() - INTERVAL 24 HOUR AND is_attributed = 1 AND orch_address != ''\n    AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n    AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address))\n    GROUP BY orch_address, pipeline\n)\nSELECT if(ifNull(ens.ens_name, '') != '' AND NOT startsWith(lower(ens.ens_name), '0x'), ens.ens_name, s.orch_address) AS \"Orchestrator\",\n    s.pipeline AS \"Pipeline\",\n    s.active_streams AS \"Active Streams\",\n    round(s.avg_fps, 2) AS \"Avg FPS\",\n    round(s.p95_fps, 2) AS \"P95 FPS\",\n    round(ifNull(s.avg_e2e_latency_s, 0), 3) AS \"Avg E2E Latency (s)\",\n    round(ifNull(s.p95_e2e_latency_s, 0), 3) AS \"P95 E2E Latency (s)\"\nFROM status_24h s\nLEFT JOIN ens ON ens.addr = s.orch_address\nORDER BY s.active_streams DESC, s.avg_fps DESC\nLIMIT 20",
+          "refId": "A"
+        }
+      ],
+      "title": "Top Orchestrators (24h: Streams, FPS, Latency)",
+      "type": "table"
+    }
+  ],
+  "refresh": "15m",
+  "schemaVersion": 39,
+  "tags": [
+    "naap",
+    "livepeer",
+    "performance"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "text": "ClickHouse Prod",
+          "value": "clickhouse_prod"
+        },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Datasource",
+        "name": "clickhouse_ds",
+        "options": [],
+        "query": "grafana-clickhouse-datasource",
+        "refresh": 1,
+        "type": "datasource"
+      },
+      {
+        "current": {
+          "text": "All",
+          "value": "__all"
+        },
+        "definition": "SELECT DISTINCT org FROM livepeer_analytics.fact_workflow_sessions WHERE ifNull(org, '') != '' ORDER BY org",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Org",
+        "multi": true,
+        "name": "org",
+        "options": [],
+        "query": "SELECT DISTINCT org FROM naap.events WHERE org != '' ORDER BY org",
+        "refresh": 1,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": {
+          "text": "All",
+          "value": "__all"
+        },
+        "definition": "SELECT DISTINCT model_id FROM livepeer_analytics.dim_orchestrator_capability_current WHERE ifNull(model_id,'') != '' ORDER BY model_id",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Model",
+        "multi": true,
+        "name": "model",
+        "options": [],
+        "query": "SELECT DISTINCT model_id FROM naap.agg_gpu_inventory WHERE model_id != '' ORDER BY model_id",
+        "refresh": 1,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": {
+          "text": "All",
+          "value": "__all"
+        },
+        "definition": "WITH orchestrators AS (SELECT DISTINCT lower(orchestrator_address) AS addr FROM livepeer_analytics.dim_orchestrator_capability_current WHERE ifNull(orchestrator_address, '') != ''), ens AS (SELECT eth_address AS addr, ens_name FROM livepeer_analytics.v_dim_ens_names) SELECT orchestrators.addr AS value, if(ifNull(ens_name, '') != '' AND NOT startsWith(lower(ens_name), '0x'), concat(ens_name, ' (', orchestrators.addr, ')'), orchestrators.addr) AS text FROM orchestrators LEFT JOIN ens ON orchestrators.addr = ens.addr ORDER BY if(ifNull(ens_name, '') != '' AND NOT startsWith(lower(ens_name), '0x'), 1, 0) DESC, text",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Orchestrator (ENS)",
+        "multi": true,
+        "name": "orchestrator",
+        "options": [],
+        "query": "WITH o AS (SELECT DISTINCT orch_address FROM naap.agg_orch_state FINAL) SELECT o.orch_address AS value, if(m.name != '' AND NOT startsWith(lower(m.name), '0x'), concat(m.name, ' (', o.orch_address, ')'), o.orch_address) AS text FROM o LEFT JOIN naap.orch_metadata FINAL m ON m.eth_address = o.orch_address ORDER BY if(m.name != '' AND NOT startsWith(lower(m.name), '0x'), 1, 0) DESC, text",
+        "refresh": 1,
+        "sort": 1,
+        "type": "query",
+        "allValue": "__all"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "utc",
+  "title": "NaaP: Performance Drilldown",
+  "uid": "naap-performance-drilldown",
+  "version": 1
+}

@@ -8,21 +8,24 @@ orchestrator leaderboard.
 ## How it works
 
 ```
-Kafka topics                 ClickHouse                     Go API
-─────────────────────────────────────────────────────────────────────
+Kafka topics                 ClickHouse                          Go API / Grafana
+──────────────────────────────────────────────────────────────────────────────────
 network_events   ──Kafka──►  Kafka Engine ──MV──►  naap.events
 streaming_events ──Engine──►  tables          │      │
-                                              │      └──► Aggregate MVs
+                                              │      └──► Aggregate MVs (MV-populated)
                                               │             agg_orch_state
                                               │             agg_stream_*
+                                              │             agg_stream_status_samples  ← migration 013
                                               │             agg_payment_*
                                               │             agg_*_hourly
-                                              └──────────────────► HTTP :8000
+                                              └──────────────────────────► HTTP :8000
+                                                                           Grafana :3000
 
 Livepeer API (poll every 5m)   enrichment worker        ClickHouse
-─────────────────────────────────────────────────────────────────────
+──────────────────────────────────────────────────────────────────────────────────
 /api/orchestrator  ──HTTP──►  Go goroutine  ──INSERT──►  naap.orch_metadata
 /api/gateways      ──poll──►  (in API proc) ──INSERT──►  naap.gateway_metadata
+agg_orch_state     ──read──►  (same worker) ──INSERT──►  naap.agg_gpu_inventory    ← migration 014
 ```
 
 Two Kafka topics are consumed directly by ClickHouse:
@@ -38,7 +41,9 @@ raw-event queries at request time.
 
 A background enrichment worker polls the [Livepeer public API](https://livepeer-api.livepeer.cloud)
 every 5 minutes and upserts orchestrator and gateway metadata (ENS names, stake, service URIs,
-deposits) into `naap.orch_metadata` and `naap.gateway_metadata`.
+deposits) into `naap.orch_metadata` and `naap.gateway_metadata`. It also reads the current
+`agg_orch_state` snapshot, parses the `raw_capabilities` JSON blob to extract per-slot GPU info,
+and writes structured rows to `naap.agg_gpu_inventory` (used by the Supply & Inventory dashboard).
 
 ## Project structure
 
@@ -47,7 +52,7 @@ api/                    Go REST API (port 8000)
   cmd/server/           Entrypoint
   internal/
     config/             Environment config (envconfig)
-    enrichment/         Livepeer API polling worker (ENS names, stake, gateway data)
+    enrichment/         Livepeer API polling worker (ENS names, stake, gateway data, GPU inventory)
     providers/          Cross-cutting: logger, telemetry, Kafka client
     repo/clickhouse/    ClickHouse query layer (R1–R6)
     service/            Business logic (leaderboard scoring, etc.)
@@ -63,8 +68,13 @@ infra/
     migrations/         SQL migrations (applied in sort order on first start)
   docker/               Dockerfiles for api
   grafana/
-    dashboards/         Drop .json dashboard exports here — auto-loaded by Grafana
+    dashboards/         Grafana dashboard JSON files (auto-loaded on startup)
+                          naap-overview.json, naap-live-operations.json,
+                          naap-economics.json, naap-performance-drilldown.json,
+                          naap-supply-inventory.json
     provisioning/       Grafana datasource and dashboard provider config
+                          datasources/clickhouse.yml  — grafana-clickhouse-datasource
+                          datasources/prometheus.yml  — Prometheus datasource
   kafka/                Kafka topic definitions
   prometheus/           Prometheus scrape configuration
 
@@ -149,7 +159,7 @@ cd api && go build -o bin/server ./cmd/server
 ## Testing
 
 ```bash
-make test             # Go unit tests with race detector (includes enrichment client tests)
+make test             # Go unit tests with race detector (includes enrichment client + GPU parsing tests)
 
 # Integration tests — requires a running ClickHouse (make up first)
 CLICKHOUSE_ADDR=localhost:9000 make test-integration

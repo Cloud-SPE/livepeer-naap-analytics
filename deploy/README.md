@@ -100,6 +100,51 @@ The stack uses an **external** named volume `naap-analytics_clickhouse_data`. Cr
 docker volume create naap-analytics_clickhouse_data
 ```
 
+## Grafana dashboards
+
+Five dashboards are baked into the API image at `infra/grafana/dashboards/` and auto-provisioned
+on startup:
+
+| Dashboard | Description |
+|-----------|-------------|
+| `naap-overview` | High-level KPIs — active streams, GPUs, FPS, latency, demand |
+| `naap-live-operations` | Real-time stream state, event throughput, gateway→orch paths |
+| `naap-economics` | Payment volume (ETH), latest quoted prices by orchestrator |
+| `naap-performance-drilldown` | E2E latency, FPS per orch, jitter, network FPS by pipeline |
+| `naap-supply-inventory` | GPU count by model, full GPU inventory with VRAM |
+
+### ClickHouse datasource
+
+Dashboards query ClickHouse directly via the `grafana-clickhouse-datasource` plugin (uid
+`clickhouse_prod`). This datasource is provisioned from
+`infra/grafana/provisioning/datasources/clickhouse.yml` using:
+
+| Setting | Value |
+|---------|-------|
+| Server | `naap-analytics-clickhouse:8123` |
+| Protocol | HTTP |
+| User | `naap_reader` |
+| Default database | `naap` |
+
+The datasource password is injected at runtime via the `CLICKHOUSE_READER_PASSWORD` environment
+variable — the same variable required by the API service.
+
+### Required environment variables (Grafana)
+
+The Grafana service requires no additional variables beyond those already listed for the API.
+`CLICKHOUSE_READER_PASSWORD` is shared.
+
+### Grafana plugin install
+
+The `grafana-clickhouse-datasource` plugin is installed at container startup via
+`GF_INSTALL_PLUGINS=grafana-clickhouse-datasource`. First start may take 5–10 seconds for the
+plugin download before dashboards become functional.
+
+### Home dashboard
+
+`GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH` is set to `naap-overview.json` so Grafana opens the
+overview dashboard on login.
+
 ## Kafka UI stack (`kafka-ui.stack.yml`)
 
 Deploy as a separate Portainer stack for optional topic/consumer monitoring.
