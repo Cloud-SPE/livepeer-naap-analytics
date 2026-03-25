@@ -241,34 +241,42 @@
           "text": "All",
           "value": "__all"
         },
-        "definition": "SELECT DISTINCT org FROM livepeer_analytics.fact_workflow_sessions WHERE ifNull(org, '') != '' ORDER BY org",
+        "definition": "SELECT DISTINCT org FROM naap.agg_orch_state FINAL WHERE org != '' ORDER BY org",
         "hide": 0,
         "includeAll": true,
         "label": "Org",
         "multi": true,
         "name": "org",
         "options": [],
-        "query": "SELECT DISTINCT org FROM naap.events WHERE org != '' ORDER BY org",
+        "query": "SELECT DISTINCT org FROM naap.agg_orch_state FINAL WHERE org != '' ORDER BY org",
         "refresh": 1,
         "sort": 1,
-        "type": "query"
+        "type": "query",
+        "datasource": {
+          "uid": "${clickhouse_ds}",
+          "type": "grafana-clickhouse-datasource"
+        }
       },
       {
         "current": {
           "text": "All",
           "value": "__all"
         },
-        "definition": "SELECT DISTINCT model_id FROM livepeer_analytics.dim_orchestrator_capability_current WHERE ifNull(model_id,'') != '' ORDER BY model_id",
+        "definition": "SELECT DISTINCT model_id FROM naap.agg_gpu_inventory FINAL WHERE model_id != '' ORDER BY model_id",
         "hide": 0,
         "includeAll": true,
         "label": "Model",
         "multi": true,
         "name": "model",
         "options": [],
-        "query": "SELECT DISTINCT model_id FROM naap.agg_gpu_inventory WHERE model_id != '' ORDER BY model_id",
+        "query": "SELECT DISTINCT model_id FROM naap.agg_gpu_inventory FINAL WHERE model_id != '' ORDER BY model_id",
         "refresh": 1,
         "sort": 1,
-        "type": "query"
+        "type": "query",
+        "datasource": {
+          "uid": "${clickhouse_ds}",
+          "type": "grafana-clickhouse-datasource"
+        }
       },
       {
         "current": {
@@ -286,7 +294,11 @@
         "refresh": 1,
         "sort": 1,
         "type": "query",
-        "allValue": "__all"
+        "allValue": "__all",
+        "datasource": {
+          "uid": "${clickhouse_ds}",
+          "type": "grafana-clickhouse-datasource"
+        }
       }
     ]
   },
