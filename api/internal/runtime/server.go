@@ -167,6 +167,11 @@ func (s *Server) buildRouter() chi.Router {
 		// Failure analysis (R14)
 		r.Get("/failures/by-pipeline", s.handleListFailuresByPipeline)
 		r.Get("/failures/by-orch", s.handleListFailuresByOrch)
+
+		// SLA / GPU / Network Demand (ported from leaderboard-serverless)
+		r.Get("/sla/compliance", s.handleListSLACompliance)
+		r.Get("/network/demand", s.handleListNetworkDemand)
+		r.Get("/gpu/metrics", s.handleListGPUMetrics)
 	})
 
 	return r

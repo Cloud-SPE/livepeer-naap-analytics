@@ -1,0 +1,58 @@
+# NAAP Analytics — Grafana Stack (infra2)
+#
+# Deploys Grafana with NAAP dashboards, exposed via Traefik at grafana.cloudspe.com.
+# Dashboards and datasource provisioning are bind-mounted from /opt/naap/grafana/.
+#
+# Prerequisites:
+#   - server-prep.sh has been run (populates /opt/naap/grafana/)
+#   - naap-clickhouse and naap-prometheus stacks deployed
+#   - Traefik running on the ingress network with cloudflare cert resolver
+#
+# ── REQUIRED ENVIRONMENT VARIABLES ────────────────────────────────────────────
+#   GF_ADMIN_PASSWORD          — Grafana admin user password
+#   CLICKHOUSE_READER_PASSWORD — password for naap_reader (ClickHouse datasource)
+#
+# ── OPTIONAL ENVIRONMENT VARIABLES ────────────────────────────────────────────
+#   GF_ADMIN_USER              — Grafana admin username (default: admin)
+
+services:
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: naap-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GF_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_ADMIN_PASSWORD}
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_INSTALL_PLUGINS: grafana-clickhouse-datasource
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/naap-overview.json
+      GF_SERVER_ROOT_URL: https://grafana.cloudspe.com
+
+      # Injected into provisioning/datasources/clickhouse.yml at runtime
+      CLICKHOUSE_READER_PASSWORD: ${CLICKHOUSE_READER_PASSWORD}
+    volumes:
+      - /opt/naap/grafana/provisioning:/etc/grafana/provisioning:ro
+      - /opt/naap/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - naap_grafana_data:/var/lib/grafana
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.naap-grafana.entrypoints=websecure"
+      - "traefik.http.routers.naap-grafana.rule=Host(`grafana.cloudspe.com`)"
+      - "traefik.http.routers.naap-grafana.tls.certresolver=cloudflare"
+      - "traefik.http.routers.naap-grafana.service=naap-grafana"
+      - "traefik.http.services.naap-grafana.loadbalancer.server.port=3000"
+      - "traefik.http.services.naap-grafana.loadbalancer.server.scheme=http"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  naap_grafana_data:
+
+networks:
+  default:
+    name: ingress
+    external: true

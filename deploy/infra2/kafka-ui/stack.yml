@@ -1,0 +1,58 @@
+# NAAP Analytics — Kafka UI Stack (infra2)
+#
+# Deploys Kafka UI with:
+#   - Built-in login form authentication (username/password)
+#   - SASL/SCRAM-SHA-512 connection to the Kafka broker
+#   - Traefik routing at kafka-ui.cloudspe.com (HTTPS)
+#
+# Prerequisites:
+#   - naap-kafka stack deployed and healthy
+#   - kafka-ui SCRAM user created (see deploy/infra2/kafka/stack.yml)
+#   - Traefik running on the ingress network with cloudflare cert resolver
+#
+# ── REQUIRED ENVIRONMENT VARIABLES ────────────────────────────────────────────
+#   KAFKA_UI_ADMIN_PASSWORD  — password for the Kafka UI web login
+#   KAFKA_UI_SASL_PASSWORD   — SCRAM password for the kafka-ui Kafka user
+#
+# ── OPTIONAL ENVIRONMENT VARIABLES ────────────────────────────────────────────
+#   KAFKA_UI_ADMIN_USER      — Kafka UI web login username (default: admin)
+
+services:
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: naap-kafka-ui
+    restart: unless-stopped
+    environment:
+      # Kafka UI web login (built-in auth)
+      AUTH_TYPE: LOGIN_FORM
+      SPRING_SECURITY_USER_NAME: ${KAFKA_UI_ADMIN_USER:-admin}
+      SPRING_SECURITY_USER_PASSWORD: ${KAFKA_UI_ADMIN_PASSWORD}
+
+      # Kafka cluster connection with SASL/SCRAM-SHA-512
+      KAFKA_CLUSTERS_0_NAME: naap
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: naap-kafka:9092
+      KAFKA_CLUSTERS_0_PROPERTIES_SECURITY_PROTOCOL: SASL_PLAINTEXT
+      KAFKA_CLUSTERS_0_PROPERTIES_SASL_MECHANISM: SCRAM-SHA-512
+      KAFKA_CLUSTERS_0_PROPERTIES_SASL_JAAS_CONFIG: >-
+        org.apache.kafka.common.security.scram.ScramLoginModule required
+        username="kafka-ui"
+        password="${KAFKA_UI_SASL_PASSWORD}";
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.naap-kafka-ui.entrypoints=websecure"
+      - "traefik.http.routers.naap-kafka-ui.rule=Host(`kafka-ui.cloudspe.com`)"
+      - "traefik.http.routers.naap-kafka-ui.tls.certresolver=cloudflare"
+      - "traefik.http.routers.naap-kafka-ui.service=naap-kafka-ui"
+      - "traefik.http.services.naap-kafka-ui.loadbalancer.server.port=8080"
+      - "traefik.http.services.naap-kafka-ui.loadbalancer.server.scheme=http"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+networks:
+  default:
+    name: ingress
+    external: true

@@ -4,8 +4,8 @@
 #
 # Note: ClickHouse Kafka Engine tables do not support ALTER TABLE MODIFY SETTING,
 # so the broker address must be baked in at CREATE TABLE time via substitution.
-# The offset policy (auto_offset_reset) is set separately in
-# infra/clickhouse/config/kafka.xml, which ClickHouse reads at startup.
+# SASL credentials and offset policy are set in infra/clickhouse/config/kafka.xml
+# via from_env attributes — ClickHouse reads that file at startup.
 #
 # This script runs inside the ClickHouse container on first start
 # (docker-entrypoint-initdb.d convention).
@@ -22,8 +22,8 @@ CH_WRITER_PASSWORD="${CLICKHOUSE_WRITER_PASSWORD:?CLICKHOUSE_WRITER_PASSWORD is 
 CH_READER_PASSWORD="${CLICKHOUSE_READER_PASSWORD:?CLICKHOUSE_READER_PASSWORD is required}"
 
 echo "[migrations] Starting ClickHouse schema migrations"
-echo "[migrations] Kafka broker:           ${KAFKA_BROKER}"
-echo "[migrations] Network consumer group:  ${KAFKA_NETWORK_GROUP}"
+echo "[migrations] Kafka broker:             ${KAFKA_BROKER}"
+echo "[migrations] Network consumer group:   ${KAFKA_NETWORK_GROUP}"
 echo "[migrations] Streaming consumer group: ${KAFKA_STREAMING_GROUP}"
 
 for f in $(ls "${MIGRATIONS_DIR}"/*.sql | sort); do

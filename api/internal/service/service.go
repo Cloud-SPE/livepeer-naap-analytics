@@ -85,6 +85,11 @@ type AnalyticsService interface {
 	// Capacity (R15)
 	GetCapacitySummary(ctx context.Context, p types.QueryParams) (*types.CapacitySummary, error)
 
+	// SLA / GPU / Network Demand (ported from leaderboard-serverless)
+	ListSLACompliance(ctx context.Context, p types.SLAComplianceParams) ([]types.SLAComplianceRow, int, error)
+	ListNetworkDemand(ctx context.Context, p types.NetworkDemandParams) ([]types.NetworkDemandRow, int, error)
+	ListGPUMetrics(ctx context.Context, p types.GPUMetricsParams) ([]types.GPUMetric, int, error)
+
 	// Health
 	Ping(ctx context.Context) error
 }
@@ -474,6 +479,30 @@ func (s *analyticsService) GetCapacitySummary(ctx context.Context, p types.Query
 		return nil, fmt.Errorf("get capacity summary: %w", err)
 	}
 	return v, nil
+}
+
+func (s *analyticsService) ListSLACompliance(ctx context.Context, p types.SLAComplianceParams) ([]types.SLAComplianceRow, int, error) {
+	rows, total, err := s.repo.ListSLACompliance(ctx, p)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list sla compliance: %w", err)
+	}
+	return rows, total, nil
+}
+
+func (s *analyticsService) ListNetworkDemand(ctx context.Context, p types.NetworkDemandParams) ([]types.NetworkDemandRow, int, error) {
+	rows, total, err := s.repo.ListNetworkDemand(ctx, p)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list network demand: %w", err)
+	}
+	return rows, total, nil
+}
+
+func (s *analyticsService) ListGPUMetrics(ctx context.Context, p types.GPUMetricsParams) ([]types.GPUMetric, int, error) {
+	rows, total, err := s.repo.ListGPUMetrics(ctx, p)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list gpu metrics: %w", err)
+	}
+	return rows, total, nil
 }
 
 func (s *analyticsService) Ping(ctx context.Context) error {

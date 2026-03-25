@@ -1,0 +1,121 @@
+# NAAP Analytics — Kafka Stack (infra2)
+#
+# Deploys Kafka in KRaft mode (no ZooKeeper) with SASL/SCRAM-SHA-512 on the
+# client-facing listener. An internal PLAINTEXT listener is used for admin
+# operations (SCRAM user creation) and is NOT exposed on the host.
+#
+# ── LISTENERS ────────────────────────────────────────────────────────────────
+#   PLAINTEXT    port 29092  — internal Docker only, no auth required
+#                              used for: SCRAM user creation, inter-broker
+#   SASL_PLAINTEXT port 9092 — all clients (SCRAM-SHA-512 required)
+#                              used for: ClickHouse, Kafka UI, MM2, gateways
+#   CONTROLLER   port 9093   — KRaft controller (internal only)
+#
+# ── DEPLOYMENT ORDER ─────────────────────────────────────────────────────────
+# 1. Deploy this stack and wait for naap-kafka to become healthy.
+# 2. Run the SCRAM user creation commands below (one-time, via PLAINTEXT port).
+# 3. Then deploy clickhouse, app, prometheus, grafana, kafka-ui stacks.
+#
+# ── SCRAM USER CREATION (run once after first deploy) ────────────────────────
+# Connect via the PLAINTEXT listener (port 29092, no auth) from inside Docker:
+#
+#   docker exec naap-kafka /opt/kafka/bin/kafka-configs.sh \
+#     --bootstrap-server naap-kafka:29092 --alter \
+#     --add-config 'SCRAM-SHA-512=[iterations=8192,password=<NAAP_CONSUMER_PASSWORD>]' \
+#     --entity-type users --entity-name naap-consumer
+#
+#   docker exec naap-kafka /opt/kafka/bin/kafka-configs.sh \
+#     --bootstrap-server naap-kafka:29092 --alter \
+#     --add-config 'SCRAM-SHA-512=[iterations=8192,password=<KAFKA_MONITOR_PASSWORD>]' \
+#     --entity-type users --entity-name naap-monitor
+#
+#   docker exec naap-kafka /opt/kafka/bin/kafka-configs.sh \
+#     --bootstrap-server naap-kafka:29092 --alter \
+#     --add-config 'SCRAM-SHA-512=[iterations=8192,password=<KAFKA_UI_SASL_PASSWORD>]' \
+#     --entity-type users --entity-name kafka-ui
+#
+#   docker exec naap-kafka /opt/kafka/bin/kafka-configs.sh \
+#     --bootstrap-server naap-kafka:29092 --alter \
+#     --add-config 'SCRAM-SHA-512=[iterations=8192,password=<MM2_CONNECTOR_PASSWORD>]' \
+#     --entity-type users --entity-name mm2-connector
+#
+#   docker exec naap-kafka /opt/kafka/bin/kafka-configs.sh \
+#     --bootstrap-server naap-kafka:29092 --alter \
+#     --add-config 'SCRAM-SHA-512=[iterations=8192,password=<CLOUDSPE_PRODUCER_PASSWORD>]' \
+#     --entity-type users --entity-name cloudspe
+#
+# ── REQUIRED ENVIRONMENT VARIABLES ───────────────────────────────────────────
+#   KAFKA_MONITOR_PASSWORD     — password for naap-monitor SCRAM user (kafka-exporter)
+#
+# ── OPTIONAL ENVIRONMENT VARIABLES ───────────────────────────────────────────
+#   KAFKA_LOG_RETENTION_HOURS  — topic log retention in hours (default: 168 = 7 days)
+
+services:
+
+  # ── Kafka (KRaft mode) ────────────────────────────────────────────────────
+  kafka:
+    image: apache/kafka:3.9.1
+    container_name: naap-kafka
+    restart: unless-stopped
+    ports:
+      # Expose SASL port for external access (gateways, SSH tunnel).
+      # PLAINTEXT port 29092 is intentionally NOT exposed.
+      - "9092:9092"
+    environment:
+      # KRaft — single node acts as both broker and controller
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@naap-kafka:9093
+
+      # Listeners
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,SASL_PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://naap-kafka:29092,SASL_PLAINTEXT://naap-kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,SASL_PLAINTEXT:SASL_PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+
+      # SASL/SCRAM-SHA-512 on the SASL_PLAINTEXT listener.
+      # Credentials are stored in Kafka's KRaft metadata and created after
+      # first deploy via kafka-configs.sh (see commands above).
+      KAFKA_SASL_ENABLED_MECHANISMS: SCRAM-SHA-512
+      KAFKA_OPTS: "-Djava.security.auth.login.config=/etc/kafka/kafka_server_jaas.conf"
+
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+      KAFKA_MIN_INSYNC_REPLICAS: 1
+      KAFKA_LOG_RETENTION_HOURS: ${KAFKA_LOG_RETENTION_HOURS:-168}
+
+      KAFKA_LOG4J_LOGGERS: "kafka.controller=INFO,kafka.producer.async.DefaultEventHandler=INFO,state.change.logger=INFO"
+    volumes:
+      - naap_v3_kafka_data:/var/lib/kafka/data
+      - /opt/naap/kafka/config/kafka_server_jaas.conf:/etc/kafka/kafka_server_jaas.conf:ro
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "9092"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+
+  # ── Kafka Exporter ────────────────────────────────────────────────────────
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:latest
+    container_name: naap-kafka-exporter
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command:
+      - "--kafka.server=naap-kafka:9092"
+      - "--sasl.enabled"
+      - "--sasl.mechanism=scram-sha512"
+      - "--sasl.username=naap-monitor"
+      - "--sasl.password=${KAFKA_MONITOR_PASSWORD}"
+
+volumes:
+  naap_v3_kafka_data:
+    external: true
+
+networks:
+  default:
+    name: ingress
+    external: true

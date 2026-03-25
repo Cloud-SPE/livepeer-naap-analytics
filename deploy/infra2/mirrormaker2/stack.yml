@@ -1,0 +1,96 @@
+# NAAP Analytics — MirrorMaker2 Stack (infra2)
+#
+# Replicates network_events from Daydream (Confluent Cloud) onto the local
+# infra2 broker (naap-kafka).
+#
+# Note: streaming_events are NOT replicated via MM2. Cloud SPE Livepeer gateways
+# produce streaming_events directly into infra2's Kafka broker. No infra1 → infra2
+# sync is needed or deployed here.
+#
+# Source : Daydream / Confluent Cloud (SASL_SSL / PLAIN)
+# Dest   : infra2 naap-kafka (SASL_PLAINTEXT / SCRAM-SHA-512)
+# Topics : network_events
+#
+# The mm2-connector SCRAM user must be created before deploying this stack.
+# See deploy/infra2/kafka/stack.yml for the creation command.
+#
+# Prerequisites:
+#   - naap-kafka stack deployed and healthy
+#   - mm2-connector SCRAM user created
+#
+# ── REQUIRED ENVIRONMENT VARIABLES ────────────────────────────────────────────
+#   MM2_CONNECTOR_PASSWORD     — SCRAM password for the mm2-connector Kafka user
+#   DAYDREAM_SASL_USERNAME     — Confluent Cloud API key
+#   DAYDREAM_SASL_PASSWORD     — Confluent Cloud API secret
+#
+# ── OPTIONAL ENVIRONMENT VARIABLES ────────────────────────────────────────────
+#   DAYDREAM_BOOTSTRAP_SERVERS — Daydream broker address
+#                                (default: pkc-921jm.us-east-2.aws.confluent.cloud:9092)
+#   INFRA2_BOOTSTRAP_SERVERS   — local broker address (default: naap-kafka:9092)
+
+services:
+
+  # MM2: Daydream / Confluent Cloud → infra2
+  # Replicates: network_events
+  #
+  # Only two clusters are listed. With two clusters MM2 creates exactly two
+  # directional workers: daydream→infra2 (active) and infra2→daydream (reverse,
+  # disabled). The reverse-flow worker still creates its MM2 coordinator metadata
+  # topics on Confluent (mm2-configs/status/offsets) — these are tiny and
+  # unavoidable. All data-plane emit flags are disabled to prevent event writes.
+  mm2-daydream:
+    image: apache/kafka:3.9.1
+    container_name: naap-mm2-daydream
+    restart: unless-stopped
+    environment:
+      MM2_PROPERTIES: |
+        clusters = daydream, infra2
+
+        daydream.bootstrap.servers = ${DAYDREAM_BOOTSTRAP_SERVERS:-pkc-921jm.us-east-2.aws.confluent.cloud:9092}
+        daydream.security.protocol = SASL_SSL
+        daydream.sasl.mechanism = PLAIN
+        daydream.sasl.jaas.config = org.apache.kafka.common.security.plain.PlainLoginModule required username='${DAYDREAM_SASL_USERNAME}' password='${DAYDREAM_SASL_PASSWORD}';
+
+        infra2.bootstrap.servers = ${INFRA2_BOOTSTRAP_SERVERS:-naap-kafka:9092}
+        infra2.security.protocol = SASL_PLAINTEXT
+        infra2.sasl.mechanism = SCRAM-SHA-512
+        infra2.sasl.jaas.config = org.apache.kafka.common.security.scram.ScramLoginModule required username="mm2-connector" password="${MM2_CONNECTOR_PASSWORD}";
+
+        # Active flow: daydream -> infra2 (Daydream network_events)
+        daydream->infra2.enabled = true
+        daydream->infra2.topics = network_events
+        daydream->infra2.consumer.auto.offset.reset = earliest
+        daydream->infra2.emit.checkpoints.enabled = false
+        daydream->infra2.emit.heartbeats.enabled = false
+        daydream->infra2.emit.offset-syncs.enabled = false
+        daydream->infra2.replication.factor = 1
+        daydream->infra2.topics.exclude = .*[\-\.]internal, .*\.replica, __.*, heartbeats, .*\.heartbeats
+
+        # Reverse flow disabled. emit flags also disabled to prevent the inactive reverse-flow
+        # worker from writing event data to Confluent Cloud via data-plane mechanisms.
+        infra2->daydream.enabled = false
+        infra2->daydream.emit.checkpoints.enabled = false
+        infra2->daydream.emit.heartbeats.enabled = false
+        infra2->daydream.emit.offset-syncs.enabled = false
+
+        # Single-node replication factors
+        config.storage.replication.factor = 1
+        offset.storage.replication.factor = 1
+        status.storage.replication.factor = 1
+        replication.factor = 1
+        heartbeats.topic.replication.factor = 1
+
+        replication.policy.class = org.apache.kafka.connect.mirror.IdentityReplicationPolicy
+        sync.topic.acls.enabled = false
+
+    command:
+      - /bin/bash
+      - -c
+      - |
+        echo "$$MM2_PROPERTIES" > /tmp/mm2.properties
+        /opt/kafka/bin/connect-mirror-maker.sh /tmp/mm2.properties
+
+networks:
+  default:
+    name: ingress
+    external: true

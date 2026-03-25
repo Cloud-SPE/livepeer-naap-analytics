@@ -1,0 +1,78 @@
+# NAAP Analytics — ClickHouse Stack (infra2)
+#
+# Deploys ClickHouse with NAAP schema migrations baked into the image.
+# Kafka Engine tables are configured with SASL/SCRAM-SHA-512 to connect
+# to the naap-kafka broker on the ingress network.
+#
+# Prerequisites:
+#   - naap-kafka stack deployed and healthy
+#   - SCRAM users created (see deploy/infra2/kafka/stack.yml)
+#   - External volume created: docker volume create naap-analytics_clickhouse_data
+#   - Image built and pushed: make push-clickhouse
+#
+# ── REQUIRED ENVIRONMENT VARIABLES ────────────────────────────────────────────
+#   CLICKHOUSE_ADMIN_PASSWORD    — password for naap_admin ClickHouse user
+#   CLICKHOUSE_WRITER_PASSWORD   — password for naap_writer ClickHouse user
+#   CLICKHOUSE_READER_PASSWORD   — password for naap_reader ClickHouse user
+#   NAAP_CONSUMER_PASSWORD       — SCRAM password for naap-consumer Kafka user
+#
+# ── OPTIONAL ENVIRONMENT VARIABLES ────────────────────────────────────────────
+#   IMAGE_TAG                    — image tag to deploy (default: latest)
+#   KAFKA_BROKER_LIST            — Kafka broker address (default: naap-kafka:9092)
+#   KAFKA_AUTO_OFFSET_RESET      — earliest | latest (default: latest)
+#   KAFKA_NETWORK_GROUP          — consumer group for network_events
+#                                  (default: clickhouse-naap-network)
+#   KAFKA_STREAMING_GROUP        — consumer group for streaming_events
+#                                  (default: clickhouse-naap-streaming)
+
+services:
+
+  clickhouse:
+    image: tztcloud/naap-clickhouse:${IMAGE_TAG:-latest}
+    container_name: naap-analytics-clickhouse
+    restart: unless-stopped
+    environment:
+      # ClickHouse admin credentials (used by the migration runner)
+      CLICKHOUSE_DB: naap
+      CLICKHOUSE_USER: naap_admin
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_ADMIN_PASSWORD}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+      CLICKHOUSE_WRITER_PASSWORD: ${CLICKHOUSE_WRITER_PASSWORD}
+      CLICKHOUSE_READER_PASSWORD: ${CLICKHOUSE_READER_PASSWORD}
+
+      # Kafka Engine — broker and consumer groups (baked into DDL at migration time)
+      KAFKA_BROKER_LIST: ${KAFKA_BROKER_LIST:-naap-kafka:9092}
+      KAFKA_AUTO_OFFSET_RESET: ${KAFKA_AUTO_OFFSET_RESET:-latest}
+      KAFKA_NETWORK_GROUP: ${KAFKA_NETWORK_GROUP:-clickhouse-naap-network}
+      KAFKA_STREAMING_GROUP: ${KAFKA_STREAMING_GROUP:-clickhouse-naap-streaming}
+
+      # Kafka Engine — SASL/SCRAM-SHA-512 (baked into DDL at migration time)
+      KAFKA_SECURITY_PROTOCOL: SASL_PLAINTEXT
+      KAFKA_SASL_MECHANISM: SCRAM-SHA-512
+      KAFKA_SASL_USERNAME: naap-consumer
+      KAFKA_SASL_PASSWORD: ${NAAP_CONSUMER_PASSWORD}
+    volumes:
+      - naap_v3_clickhouse_data:/var/lib/clickhouse
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+    # ClickHouse ports are intentionally not exposed externally.
+    # Access via: docker exec or an SSH tunnel to localhost:8123 / localhost:9000.
+    # ports:
+    #   - "8123:8123"
+    #   - "9000:9000"
+
+volumes:
+  naap_v3_clickhouse_data:
+    external: true
+
+networks:
+  default:
+    name: ingress
+    external: true

@@ -82,6 +82,11 @@ type AnalyticsRepo interface {
 	// Capacity (R15)
 	GetCapacitySummary(ctx context.Context, p types.QueryParams) (*types.CapacitySummary, error)
 
+	// SLA / GPU / Network Demand (ported from leaderboard-serverless)
+	ListSLACompliance(ctx context.Context, p types.SLAComplianceParams) ([]types.SLAComplianceRow, int, error)
+	ListNetworkDemand(ctx context.Context, p types.NetworkDemandParams) ([]types.NetworkDemandRow, int, error)
+	ListGPUMetrics(ctx context.Context, p types.GPUMetricsParams) ([]types.GPUMetric, int, error)
+
 	// Healthcheck
 	Ping(ctx context.Context) error
 }
@@ -208,5 +213,14 @@ func (n *NoopAnalyticsRepo) ListFailuresByOrch(_ context.Context, _ types.QueryP
 }
 func (n *NoopAnalyticsRepo) GetCapacitySummary(_ context.Context, _ types.QueryParams) (*types.CapacitySummary, error) {
 	return &types.CapacitySummary{Entries: []types.CapacityEntry{}}, nil
+}
+func (n *NoopAnalyticsRepo) ListSLACompliance(_ context.Context, _ types.SLAComplianceParams) ([]types.SLAComplianceRow, int, error) {
+	return nil, 0, nil
+}
+func (n *NoopAnalyticsRepo) ListNetworkDemand(_ context.Context, _ types.NetworkDemandParams) ([]types.NetworkDemandRow, int, error) {
+	return nil, 0, nil
+}
+func (n *NoopAnalyticsRepo) ListGPUMetrics(_ context.Context, _ types.GPUMetricsParams) ([]types.GPUMetric, int, error) {
+	return nil, 0, nil
 }
 func (n *NoopAnalyticsRepo) Ping(_ context.Context) error { return nil }

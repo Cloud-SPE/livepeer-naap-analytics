@@ -15,5 +15,9 @@
     -->
     <kafka>
         <auto_offset_reset from_env="KAFKA_AUTO_OFFSET_RESET"/>
+        <security_protocol from_env="KAFKA_SECURITY_PROTOCOL"/>
+        <sasl_mechanism from_env="KAFKA_SASL_MECHANISM"/>
+        <sasl_username from_env="KAFKA_SASL_USERNAME"/>
+        <sasl_password from_env="KAFKA_SASL_PASSWORD"/>
     </kafka>
 </clickhouse>

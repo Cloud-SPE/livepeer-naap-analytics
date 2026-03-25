@@ -18,14 +18,19 @@
 --
 -- ClickHouse Kafka Engine does not support ALTER TABLE MODIFY SETTING, so all
 -- connection and behaviour settings must be supplied at CREATE TABLE time.
--- All four vars are substituted from environment variables by the init script:
---   KAFKA_BROKER_LIST       — broker address (e.g. infra2.cloudspe.com:9092)
---   KAFKA_AUTO_OFFSET_RESET — earliest (full history) | latest (new data only)
---   KAFKA_NETWORK_GROUP     — consumer group for network_events
---   KAFKA_STREAMING_GROUP   — consumer group for streaming_events
+-- All vars are substituted from environment variables by the init script:
+--   KAFKA_BROKER_LIST         — broker address (e.g. naap-kafka:9092)
+--   KAFKA_AUTO_OFFSET_RESET   — earliest (full history) | latest (new data only)
+--   KAFKA_NETWORK_GROUP       — consumer group for network_events
+--   KAFKA_STREAMING_GROUP     — consumer group for streaming_events
 --
--- To change these on a running instance, drop and recreate the tables (and
--- their dependent MVs). See infra/clickhouse/README.md for the procedure.
+-- SASL credentials (KAFKA_SECURITY_PROTOCOL, KAFKA_SASL_MECHANISM,
+-- KAFKA_SASL_USERNAME, KAFKA_SASL_PASSWORD) are configured via
+-- infra/clickhouse/config/kafka.xml using from_env attributes —
+-- ClickHouse 24.3 does not support these as Kafka Engine DDL settings.
+--
+-- To change broker/group settings on a running instance, drop and recreate
+-- the tables (and their dependent MVs). See infra/clickhouse/README.md.
 
 CREATE TABLE IF NOT EXISTS naap.kafka_network_events
 (
@@ -40,12 +45,12 @@ CREATE TABLE IF NOT EXISTS naap.kafka_network_events
 )
 ENGINE = Kafka
 SETTINGS
-    kafka_broker_list      = '${KAFKA_BROKER_LIST}',
-    kafka_topic_list       = 'network_events',
-    kafka_group_name       = '${KAFKA_NETWORK_GROUP}',
-    kafka_format           = 'JSONEachRow',
+    kafka_broker_list        = '${KAFKA_BROKER_LIST}',
+    kafka_topic_list         = 'network_events',
+    kafka_group_name         = '${KAFKA_NETWORK_GROUP}',
+    kafka_format             = 'JSONEachRow',
     kafka_skip_broken_messages = 100,
-    kafka_num_consumers    = 2;
+    kafka_num_consumers      = 2;
 
 CREATE TABLE IF NOT EXISTS naap.kafka_streaming_events
 (
@@ -57,9 +62,9 @@ CREATE TABLE IF NOT EXISTS naap.kafka_streaming_events
 )
 ENGINE = Kafka
 SETTINGS
-    kafka_broker_list      = '${KAFKA_BROKER_LIST}',
-    kafka_topic_list       = 'streaming_events',
-    kafka_group_name       = '${KAFKA_STREAMING_GROUP}',
-    kafka_format           = 'JSONEachRow',
+    kafka_broker_list        = '${KAFKA_BROKER_LIST}',
+    kafka_topic_list         = 'streaming_events',
+    kafka_group_name         = '${KAFKA_STREAMING_GROUP}',
+    kafka_format             = 'JSONEachRow',
     kafka_skip_broken_messages = 100,
-    kafka_num_consumers    = 1;
+    kafka_num_consumers      = 1;
