@@ -37,6 +37,14 @@ tags:
     description: Failure rates and events (R5)
   - name: Leaderboard
     description: Composite-scored orchestrator ranking (R6)
+  - name: Gateways
+    description: Gateway listing and profiles (R7)
+  - name: Pipelines
+    description: Cross-cutting pipeline analytics (R10)
+  - name: Pricing
+    description: Orchestrator AI model pricing (R11)
+  - name: Capacity
+    description: GPU supply vs. stream demand (R15)
 
 # ── Common parameter definitions ──────────────────────────────────────────────
 
@@ -738,6 +746,316 @@ components:
         IsActive:
           type: boolean
 
+    # ── Gateways (R7) ──────────────────────────────────────────────────────
+
+    Gateway:
+      type: object
+      properties:
+        Address: { type: string }
+        Name: { type: string }
+        Avatar: { type: string }
+        DepositWEI: { $ref: "#/components/schemas/WEI" }
+        ReserveWEI: { $ref: "#/components/schemas/WEI" }
+        UpdatedAt: { type: string, format: date-time }
+        ActiveStreams: { type: integer, format: int64 }
+
+    GatewayProfile:
+      type: object
+      properties:
+        Address: { type: string }
+        Name: { type: string }
+        Avatar: { type: string }
+        DepositWEI: { $ref: "#/components/schemas/WEI" }
+        ReserveWEI: { $ref: "#/components/schemas/WEI" }
+        UpdatedAt: { type: string, format: date-time }
+        StreamsRouted: { type: integer, format: int64 }
+        ActiveStreams: { type: integer, format: int64 }
+        TotalPaymentsWEI: { $ref: "#/components/schemas/WEI" }
+        OrchsUsed:
+          type: array
+          items: { type: string }
+
+    GatewayOrch:
+      type: object
+      properties:
+        OrchAddress: { type: string }
+        Name: { type: string }
+        StreamCount: { type: integer, format: int64 }
+        LastSeen: { type: string, format: date-time }
+
+    # ── Stream Extensions (R8) ───────────────────────────────────────────────
+
+    StreamStatusSample:
+      type: object
+      properties:
+        SampleTS: { type: string, format: date-time }
+        Org: { type: string }
+        StreamID: { type: string }
+        Gateway: { type: string }
+        OrchAddress: { type: string }
+        Pipeline: { type: string }
+        State: { type: string }
+        OutputFPS: { type: number, format: double }
+        InputFPS: { type: number, format: double }
+        E2ELatencyMS: { type: number, format: double }
+        IsAttributed: { type: boolean }
+
+    StreamDetail:
+      type: object
+      properties:
+        StreamID: { type: string }
+        Org: { type: string }
+        Pipeline: { type: string }
+        Gateway: { type: string }
+        OrchAddress: { type: string }
+        State: { type: string }
+        StartedAt: { type: string, format: date-time }
+        LastSeen: { type: string, format: date-time }
+        IsClosed: { type: boolean }
+        HasFailure: { type: boolean }
+        Samples:
+          type: array
+          items: { $ref: "#/components/schemas/StreamStatusSample" }
+
+    AttributionSummary:
+      type: object
+      properties:
+        StartTime: { type: string, format: date-time }
+        EndTime: { type: string, format: date-time }
+        TotalSamples: { type: integer, format: int64 }
+        AttributedCount: { type: integer, format: int64 }
+        UnattributedCount: { type: integer, format: int64 }
+        AttributionRate: { type: number, format: double, description: "Fraction of samples with a resolved orch address (0–1)." }
+
+    # ── E2E Latency (R9) ────────────────────────────────────────────────────
+
+    E2ELatencyStats:
+      type: object
+      properties:
+        AvgMS: { type: number, format: double }
+        P50MS: { type: number, format: double }
+        P95MS: { type: number, format: double }
+        P99MS: { type: number, format: double }
+        SampleCount: { type: integer, format: int64 }
+
+    PipelineE2ELatency:
+      type: object
+      properties:
+        Pipeline: { type: string }
+        AvgMS: { type: number, format: double }
+        P50MS: { type: number, format: double }
+        P95MS: { type: number, format: double }
+        P99MS: { type: number, format: double }
+        SampleCount: { type: integer, format: int64 }
+
+    OrchE2ELatency:
+      type: object
+      properties:
+        Address: { type: string }
+        Pipeline: { type: string }
+        AvgMS: { type: number, format: double }
+        P50MS: { type: number, format: double }
+        P95MS: { type: number, format: double }
+        P99MS: { type: number, format: double }
+        SampleCount: { type: integer, format: int64 }
+
+    E2ELatencySummary:
+      type: object
+      properties:
+        StartTime: { type: string, format: date-time }
+        EndTime: { type: string, format: date-time }
+        Overall: { $ref: "#/components/schemas/E2ELatencyStats" }
+        ByPipeline:
+          type: array
+          items: { $ref: "#/components/schemas/PipelineE2ELatency" }
+        ByOrchestrator:
+          type: array
+          items: { $ref: "#/components/schemas/OrchE2ELatency" }
+
+    E2ELatencyBucket:
+      type: object
+      properties:
+        Timestamp: { type: string, format: date-time }
+        AvgMS: { type: number, format: double }
+        P50MS: { type: number, format: double }
+        P95MS: { type: number, format: double }
+        SampleCount: { type: integer, format: int64 }
+
+    # ── Pipelines (R10) ─────────────────────────────────────────────────────
+
+    PipelineSummary:
+      type: object
+      properties:
+        Pipeline: { type: string }
+        ActiveStreams: { type: integer, format: int64 }
+        StartedCount: { type: integer, format: int64 }
+        SuccessRate: { type: number, format: double }
+        AvgInferenceFPS: { type: number, format: double }
+        TotalPaymentsWEI: { $ref: "#/components/schemas/WEI" }
+        WarmOrchCount: { type: integer, format: int64 }
+        TopOrchAddress: { type: string }
+
+    ModelPipelineStats:
+      type: object
+      properties:
+        ModelID: { type: string }
+        WarmOrchCount: { type: integer, format: int64 }
+        AvgFPS: { type: number, format: double }
+
+    PipelineDetail:
+      type: object
+      properties:
+        Pipeline: { type: string }
+        StartTime: { type: string, format: date-time }
+        EndTime: { type: string, format: date-time }
+        ActiveStreams: { type: integer, format: int64 }
+        StartedCount: { type: integer, format: int64 }
+        SuccessRate: { type: number, format: double }
+        AvgInferenceFPS: { type: number, format: double }
+        TotalPaymentsWEI: { $ref: "#/components/schemas/WEI" }
+        WarmOrchCount: { type: integer, format: int64 }
+        ByModel:
+          type: array
+          items: { $ref: "#/components/schemas/ModelPipelineStats" }
+
+    # ── Pricing (R11) ───────────────────────────────────────────────────────
+
+    OrchPricingEntry:
+      type: object
+      properties:
+        OrchAddress: { type: string }
+        Name: { type: string }
+        Pipeline: { type: string }
+        ModelID: { type: string }
+        PricePerUnit: { type: integer, format: int64 }
+        PixelsPerUnit: { type: integer, format: int64 }
+        IsWarm: { type: boolean }
+
+    ModelPricing:
+      type: object
+      properties:
+        ModelID: { type: string }
+        PricePerUnit: { type: integer, format: int64 }
+        PixelsPerUnit: { type: integer, format: int64 }
+        IsWarm: { type: boolean }
+
+    PipelinePricing:
+      type: object
+      properties:
+        Pipeline: { type: string }
+        Models:
+          type: array
+          items: { $ref: "#/components/schemas/ModelPricing" }
+
+    OrchPricingProfile:
+      type: object
+      properties:
+        OrchAddress: { type: string }
+        Name: { type: string }
+        IsActive: { type: boolean }
+        Pipelines:
+          type: array
+          items: { $ref: "#/components/schemas/PipelinePricing" }
+
+    # ── Model Performance (R12) ──────────────────────────────────────────────
+
+    ModelPerformance:
+      type: object
+      properties:
+        ModelID: { type: string }
+        Pipeline: { type: string }
+        AvgFPS: { type: number, format: double }
+        P50FPS: { type: number, format: double }
+        P99FPS: { type: number, format: double }
+        WarmOrchCount: { type: integer, format: int64 }
+        TotalStreams: { type: integer, format: int64 }
+
+    OrchModelStats:
+      type: object
+      properties:
+        Address: { type: string }
+        Name: { type: string }
+        AvgFPS: { type: number, format: double }
+        IsWarm: { type: boolean }
+
+    ModelDetail:
+      type: object
+      properties:
+        ModelID: { type: string }
+        Pipeline: { type: string }
+        AvgFPS: { type: number, format: double }
+        P50FPS: { type: number, format: double }
+        P99FPS: { type: number, format: double }
+        WarmOrchCount: { type: integer, format: int64 }
+        TotalStreams: { type: integer, format: int64 }
+        Orchs:
+          type: array
+          items: { $ref: "#/components/schemas/OrchModelStats" }
+
+    # ── Extended Payments (R13) ──────────────────────────────────────────────
+
+    GatewayPayment:
+      type: object
+      properties:
+        GatewayAddress: { type: string }
+        Name: { type: string }
+        TotalWEI: { $ref: "#/components/schemas/WEI" }
+        EventCount: { type: integer, format: int64 }
+        UniqueOrchs: { type: integer, format: int64 }
+
+    StreamPayment:
+      type: object
+      properties:
+        StreamID: { type: string }
+        Org: { type: string }
+        Pipeline: { type: string }
+        TotalWEI: { $ref: "#/components/schemas/WEI" }
+        EventCount: { type: integer, format: int64 }
+
+    # ── Failure Analysis (R14) ───────────────────────────────────────────────
+
+    FailuresByPipeline:
+      type: object
+      properties:
+        Pipeline: { type: string }
+        NoOrchCount: { type: integer, format: int64 }
+        InferenceErrorCount: { type: integer, format: int64 }
+        OrchSwapCount: { type: integer, format: int64 }
+        InferenceRestartCount: { type: integer, format: int64 }
+        TotalFailures: { type: integer, format: int64 }
+        FailureRate: { type: number, format: double, description: "total failures / streams started (0–1)" }
+
+    FailuresByOrch:
+      type: object
+      properties:
+        OrchAddress: { type: string }
+        Name: { type: string }
+        InferenceErrors: { type: integer, format: int64 }
+        InferenceRestarts: { type: integer, format: int64 }
+        TotalFailures: { type: integer, format: int64 }
+        StreamsHandled: { type: integer, format: int64 }
+        FailureRate: { type: number, format: double }
+
+    # ── Capacity (R15) ───────────────────────────────────────────────────────
+
+    CapacityEntry:
+      type: object
+      properties:
+        Pipeline: { type: string }
+        ModelID: { type: string }
+        WarmOrchCount: { type: integer, format: int64 }
+        ActiveStreams: { type: integer, format: int64 }
+        UtilizationPct: { type: number, format: double, description: "active streams / warm orchs (0–1)" }
+        TotalVRAMBytes: { type: integer, format: int64 }
+
+    CapacitySummary:
+      type: object
+      properties:
+        SnapshotTime: { type: string, format: date-time }
+        Entries:
+          type: array
+          items: { $ref: "#/components/schemas/CapacityEntry" }
+
   responses:
     429:
       description: Rate limit exceeded.
@@ -762,6 +1080,21 @@ components:
         application/problem+json:
           schema:
             $ref: "#/components/schemas/Problem"
+    TooManyRequests:
+      description: Rate limit exceeded.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    NotFound:
+      description: Resource not found.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    BadRequest:
+      description: Bad request.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 
@@ -1336,3 +1669,409 @@ paths:
           $ref: "#/components/responses/429"
         "500":
           $ref: "#/components/responses/500"
+
+  # ── Gateways (R7) ────────────────────────────────────────────────────────
+
+  /v1/net/gateways:
+    get:
+      summary: List gateways
+      description: Returns all known gateways with active stream counts.
+      operationId: listGateways
+      tags: [Gateways]
+      parameters:
+        - $ref: "#/components/parameters/org"
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/offset"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Gateway" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /v1/net/gateways/{address}:
+    get:
+      summary: Gateway profile
+      description: Returns stats and metadata for one gateway.
+      operationId: getGatewayProfile
+      tags: [Gateways]
+      parameters:
+        - $ref: "#/components/parameters/address_path"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GatewayProfile" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /v1/net/gateways/{address}/orchs:
+    get:
+      summary: Gateway orchestrators
+      description: Returns orchestrators that handled traffic for a given gateway.
+      operationId: listGatewayOrchestrators
+      tags: [Gateways]
+      parameters:
+        - $ref: "#/components/parameters/address_path"
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/offset"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/GatewayOrch" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  # ── Stream Extensions (R8) ───────────────────────────────────────────────
+
+  /v1/streams/samples:
+    get:
+      summary: Stream status samples
+      description: Returns recent per-stream telemetry samples from the last 30 days.
+      operationId: listStreamSamples
+      tags: [Streams]
+      parameters:
+        - $ref: "#/components/parameters/org"
+        - $ref: "#/components/parameters/start"
+        - $ref: "#/components/parameters/end"
+        - $ref: "#/components/parameters/pipeline"
+        - $ref: "#/components/parameters/orch_address"
+        - $ref: "#/components/parameters/stream_id"
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/offset"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/StreamStatusSample" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /v1/streams/attribution:
+    get:
+      summary: Stream attribution summary
+      description: Returns the fraction of stream samples that were successfully attributed to an orchestrator.
+      operationId: getAttributionSummary
+      tags: [Streams]
+      parameters:
+        - $ref: "#/components/parameters/org"
+        - $ref: "#/components/parameters/start"
+        - $ref: "#/components/parameters/end"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AttributionSummary" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /v1/streams/{stream_id}:
+    get:
+      summary: Stream detail
+      description: Returns the full state and sample history for one stream.
+      operationId: getStreamDetail
+      tags: [Streams]
+      parameters:
+        - name: stream_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StreamDetail" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  # ── E2E Latency (R9) ────────────────────────────────────────────────────
+
+  /v1/perf/e2e-latency:
+    get:
+      summary: E2E latency summary
+      description: Returns end-to-end latency percentiles from stream status samples.
+      operationId: getE2ELatencySummary
+      tags: [Performance]
+      parameters:
+        - $ref: "#/components/parameters/org"
+        - $ref: "#/components/parameters/start"
+        - $ref: "#/components/parameters/end"
+        - $ref: "#/components/parameters/pipeline"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/E2ELatencySummary" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /v1/perf/e2e-latency/history:
+    get:
+      summary: E2E latency history
+      description: Returns hourly E2E latency buckets (p50, p95, avg).
+      operationId: listE2ELatencyHistory
+      tags: [Performance]
+      parameters:
+        - $ref: "#/components/parameters/org"
+        - $ref: "#/components/parameters/start"
+        - $ref: "#/components/parameters/end"
+        - $ref: "#/components/parameters/pipeline"
+        - $ref: "#/components/parameters/limit"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/E2ELatencyBucket" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  # ── Pipelines (R10) ─────────────────────────────────────────────────────
+
+  /v1/pipelines:
+    get:
+      summary: List pipelines
+      description: Returns a cross-cutting summary per pipeline combining streams, FPS, and payment data.
+      operationId: listPipelines
+      tags: [Pipelines]
+      parameters:
+        - $ref: "#/components/parameters/org"
+        - $ref: "#/components/parameters/start"
+        - $ref: "#/components/parameters/end"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/PipelineSummary" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /v1/pipelines/{pipeline}:
+    get:
+      summary: Pipeline detail
+      description: Returns detailed stats for one pipeline including model breakdown.
+      operationId: getPipelineDetail
+      tags: [Pipelines]
+      parameters:
+        - name: pipeline
+          in: path
+          required: true
+          description: Pipeline name (e.g. `text-to-image`).
+          schema: { type: string }
+        - $ref: "#/components/parameters/org"
+        - $ref: "#/components/parameters/start"
+        - $ref: "#/components/parameters/end"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PipelineDetail" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  # ── Pricing (R11) ───────────────────────────────────────────────────────
+
+  /v1/net/pricing:
+    get:
+      summary: List orchestrator pricing
+      description: Returns flat pricing rows for all active orchestrators.
+      operationId: listPricing
+      tags: [Pricing]
+      parameters:
+        - $ref: "#/components/parameters/org"
+        - $ref: "#/components/parameters/pipeline"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/OrchPricingEntry" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /v1/net/pricing/{address}:
+    get:
+      summary: Orchestrator pricing profile
+      description: Returns structured pipeline/model pricing for one orchestrator.
+      operationId: getOrchPricingProfile
+      tags: [Pricing]
+      parameters:
+        - $ref: "#/components/parameters/address_path"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrchPricingProfile" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  # ── Model Performance (R12) ──────────────────────────────────────────────
+
+  /v1/perf/by-model:
+    get:
+      summary: Performance by AI model
+      description: Returns FPS performance broken down by AI model, joined from GPU inventory.
+      operationId: listModelPerformance
+      tags: [Performance]
+      parameters:
+        - $ref: "#/components/parameters/org"
+        - $ref: "#/components/parameters/start"
+        - $ref: "#/components/parameters/end"
+        - $ref: "#/components/parameters/pipeline"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ModelPerformance" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /v1/net/model:
+    get:
+      summary: Model detail
+      description: Returns detail for one AI model including per-orch FPS stats. Use `model_id` query param since model IDs contain slashes.
+      operationId: getModelDetail
+      tags: [Network, Performance]
+      parameters:
+        - name: model_id
+          in: query
+          required: true
+          description: AI model identifier (e.g. `stabilityai/stable-diffusion-xl-base-1.0`).
+          schema: { type: string }
+        - $ref: "#/components/parameters/pipeline"
+        - $ref: "#/components/parameters/start"
+        - $ref: "#/components/parameters/end"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ModelDetail" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  # ── Extended Payments (R13) ──────────────────────────────────────────────
+
+  /v1/payments/by-gateway:
+    get:
+      summary: Payments by gateway
+      description: Returns payment totals aggregated by originating gateway address.
+      operationId: listPaymentsByGateway
+      tags: [Payments]
+      parameters:
+        - $ref: "#/components/parameters/org"
+        - $ref: "#/components/parameters/start"
+        - $ref: "#/components/parameters/end"
+        - $ref: "#/components/parameters/limit"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/GatewayPayment" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /v1/payments/by-stream:
+    get:
+      summary: Payments by stream
+      description: Returns total payments aggregated per stream session.
+      operationId: listPaymentsByStream
+      tags: [Payments]
+      parameters:
+        - $ref: "#/components/parameters/org"
+        - $ref: "#/components/parameters/start"
+        - $ref: "#/components/parameters/end"
+        - $ref: "#/components/parameters/stream_id"
+        - $ref: "#/components/parameters/limit"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/StreamPayment" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  # ── Failure Analysis (R14) ───────────────────────────────────────────────
+
+  /v1/failures/by-pipeline:
+    get:
+      summary: Failures by pipeline
+      description: Returns aggregated failure counts per pipeline.
+      operationId: listFailuresByPipeline
+      tags: [Reliability]
+      parameters:
+        - $ref: "#/components/parameters/org"
+        - $ref: "#/components/parameters/start"
+        - $ref: "#/components/parameters/end"
+        - $ref: "#/components/parameters/limit"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/FailuresByPipeline" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /v1/failures/by-orch:
+    get:
+      summary: Failures by orchestrator
+      description: Returns aggregated inference error and restart counts per orchestrator.
+      operationId: listFailuresByOrch
+      tags: [Reliability]
+      parameters:
+        - $ref: "#/components/parameters/org"
+        - $ref: "#/components/parameters/start"
+        - $ref: "#/components/parameters/end"
+        - $ref: "#/components/parameters/limit"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/FailuresByOrch" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  # ── Capacity (R15) ───────────────────────────────────────────────────────
+
+  /v1/net/capacity:
+    get:
+      summary: Network capacity vs. demand
+      description: Returns GPU supply (warm orchs, VRAM) vs. active stream demand per (pipeline, model).
+      operationId: getCapacitySummary
+      tags: [Capacity, Network]
+      parameters:
+        - $ref: "#/components/parameters/org"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CapacitySummary" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }

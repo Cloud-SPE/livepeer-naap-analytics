@@ -65,3 +65,31 @@ func (s *Server) handleListPaymentsByOrch(w http.ResponseWriter, r *http.Request
 	}
 	respondJSON(w, http.StatusOK, result)
 }
+
+func (s *Server) handleListPaymentsByGateway(w http.ResponseWriter, r *http.Request) {
+	p := parseQueryParams(r)
+	result, err := s.svc.ListPaymentsByGateway(r.Context(), p)
+	if err != nil {
+		s.providers.Logger.Sugar().Errorw("list payments by gateway failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "Internal Server Error", "")
+		return
+	}
+	if result == nil {
+		result = []types.GatewayPayment{}
+	}
+	respondJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleListPaymentsByStream(w http.ResponseWriter, r *http.Request) {
+	p := parseQueryParams(r)
+	result, err := s.svc.ListPaymentsByStream(r.Context(), p)
+	if err != nil {
+		s.providers.Logger.Sugar().Errorw("list payments by stream failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "Internal Server Error", "")
+		return
+	}
+	if result == nil {
+		result = []types.StreamPayment{}
+	}
+	respondJSON(w, http.StatusOK, result)
+}

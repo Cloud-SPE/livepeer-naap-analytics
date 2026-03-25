@@ -48,6 +48,43 @@ type AnalyticsService interface {
 	GetLeaderboard(ctx context.Context, p types.QueryParams) ([]types.LeaderboardEntry, error)
 	GetOrchProfile(ctx context.Context, address string) (*types.OrchProfile, error)
 
+	// Gateways (R7)
+	ListGateways(ctx context.Context, p types.QueryParams) ([]types.Gateway, error)
+	GetGatewayProfile(ctx context.Context, address string) (*types.GatewayProfile, error)
+	ListGatewayOrchestrators(ctx context.Context, address string, p types.QueryParams) ([]types.GatewayOrch, error)
+
+	// Stream extensions (R8)
+	ListStreamSamples(ctx context.Context, p types.QueryParams) ([]types.StreamStatusSample, error)
+	GetStreamDetail(ctx context.Context, streamID string) (*types.StreamDetail, error)
+	GetAttributionSummary(ctx context.Context, p types.QueryParams) (*types.AttributionSummary, error)
+
+	// E2E Latency (R9)
+	GetE2ELatencySummary(ctx context.Context, p types.QueryParams) (*types.E2ELatencySummary, error)
+	ListE2ELatencyHistory(ctx context.Context, p types.QueryParams) ([]types.E2ELatencyBucket, error)
+
+	// Pipelines (R10)
+	ListPipelines(ctx context.Context, p types.QueryParams) ([]types.PipelineSummary, error)
+	GetPipelineDetail(ctx context.Context, pipeline string, p types.QueryParams) (*types.PipelineDetail, error)
+
+	// Pricing (R11)
+	ListPricing(ctx context.Context, p types.QueryParams) ([]types.OrchPricingEntry, error)
+	GetOrchPricingProfile(ctx context.Context, address string) (*types.OrchPricingProfile, error)
+
+	// Model performance (R12)
+	ListModelPerformance(ctx context.Context, p types.QueryParams) ([]types.ModelPerformance, error)
+	GetModelDetail(ctx context.Context, modelID string, p types.QueryParams) (*types.ModelDetail, error)
+
+	// Extended payments (R13)
+	ListPaymentsByGateway(ctx context.Context, p types.QueryParams) ([]types.GatewayPayment, error)
+	ListPaymentsByStream(ctx context.Context, p types.QueryParams) ([]types.StreamPayment, error)
+
+	// Failure analysis (R14)
+	ListFailuresByPipeline(ctx context.Context, p types.QueryParams) ([]types.FailuresByPipeline, error)
+	ListFailuresByOrch(ctx context.Context, p types.QueryParams) ([]types.FailuresByOrch, error)
+
+	// Capacity (R15)
+	GetCapacitySummary(ctx context.Context, p types.QueryParams) (*types.CapacitySummary, error)
+
 	// Health
 	Ping(ctx context.Context) error
 }
@@ -283,6 +320,158 @@ func (s *analyticsService) GetOrchProfile(ctx context.Context, address string) (
 	v, err := s.repo.GetOrchProfile(ctx, address)
 	if err != nil {
 		return nil, fmt.Errorf("get orch profile: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) ListGateways(ctx context.Context, p types.QueryParams) ([]types.Gateway, error) {
+	v, err := s.repo.ListGateways(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("list gateways: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) GetGatewayProfile(ctx context.Context, address string) (*types.GatewayProfile, error) {
+	v, err := s.repo.GetGatewayProfile(ctx, address)
+	if err != nil {
+		return nil, fmt.Errorf("get gateway profile: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) ListGatewayOrchestrators(ctx context.Context, address string, p types.QueryParams) ([]types.GatewayOrch, error) {
+	v, err := s.repo.ListGatewayOrchestrators(ctx, address, p)
+	if err != nil {
+		return nil, fmt.Errorf("list gateway orchestrators: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) ListStreamSamples(ctx context.Context, p types.QueryParams) ([]types.StreamStatusSample, error) {
+	v, err := s.repo.ListStreamSamples(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("list stream samples: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) GetStreamDetail(ctx context.Context, streamID string) (*types.StreamDetail, error) {
+	v, err := s.repo.GetStreamDetail(ctx, streamID)
+	if err != nil {
+		return nil, fmt.Errorf("get stream detail: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) GetAttributionSummary(ctx context.Context, p types.QueryParams) (*types.AttributionSummary, error) {
+	v, err := s.repo.GetAttributionSummary(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("get attribution summary: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) GetE2ELatencySummary(ctx context.Context, p types.QueryParams) (*types.E2ELatencySummary, error) {
+	v, err := s.repo.GetE2ELatencySummary(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("get e2e latency summary: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) ListE2ELatencyHistory(ctx context.Context, p types.QueryParams) ([]types.E2ELatencyBucket, error) {
+	v, err := s.repo.ListE2ELatencyHistory(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("list e2e latency history: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) ListPipelines(ctx context.Context, p types.QueryParams) ([]types.PipelineSummary, error) {
+	v, err := s.repo.ListPipelines(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("list pipelines: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) GetPipelineDetail(ctx context.Context, pipeline string, p types.QueryParams) (*types.PipelineDetail, error) {
+	v, err := s.repo.GetPipelineDetail(ctx, pipeline, p)
+	if err != nil {
+		return nil, fmt.Errorf("get pipeline detail: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) ListPricing(ctx context.Context, p types.QueryParams) ([]types.OrchPricingEntry, error) {
+	v, err := s.repo.ListPricing(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("list pricing: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) GetOrchPricingProfile(ctx context.Context, address string) (*types.OrchPricingProfile, error) {
+	v, err := s.repo.GetOrchPricingProfile(ctx, address)
+	if err != nil {
+		return nil, fmt.Errorf("get orch pricing profile: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) ListModelPerformance(ctx context.Context, p types.QueryParams) ([]types.ModelPerformance, error) {
+	v, err := s.repo.ListModelPerformance(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("list model performance: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) GetModelDetail(ctx context.Context, modelID string, p types.QueryParams) (*types.ModelDetail, error) {
+	v, err := s.repo.GetModelDetail(ctx, modelID, p)
+	if err != nil {
+		return nil, fmt.Errorf("get model detail: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) ListPaymentsByGateway(ctx context.Context, p types.QueryParams) ([]types.GatewayPayment, error) {
+	v, err := s.repo.ListPaymentsByGateway(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("list payments by gateway: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) ListPaymentsByStream(ctx context.Context, p types.QueryParams) ([]types.StreamPayment, error) {
+	v, err := s.repo.ListPaymentsByStream(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("list payments by stream: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) ListFailuresByPipeline(ctx context.Context, p types.QueryParams) ([]types.FailuresByPipeline, error) {
+	v, err := s.repo.ListFailuresByPipeline(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("list failures by pipeline: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) ListFailuresByOrch(ctx context.Context, p types.QueryParams) ([]types.FailuresByOrch, error) {
+	v, err := s.repo.ListFailuresByOrch(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("list failures by orch: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) GetCapacitySummary(ctx context.Context, p types.QueryParams) (*types.CapacitySummary, error) {
+	v, err := s.repo.GetCapacitySummary(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("get capacity summary: %w", err)
 	}
 	return v, nil
 }

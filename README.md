@@ -190,8 +190,72 @@ The raw spec is at **`GET /docs/openapi.yaml`**.
 | Payments (R4) | `/v1/payments/` | summary, history, by-pipeline, by-orch |
 | Reliability (R5) | `/v1/reliability/` | summary, history, orchs, `/v1/failures` |
 | Leaderboard (R6) | `/v1/leaderboard` | list, `/{address}` |
+| Gateways (R7) | `/v1/net/gateways` | list, `/{address}`, `/{address}/orchs` |
+| Stream Extensions (R8) | `/v1/streams/` | samples, `/{stream_id}`, attribution |
+| E2E Latency (R9) | `/v1/perf/` | e2e-latency, e2e-latency/history |
+| Pipelines (R10) | `/v1/pipelines` | list, `/{pipeline}` |
+| Pricing (R11) | `/v1/net/pricing` | list, `/{address}` |
+| Model Performance (R12) | `/v1/perf/by-model`, `/v1/net/model` | by-model list, model detail |
+| Extended Payments (R13) | `/v1/payments/` | by-gateway, by-stream |
+| Failure Analysis (R14) | `/v1/failures/` | by-pipeline, by-orch |
+| Capacity (R15) | `/v1/net/capacity` | capacity summary |
 
 Common query parameters: `org`, `start`, `end`, `limit`, `offset`, `active_only`.
+
+### Gateways (R7)
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/v1/net/gateways` | List gateways with active stream counts |
+| GET | `/v1/net/gateways/{address}` | Gateway profile: streams routed, orchs used, payments |
+| GET | `/v1/net/gateways/{address}/orchs` | Orchestrators used by a specific gateway |
+
+### Stream Extensions (R8)
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/v1/streams/samples` | Per-stream telemetry samples (fps, latency, state) |
+| GET | `/v1/streams/{stream_id}` | Full timeline and state for a specific stream |
+| GET | `/v1/streams/attribution` | Attribution rate: fraction of samples with resolved orch |
+
+### E2E Latency (R9)
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/v1/perf/e2e-latency` | E2E latency p50/p95/p99 by pipeline and orchestrator |
+| GET | `/v1/perf/e2e-latency/history` | Hourly E2E latency trend |
+
+### Pipelines (R10)
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/v1/pipelines` | Cross-cutting summary per pipeline (streams, FPS, payments) |
+| GET | `/v1/pipelines/{pipeline}` | Detailed pipeline stats with model breakdown |
+
+### Pricing (R11)
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/v1/net/pricing` | Flat pricing rows for all active orchestrators |
+| GET | `/v1/net/pricing/{address}` | Structured pricing profile for one orchestrator |
+
+### Model Performance (R12)
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/v1/perf/by-model` | FPS performance broken down by AI model |
+| GET | `/v1/net/model?model_id=` | Detail for one model (orchs, FPS, warm count) |
+
+### Extended Payments (R13)
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/v1/payments/by-gateway` | Payment totals aggregated by gateway address |
+| GET | `/v1/payments/by-stream` | Payment totals per stream session |
+
+### Failure Analysis (R14)
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/v1/failures/by-pipeline` | Failure counts aggregated per pipeline |
+| GET | `/v1/failures/by-orch` | Inference errors and restarts per orchestrator |
+
+### Capacity (R15)
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/v1/net/capacity` | GPU supply (warm orchs, VRAM) vs. active stream demand |
 
 Prometheus metrics exposed on `/metrics`:
 

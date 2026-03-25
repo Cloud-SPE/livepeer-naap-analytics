@@ -132,6 +132,41 @@ func (s *Server) buildRouter() chi.Router {
 		// Leaderboard (R6)
 		r.Get("/leaderboard", s.handleGetLeaderboard)
 		r.Get("/leaderboard/{address}", s.handleGetLeaderboardProfile)
+
+		// Gateways (R7)
+		r.Get("/net/gateways", s.handleListGateways)
+		r.Get("/net/gateways/{address}/orchs", s.handleListGatewayOrchestrators)
+		r.Get("/net/gateways/{address}", s.handleGetGatewayProfile)
+
+		// Network capacity & pricing (R11, R12, R15)
+		r.Get("/net/pricing", s.handleListPricing)
+		r.Get("/net/pricing/{address}", s.handleGetOrchPricingProfile)
+		r.Get("/net/model", s.handleGetModelDetail)
+		r.Get("/net/capacity", s.handleGetCapacitySummary)
+
+		// Stream extensions (R8)
+		r.Get("/streams/samples", s.handleListStreamSamples)
+		r.Get("/streams/attribution", s.handleGetAttributionSummary)
+		r.Get("/streams/{stream_id}", s.handleGetStreamDetail)
+
+		// E2E latency (R9)
+		r.Get("/perf/e2e-latency/history", s.handleListE2ELatencyHistory)
+		r.Get("/perf/e2e-latency", s.handleGetE2ELatencySummary)
+
+		// Model performance (R12)
+		r.Get("/perf/by-model", s.handleListModelPerformance)
+
+		// Pipelines (R10)
+		r.Get("/pipelines", s.handleListPipelines)
+		r.Get("/pipelines/{pipeline}", s.handleGetPipelineDetail)
+
+		// Extended payments (R13)
+		r.Get("/payments/by-gateway", s.handleListPaymentsByGateway)
+		r.Get("/payments/by-stream", s.handleListPaymentsByStream)
+
+		// Failure analysis (R14)
+		r.Get("/failures/by-pipeline", s.handleListFailuresByPipeline)
+		r.Get("/failures/by-orch", s.handleListFailuresByOrch)
 	})
 
 	return r

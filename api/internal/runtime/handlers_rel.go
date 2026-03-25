@@ -62,3 +62,31 @@ func (s *Server) handleListFailures(w http.ResponseWriter, r *http.Request) {
 	}
 	respondJSON(w, http.StatusOK, result)
 }
+
+func (s *Server) handleListFailuresByPipeline(w http.ResponseWriter, r *http.Request) {
+	p := parseQueryParams(r)
+	result, err := s.svc.ListFailuresByPipeline(r.Context(), p)
+	if err != nil {
+		s.providers.Logger.Sugar().Errorw("list failures by pipeline failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "Internal Server Error", "")
+		return
+	}
+	if result == nil {
+		result = []types.FailuresByPipeline{}
+	}
+	respondJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleListFailuresByOrch(w http.ResponseWriter, r *http.Request) {
+	p := parseQueryParams(r)
+	result, err := s.svc.ListFailuresByOrch(r.Context(), p)
+	if err != nil {
+		s.providers.Logger.Sugar().Errorw("list failures by orch failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "Internal Server Error", "")
+		return
+	}
+	if result == nil {
+		result = []types.FailuresByOrch{}
+	}
+	respondJSON(w, http.StatusOK, result)
+}
