@@ -84,17 +84,17 @@ services:
       clickhouse:
         condition: service_healthy
     environment:
-      DBT_PROFILES_DIR: /workspace/warehouse
+      DBT_PROFILES_DIR: /app/warehouse
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: "8123"
       CLICKHOUSE_DB: naap
       CLICKHOUSE_USER: naap_admin
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_ADMIN_PASSWORD:-changeme}
+      DBT_CRON_SCHEDULE: ${DBT_CRON_SCHEDULE:-*/5 * * * *}
     volumes:
-      - ./warehouse:/workspace/warehouse
-    working_dir: /workspace/warehouse
-    command: ["run"]
-    restart: "no"
+      - ./warehouse:/app/warehouse
+    working_dir: /app/warehouse
+    restart: unless-stopped
 
   validation-go:
     image: golang:1.24-alpine
@@ -198,10 +198,16 @@ services:
       # Kafka runtime config consumed by 01_apply_kafka_config.sh on first start.
       # KAFKA_BROKER_LIST: broker for ClickHouse Kafka Engine tables.
       # KAFKA_AUTO_OFFSET_RESET: earliest = full history, latest = new data only.
+      CLICKHOUSE_WRITER_PASSWORD: ${CLICKHOUSE_WRITER_PASSWORD:-naap_writer_changeme}
+      CLICKHOUSE_READER_PASSWORD: ${CLICKHOUSE_READER_PASSWORD:-naap_reader_changeme}
       KAFKA_BROKER_LIST: ${KAFKA_BROKER_LIST:-infra2.cloudspe.com:9092}
       KAFKA_AUTO_OFFSET_RESET: ${KAFKA_AUTO_OFFSET_RESET:-earliest}
       KAFKA_NETWORK_GROUP: ${KAFKA_NETWORK_GROUP:-clickhouse-naap-network}
       KAFKA_STREAMING_GROUP: ${KAFKA_STREAMING_GROUP:-clickhouse-naap-streaming}
+      KAFKA_SECURITY_PROTOCOL: ${KAFKA_SECURITY_PROTOCOL:-}
+      KAFKA_SASL_MECHANISM: ${KAFKA_SASL_MECHANISM:-}
+      KAFKA_SASL_USERNAME: ${KAFKA_SASL_USERNAME:-}
+      KAFKA_SASL_PASSWORD: ${KAFKA_SASL_PASSWORD:-}
     volumes:
       - clickhouse_data:/var/lib/clickhouse
       - ./infra/clickhouse/config:/etc/clickhouse-server/config.d:ro

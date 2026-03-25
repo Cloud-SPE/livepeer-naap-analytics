@@ -6,12 +6,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 
+RUN apt-get update && apt-get install -y --no-install-recommends cron && rm -rf /var/lib/apt/lists/*
+
 RUN pip install --no-cache-dir dbt-core dbt-clickhouse
 
 WORKDIR /app
 
 COPY warehouse /app/warehouse
+COPY infra/docker/dbt-entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 WORKDIR /app/warehouse
 
-ENTRYPOINT ["dbt"]
+ENTRYPOINT ["/entrypoint.sh"]
