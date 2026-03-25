@@ -45,6 +45,12 @@ tags:
     description: Orchestrator AI model pricing (R11)
   - name: Capacity
     description: GPU supply vs. stream demand (R15)
+  - name: SLA
+    description: SLA compliance metrics per orchestrator/pipeline (ported from leaderboard-serverless)
+  - name: Demand
+    description: Network demand metrics per gateway/pipeline (ported from leaderboard-serverless)
+  - name: GPUMetrics
+    description: GPU performance metrics per orchestrator/pipeline (ported from leaderboard-serverless)
 
 # ── Common parameter definitions ──────────────────────────────────────────────
 
@@ -130,6 +136,88 @@ components:
       schema:
         type: string
         example: "0xabc123def456"
+    window:
+      name: window
+      in: query
+      description: |
+        Lookback window as a duration string. Accepts Go duration syntax (`24h`, `90m`, `30s`)
+        or a day suffix (`7d`). Capped per-endpoint — see endpoint description for limits.
+      schema:
+        type: string
+        example: "24h"
+        default: "24h"
+    page:
+      name: page
+      in: query
+      description: Page number (1-based).
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    page_size:
+      name: page_size
+      in: query
+      description: Items per page (1–500).
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 500
+        default: 50
+    orchestrator_address:
+      name: orchestrator_address
+      in: query
+      description: Filter by orchestrator Ethereum address (lowercased).
+      schema:
+        type: string
+        example: "0xabc123def456"
+    pipeline_id:
+      name: pipeline_id
+      in: query
+      description: Filter by pipeline name (e.g. `streamdiffusion-sdxl-v2v`).
+      schema:
+        type: string
+    model_id:
+      name: model_id
+      in: query
+      description: Filter by model identifier.
+      schema:
+        type: string
+    gpu_id:
+      name: gpu_id
+      in: query
+      description: Filter by GPU slot identifier.
+      schema:
+        type: string
+    gateway_filter:
+      name: gateway
+      in: query
+      description: Filter by gateway Ethereum address.
+      schema:
+        type: string
+    gpu_model_name:
+      name: gpu_model_name
+      in: query
+      description: Filter by GPU model name (e.g. `RTX-4090`).
+      schema:
+        type: string
+    runner_version:
+      name: runner_version
+      in: query
+      description: Filter by runner software version.
+      schema:
+        type: string
+    cuda_version:
+      name: cuda_version
+      in: query
+      description: Filter by CUDA version string.
+      schema:
+        type: string
+    region:
+      name: region
+      in: query
+      description: Filter by geographic region (currently always null — reserved for future use).
+      schema:
+        type: string
 
   schemas:
 
@@ -1055,6 +1143,136 @@ components:
         Entries:
           type: array
           items: { $ref: "#/components/schemas/CapacityEntry" }
+
+    # ── SLA / GPU / Network Demand (ported from leaderboard-serverless) ──────
+
+    Pagination:
+      type: object
+      description: Pagination metadata included in paged responses.
+      properties:
+        page:        { type: integer, example: 1 }
+        page_size:   { type: integer, example: 50 }
+        total_count: { type: integer, example: 243 }
+        total_pages: { type: integer, example: 5 }
+
+    SLAComplianceRow:
+      type: object
+      description: SLA compliance metrics for one (orchestrator, pipeline, model, gpu, window) bucket.
+      properties:
+        window_start:                { type: string, format: date-time }
+        org:                         { type: string, nullable: true }
+        orchestrator_address:        { type: string, example: "0xabc123" }
+        pipeline_id:                 { type: string, example: "streamdiffusion-sdxl-v2v" }
+        model_id:                    { type: string, nullable: true }
+        gpu_id:                      { type: string, nullable: true }
+        region:                      { type: string, nullable: true, description: "Always null — not captured in event data." }
+        known_sessions_count:        { type: integer, format: int64 }
+        startup_success_sessions:    { type: integer, format: int64 }
+        startup_excused_sessions:    { type: integer, format: int64, description: "Always 0 — excusal logic not implemented." }
+        startup_unexcused_sessions:  { type: integer, format: int64 }
+        confirmed_swapped_sessions:  { type: integer, format: int64, description: "Always 0 — confirmation signal absent." }
+        inferred_swap_sessions:      { type: integer, format: int64 }
+        total_swapped_sessions:      { type: integer, format: int64 }
+        sessions_ending_in_error:    { type: integer, format: int64 }
+        error_status_samples:        { type: integer, format: int64 }
+        health_signal_coverage_ratio: { type: number, format: double }
+        startup_success_rate:        { type: number, format: double, nullable: true, description: "Null when known_sessions_count < 5." }
+        effective_success_rate:      { type: number, format: double, nullable: true }
+        no_swap_rate:                { type: number, format: double, nullable: true }
+        sla_score:                   { type: number, format: double, nullable: true, description: "0.6×startup_success_rate + 0.4×no_swap_rate." }
+
+    SLAComplianceResponse:
+      type: object
+      properties:
+        compliance:
+          type: array
+          items: { $ref: "#/components/schemas/SLAComplianceRow" }
+        pagination: { $ref: "#/components/schemas/Pagination" }
+
+    NetworkDemandRow:
+      type: object
+      description: Network demand metrics for one (gateway, pipeline, model, window) bucket.
+      properties:
+        window_start:                { type: string, format: date-time }
+        org:                         { type: string, nullable: true }
+        gateway:                     { type: string, example: "0xgateway123" }
+        region:                      { type: string, nullable: true, description: "Always null." }
+        pipeline_id:                 { type: string }
+        model_id:                    { type: string, nullable: true }
+        sessions_count:              { type: integer, format: int64 }
+        avg_output_fps:              { type: number, format: double }
+        total_minutes:               { type: number, format: double }
+        known_sessions_count:        { type: integer, format: int64 }
+        served_sessions:             { type: integer, format: int64 }
+        unserved_sessions:           { type: integer, format: int64 }
+        total_demand_sessions:       { type: integer, format: int64 }
+        startup_unexcused_sessions:  { type: integer, format: int64 }
+        confirmed_swapped_sessions:  { type: integer, format: int64 }
+        inferred_swap_sessions:      { type: integer, format: int64 }
+        total_swapped_sessions:      { type: integer, format: int64 }
+        sessions_ending_in_error:    { type: integer, format: int64 }
+        error_status_samples:        { type: integer, format: int64 }
+        health_signal_coverage_ratio: { type: number, format: double }
+        startup_success_rate:        { type: number, format: double }
+        effective_success_rate:      { type: number, format: double }
+        ticket_face_value_eth:       { type: number, format: double, description: "Proportional ETH payment estimate for this gateway's sessions." }
+
+    NetworkDemandResponse:
+      type: object
+      properties:
+        demand:
+          type: array
+          items: { $ref: "#/components/schemas/NetworkDemandRow" }
+        pagination: { $ref: "#/components/schemas/Pagination" }
+
+    GPUMetric:
+      type: object
+      description: GPU performance metrics for one (orchestrator, pipeline, model, gpu, window) bucket.
+      properties:
+        window_start:                   { type: string, format: date-time }
+        org:                            { type: string, nullable: true }
+        orchestrator_address:           { type: string }
+        pipeline_id:                    { type: string }
+        model_id:                       { type: string, nullable: true }
+        gpu_id:                         { type: string, nullable: true }
+        region:                         { type: string, nullable: true, description: "Always null." }
+        avg_output_fps:                 { type: number, format: double }
+        p95_output_fps:                 { type: number, format: double }
+        fps_jitter_coefficient:         { type: number, format: double, nullable: true, description: "Always null — not computed." }
+        status_samples:                 { type: integer, format: int64 }
+        error_status_samples:           { type: integer, format: int64 }
+        health_signal_coverage_ratio:   { type: number, format: double }
+        gpu_model_name:                 { type: string, nullable: true }
+        gpu_memory_bytes_total:         { type: integer, format: int64, nullable: true }
+        runner_version:                 { type: string, nullable: true, description: "Always null." }
+        cuda_version:                   { type: string, nullable: true, description: "Always null." }
+        avg_prompt_to_first_frame_ms:   { type: number, format: double, nullable: true, description: "Always null." }
+        avg_startup_latency_ms:         { type: number, format: double, nullable: true }
+        avg_e2e_latency_ms:             { type: number, format: double, nullable: true }
+        p95_prompt_to_first_frame_latency_ms: { type: number, format: double, nullable: true, description: "Always null." }
+        p95_startup_latency_ms:         { type: number, format: double, nullable: true }
+        p95_e2e_latency_ms:             { type: number, format: double, nullable: true }
+        prompt_to_first_frame_sample_count: { type: integer, format: int64 }
+        startup_latency_sample_count:   { type: integer, format: int64 }
+        e2e_latency_sample_count:       { type: integer, format: int64 }
+        known_sessions_count:           { type: integer, format: int64 }
+        startup_success_sessions:       { type: integer, format: int64 }
+        startup_excused_sessions:       { type: integer, format: int64 }
+        startup_unexcused_sessions:     { type: integer, format: int64 }
+        confirmed_swapped_sessions:     { type: integer, format: int64 }
+        inferred_swap_sessions:         { type: integer, format: int64 }
+        total_swapped_sessions:         { type: integer, format: int64 }
+        sessions_ending_in_error:       { type: integer, format: int64 }
+        startup_unexcused_rate:         { type: number, format: double }
+        swap_rate:                      { type: number, format: double }
+
+    GPUMetricsResponse:
+      type: object
+      properties:
+        metrics:
+          type: array
+          items: { $ref: "#/components/schemas/GPUMetric" }
+        pagination: { $ref: "#/components/schemas/Pagination" }
 
   responses:
     429:
@@ -2075,3 +2293,106 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/CapacitySummary" }
         "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  # ── SLA / GPU / Network Demand (ported from leaderboard-serverless) ────────
+
+  /v1/sla/compliance:
+    get:
+      summary: SLA compliance metrics
+      description: |
+        Returns per-orchestrator SLA compliance metrics aggregated into hourly buckets.
+        Grouped by (orchestrator_address, pipeline_id, model_id, gpu_id).
+
+        **Window:** default 24h, min 1h, max 30d.
+
+        **Approximations vs. source schema:**
+        - `region` is always null (not captured in event data)
+        - `startup_excused_sessions` is always 0
+        - `confirmed_swapped_sessions` is always 0
+        - `sla_score` = 0.6×startup_success_rate + 0.4×no_swap_rate
+        - Fields with < 5 sessions return null for rate fields
+      operationId: listSLACompliance
+      tags: [SLA]
+      parameters:
+        - $ref: "#/components/parameters/org"
+        - $ref: "#/components/parameters/window"
+        - $ref: "#/components/parameters/orchestrator_address"
+        - $ref: "#/components/parameters/pipeline_id"
+        - $ref: "#/components/parameters/model_id"
+        - $ref: "#/components/parameters/gpu_id"
+        - $ref: "#/components/parameters/region"
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/page_size"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SLAComplianceResponse" }
+        "500": { $ref: "#/components/responses/500" }
+
+  /v1/network/demand:
+    get:
+      summary: Network demand metrics
+      description: |
+        Returns session demand metrics aggregated into hourly buckets per gateway.
+        Grouped by (gateway, pipeline_id, model_id).
+
+        **Window:** default 3h, min 1m, max 30d.
+
+        **Approximations:** `region` always null, `ticket_face_value_eth` is a
+        proportional estimate from pipeline-level payment data.
+      operationId: listNetworkDemand
+      tags: [Demand]
+      parameters:
+        - $ref: "#/components/parameters/org"
+        - $ref: "#/components/parameters/window"
+        - $ref: "#/components/parameters/gateway_filter"
+        - $ref: "#/components/parameters/pipeline_id"
+        - $ref: "#/components/parameters/model_id"
+        - $ref: "#/components/parameters/region"
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/page_size"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NetworkDemandResponse" }
+        "500": { $ref: "#/components/responses/500" }
+
+  /v1/gpu/metrics:
+    get:
+      summary: GPU performance metrics
+      description: |
+        Returns per-GPU performance metrics aggregated into hourly buckets.
+        Grouped by (orchestrator_address, pipeline_id, model_id, gpu_id).
+        Hardware dimensions (gpu_model_name, gpu_memory_bytes_total) are joined
+        from the GPU inventory.
+
+        **Window:** default 24h, min 1m, max 72h.
+
+        **Approximations:** `region`, `runner_version`, `cuda_version`,
+        `avg_prompt_to_first_frame_ms`, and `fps_jitter_coefficient` are always null.
+      operationId: listGPUMetrics
+      tags: [GPUMetrics]
+      parameters:
+        - $ref: "#/components/parameters/org"
+        - $ref: "#/components/parameters/window"
+        - $ref: "#/components/parameters/orchestrator_address"
+        - $ref: "#/components/parameters/pipeline_id"
+        - $ref: "#/components/parameters/model_id"
+        - $ref: "#/components/parameters/gpu_id"
+        - $ref: "#/components/parameters/gpu_model_name"
+        - $ref: "#/components/parameters/runner_version"
+        - $ref: "#/components/parameters/cuda_version"
+        - $ref: "#/components/parameters/region"
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/page_size"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GPUMetricsResponse" }
+        "500": { $ref: "#/components/responses/500" }
