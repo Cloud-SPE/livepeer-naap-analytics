@@ -50,11 +50,11 @@ select
     i.runner_version,
     i.cuda_version,
     cast(null as Nullable(Float64)) as avg_prompt_to_first_frame_ms,
-    avgIf(b.startup_latency_ms, b.startup_latency_ms > 0) as avg_startup_latency_ms,
-    avgIf(b.avg_e2e_latency_ms, b.avg_e2e_latency_ms > 0) as avg_e2e_latency_ms,
+    if(countIf(b.startup_latency_ms > 0) > 0, toFloat64(avgIf(b.startup_latency_ms, b.startup_latency_ms > 0)), NULL) as avg_startup_latency_ms,
+    if(countIf(b.avg_e2e_latency_ms > 0) > 0, toFloat64(avgIf(b.avg_e2e_latency_ms, b.avg_e2e_latency_ms > 0)), NULL) as avg_e2e_latency_ms,
     cast(null as Nullable(Float64)) as p95_prompt_to_first_frame_latency_ms,
-    CAST(quantileTDigestIf(0.95)(b.startup_latency_ms, b.startup_latency_ms > 0) AS Nullable(Float64)) as p95_startup_latency_ms,
-    CAST(quantileIf(0.95)(b.avg_e2e_latency_ms, b.avg_e2e_latency_ms > 0) AS Nullable(Float64)) as p95_e2e_latency_ms,
+    if(countIf(b.startup_latency_ms > 0) > 0, toFloat64(quantileTDigestIf(0.95)(b.startup_latency_ms, b.startup_latency_ms > 0)), NULL) as p95_startup_latency_ms,
+    if(countIf(b.avg_e2e_latency_ms > 0) > 0, toFloat64(quantileIf(0.95)(b.avg_e2e_latency_ms, b.avg_e2e_latency_ms > 0)), NULL) as p95_e2e_latency_ms,
     toUInt64(0) as prompt_to_first_frame_sample_count,
     toUInt64(countIf(b.startup_latency_ms > 0)) as startup_latency_sample_count,
     toUInt64(countIf(b.avg_e2e_latency_ms > 0)) as e2e_latency_sample_count,
@@ -66,8 +66,8 @@ select
     toUInt64(0) as inferred_swap_sessions,
     toUInt64(countIf(b.swap_count > 0)) as total_swapped_sessions,
     toUInt64(countIf(b.error_seen = 1)) as sessions_ending_in_error,
-    toFloat64(countIf(b.startup_outcome = 'unexcused')) / nullIf(toFloat64(count()), 0.0) as startup_unexcused_rate,
-    toFloat64(countIf(b.swap_count > 0)) / nullIf(toFloat64(count()), 0.0) as swap_rate
+    ifNull(toFloat64(countIf(b.startup_outcome = 'unexcused')) / nullIf(toFloat64(count()), 0.0), 0.0) as startup_unexcused_rate,
+    ifNull(toFloat64(countIf(b.swap_count > 0)) / nullIf(toFloat64(count()), 0.0), 0.0) as swap_rate
 from base b
 left join inventory i
   on b.orchestrator_address = i.orchestrator_address
