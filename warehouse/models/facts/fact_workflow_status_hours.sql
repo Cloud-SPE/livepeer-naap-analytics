@@ -1,3 +1,9 @@
+{{ config(
+    engine='MergeTree()',
+    order_by=['org', 'hour', 'canonical_session_key'],
+    partition_by='toYYYYMM(hour)'
+) }}
+
 with attributed_status as (
     select
         s.canonical_session_key,
@@ -11,6 +17,7 @@ with attributed_status as (
         fs.started_at,
         fs.last_seen as session_last_seen,
         fs.attributed_orch_address as orch_address,
+        fs.attributed_orch_uri as orch_uri,
         fs.attribution_status,
         fs.attribution_reason,
         s.state,
@@ -33,6 +40,7 @@ base_hours as (
         any(canonical_pipeline) as canonical_pipeline,
         any(canonical_model) as canonical_model,
         any(orch_address) as orch_address,
+        any(orch_uri) as orch_uri,
         any(attribution_status) as attribution_status,
         any(attribution_reason) as attribution_reason,
         any(started_at) as started_at,

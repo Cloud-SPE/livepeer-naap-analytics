@@ -1,3 +1,12 @@
+{{ config(
+    materialized='table',
+    engine='MergeTree()',
+    order_by=['org', 'state', 'sample_ts']
+) }}
+
+-- Materialized table: rebuilt on dbt incremental schedule (~5 min cadence).
+-- Bound to 24h by sample_ts to cap table size. Recency filtering (e.g. last 30s)
+-- is the responsibility of each API consumer, not this model.
 with latest_sample as (
     select
         canonical_session_key,
@@ -25,6 +34,7 @@ select
     fs.canonical_pipeline as pipeline,
     fs.canonical_model as model_id,
     fs.attributed_orch_address as orch_address,
+    fs.attributed_orch_uri as orch_uri,
     fs.attribution_status,
     fs.attribution_reason,
     s.state,
@@ -36,5 +46,5 @@ select
     fs.completed
 from latest_sample s
 left join {{ ref('fact_workflow_sessions') }} fs on s.canonical_session_key = fs.canonical_session_key
-where fs.last_seen > now() - interval 90 second
+where s.sample_ts > now() - interval 24 hour
   and fs.completed = 0

@@ -127,8 +127,9 @@ func (r *Repo) ListPipelines(ctx context.Context, p types.QueryParams) ([]types.
 		return nil, fmt.Errorf("clickhouse list pipelines pay rows: %w", err)
 	}
 
-	// Active streams per pipeline
-	activeWhere := "WHERE state = 'ONLINE'"
+	// Active streams per pipeline.
+	// sample_ts filter restores the recency bound that was previously in the view definition.
+	activeWhere := fmt.Sprintf("WHERE state = 'ONLINE' AND sample_ts > now() - INTERVAL %d SECOND", activeStreamSecs)
 	activeArgs := []any{}
 	if p.Org != "" {
 		activeWhere += " AND org = ?"
@@ -255,8 +256,9 @@ func (r *Repo) GetPipelineDetail(ctx context.Context, pipeline string, p types.Q
 		return nil, fmt.Errorf("clickhouse get pipeline detail pay: %w", err)
 	}
 
-	// Active streams
-	activeWhere := "WHERE state = 'ONLINE' AND pipeline = ?"
+	// Active streams.
+	// sample_ts filter restores the recency bound that was previously in the view definition.
+	activeWhere := fmt.Sprintf("WHERE state = 'ONLINE' AND pipeline = ? AND sample_ts > now() - INTERVAL %d SECOND", activeStreamSecs)
 	activeArgs := []any{pipeline}
 	if p.Org != "" {
 		activeWhere += " AND org = ?"

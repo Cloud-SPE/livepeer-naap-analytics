@@ -22,13 +22,15 @@ func (r *Repo) ListPaymentsByGateway(ctx context.Context, p types.QueryParams) (
 
 	rows, err := r.conn.Query(ctx, `
 		SELECT
-			gateway,
-			sum(face_value_wei) AS total_wei,
+			pl.gateway,
+			coalesce(any(gm.name), '') AS name,
+			sum(pl.face_value_wei) AS total_wei,
 			count() AS event_count,
-			uniqExact(recipient_address) AS unique_orchs
-		FROM naap.serving_payment_links
+			uniqExact(pl.recipient_address) AS unique_orchs
+		FROM naap.serving_payment_links pl
+		LEFT JOIN naap.gateway_metadata gm ON lower(gm.eth_address) = lower(pl.gateway)
 		`+where+`
-		GROUP BY gateway
+		GROUP BY pl.gateway
 		ORDER BY total_wei DESC
 		LIMIT ?
 	`, args...)
@@ -41,20 +43,12 @@ func (r *Repo) ListPaymentsByGateway(ctx context.Context, p types.QueryParams) (
 	for rows.Next() {
 		var gp types.GatewayPayment
 		var wei, count, orchs uint64
-		if err := rows.Scan(&gp.GatewayAddress, &wei, &count, &orchs); err != nil {
+		if err := rows.Scan(&gp.GatewayAddress, &gp.Name, &wei, &count, &orchs); err != nil {
 			return nil, fmt.Errorf("clickhouse list payments by gateway scan: %w", err)
 		}
 		gp.TotalWEI = types.WEI(wei)
 		gp.EventCount = int64(count)
 		gp.UniqueOrchs = int64(orchs)
-
-		// Resolve name from gateway_metadata
-		nameRow := r.conn.QueryRow(ctx, `
-			SELECT coalesce(name, '') FROM naap.gateway_metadata FINAL
-			WHERE lower(eth_address) = lower(?)
-		`, gp.GatewayAddress)
-		_ = nameRow.Scan(&gp.Name)
-
 		result = append(result, gp)
 	}
 	return result, rows.Err()

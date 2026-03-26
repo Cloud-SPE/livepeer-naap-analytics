@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS naap.typed_stream_trace
 )
 ENGINE = ReplacingMergeTree(event_ts)
 PARTITION BY (org, toYYYYMM(event_ts))
-ORDER BY event_id
+PRIMARY KEY (org, event_ts)
+ORDER BY (org, event_ts, event_id)
 SETTINGS index_granularity = 8192;
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS naap.mv_typed_stream_trace
@@ -67,7 +68,8 @@ CREATE TABLE IF NOT EXISTS naap.typed_ai_stream_status
 )
 ENGINE = ReplacingMergeTree(event_ts)
 PARTITION BY (org, toYYYYMM(event_ts))
-ORDER BY event_id
+PRIMARY KEY (org, event_ts)
+ORDER BY (org, event_ts, event_id)
 SETTINGS index_granularity = 8192;
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS naap.mv_typed_ai_stream_status
@@ -113,7 +115,8 @@ CREATE TABLE IF NOT EXISTS naap.typed_ai_stream_events
 )
 ENGINE = ReplacingMergeTree(event_ts)
 PARTITION BY (org, toYYYYMM(event_ts))
-ORDER BY event_id
+PRIMARY KEY (org, event_ts)
+ORDER BY (org, event_ts, event_id)
 SETTINGS index_granularity = 8192;
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS naap.mv_typed_ai_stream_events
@@ -149,35 +152,41 @@ CREATE TABLE IF NOT EXISTS naap.typed_discovery_results
 )
 ENGINE = ReplacingMergeTree(event_ts)
 PARTITION BY (org, toYYYYMM(event_ts))
-ORDER BY row_id
+PRIMARY KEY (org, event_ts)
+ORDER BY (org, event_ts, row_id)
 SETTINGS index_granularity = 8192;
 
+-- Single arrayJoin on a zipped (index, value) tuple avoids the N² cross-product
+-- that two independent arrayJoin calls on the same array would produce.
 CREATE MATERIALIZED VIEW IF NOT EXISTS naap.mv_typed_discovery_results
 TO naap.typed_discovery_results
 AS
 SELECT
-    concat(event_id, '#', lower(JSONExtractString(candidate_json, 'address')), '#', toString(_idx)) AS row_id,
+    concat(event_id, '#', lower(JSONExtractString(pair.2, 'address')), '#', toString(pair.1)) AS row_id,
     event_id,
     event_ts,
     org,
     gateway,
-    lower(JSONExtractString(candidate_json, 'address'))                                               AS orch_address,
-    JSONExtractString(candidate_json, 'url')                                                          AS orch_url,
-    toUInt64OrDefault(JSONExtractString(candidate_json, 'latency_ms'))                                AS latency_ms,
-    candidate_json                                                                                     AS data
+    lower(JSONExtractString(pair.2, 'address')) AS orch_address,
+    JSONExtractString(pair.2, 'url')            AS orch_url,
+    toUInt64OrDefault(JSONExtractString(pair.2, 'latency_ms')) AS latency_ms,
+    pair.2                                      AS data
 FROM (
     SELECT
         event_id,
         event_ts,
         org,
         gateway,
-        arrayJoin(arrayEnumerate(JSONExtractArrayRaw(data))) AS _idx,
-        arrayJoin(JSONExtractArrayRaw(data))                 AS candidate_json
+        arrayJoin(
+            arrayMap((x, i) -> tuple(i, x),
+                JSONExtractArrayRaw(data),
+                arrayEnumerate(JSONExtractArrayRaw(data)))
+        ) AS pair
     FROM naap.events
     WHERE event_type = 'discovery_results'
       AND data NOT IN ('', '[]', 'null')
 )
-WHERE orch_address != '';
+WHERE lower(JSONExtractString(pair.2, 'address')) != '';
 
 CREATE TABLE IF NOT EXISTS naap.typed_stream_ingest_metrics
 (
@@ -198,7 +207,8 @@ CREATE TABLE IF NOT EXISTS naap.typed_stream_ingest_metrics
 )
 ENGINE = ReplacingMergeTree(event_ts)
 PARTITION BY (org, toYYYYMM(event_ts))
-ORDER BY event_id
+PRIMARY KEY (org, event_ts)
+ORDER BY (org, event_ts, event_id)
 SETTINGS index_granularity = 8192;
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS naap.mv_typed_stream_ingest_metrics
@@ -240,7 +250,8 @@ CREATE TABLE IF NOT EXISTS naap.typed_network_capabilities
 )
 ENGINE = ReplacingMergeTree(event_ts)
 PARTITION BY (org, toYYYYMM(event_ts))
-ORDER BY row_id
+PRIMARY KEY (org, event_ts)
+ORDER BY (org, event_ts, row_id)
 SETTINGS index_granularity = 8192;
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS naap.mv_typed_network_capabilities
@@ -296,7 +307,8 @@ CREATE TABLE IF NOT EXISTS naap.typed_payments
 )
 ENGINE = ReplacingMergeTree(event_ts)
 PARTITION BY (org, toYYYYMM(event_ts))
-ORDER BY event_id
+PRIMARY KEY (org, event_ts)
+ORDER BY (org, event_ts, event_id)
 SETTINGS index_granularity = 8192;
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS naap.mv_typed_payments

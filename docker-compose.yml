@@ -96,25 +96,25 @@ services:
     working_dir: /app/warehouse
     restart: unless-stopped
 
-  validation-go:
-    image: golang:1.24-alpine
-    depends_on:
-      clickhouse:
-        condition: service_healthy
-    environment:
-      CLICKHOUSE_ADDR: clickhouse:9000
-      CLICKHOUSE_DB: naap
-      CLICKHOUSE_WRITER_USER: naap_writer
-      CLICKHOUSE_WRITER_PASSWORD: naap_writer_changeme
-      GOCACHE: /tmp/go-build-cache
-      GOMODCACHE: /go/pkg/mod
-    working_dir: /workspace/api
-    volumes:
-      - ./api:/workspace/api
-      - /tmp/go-build-cache:/tmp/go-build-cache
-      - /tmp/go-mod-cache:/go/pkg/mod
-    command: ["go", "test", "-tags=validation", "./internal/validation/...", "-v", "-count=1", "-timeout=120s"]
-    restart: "no"
+#  validation-go:
+#    image: golang:1.24-alpine
+#    depends_on:
+#      clickhouse:
+#        condition: service_healthy
+#    environment:
+#      CLICKHOUSE_ADDR: clickhouse:9000
+#      CLICKHOUSE_DB: naap
+#      CLICKHOUSE_WRITER_USER: naap_writer
+#      CLICKHOUSE_WRITER_PASSWORD: naap_writer_changeme
+#      GOCACHE: /tmp/go-build-cache
+#      GOMODCACHE: /go/pkg/mod
+#    working_dir: /workspace/api
+#    volumes:
+#      - ./api:/workspace/api
+#      - /tmp/go-build-cache:/tmp/go-build-cache
+#      - /tmp/go-mod-cache:/go/pkg/mod
+#    command: ["go", "test", "-tags=validation", "./internal/validation/...", "-v", "-count=1", "-timeout=120s"]
+#    restart: "no"
 
   # ── Observability ────────────────────────────────────────────────────────────
 

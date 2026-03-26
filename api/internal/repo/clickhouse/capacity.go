@@ -55,8 +55,9 @@ func (r *Repo) GetCapacitySummary(ctx context.Context, p types.QueryParams) (*ty
 		return nil, fmt.Errorf("clickhouse get capacity warm rows: %w", err)
 	}
 
-	// Active streams per pipeline
-	activeWhere := "WHERE state = 'ONLINE'"
+	// Active streams per pipeline.
+	// sample_ts filter restores the recency bound that was previously in the view definition.
+	activeWhere := fmt.Sprintf("WHERE state = 'ONLINE' AND sample_ts > now() - INTERVAL %d SECOND", activeStreamSecs)
 	activeArgs := []any{}
 	if p.Org != "" {
 		activeWhere += " AND org = ?"

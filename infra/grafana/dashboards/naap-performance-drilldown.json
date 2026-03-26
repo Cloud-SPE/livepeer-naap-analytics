@@ -171,12 +171,13 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT toStartOfInterval(sample_ts, INTERVAL 1 HOUR) AS time,\n    avg(e2e_latency_ms) / 1000.0 AS avg_e2e_latency_s,\n    quantileTDigest(0.95)(e2e_latency_ms) / 1000.0 AS p95_e2e_latency_s\nFROM naap.serving_status_samples\nWHERE $__timeFilter(sample_ts) AND e2e_latency_ms > 0\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nAND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address))\nGROUP BY time ORDER BY time",
+          "rawSql": "SELECT\n    hour AS time,\n    avg_startup_latency_ms / 1000.0 AS avg_e2e_latency_s,\n    p95_startup_latency_ms / 1000.0 AS p95_e2e_latency_s\nFROM naap.serving_stream_hourly\nWHERE $__timeFilter(hour)\nAND avg_startup_latency_ms > 0\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY hour, avg_startup_latency_ms, p95_startup_latency_ms\nORDER BY time",
           "refId": "A"
         }
       ],
       "title": "End-to-End (e2e) Stream Latency",
-      "type": "timeseries"
+      "type": "timeseries",
+      "description": "Time from gateway_receive_stream_request to gateway_receive_first_processed_segment, pre-aggregated hourly in serving_stream_hourly. Source of truth: fact_workflow_sessions.startup_latency_ms."
     },
     {
       "fieldConfig": {
@@ -454,7 +455,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT toStartOfInterval(hour, INTERVAL 1 HOUR) AS time,\n    pipeline,\n    sum(inference_fps_sum) / nullIf(sum(sample_count), 0) AS avg_fps\nFROM naap.serving_fps_hourly\nWHERE $__timeFilter(hour)\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nAND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address))\nGROUP BY time, pipeline ORDER BY time",
+          "rawSql": "SELECT toStartOfInterval(hour, INTERVAL 1 HOUR) AS time,\n    pipeline,\n    sum(inference_fps_sum) / nullIf(sum(sample_count), 0) AS avg_fps\nFROM naap.serving_fps_hourly\nWHERE $__timeFilter(hour)\nAND orch_address != ''\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nAND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address))\nGROUP BY time, pipeline ORDER BY time",
           "refId": "A"
         }
       ],
@@ -613,7 +614,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "WITH ens AS (SELECT orch_address AS addr, name AS ens_name FROM naap.serving_latest_orchestrator_state),\nstatus_24h AS (\n    SELECT orch_address,\n        ifNull(nullIf(pipeline, ''), 'unknown') AS pipeline,\n        countDistinct(stream_id) AS active_streams,\n        avg(output_fps) AS avg_fps,\n        quantileTDigest(0.95)(output_fps) AS p95_fps,\n        avgIf(e2e_latency_ms, e2e_latency_ms > 0) / 1000.0 AS avg_e2e_latency_s,\n        quantileTDigestIf(0.95)(e2e_latency_ms, e2e_latency_ms > 0) / 1000.0 AS p95_e2e_latency_s\n    FROM naap.serving_status_samples\n    WHERE sample_ts >= now() - INTERVAL 24 HOUR AND is_attributed = 1 AND orch_address != ''\n    AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n    AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address))\n    GROUP BY orch_address, pipeline\n)\nSELECT if(ifNull(ens.ens_name, '') != '' AND NOT startsWith(lower(ens.ens_name), '0x'), ens.ens_name, s.orch_address) AS \"Orchestrator\",\n    s.pipeline AS \"Pipeline\",\n    s.active_streams AS \"Active Streams\",\n    round(s.avg_fps, 2) AS \"Avg FPS\",\n    round(s.p95_fps, 2) AS \"P95 FPS\",\n    round(ifNull(s.avg_e2e_latency_s, 0), 3) AS \"Avg E2E Latency (s)\",\n    round(ifNull(s.p95_e2e_latency_s, 0), 3) AS \"P95 E2E Latency (s)\"\nFROM status_24h s\nLEFT JOIN ens ON ens.addr = s.orch_address\nORDER BY s.active_streams DESC, s.avg_fps DESC\nLIMIT 20",
+          "rawSql": "WITH ens AS (SELECT orch_address AS addr, name AS ens_name FROM naap.serving_latest_orchestrator_state),\nstatus_24h AS (\n    SELECT orch_address,\n        ifNull(nullIf(pipeline, ''), 'unknown') AS pipeline,\n        countDistinct(stream_id) AS active_streams,\n        avg(output_fps) AS avg_fps,\n        quantileTDigest(0.95)(output_fps) AS p95_fps,\n        round(avgIf(startup_latency_ms, startup_latency_ms > 0) / 1000.0, 3) AS avg_e2e_latency_s,\n        round(quantileTDigestIf(0.95)(startup_latency_ms, startup_latency_ms > 0) / 1000.0, 3) AS p95_e2e_latency_s\n    FROM naap.serving_status_samples ss\n    JOIN naap.fact_workflow_sessions fws ON ss.canonical_session_key = fws.canonical_session_key\n    WHERE ss.sample_ts >= now() - INTERVAL 24 HOUR AND ss.is_attributed = 1 AND ss.orch_address != ''\n    AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), ss.org))\n    AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), ss.orch_address))\n    GROUP BY orch_address, pipeline\n)\nSELECT if(ifNull(ens.ens_name, '') != '' AND NOT startsWith(lower(ens.ens_name), '0x'), ens.ens_name, s.orch_address) AS \"Orchestrator\",\n    s.pipeline AS \"Pipeline\",\n    s.active_streams AS \"Active Streams\",\n    round(s.avg_fps, 2) AS \"Avg FPS\",\n    round(s.p95_fps, 2) AS \"P95 FPS\",\n    s.avg_e2e_latency_s AS \"Avg E2E Latency (s)\",\n    s.p95_e2e_latency_s AS \"P95 E2E Latency (s)\"\nFROM status_24h s\nLEFT JOIN ens ON ens.addr = s.orch_address\nORDER BY s.active_streams DESC, s.avg_fps DESC\nLIMIT 20",
           "refId": "A"
         }
       ],

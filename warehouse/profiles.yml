@@ -12,5 +12,5 @@ naap_analytics:
       secure: false
       retries: 1
       connect_timeout: 10
-      send_receive_timeout: 60
-      sync_request_timeout: 60
+      send_receive_timeout: 300
+      sync_request_timeout: 300

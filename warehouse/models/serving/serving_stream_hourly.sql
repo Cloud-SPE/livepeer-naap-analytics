@@ -1,19 +1,22 @@
-with session_gateway as (
-    select canonical_session_key, anyIf(gateway, gateway != '') as gateway
-    from {{ ref('stg_stream_trace') }}
-    where canonical_session_key != ''
-    group by canonical_session_key
-)
+{{ config(
+    materialized='table',
+    engine='MergeTree()',
+    order_by=["ifNull(org, '')", 'hour', "ifNull(pipeline, '')"],
+    partition_by='toYYYYMM(hour)'
+) }}
+
 select
     toStartOfHour(coalesce(f.started_at, f.last_seen)) as hour,
     f.org,
     f.canonical_pipeline as pipeline,
-    ifNull(sg.gateway, '') as gateway,
+    ifNull(f.gateway, '') as gateway,
     countIf(f.started = 1) as started,
     countIf(f.startup_outcome = 'success') as completed,
     countIf(f.no_orch = 1) as no_orch,
-    countIf(f.swap_count > 0) as orch_swap
+    countIf(f.swap_count > 0) as orch_swap,
+    toFloat64(avgIf(f.startup_latency_ms, f.startup_latency_ms > 0)) as avg_startup_latency_ms,
+    toFloat64(quantileTDigestIf(0.95)(f.startup_latency_ms, f.startup_latency_ms > 0)) as p95_startup_latency_ms
 from {{ ref('fact_workflow_sessions') }} f
-left join session_gateway sg on f.canonical_session_key = sg.canonical_session_key
 where f.canonical_session_key != ''
+  and toYear(coalesce(f.started_at, f.last_seen)) > 2000
 group by hour, f.org, pipeline, gateway

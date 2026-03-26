@@ -68,7 +68,7 @@ test-validation-docker:
 	docker compose run --rm validation-go
 
 warehouse-run:
-	docker compose run --rm warehouse run
+	docker compose run --rm warehouse run --full-refresh
 
 warehouse-test:
 	docker compose run --rm warehouse test

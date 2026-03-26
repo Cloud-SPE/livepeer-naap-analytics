@@ -16,8 +16,8 @@ inventory as (
     select
         orch_address as orchestrator_address,
         pipeline_id,
-        any(model_id) as model_id,
-        any(gpu_id) as gpu_id
+        argMax(model_id, last_seen) as model_id,
+        argMax(gpu_id, last_seen) as gpu_id
     from {{ ref('serving_latest_orchestrator_pipeline_models') }}
     group by orchestrator_address, pipeline_id
 )
@@ -32,7 +32,7 @@ select
     toUInt64(count()) as known_sessions_count,
     toUInt64(countIf(b.startup_outcome = 'success')) as startup_success_sessions,
     toUInt64(countIf(b.startup_outcome = 'excused')) as startup_excused_sessions,
-    toUInt64(countIf(b.startup_outcome = 'failed')) as startup_unexcused_sessions,
+    toUInt64(countIf(b.startup_outcome = 'unexcused')) as startup_unexcused_sessions,
     toUInt64(0) as confirmed_swapped_sessions,
     toUInt64(0) as inferred_swap_sessions,
     toUInt64(countIf(b.swap_count > 0)) as total_swapped_sessions,

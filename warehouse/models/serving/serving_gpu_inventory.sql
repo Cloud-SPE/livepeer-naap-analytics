@@ -1,5 +1,12 @@
+{{ config(
+    materialized='table',
+    engine='MergeTree()',
+    order_by=['orch_address', 'orch_uri', 'pipeline', 'model_id']
+) }}
+
 select
     orch_address,
+    orch_uri,
     org,
     pipeline_id as pipeline,
     model_id,

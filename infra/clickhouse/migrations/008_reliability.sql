@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS naap.agg_orch_reliability_hourly
 )
 ENGINE = SummingMergeTree()
 PARTITION BY toYYYYMM(hour)
-ORDER BY (orch_address, org, hour)
+ORDER BY (org, hour, orch_address)
 SETTINGS index_granularity = 8192;
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS naap.mv_orch_reliability_hourly
