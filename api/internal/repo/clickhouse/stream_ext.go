@@ -39,7 +39,7 @@ func (r *Repo) ListStreamSamples(ctx context.Context, p types.QueryParams) ([]ty
 		SELECT
 			sample_ts, org, stream_id, gateway, orch_address,
 			pipeline, state, output_fps, input_fps, e2e_latency_ms, is_attributed
-		FROM naap.agg_stream_status_samples
+		FROM naap.serving_status_samples
 		`+where+`
 		ORDER BY sample_ts DESC
 		LIMIT ? OFFSET ?
@@ -67,18 +67,27 @@ func (r *Repo) ListStreamSamples(ctx context.Context, p types.QueryParams) ([]ty
 
 // GetStreamDetail returns the state and full sample history for one stream (STR-EXT-002).
 func (r *Repo) GetStreamDetail(ctx context.Context, streamID string) (*types.StreamDetail, error) {
-	// State from agg_stream_state
+	// Session lifecycle state from the canonical serving view.
 	stateRow := r.conn.QueryRow(ctx, `
-		SELECT stream_id, org, pipeline, orch_address, state,
-		       started_at, last_seen, is_closed, has_failure
-		FROM naap.agg_stream_state FINAL
+		SELECT
+			stream_id,
+			org,
+			canonical_pipeline,
+			ifNull(attributed_orch_address, '') AS orch_address,
+			started_at,
+			last_seen,
+			completed,
+			error_seen
+		FROM naap.serving_stream_sessions
 		WHERE stream_id = ?
+		ORDER BY last_seen DESC
+		LIMIT 1
 	`, streamID)
 
 	var sd types.StreamDetail
 	var isClosed, hasFailure uint8
 	if err := stateRow.Scan(
-		&sd.StreamID, &sd.Org, &sd.Pipeline, &sd.OrchAddress, &sd.State,
+		&sd.StreamID, &sd.Org, &sd.Pipeline, &sd.OrchAddress,
 		&sd.StartedAt, &sd.LastSeen, &isClosed, &hasFailure,
 	); err != nil {
 		if strings.Contains(err.Error(), "no rows in result set") {
@@ -88,19 +97,27 @@ func (r *Repo) GetStreamDetail(ctx context.Context, streamID string) (*types.Str
 	}
 	sd.IsClosed = isClosed != 0
 	sd.HasFailure = hasFailure != 0
-
 	// Resolve gateway from samples
 	gwRow := r.conn.QueryRow(ctx, `
-		SELECT any(gateway) FROM naap.agg_stream_status_samples WHERE stream_id = ?
+		SELECT any(gateway) FROM naap.serving_status_samples WHERE stream_id = ?
 	`, streamID)
 	_ = gwRow.Scan(&sd.Gateway)
 
-	// Samples from agg_stream_status_samples
+	latestStateRow := r.conn.QueryRow(ctx, `
+		SELECT state
+		FROM naap.serving_status_samples
+		WHERE stream_id = ?
+		ORDER BY sample_ts DESC
+		LIMIT 1
+	`, streamID)
+	_ = latestStateRow.Scan(&sd.State)
+
+	// Samples from the canonical serving view.
 	rows, err := r.conn.Query(ctx, `
 		SELECT
 			sample_ts, org, stream_id, gateway, orch_address,
 			pipeline, state, output_fps, input_fps, e2e_latency_ms, is_attributed
-		FROM naap.agg_stream_status_samples
+		FROM naap.serving_status_samples
 		WHERE stream_id = ?
 		ORDER BY sample_ts ASC
 		LIMIT 1000
@@ -148,7 +165,7 @@ func (r *Repo) GetAttributionSummary(ctx context.Context, p types.QueryParams) (
 			count()                        AS total_samples,
 			countIf(is_attributed = 1)     AS attributed,
 			countIf(is_attributed = 0)     AS unattributed
-		FROM naap.agg_stream_status_samples
+		FROM naap.serving_status_samples
 		`+where, args...)
 
 	var total, attributed, unattributed uint64

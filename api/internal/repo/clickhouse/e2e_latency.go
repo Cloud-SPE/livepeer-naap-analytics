@@ -7,30 +7,33 @@ import (
 	"github.com/livepeer/naap-analytics/internal/types"
 )
 
-// GetE2ELatencySummary returns end-to-end latency stats from stream status samples (E2E-001).
+// GetE2ELatencySummary returns stream startup latency stats derived from
+// gateway trace events (gateway_receive_stream_request →
+// gateway_receive_first_processed_segment), stored as startup_latency_ms in
+// fact_workflow_sessions (E2E-001).
 func (r *Repo) GetE2ELatencySummary(ctx context.Context, p types.QueryParams) (*types.E2ELatencySummary, error) {
 	start, end := effectiveWindow(p)
 
-	where := "WHERE sample_ts >= ? AND sample_ts < ? AND e2e_latency_ms > 0"
+	where := "WHERE coalesce(started_at, last_seen) >= ? AND coalesce(started_at, last_seen) < ? AND startup_latency_ms > 0"
 	args := []any{start, end}
 	if p.Org != "" {
 		where += " AND org = ?"
 		args = append(args, p.Org)
 	}
 	if p.Pipeline != "" {
-		where += " AND pipeline = ?"
+		where += " AND canonical_pipeline = ?"
 		args = append(args, p.Pipeline)
 	}
 
 	// Overall stats
 	overallRow := r.conn.QueryRow(ctx, `
 		SELECT
-			avg(e2e_latency_ms)              AS avg_ms,
-			quantile(0.5)(e2e_latency_ms)    AS p50_ms,
-			quantile(0.95)(e2e_latency_ms)   AS p95_ms,
-			quantile(0.99)(e2e_latency_ms)   AS p99_ms,
-			count()                          AS n
-		FROM naap.agg_stream_status_samples
+			avg(startup_latency_ms)              AS avg_ms,
+			quantile(0.5)(startup_latency_ms)    AS p50_ms,
+			quantile(0.95)(startup_latency_ms)   AS p95_ms,
+			quantile(0.99)(startup_latency_ms)   AS p99_ms,
+			count()                              AS n
+		FROM naap.fact_workflow_sessions
 		`+where, args...)
 
 	var overall types.E2ELatencyStats
@@ -43,15 +46,15 @@ func (r *Repo) GetE2ELatencySummary(ctx context.Context, p types.QueryParams) (*
 	// By pipeline
 	pipeRows, err := r.conn.Query(ctx, `
 		SELECT
-			pipeline,
-			avg(e2e_latency_ms),
-			quantile(0.5)(e2e_latency_ms),
-			quantile(0.95)(e2e_latency_ms),
-			quantile(0.99)(e2e_latency_ms),
+			canonical_pipeline,
+			avg(startup_latency_ms),
+			quantile(0.5)(startup_latency_ms),
+			quantile(0.95)(startup_latency_ms),
+			quantile(0.99)(startup_latency_ms),
 			count()
-		FROM naap.agg_stream_status_samples
+		FROM naap.fact_workflow_sessions
 		`+where+`
-		GROUP BY pipeline
+		GROUP BY canonical_pipeline
 		ORDER BY count() DESC
 		LIMIT 50
 	`, args...)
@@ -74,20 +77,21 @@ func (r *Repo) GetE2ELatencySummary(ctx context.Context, p types.QueryParams) (*
 		return nil, fmt.Errorf("clickhouse get e2e latency by pipeline rows: %w", err)
 	}
 
-	// By orchestrator (top 50 by sample count)
+	// By orchestrator (top 50 by session count)
 	orchRows, err := r.conn.Query(ctx, `
 		SELECT
-			orch_address,
-			pipeline,
-			avg(e2e_latency_ms),
-			quantile(0.5)(e2e_latency_ms),
-			quantile(0.95)(e2e_latency_ms),
-			quantile(0.99)(e2e_latency_ms),
+			attributed_orch_address,
+			canonical_pipeline,
+			avg(startup_latency_ms),
+			quantile(0.5)(startup_latency_ms),
+			quantile(0.95)(startup_latency_ms),
+			quantile(0.99)(startup_latency_ms),
 			count()
-		FROM naap.agg_stream_status_samples
+		FROM naap.fact_workflow_sessions
 		`+where+`
-		  AND orch_address != ''
-		GROUP BY orch_address, pipeline
+		  AND attributed_orch_address != ''
+		  AND attributed_orch_address IS NOT NULL
+		GROUP BY attributed_orch_address, canonical_pipeline
 		ORDER BY count() DESC
 		LIMIT 50
 	`, args...)
@@ -126,12 +130,14 @@ func (r *Repo) GetE2ELatencySummary(ctx context.Context, p types.QueryParams) (*
 	}, nil
 }
 
-// ListE2ELatencyHistory returns hourly E2E latency buckets (E2E-002).
+// ListE2ELatencyHistory returns hourly startup latency buckets from
+// serving_stream_hourly, which pre-aggregates startup_latency_ms from
+// fact_workflow_sessions (E2E-002).
 func (r *Repo) ListE2ELatencyHistory(ctx context.Context, p types.QueryParams) ([]types.E2ELatencyBucket, error) {
 	start, end := effectiveWindow(p)
 	limit := effectiveLimit(p)
 
-	where := "WHERE sample_ts >= ? AND sample_ts < ? AND e2e_latency_ms > 0"
+	where := "WHERE hour >= ? AND hour < ? AND avg_startup_latency_ms > 0"
 	args := []any{start, end}
 	if p.Org != "" {
 		where += " AND org = ?"
@@ -145,15 +151,15 @@ func (r *Repo) ListE2ELatencyHistory(ctx context.Context, p types.QueryParams) (
 
 	rows, err := r.conn.Query(ctx, `
 		SELECT
-			toStartOfHour(sample_ts)       AS hour,
-			avg(e2e_latency_ms)            AS avg_ms,
-			quantile(0.5)(e2e_latency_ms)  AS p50_ms,
-			quantile(0.95)(e2e_latency_ms) AS p95_ms,
-			count()                        AS n
-		FROM naap.agg_stream_status_samples
+			toStartOfHour(hour)                    AS ts,
+			avg(avg_startup_latency_ms)            AS avg_ms,
+			quantile(0.5)(avg_startup_latency_ms)  AS p50_ms,
+			avg(p95_startup_latency_ms)            AS p95_ms,
+			sum(started)                           AS n
+		FROM naap.serving_stream_hourly
 		`+where+`
-		GROUP BY hour
-		ORDER BY hour ASC
+		GROUP BY ts
+		ORDER BY ts ASC
 		LIMIT ?
 	`, args...)
 	if err != nil {

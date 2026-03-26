@@ -25,7 +25,7 @@ func (r *Repo) ListPipelines(ctx context.Context, p types.QueryParams) ([]types.
 			pipeline,
 			sum(started)   AS started,
 			sum(completed) AS completed
-		FROM naap.agg_stream_hourly FINAL
+		FROM naap.serving_stream_hourly
 		WHERE hour >= ? AND hour < ?`+orgFilter+`
 		GROUP BY pipeline
 	`, args...)
@@ -69,7 +69,7 @@ func (r *Repo) ListPipelines(ctx context.Context, p types.QueryParams) ([]types.
 			pipeline,
 			sum(inference_fps_sum) AS fps_sum,
 			sum(sample_count)      AS samp
-		FROM naap.agg_fps_hourly FINAL
+		FROM naap.serving_fps_hourly
 		WHERE hour >= ? AND hour < ?`+orgFilter+`
 		GROUP BY pipeline
 	`, args...)
@@ -100,7 +100,7 @@ func (r *Repo) ListPipelines(ctx context.Context, p types.QueryParams) ([]types.
 	// Payment per pipeline
 	payRows, err := r.conn.Query(ctx, `
 		SELECT pipeline, sum(total_wei), sum(event_count)
-		FROM naap.agg_payment_hourly FINAL
+		FROM naap.serving_payment_hourly
 		WHERE hour >= ? AND hour < ?`+orgFilter+`
 		GROUP BY pipeline
 	`, args...)
@@ -127,8 +127,9 @@ func (r *Repo) ListPipelines(ctx context.Context, p types.QueryParams) ([]types.
 		return nil, fmt.Errorf("clickhouse list pipelines pay rows: %w", err)
 	}
 
-	// Active streams per pipeline
-	activeWhere := "WHERE state = 'ONLINE'"
+	// Active streams per pipeline.
+	// sample_ts filter restores the recency bound that was previously in the view definition.
+	activeWhere := fmt.Sprintf("WHERE state = 'ONLINE' AND sample_ts > now() - INTERVAL %d SECOND", activeStreamSecs)
 	activeArgs := []any{}
 	if p.Org != "" {
 		activeWhere += " AND org = ?"
@@ -136,7 +137,7 @@ func (r *Repo) ListPipelines(ctx context.Context, p types.QueryParams) ([]types.
 	}
 	activeRows, err := r.conn.Query(ctx, `
 		SELECT pipeline, count() AS active
-		FROM naap.agg_stream_state FINAL
+		FROM naap.serving_active_stream_state
 		`+activeWhere+`
 		GROUP BY pipeline
 	`, activeArgs...)
@@ -167,7 +168,7 @@ func (r *Repo) ListPipelines(ctx context.Context, p types.QueryParams) ([]types.
 	}
 	warmRows, err := r.conn.Query(ctx, `
 		SELECT pipeline, count(DISTINCT orch_address) AS warm, any(orch_address) AS top_orch
-		FROM naap.agg_gpu_inventory FINAL
+		FROM naap.serving_gpu_inventory
 		`+warmWhere+`
 		GROUP BY pipeline
 	`, warmArgs...)
@@ -226,7 +227,7 @@ func (r *Repo) GetPipelineDetail(ctx context.Context, pipeline string, p types.Q
 	// Stream summary
 	streamRow := r.conn.QueryRow(ctx, `
 		SELECT sum(started), sum(completed)
-		FROM naap.agg_stream_hourly FINAL
+		FROM naap.serving_stream_hourly
 		`+where, args...)
 
 	var started, completed uint64
@@ -237,7 +238,7 @@ func (r *Repo) GetPipelineDetail(ctx context.Context, pipeline string, p types.Q
 	// FPS
 	fpsRow := r.conn.QueryRow(ctx, `
 		SELECT sum(inference_fps_sum), sum(sample_count)
-		FROM naap.agg_fps_hourly FINAL
+		FROM naap.serving_fps_hourly
 		`+where, args...)
 	var fpsSum float64
 	var fpsSamp uint64
@@ -248,22 +249,23 @@ func (r *Repo) GetPipelineDetail(ctx context.Context, pipeline string, p types.Q
 	// Payments
 	payRow := r.conn.QueryRow(ctx, `
 		SELECT sum(total_wei)
-		FROM naap.agg_payment_hourly FINAL
+		FROM naap.serving_payment_hourly
 		`+where, args...)
 	var payWEI uint64
 	if err := payRow.Scan(&payWEI); err != nil {
 		return nil, fmt.Errorf("clickhouse get pipeline detail pay: %w", err)
 	}
 
-	// Active streams
-	activeWhere := "WHERE state = 'ONLINE' AND pipeline = ?"
+	// Active streams.
+	// sample_ts filter restores the recency bound that was previously in the view definition.
+	activeWhere := fmt.Sprintf("WHERE state = 'ONLINE' AND pipeline = ? AND sample_ts > now() - INTERVAL %d SECOND", activeStreamSecs)
 	activeArgs := []any{pipeline}
 	if p.Org != "" {
 		activeWhere += " AND org = ?"
 		activeArgs = append(activeArgs, p.Org)
 	}
 	activeRow := r.conn.QueryRow(ctx, `
-		SELECT count() FROM naap.agg_stream_state FINAL `+activeWhere, activeArgs...)
+		SELECT count() FROM naap.serving_active_stream_state `+activeWhere, activeArgs...)
 	var active uint64
 	_ = activeRow.Scan(&active)
 
@@ -276,7 +278,7 @@ func (r *Repo) GetPipelineDetail(ctx context.Context, pipeline string, p types.Q
 	}
 	modelRows, err := r.conn.Query(ctx, `
 		SELECT model_id, count(DISTINCT orch_address) AS warm
-		FROM naap.agg_gpu_inventory FINAL
+		FROM naap.serving_gpu_inventory
 		`+warmWhere+`
 		GROUP BY model_id
 		ORDER BY warm DESC

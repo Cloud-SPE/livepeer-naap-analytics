@@ -23,7 +23,7 @@ func (r *Repo) GetCapacitySummary(ctx context.Context, p types.QueryParams) (*ty
 			model_id,
 			count(DISTINCT orch_address) AS warm_orchs,
 			sum(memory_bytes)            AS total_vram
-		FROM naap.agg_gpu_inventory FINAL
+		FROM naap.serving_gpu_inventory
 		`+warmWhere+`
 		GROUP BY pipeline, model_id
 		ORDER BY warm_orchs DESC
@@ -55,8 +55,9 @@ func (r *Repo) GetCapacitySummary(ctx context.Context, p types.QueryParams) (*ty
 		return nil, fmt.Errorf("clickhouse get capacity warm rows: %w", err)
 	}
 
-	// Active streams per pipeline
-	activeWhere := "WHERE state = 'ONLINE'"
+	// Active streams per pipeline.
+	// sample_ts filter restores the recency bound that was previously in the view definition.
+	activeWhere := fmt.Sprintf("WHERE state = 'ONLINE' AND sample_ts > now() - INTERVAL %d SECOND", activeStreamSecs)
 	activeArgs := []any{}
 	if p.Org != "" {
 		activeWhere += " AND org = ?"
@@ -64,7 +65,7 @@ func (r *Repo) GetCapacitySummary(ctx context.Context, p types.QueryParams) (*ty
 	}
 	activeRows, err := r.conn.Query(ctx, `
 		SELECT pipeline, count() AS active
-		FROM naap.agg_stream_state FINAL
+		FROM naap.serving_active_stream_state
 		`+activeWhere+`
 		GROUP BY pipeline
 	`, activeArgs...)

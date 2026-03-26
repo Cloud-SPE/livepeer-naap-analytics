@@ -8,39 +8,39 @@ import (
 )
 
 // GetFPSSummary returns inference and input FPS statistics by pipeline and orch (PERF-001).
-// Percentiles are computed from raw naap.events (not aggregate table) for accuracy.
+// Percentiles are computed from canonical serving samples.
 // PERF-001-c: samples with fps == 0 are excluded.
 func (r *Repo) GetFPSSummary(ctx context.Context, p types.QueryParams) (*types.FPSSummary, error) {
 	start, end := effectiveWindow(p)
-	where := "WHERE event_type = 'ai_stream_status' AND event_ts >= ? AND event_ts < ? AND JSONExtractFloat(data, 'inference_status', 'fps') > 0"
+	where := "WHERE sample_ts >= ? AND sample_ts < ? AND output_fps > 0"
 	args := []any{start, end}
 	if p.Org != "" {
 		where += " AND org = ?"
 		args = append(args, p.Org)
 	}
 	if p.Pipeline != "" {
-		where += " AND JSONExtractString(data, 'pipeline') = ?"
+		where += " AND pipeline = ?"
 		args = append(args, p.Pipeline)
 	}
 	if p.OrchAddress != "" {
-		where += " AND lower(JSONExtractString(data, 'orchestrator_info', 'address')) = ?"
+		where += " AND orch_address = ?"
 		args = append(args, p.OrchAddress)
 	}
 
 	// By pipeline.
 	pipeRows, err := r.conn.Query(ctx, `
 		SELECT
-			JSONExtractString(data, 'pipeline')                              AS pipeline,
-			avg(JSONExtractFloat(data, 'inference_status', 'fps'))           AS avg_inf,
-			quantile(0.05)(JSONExtractFloat(data, 'inference_status', 'fps')) AS p5_inf,
-			quantile(0.5)(JSONExtractFloat(data, 'inference_status', 'fps'))  AS p50_inf,
-			quantile(0.99)(JSONExtractFloat(data, 'inference_status', 'fps')) AS p99_inf,
-			avg(JSONExtractFloat(data, 'input_status', 'fps'))               AS avg_inp,
-			quantile(0.05)(JSONExtractFloat(data, 'input_status', 'fps'))     AS p5_inp,
-			quantile(0.5)(JSONExtractFloat(data, 'input_status', 'fps'))      AS p50_inp,
-			quantile(0.99)(JSONExtractFloat(data, 'input_status', 'fps'))     AS p99_inp,
+			pipeline,
+			avg(output_fps)            AS avg_inf,
+			quantile(0.05)(output_fps) AS p5_inf,
+			quantile(0.5)(output_fps)  AS p50_inf,
+			quantile(0.99)(output_fps) AS p99_inf,
+			avg(input_fps)             AS avg_inp,
+			quantile(0.05)(input_fps)  AS p5_inp,
+			quantile(0.5)(input_fps)   AS p50_inp,
+			quantile(0.99)(input_fps)  AS p99_inp,
 			count()                                                          AS n
-		FROM naap.events
+		FROM naap.serving_status_samples
 		`+where+`
 		GROUP BY pipeline
 		ORDER BY n DESC
@@ -72,20 +72,20 @@ func (r *Repo) GetFPSSummary(ctx context.Context, p types.QueryParams) (*types.F
 	// By orchestrator.
 	orchRows, err := r.conn.Query(ctx, `
 		SELECT
-			lower(JSONExtractString(data, 'orchestrator_info', 'address'))    AS addr,
-			JSONExtractString(data, 'pipeline')                               AS pipeline,
-			avg(JSONExtractFloat(data, 'inference_status', 'fps'))            AS avg_inf,
-			quantile(0.05)(JSONExtractFloat(data, 'inference_status', 'fps')) AS p5_inf,
-			quantile(0.5)(JSONExtractFloat(data, 'inference_status', 'fps'))  AS p50_inf,
-			quantile(0.99)(JSONExtractFloat(data, 'inference_status', 'fps')) AS p99_inf,
-			avg(JSONExtractFloat(data, 'input_status', 'fps'))                AS avg_inp,
-			quantile(0.05)(JSONExtractFloat(data, 'input_status', 'fps'))     AS p5_inp,
-			quantile(0.5)(JSONExtractFloat(data, 'input_status', 'fps'))      AS p50_inp,
-			quantile(0.99)(JSONExtractFloat(data, 'input_status', 'fps'))     AS p99_inp,
+			orch_address AS addr,
+			pipeline,
+			avg(output_fps)            AS avg_inf,
+			quantile(0.05)(output_fps) AS p5_inf,
+			quantile(0.5)(output_fps)  AS p50_inf,
+			quantile(0.99)(output_fps) AS p99_inf,
+			avg(input_fps)             AS avg_inp,
+			quantile(0.05)(input_fps)  AS p5_inp,
+			quantile(0.5)(input_fps)   AS p50_inp,
+			quantile(0.99)(input_fps)  AS p99_inp,
 			count()                                                           AS n
-		FROM naap.events
+		FROM naap.serving_status_samples
 		`+where+`
-		AND lower(JSONExtractString(data, 'orchestrator_info', 'address')) != ''
+		AND orch_address != ''
 		GROUP BY addr, pipeline
 		ORDER BY n DESC
 		LIMIT 100
@@ -141,7 +141,7 @@ func (r *Repo) ListFPSHistory(ctx context.Context, p types.QueryParams) ([]types
 			sum(inference_fps_sum) / sum(sample_count)   AS avg_inf,
 			sum(input_fps_sum) / sum(sample_count)       AS avg_inp,
 			sum(sample_count)                            AS n
-		FROM naap.agg_fps_hourly FINAL
+		FROM naap.serving_fps_hourly
 		`+where+`
 		GROUP BY ts
 		ORDER BY ts ASC
@@ -171,11 +171,10 @@ func (r *Repo) ListFPSHistory(ctx context.Context, p types.QueryParams) ([]types
 }
 
 // GetLatencySummary returns orch discovery latency percentiles (PERF-003).
-// Percentiles are computed from raw naap.events for accuracy (PERF-003-b).
+// Percentiles are computed from typed discovery candidates.
 func (r *Repo) GetLatencySummary(ctx context.Context, p types.QueryParams) (*types.LatencySummary, error) {
 	start, end := effectiveWindow(p)
-	// Build inner WHERE conditions (no WHERE keyword — appended after fixed predicates).
-	innerConds := "event_ts >= ? AND event_ts < ? AND data NOT IN ('', '[]', 'null')"
+	innerConds := "event_ts >= ? AND event_ts < ?"
 	args := []any{start, end}
 	if p.Org != "" {
 		innerConds += " AND org = ?"
@@ -184,22 +183,16 @@ func (r *Repo) GetLatencySummary(ctx context.Context, p types.QueryParams) (*typ
 
 	rows, err := r.conn.Query(ctx, `
 		SELECT
-			lower(JSONExtractString(orch_json, 'address'))                     AS addr,
-			avg(toUInt64OrDefault(JSONExtractString(orch_json, 'latency_ms'))) AS avg_ms,
-			quantile(0.5)(toUInt64OrDefault(JSONExtractString(orch_json, 'latency_ms')))  AS p50,
-			quantile(0.95)(toUInt64OrDefault(JSONExtractString(orch_json, 'latency_ms'))) AS p95,
-			quantile(0.99)(toUInt64OrDefault(JSONExtractString(orch_json, 'latency_ms'))) AS p99,
+			orch_address AS addr,
+			avg(latency_ms) AS avg_ms,
+			quantile(0.5)(latency_ms)  AS p50,
+			quantile(0.95)(latency_ms) AS p95,
+			quantile(0.99)(latency_ms) AS p99,
 			count()                                                            AS n
-		FROM (
-			SELECT
-				event_ts, org,
-				arrayJoin(JSONExtractArrayRaw(data)) AS orch_json
-			FROM naap.events
-			WHERE event_type = 'discovery_results'
-			  AND `+innerConds+`
-		)
-		WHERE addr != ''
-		  AND toUInt64OrDefault(JSONExtractString(orch_json, 'latency_ms')) > 0
+		FROM naap.serving_discovery_results
+		WHERE `+innerConds+`
+		  AND orch_address != ''
+		  AND latency_ms > 0
 		GROUP BY addr
 		ORDER BY avg_ms ASC
 		LIMIT 200

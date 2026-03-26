@@ -120,7 +120,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "sql",
-          "rawSql": "SELECT toFloat64(countDistinct(stream_id)) AS value\nFROM naap.agg_stream_status_samples\nWHERE sample_ts >= now() - INTERVAL 15 MINUTE\nAND is_attributed = 1 AND orch_address != ''\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nAND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address))",
+          "rawSql": "SELECT toFloat64(countDistinct(stream_id)) AS value\nFROM naap.serving_status_samples\nWHERE sample_ts >= now() - INTERVAL 15 MINUTE\nAND is_attributed = 1 AND orch_address != ''\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nAND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address))",
           "refId": "A"
         }
       ],
@@ -183,7 +183,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "WITH ens AS (SELECT eth_address AS addr, name AS ens_name FROM naap.orch_metadata FINAL),\nlatest_per_stream AS (\n    SELECT stream_id, org, orch_address, pipeline, gateway,\n        argMax(output_fps, sample_ts) AS latest_output_fps,\n        argMax(state, sample_ts) AS latest_state,\n        max(sample_ts) AS latest_sample_ts\n    FROM naap.agg_stream_status_samples\n    WHERE sample_ts >= now() - INTERVAL 30 MINUTE AND is_attributed = 1\n    GROUP BY stream_id, org, orch_address, pipeline, gateway\n)\nSELECT s.stream_id AS \"Stream ID\",\n    if(ifNull(ens.ens_name, '') != '' AND NOT startsWith(lower(ens.ens_name), '0x'), ens.ens_name, s.orch_address) AS \"Orchestrator ENS\",\n    ifNull(s.pipeline, 'unknown') AS \"Pipeline\",\n    s.gateway AS \"Gateway\",\n    round(ifNull(s.latest_output_fps, 0), 2) AS \"FPS\",\n    s.latest_state AS \"State\",\n    toUInt64(greatest(dateDiff('second', s.latest_sample_ts, now()), 0)) AS \"Last Sample Age (s)\"\nFROM latest_per_stream s\nLEFT JOIN ens e ON e.addr = s.orch_address\nWHERE s.latest_sample_ts >= now() - INTERVAL 15 MINUTE\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), s.org))\nAND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), s.orch_address))\nORDER BY \"Last Sample Age (s)\" ASC\nLIMIT 100",
+          "rawSql": "WITH ens AS (SELECT orch_address AS addr, name AS ens_name FROM naap.serving_latest_orchestrator_state)\nSELECT s.stream_id AS \"Stream ID\",\n    if(ifNull(ens.ens_name, '') != '' AND NOT startsWith(lower(ens.ens_name), '0x'), ens.ens_name, s.orch_address) AS \"Orchestrator ENS\",\n    ifNull(s.pipeline, 'unknown') AS \"Pipeline\",\n    s.gateway AS \"Gateway\",\n    round(ifNull(s.output_fps, 0), 2) AS \"FPS\",\n    s.state AS \"State\",\n    toUInt64(greatest(dateDiff('second', s.sample_ts, now()), 0)) AS \"Last Sample Age (s)\"\nFROM naap.serving_active_stream_state s\nLEFT JOIN ens e ON e.addr = s.orch_address\nWHERE ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), s.org))\nAND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), s.orch_address))\nORDER BY \"Last Sample Age (s)\" ASC\nLIMIT 100",
           "refId": "A"
         }
       ],
@@ -371,7 +371,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "WITH ens AS (SELECT eth_address AS addr, name AS ens_name FROM naap.orch_metadata FINAL),\nactive_counts AS (\n    SELECT orch_address AS addr, countDistinct(stream_id) AS active_streams\n    FROM naap.agg_stream_status_samples\n    WHERE sample_ts >= now() - INTERVAL 15 MINUTE AND is_attributed = 1 AND orch_address != ''\n    AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n    GROUP BY addr\n)\nSELECT a.addr AS \"Orchestrator Address\",\n    if(ifNull(ens.ens_name, '') != '' AND NOT startsWith(lower(ens.ens_name), '0x'), ens.ens_name, a.addr) AS \"Orchestrator ENS\",\n    toUInt64(a.active_streams) AS \"Active Streams\"\nFROM active_counts a\nLEFT JOIN ens e ON e.addr = a.addr\nWHERE ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), a.addr))\nORDER BY \"Active Streams\" DESC, \"Orchestrator Address\" ASC\nLIMIT 12",
+          "rawSql": "WITH ens AS (SELECT orch_address AS addr, name AS ens_name FROM naap.serving_latest_orchestrator_state),\nactive_counts AS (\n    SELECT orch_address AS addr, countDistinct(stream_id) AS active_streams\n    FROM naap.serving_status_samples\n    WHERE sample_ts >= now() - INTERVAL 15 MINUTE AND is_attributed = 1 AND orch_address != ''\n    AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n    GROUP BY addr\n)\nSELECT a.addr AS \"Orchestrator Address\",\n    if(ifNull(ens.ens_name, '') != '' AND NOT startsWith(lower(ens.ens_name), '0x'), ens.ens_name, a.addr) AS \"Orchestrator ENS\",\n    toUInt64(a.active_streams) AS \"Active Streams\"\nFROM active_counts a\nLEFT JOIN ens e ON e.addr = a.addr\nWHERE ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), a.addr))\nORDER BY \"Active Streams\" DESC, \"Orchestrator Address\" ASC\nLIMIT 12",
           "refId": "A"
         }
       ],
@@ -429,7 +429,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "WITH ens AS (SELECT eth_address AS addr, name AS ens_name FROM naap.orch_metadata FINAL),\nactive_paths AS (\n    SELECT orch_address AS addr, gateway,\n        ifNull(nullIf(pipeline, ''), 'unknown') AS pipeline,\n        countDistinct(stream_id) AS active_streams,\n        round(avg(output_fps), 2) AS avg_fps\n    FROM naap.agg_stream_status_samples\n    WHERE sample_ts >= now() - INTERVAL 15 MINUTE AND is_attributed = 1 AND orch_address != ''\n    AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n    GROUP BY addr, gateway, pipeline\n)\nSELECT ifNull(gateway, 'unknown') AS \"From\",\n    if(ifNull(ens.ens_name, '') != '' AND NOT startsWith(lower(ens.ens_name), '0x'), ens.ens_name, a.addr) AS \"Orchestrator\",\n    a.pipeline AS \"Pipeline\",\n    toUInt64(a.active_streams) AS \"Active Streams (15m)\",\n    toFloat64(a.avg_fps) AS \"Avg FPS\"\nFROM active_paths a\nLEFT JOIN ens e ON e.addr = a.addr\nWHERE ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), a.addr))\nORDER BY \"Active Streams (15m)\" DESC, \"Avg FPS\" DESC\nLIMIT 50",
+          "rawSql": "WITH ens AS (SELECT orch_address AS addr, name AS ens_name FROM naap.serving_latest_orchestrator_state),\nactive_paths AS (\n    SELECT orch_address AS addr, gateway,\n        ifNull(nullIf(pipeline, ''), 'unknown') AS pipeline,\n        countDistinct(stream_id) AS active_streams,\n        round(avg(output_fps), 2) AS avg_fps\n    FROM naap.serving_status_samples\n    WHERE sample_ts >= now() - INTERVAL 15 MINUTE AND is_attributed = 1 AND orch_address != ''\n    AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n    GROUP BY addr, gateway, pipeline\n)\nSELECT ifNull(gateway, 'unknown') AS \"From\",\n    if(ifNull(ens.ens_name, '') != '' AND NOT startsWith(lower(ens.ens_name), '0x'), ens.ens_name, a.addr) AS \"Orchestrator\",\n    a.pipeline AS \"Pipeline\",\n    toUInt64(a.active_streams) AS \"Active Streams (15m)\",\n    toFloat64(a.avg_fps) AS \"Avg FPS\"\nFROM active_paths a\nLEFT JOIN ens e ON e.addr = a.addr\nWHERE ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), a.addr))\nORDER BY \"Active Streams (15m)\" DESC, \"Avg FPS\" DESC\nLIMIT 50",
           "refId": "A"
         }
       ],
@@ -523,14 +523,14 @@
           "text": "All",
           "value": "__all"
         },
-        "definition": "SELECT DISTINCT org FROM naap.agg_orch_state FINAL WHERE org != '' ORDER BY org",
+        "definition": "SELECT DISTINCT org FROM naap.serving_latest_orchestrator_state WHERE org != '' ORDER BY org",
         "hide": 0,
         "includeAll": true,
         "label": "Org",
         "multi": true,
         "name": "org",
         "options": [],
-        "query": "SELECT DISTINCT org FROM naap.agg_orch_state FINAL WHERE org != '' ORDER BY org",
+        "query": "SELECT DISTINCT org FROM naap.serving_latest_orchestrator_state WHERE org != '' ORDER BY org",
         "refresh": 1,
         "sort": 1,
         "type": "query",
@@ -544,14 +544,14 @@
           "text": "All",
           "value": "__all"
         },
-        "definition": "SELECT DISTINCT model_id FROM naap.agg_gpu_inventory FINAL WHERE model_id != '' ORDER BY model_id",
+        "definition": "SELECT DISTINCT model_id FROM naap.serving_gpu_inventory WHERE model_id != '' ORDER BY model_id",
         "hide": 0,
         "includeAll": true,
         "label": "Model",
         "multi": true,
         "name": "model",
         "options": [],
-        "query": "SELECT DISTINCT model_id FROM naap.agg_gpu_inventory FINAL WHERE model_id != '' ORDER BY model_id",
+        "query": "SELECT DISTINCT model_id FROM naap.serving_gpu_inventory WHERE model_id != '' ORDER BY model_id",
         "refresh": 1,
         "sort": 1,
         "type": "query",
@@ -565,14 +565,14 @@
           "text": "All",
           "value": "__all"
         },
-        "definition": "WITH orchestrators AS (SELECT DISTINCT lower(orchestrator_address) AS addr FROM livepeer_analytics.dim_orchestrator_capability_current WHERE ifNull(orchestrator_address, '') != ''), ens AS (SELECT eth_address AS addr, ens_name FROM livepeer_analytics.v_dim_ens_names) SELECT orchestrators.addr AS value, if(ifNull(ens_name, '') != '' AND NOT startsWith(lower(ens_name), '0x'), concat(ens_name, ' (', orchestrators.addr, ')'), orchestrators.addr) AS text FROM orchestrators LEFT JOIN ens ON orchestrators.addr = ens.addr ORDER BY if(ifNull(ens_name, '') != '' AND NOT startsWith(lower(ens_name), '0x'), 1, 0) DESC, text",
+        "definition": "SELECT orch_address AS __value, if(name != '' AND NOT startsWith(lower(name), '0x'), concat(name, ' (', orch_address, ')'), orch_address) AS __text FROM naap.serving_latest_orchestrator_state ORDER BY if(name != '' AND NOT startsWith(lower(name), '0x'), 1, 0) DESC, __text",
         "hide": 0,
         "includeAll": true,
         "label": "Orchestrator (ENS)",
         "multi": true,
         "name": "orchestrator",
         "options": [],
-        "query": "WITH o AS (SELECT DISTINCT orch_address FROM naap.agg_orch_state FINAL) SELECT o.orch_address AS value, if(m.name != '' AND NOT startsWith(lower(m.name), '0x'), concat(m.name, ' (', o.orch_address, ')'), o.orch_address) AS text FROM o LEFT JOIN naap.orch_metadata FINAL m ON m.eth_address = o.orch_address ORDER BY if(m.name != '' AND NOT startsWith(lower(m.name), '0x'), 1, 0) DESC, text",
+        "query": "SELECT orch_address AS __value, if(name != '' AND NOT startsWith(lower(name), '0x'), concat(name, ' (', orch_address, ')'), orch_address) AS __text FROM naap.serving_latest_orchestrator_state ORDER BY if(name != '' AND NOT startsWith(lower(name), '0x'), 1, 0) DESC, __text",
         "refresh": 1,
         "sort": 1,
         "type": "query",

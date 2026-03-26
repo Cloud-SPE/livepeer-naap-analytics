@@ -1,4 +1,4 @@
-.PHONY: up down build test test-integration bench load-test lint dev-api setup fmt ch-smoke ch-query push push-api push-clickhouse
+.PHONY: up down build test test-integration bench load-test lint dev-api setup fmt ch-smoke ch-query push push-api push-clickhouse push-dbt warehouse-run warehouse-test test-validation test-validation-docker
 
 REGISTRY  ?= tztcloud
 IMAGE_TAG ?= latest
@@ -21,7 +21,7 @@ build:
 
 # Build and push production images to the registry.
 # Requires: docker login tztcloud
-push: push-api push-clickhouse
+push: push-api push-clickhouse push-dbt
 
 push-api:
 	docker build \
@@ -37,6 +37,13 @@ push-clickhouse:
 	    .
 	docker push $(REGISTRY)/naap-clickhouse:$(IMAGE_TAG)
 
+push-dbt:
+	docker build \
+	    -f infra/docker/dbt.Dockerfile \
+	    -t $(REGISTRY)/naap-dbt:$(IMAGE_TAG) \
+	    .
+	docker push $(REGISTRY)/naap-dbt:$(IMAGE_TAG)
+
 # ── Test ──────────────────────────────────────────────────────────────────────
 
 test:
@@ -47,13 +54,24 @@ test-integration:
 	cd api && CLICKHOUSE_ADDR=localhost:9000 go test -tags=integration ./internal/repo/clickhouse/... -v -timeout=60s
 
 # Validation tests: scenario-based data-quality harness (make up first).
-# Inserts synthetic events directly into naap.events and asserts on aggregate tables.
-# Each test uses a unique org tag for isolation — no cleanup required.
+# Inserts synthetic events directly into naap.events and asserts on canonical
+# typed, fact, and serving outputs. The host target requires direct native
+# ClickHouse socket access; use test-validation-docker when running entirely
+# inside docker-compose.
 test-validation:
 	cd api && CLICKHOUSE_ADDR=localhost:9000 \
 	         CLICKHOUSE_WRITER_USER=naap_writer \
 	         CLICKHOUSE_WRITER_PASSWORD=naap_writer_changeme \
 	         go test -tags=validation ./internal/validation/... -v -timeout=120s
+
+test-validation-docker:
+	docker compose run --rm validation-go
+
+warehouse-run:
+	docker compose run --rm warehouse run --full-refresh
+
+warehouse-test:
+	docker compose run --rm warehouse test
 
 # Benchmarks: measures handler+JSON overhead using the noop repo.
 bench:

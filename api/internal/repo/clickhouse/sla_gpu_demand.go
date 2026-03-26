@@ -12,12 +12,11 @@ import (
 // SLA Compliance  —  GET /v1/sla/compliance
 // ---------------------------------------------------------------------------
 
-// ListSLACompliance returns paginated SLA compliance rows aggregated from
-// naap.agg_stream_status_samples, joined to naap.agg_gpu_inventory for
-// model_id and gpu_id dimensions.
+// ListSLACompliance returns paginated SLA compliance rows from canonical
+// serving views.
 //
 // Field approximations vs leaderboard-serverless source:
-//   - region                   → always NULL (not captured in naap.events)
+//   - region                   → always NULL (not captured in canonical sources)
 //   - startup_excused_sessions → 0 (excusal logic absent)
 //   - confirmed_swapped_sessions → 0 (confirmation signal absent)
 //   - inferred_swap_sessions   → 0 (restart events not linked per-session here)
@@ -113,8 +112,8 @@ func buildSLAWhere(p types.SLAComplianceParams) (string, []any) {
 // Network Demand  —  GET /v1/network/demand
 // ---------------------------------------------------------------------------
 
-// ListNetworkDemand returns paginated network demand rows aggregated from
-// naap.agg_stream_status_samples grouped by gateway + pipeline.
+// ListNetworkDemand returns paginated network demand rows from canonical
+// serving views.
 //
 // Field approximations:
 //   - region                → always NULL
@@ -205,9 +204,8 @@ func buildDemandWhere(p types.NetworkDemandParams) (string, []any) {
 // GPU Metrics  —  GET /v1/gpu/metrics
 // ---------------------------------------------------------------------------
 
-// ListGPUMetrics returns paginated GPU performance metrics aggregated from
-// naap.agg_stream_status_samples, joined to naap.agg_gpu_inventory for
-// hardware dimensions.
+// ListGPUMetrics returns paginated GPU performance metrics from canonical
+// serving views.
 //
 // Field approximations:
 //   - region, runner_version, cuda_version → always NULL
@@ -235,7 +233,7 @@ func (r *Repo) ListGPUMetrics(ctx context.Context, p types.GPUMetricsParams) ([]
 			window_start, org, orchestrator_address, pipeline_id, model_id, gpu_id, region,
 			avg_output_fps, p95_output_fps, fps_jitter_coefficient,
 			status_samples, error_status_samples, health_signal_coverage_ratio,
-			gpu_model, memory_bytes, runner_version, cuda_version,
+			gpu_model_name, gpu_memory_bytes_total, runner_version, cuda_version,
 			avg_prompt_to_first_frame_ms, avg_startup_latency_ms, avg_e2e_latency_ms,
 			p95_prompt_to_first_frame_latency_ms, p95_startup_latency_ms, p95_e2e_latency_ms,
 			prompt_to_first_frame_sample_count, startup_latency_sample_count, e2e_latency_sample_count,
@@ -310,7 +308,7 @@ func buildGPUWhere(p types.GPUMetricsParams) (string, []any) {
 		args = append(args, p.GPUID)
 	}
 	if p.GPUModelName != "" {
-		conds = append(conds, "gpu_model = ?")
+		conds = append(conds, "gpu_model_name = ?")
 		args = append(args, p.GPUModelName)
 	}
 	return "WHERE " + strings.Join(conds, " AND "), args

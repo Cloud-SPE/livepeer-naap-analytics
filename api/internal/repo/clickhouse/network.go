@@ -16,7 +16,7 @@ func (r *Repo) GetNetworkSummary(ctx context.Context, p types.QueryParams) (*typ
 		SELECT
 			count()                                                         AS total_registered,
 			countIf(last_seen > now() - INTERVAL ? MINUTE)                  AS total_active
-		FROM naap.agg_orch_state FINAL
+		FROM naap.serving_latest_orchestrator_state
 	`
 	args := []any{activeOrchMinutes}
 
@@ -61,12 +61,12 @@ func (r *Repo) ListOrchestrators(ctx context.Context, p types.QueryParams) ([]ty
 		SELECT
 			orch_address,
 			org,
-			JSONExtractString(raw_capabilities, 'orch_uri')               AS uri,
+			uri,
 			version,
 			last_seen,
 			last_seen > now() - INTERVAL %d MINUTE                        AS is_active,
 			raw_capabilities
-		FROM naap.agg_orch_state FINAL
+		FROM naap.serving_latest_orchestrator_state
 		%s
 		ORDER BY last_seen DESC
 		LIMIT ? OFFSET ?
@@ -107,7 +107,7 @@ func (r *Repo) GetGPUSummary(ctx context.Context, p types.QueryParams) (*types.G
 	}
 
 	rows, err := r.conn.Query(ctx,
-		"SELECT raw_capabilities FROM naap.agg_orch_state FINAL "+where, args...)
+		"SELECT raw_capabilities FROM naap.serving_latest_orchestrator_state "+where, args...)
 	if err != nil {
 		return nil, fmt.Errorf("clickhouse get gpu summary: %w", err)
 	}
@@ -165,7 +165,7 @@ func (r *Repo) ListModels(ctx context.Context, p types.QueryParams) ([]types.Mod
 	}
 
 	rows, err := r.conn.Query(ctx,
-		"SELECT raw_capabilities FROM naap.agg_orch_state FINAL "+where, args...)
+		"SELECT raw_capabilities FROM naap.serving_latest_orchestrator_state "+where, args...)
 	if err != nil {
 		return nil, fmt.Errorf("clickhouse list models: %w", err)
 	}

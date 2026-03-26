@@ -1,0 +1,38 @@
+name: "naap_analytics"
+version: "1.0.0"
+config-version: 2
+
+profile: "naap_analytics"
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+models:
+  naap_analytics:
+    staging:
+      +materialized: view
+      +tags: ['static']
+    facts:
+      +materialized: table
+      +tags: ['incremental']
+    serving:
+      +materialized: view
+      +tags: ['static']
+      # Table-backed serving models that need periodic refresh via dbt schedule.
+      # These override the parent 'static' tag so the cron only rebuilds what matters.
+      serving_active_stream_state:
+        +materialized: table
+        tags: ['incremental']
+      serving_status_samples:
+        tags: ['incremental']
+      serving_latest_orchestrator_pipeline_models:
+        tags: ['incremental']
+      serving_gpu_inventory:
+        tags: ['incremental']
+      serving_stream_hourly:
+        tags: ['incremental']

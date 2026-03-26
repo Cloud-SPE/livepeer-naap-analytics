@@ -2,269 +2,178 @@
 
 package validation
 
-// ── RULE-AGGREGATE-004 (partial) ─────────────────────────────────────────────
-// GPU Metrics Must Remain Hardware-Backed; Null KPIs Must Not Become Zero
-// The current implementation partially enforces this via the WHERE fps > 0
-// filter in mv_fps_hourly: zero-FPS status samples (stream not yet producing
-// output) are excluded from agg_fps_hourly. This test verifies that filter
-// holds — a zero-FPS sample must not appear in the aggregate.
+// ── RULE-AGGREGATE-004 ────────────────────────────────────────────────────────
+// Status-hour and reliability outputs must preserve degraded-mode splits and
+// same-hour failed no-output sessions without coercing missing values to zero.
+//
+// ── RULE-LIFECYCLE-009 ───────────────────────────────────────────────────────
+// Tail filtering must be narrow and deterministic: only true end-of-session
+// rollover noise is suppressed from serving outputs.
 //
 // ── RULE-TYPED_RAW-002 ───────────────────────────────────────────────────────
-// Capability Payloads Must Expand Into Canonical Snapshot Rows Without Losing
-// Orchestrator Identity
-// A network_capabilities event carrying an array of N orchestrators must
-// produce exactly N rows in agg_orch_state (one per orchestrator).
-// Orchestrators with blank address must be filtered out.
+// Capability payloads must expand into historical snapshot rows without losing
+// orchestrator identity.
 
 import (
-	"context"
 	"fmt"
+	"strings"
 	"testing"
+	"time"
 )
 
-// ── RULE-AGGREGATE-004 (partial) ─────────────────────────────────────────────
-
-// TestRuleAggregate004_ZeroFpsSamplesExcludedFromAggregate verifies that
-// ai_stream_status events with inference_status.fps = 0 do not appear in
-// agg_fps_hourly. The MV has WHERE fps > 0 to exclude non-producing samples.
-func TestRuleAggregate004_ZeroFpsSamplesExcludedFromAggregate(t *testing.T) {
+func TestRuleAggregate004_DegradedModesRemainSplitInReliabilityFacts(t *testing.T) {
 	h := newHarness(t)
 	ts := anchor()
-	orchAddr := fmt.Sprintf("0x%s", uid("orch"))
-	streamID := uid("s")
+	orchAddr := strings.ToLower(fmt.Sprintf("0x%s", uid("orch")))
+	orchURI := fmt.Sprintf("https://orch-%s.example.com", uid("uri"))
 
 	h.insert(t, []rawEvent{
-		// Zero FPS — stream not yet producing output. Must NOT appear in agg_fps_hourly.
-		{EventID: uid("e"), EventType: "ai_stream_status", EventTs: ts, Org: h.org,
-			Data: fmt.Sprintf(
-				`{"stream_id":%q,"pipeline":"streamdiffusion","state":"LOADING","orchestrator_info":{"address":%q,"url":""},"inference_status":{"fps":0.0,"restart_count":0,"last_error":""}}`,
-				streamID, orchAddr),
-			IngestedAt: ts},
+		{
+			EventID: uid("e"), EventType: "network_capabilities", EventTs: ts, Org: h.org,
+			Data:       fmt.Sprintf(`[{"address":%q,"local_address":"orch","uri":%q,"version":"0.9.0","hardware":[{"pipeline":"text-to-image","model_id":"model-a"}]}]`, orchAddr, orchURI),
+			IngestedAt: ts,
+		},
+		{
+			EventID: uid("e"), EventType: "stream_trace", EventTs: ts, Org: h.org,
+			Data:       fmt.Sprintf(`{"stream_id":"deg-in","request_id":"req-in","type":"gateway_receive_stream_request","pipeline":"text-to-image","orchestrator_info":{"address":%q,"url":%q}}`, orchAddr, orchURI),
+			IngestedAt: ts,
+		},
+		{
+			EventID: uid("e"), EventType: "ai_stream_status", EventTs: ts, Org: h.org,
+			Data:       fmt.Sprintf(`{"stream_id":"deg-in","request_id":"req-in","pipeline":"text-to-image","state":"DEGRADED_INPUT","orchestrator_info":{"address":%q,"url":%q},"inference_status":{"fps":6.0,"restart_count":0,"last_error":""}}`, orchAddr, orchURI),
+			IngestedAt: ts,
+		},
+		{
+			EventID: uid("e"), EventType: "stream_trace", EventTs: ts.Add(time.Second), Org: h.org,
+			Data:       fmt.Sprintf(`{"stream_id":"deg-out","request_id":"req-out","type":"gateway_receive_stream_request","pipeline":"text-to-image","orchestrator_info":{"address":%q,"url":%q}}`, orchAddr, orchURI),
+			IngestedAt: ts.Add(time.Second),
+		},
+		{
+			EventID: uid("e"), EventType: "ai_stream_status", EventTs: ts.Add(time.Second), Org: h.org,
+			Data:       fmt.Sprintf(`{"stream_id":"deg-out","request_id":"req-out","pipeline":"text-to-image","state":"DEGRADED_INFERENCE","orchestrator_info":{"address":%q,"url":%q},"inference_status":{"fps":5.0,"restart_count":0,"last_error":""}}`, orchAddr, orchURI),
+			IngestedAt: ts.Add(time.Second),
+		},
 	})
 
-	// agg_fps_hourly MV has WHERE fps > 0 — zero-FPS sample must produce no row.
-	rows := h.queryInt(t, `
-		SELECT count()
-		FROM naap.agg_fps_hourly
-		WHERE org = ? AND orch_address = ?`, h.org, fmt.Sprintf("%s", orchAddr))
-
-	if rows != 0 {
-		t.Errorf("RULE-AGGREGATE-004: zero-FPS sample produced %d row(s) in agg_fps_hourly (expected 0)", rows)
+	hour := ts.Truncate(time.Hour)
+	if h.queryInt(t, `SELECT degraded_input_count FROM naap.serving_orch_reliability_hourly WHERE org = ? AND hour = ? AND orch_address = ?`, h.org, hour, orchAddr) != 1 {
+		t.Errorf("RULE-AGGREGATE-004: degraded_input_count did not stay split at 1")
+	}
+	if h.queryInt(t, `SELECT degraded_inference_count FROM naap.serving_orch_reliability_hourly WHERE org = ? AND hour = ? AND orch_address = ?`, h.org, hour, orchAddr) != 1 {
+		t.Errorf("RULE-AGGREGATE-004: degraded_inference_count did not stay split at 1")
+	}
+	if h.queryInt(t, `SELECT degraded_count FROM naap.serving_orch_reliability_hourly WHERE org = ? AND hour = ? AND orch_address = ?`, h.org, hour, orchAddr) != 2 {
+		t.Errorf("RULE-AGGREGATE-004: degraded_count did not total 2")
 	}
 }
 
-// TestRuleAggregate004_PositiveFpsSamplesAreAggregated is the complement:
-// a positive-FPS sample must appear in agg_fps_hourly with correct sum and count.
-func TestRuleAggregate004_PositiveFpsSamplesAreAggregated(t *testing.T) {
+func TestRuleAggregate004_SameHourFailedNoOutputSessionIsRetained(t *testing.T) {
 	h := newHarness(t)
-	ts := anchor()
-	orchAddr := fmt.Sprintf("0x%s", uid("orch"))
-	streamID := uid("s")
+	ts := anchor().Add(10 * time.Minute)
+	streamID := uid("fail")
+	requestID := uid("req")
+	key := canonicalSessionKey(h.org, streamID, requestID)
 
-	// Two samples at fps=15 and fps=25. Expected: sum=40, count=2.
 	h.insert(t, []rawEvent{
-		{EventID: uid("e"), EventType: "ai_stream_status", EventTs: ts, Org: h.org,
-			Data: fmt.Sprintf(
-				`{"stream_id":%q,"pipeline":"streamdiffusion","state":"ONLINE","orchestrator_info":{"address":%q,"url":""},"inference_status":{"fps":15.0,"restart_count":0,"last_error":""}}`,
-				streamID, orchAddr),
-			IngestedAt: ts},
-		{EventID: uid("e"), EventType: "ai_stream_status", EventTs: ts, Org: h.org,
-			Data: fmt.Sprintf(
-				`{"stream_id":%q,"pipeline":"streamdiffusion","state":"ONLINE","orchestrator_info":{"address":%q,"url":""},"inference_status":{"fps":25.0,"restart_count":0,"last_error":""}}`,
-				streamID, orchAddr),
-			IngestedAt: ts},
+		{
+			EventID: uid("e"), EventType: "stream_trace", EventTs: ts, Org: h.org,
+			Data:       fmt.Sprintf(`{"stream_id":%q,"request_id":%q,"type":"gateway_receive_stream_request","pipeline":"text-to-image"}`, streamID, requestID),
+			IngestedAt: ts,
+		},
+		{
+			EventID: uid("e"), EventType: "ai_stream_status", EventTs: ts.Add(time.Second), Org: h.org,
+			Data:       fmt.Sprintf(`{"stream_id":%q,"request_id":%q,"pipeline":"text-to-image","state":"ONLINE","orchestrator_info":{"address":"0xabc","url":"https://orch.example.com"},"inference_status":{"fps":0.0,"restart_count":0,"last_error":"boom"}}`, streamID, requestID),
+			IngestedAt: ts.Add(time.Second),
+		},
 	})
 
-	var fpsSumRaw float64
-	var sampleCount uint64
-	row := h.conn.QueryRow(context.Background(), fmt.Sprintf(`
-		SELECT sum(inference_fps_sum), sum(sample_count)
-		FROM naap.agg_fps_hourly
-		WHERE org = '%s' AND orch_address = '%s'`, h.org, orchAddr))
-	if err := row.Scan(&fpsSumRaw, &sampleCount); err != nil {
-		t.Fatalf("RULE-AGGREGATE-004: scan: %v", err)
+	if h.queryInt(t, `SELECT error_samples FROM naap.fact_workflow_status_hours WHERE canonical_session_key = ?`, key) != 1 {
+		t.Errorf("RULE-AGGREGATE-004: same-hour failed no-output session lost error_samples")
 	}
-
-	if sampleCount != 2 {
-		t.Errorf("RULE-AGGREGATE-004: sample_count = %d, want 2", sampleCount)
-	}
-	// fps_sum should be 15+25=40 (or close — float64 arithmetic).
-	if fpsSumRaw < 39.9 || fpsSumRaw > 40.1 {
-		t.Errorf("RULE-AGGREGATE-004: inference_fps_sum = %.2f, want ~40.0", fpsSumRaw)
+	if h.queryInt(t, `SELECT toUInt64(is_terminal_tail_artifact) FROM naap.fact_workflow_status_hours WHERE canonical_session_key = ?`, key) != 0 {
+		t.Errorf("RULE-AGGREGATE-004: same-hour failed no-output session was incorrectly tail-filtered")
 	}
 }
 
-// TestRuleAggregate004_ZeroAndPositiveSamplesAreSeparated inserts both zero
-// and positive FPS samples for the same orchestrator and verifies that only
-// the positive ones accumulate in the aggregate.
-func TestRuleAggregate004_ZeroAndPositiveSamplesAreSeparated(t *testing.T) {
+func TestRuleLifecycle009_TailFilteringIsNarrowAndDeterministic(t *testing.T) {
 	h := newHarness(t)
-	ts := anchor()
-	orchAddr := fmt.Sprintf("0x%s", uid("orch"))
-	streamID := uid("s")
+	baseHour := anchor().Add(-time.Hour)
+	streamID := uid("tail")
+	requestID := uid("req")
+	key := canonicalSessionKey(h.org, streamID, requestID)
 
 	h.insert(t, []rawEvent{
-		// Zero FPS — excluded by MV filter.
-		{EventID: uid("e"), EventType: "ai_stream_status", EventTs: ts, Org: h.org,
-			Data: fmt.Sprintf(
-				`{"stream_id":%q,"pipeline":"p","state":"LOADING","orchestrator_info":{"address":%q,"url":""},"inference_status":{"fps":0.0}}`,
-				streamID, orchAddr),
-			IngestedAt: ts},
-		// Zero FPS — excluded.
-		{EventID: uid("e"), EventType: "ai_stream_status", EventTs: ts, Org: h.org,
-			Data: fmt.Sprintf(
-				`{"stream_id":%q,"pipeline":"p","state":"LOADING","orchestrator_info":{"address":%q,"url":""},"inference_status":{"fps":0.0}}`,
-				streamID, orchAddr),
-			IngestedAt: ts},
-		// Positive FPS — included.
-		{EventID: uid("e"), EventType: "ai_stream_status", EventTs: ts, Org: h.org,
-			Data: fmt.Sprintf(
-				`{"stream_id":%q,"pipeline":"p","state":"ONLINE","orchestrator_info":{"address":%q,"url":""},"inference_status":{"fps":20.0}}`,
-				streamID, orchAddr),
-			IngestedAt: ts},
+		{
+			EventID: uid("e"), EventType: "stream_trace", EventTs: baseHour.Add(-10 * time.Minute), Org: h.org,
+			Data:       fmt.Sprintf(`{"stream_id":%q,"request_id":%q,"type":"gateway_receive_stream_request","pipeline":"text-to-image"}`, streamID, requestID),
+			IngestedAt: baseHour.Add(-10 * time.Minute),
+		},
+		{
+			EventID: uid("e"), EventType: "ai_stream_status", EventTs: baseHour.Add(10 * time.Minute), Org: h.org,
+			Data:       fmt.Sprintf(`{"stream_id":%q,"request_id":%q,"pipeline":"text-to-image","state":"LOADING","orchestrator_info":{"address":"0xabc","url":"https://orch.example.com"},"inference_status":{"fps":0.0,"restart_count":0,"last_error":""}}`, streamID, requestID),
+			IngestedAt: baseHour.Add(10 * time.Minute),
+		},
+		{
+			EventID: uid("e"), EventType: "ai_stream_status", EventTs: baseHour.Add(time.Hour + 5*time.Minute), Org: h.org,
+			Data:       fmt.Sprintf(`{"stream_id":%q,"request_id":%q,"pipeline":"text-to-image","state":"LOADING","orchestrator_info":{"address":"0xabc","url":"https://orch.example.com"},"inference_status":{"fps":0.0,"restart_count":0,"last_error":""}}`, streamID, requestID),
+			IngestedAt: baseHour.Add(time.Hour + 5*time.Minute),
+		},
 	})
 
-	var sampleCount uint64
-	row := h.conn.QueryRow(context.Background(), fmt.Sprintf(`
-		SELECT sum(sample_count)
-		FROM naap.agg_fps_hourly
-		WHERE org = '%s' AND orch_address = '%s'`, h.org, orchAddr))
-	if err := row.Scan(&sampleCount); err != nil {
-		t.Fatalf("RULE-AGGREGATE-004: scan: %v", err)
+	if h.queryInt(t, `SELECT toUInt64(is_terminal_tail_artifact) FROM naap.fact_workflow_status_hours WHERE canonical_session_key = ? AND hour = ?`, key, baseHour) != 0 {
+		t.Errorf("RULE-LIFECYCLE-009: previous active hour was incorrectly tail-filtered")
 	}
-
-	// Only the 1 positive sample should be counted.
-	if sampleCount != 1 {
-		t.Errorf("RULE-AGGREGATE-004: sample_count = %d after filtering zero-FPS, want 1", sampleCount)
+	if h.queryInt(t, `SELECT toUInt64(is_terminal_tail_artifact) FROM naap.fact_workflow_status_hours WHERE canonical_session_key = ? AND hour = ?`, key, baseHour.Add(time.Hour)) != 1 {
+		t.Errorf("RULE-LIFECYCLE-009: terminal rollover hour was not tail-filtered")
+	}
+	if h.queryInt(t, `SELECT count() FROM naap.serving_orch_reliability_hourly WHERE org = ?`, h.org) != 1 {
+		t.Errorf("RULE-LIFECYCLE-009: serving reliability kept tail noise instead of filtering it")
 	}
 }
 
-// ── RULE-TYPED_RAW-002 ───────────────────────────────────────────────────────
-
-// TestRuleTypedRaw002_CapabilityArrayFansOutToOneRowPerOrch verifies that a
-// single network_capabilities event carrying an array of N orchestrators
-// produces exactly N rows in agg_orch_state (via arrayJoin in the MV).
-func TestRuleTypedRaw002_CapabilityArrayFansOutToOneRowPerOrch(t *testing.T) {
+func TestRuleTypedRaw002_CapabilityArrayFansOutWithoutBlankAddresses(t *testing.T) {
 	h := newHarness(t)
 	ts := anchor()
-
-	// Two orchestrators in one network_capabilities payload.
-	orch1 := fmt.Sprintf("0x%016x_a", uid("o"))
-	orch2 := fmt.Sprintf("0x%016x_b", uid("o"))
+	orchA := strings.ToLower(fmt.Sprintf("0x%s", uid("a")))
+	orchB := strings.ToLower(fmt.Sprintf("0x%s", uid("b")))
 
 	h.insert(t, []rawEvent{{
 		EventID: uid("e"), EventType: "network_capabilities", EventTs: ts, Org: h.org,
 		Data: fmt.Sprintf(`[
-			{"address":%q,"local_address":"node-a","uri":"https://a.example.com","version":"0.7.0"},
-			{"address":%q,"local_address":"node-b","uri":"https://b.example.com","version":"0.7.0"}
-		]`, orch1, orch2),
+			{"address":%q,"local_address":"orch-a","uri":"https://a.example.com","version":"0.7.0"},
+			{"address":%q,"local_address":"orch-b","uri":"https://b.example.com","version":"0.7.0"},
+			{"address":"","local_address":"blank","uri":"https://blank.example.com","version":"0.7.0"}
+		]`, orchA, orchB),
 		IngestedAt: ts,
 	}})
 
-	orchRows := h.queryInt(t,
-		`SELECT count() FROM naap.agg_orch_state FINAL
-		 WHERE orch_address IN (?, ?)`, orch1, orch2)
-
-	if orchRows != 2 {
-		t.Errorf("RULE-TYPED_RAW-002: expected 2 orch rows from array fanout, got %d", orchRows)
+	if h.queryInt(t, `SELECT count() FROM naap.capability_snapshots WHERE org = ?`, h.org) != 2 {
+		t.Errorf("RULE-TYPED_RAW-002: capability fanout did not produce exactly 2 canonical snapshots")
+	}
+	if h.queryInt(t, `SELECT count() FROM naap.capability_snapshots WHERE org = ? AND orch_address = ''`, h.org) != 0 {
+		t.Errorf("RULE-TYPED_RAW-002: blank orchestrator address leaked into capability snapshots")
 	}
 }
 
-// TestRuleTypedRaw002_BlankAddressOrchIsFilteredOut verifies that orchestrator
-// entries in the capabilities array with a blank address are excluded from
-// agg_orch_state (the MV has WHERE address != '').
-func TestRuleTypedRaw002_BlankAddressOrchIsFilteredOut(t *testing.T) {
+func TestRuleTypedRaw002_LatestCapabilityStateKeepsNameFallback(t *testing.T) {
 	h := newHarness(t)
 	ts := anchor()
-	validOrch := fmt.Sprintf("0x%s", uid("o"))
+	orchWithName := strings.ToLower(fmt.Sprintf("0x%s", uid("named")))
+	orchNoName := strings.ToLower(fmt.Sprintf("0x%s", uid("addr")))
 
 	h.insert(t, []rawEvent{{
 		EventID: uid("e"), EventType: "network_capabilities", EventTs: ts, Org: h.org,
 		Data: fmt.Sprintf(`[
-			{"address":%q,"local_address":"valid","uri":"https://valid.example.com","version":"0.7.0"},
-			{"address":"","local_address":"blank-addr","uri":"https://blank.example.com","version":"0.7.0"}
-		]`, validOrch),
-		IngestedAt: ts,
-	}})
-
-	// Only the valid orch should appear in agg_orch_state.
-	rows := h.queryInt(t,
-		`SELECT count() FROM naap.agg_orch_state FINAL WHERE orch_address = ?`,
-		fmt.Sprintf("%s", validOrch))
-
-	if rows != 1 {
-		t.Errorf("RULE-TYPED_RAW-002: expected 1 valid orch row, got %d", rows)
-	}
-
-	// Blank address must not appear.
-	blankRows := h.queryInt(t,
-		`SELECT count() FROM naap.agg_orch_state FINAL WHERE orch_address = ''`)
-	if blankRows != 0 {
-		t.Errorf("RULE-TYPED_RAW-002: blank-address orch leaked into agg_orch_state (%d rows)", blankRows)
-	}
-}
-
-// TestRuleTypedRaw002_EmptyOrNullCapabilityDataProducesNoOrchRows verifies
-// that malformed network_capabilities events (empty array, "null", or empty
-// string data) do not produce any orch rows — guarded by the MV WHERE clause.
-func TestRuleTypedRaw002_EmptyCapabilityDataProducesNoOrchRows(t *testing.T) {
-	h := newHarness(t)
-	ts := anchor()
-
-	// All three malformed shapes from the known-risk comment in migration 005.
-	h.insert(t, []rawEvent{
-		{EventID: uid("e"), EventType: "network_capabilities", EventTs: ts, Org: h.org,
-			Data: "[]", IngestedAt: ts},
-		{EventID: uid("e"), EventType: "network_capabilities", EventTs: ts, Org: h.org,
-			Data: "null", IngestedAt: ts},
-		{EventID: uid("e"), EventType: "network_capabilities", EventTs: ts, Org: h.org,
-			Data: "", IngestedAt: ts},
-	})
-
-	orchRows := h.queryInt(t,
-		`SELECT count() FROM naap.agg_orch_state WHERE org = ?`, h.org)
-
-	if orchRows != 0 {
-		t.Errorf("RULE-TYPED_RAW-002: empty/null capability data produced %d orch rows (expected 0)", orchRows)
-	}
-}
-
-// TestRuleTypedRaw002_CapabilityLocalAddressFallback verifies the name field
-// preference: local_address is used when present, falls back to address when blank.
-func TestRuleTypedRaw002_CapabilityNameFallback(t *testing.T) {
-	h := newHarness(t)
-	ts := anchor()
-
-	orchWithName := fmt.Sprintf("0x%s", uid("o"))
-	orchNoName := fmt.Sprintf("0x%s", uid("o"))
-
-	h.insert(t, []rawEvent{{
-		EventID: uid("e"), EventType: "network_capabilities", EventTs: ts, Org: h.org,
-		Data: fmt.Sprintf(`[
-			{"address":%q,"local_address":"friendly-name","uri":"https://a.example.com","version":"0.7.0"},
-			{"address":%q,"local_address":"","uri":"https://b.example.com","version":"0.7.0"}
+			{"address":%q,"local_address":"friendly-name","uri":"https://named.example.com","version":"0.7.0"},
+			{"address":%q,"local_address":"","uri":"https://addr.example.com","version":"0.7.0"}
 		]`, orchWithName, orchNoName),
 		IngestedAt: ts,
 	}})
 
-	var nameA, nameB string
-	rowA := h.conn.QueryRow(context.Background(), fmt.Sprintf(
-		`SELECT name FROM naap.agg_orch_state FINAL WHERE orch_address = '%s'`, orchWithName))
-	if err := rowA.Scan(&nameA); err != nil {
-		t.Fatalf("RULE-TYPED_RAW-002: scan nameA: %v", err)
+	if got := h.queryString(t, `SELECT name FROM naap.serving_latest_orchestrator_state WHERE orch_address = ?`, orchWithName); got != "friendly-name" {
+		t.Errorf("RULE-TYPED_RAW-002: latest capability name = %q, want friendly-name", got)
 	}
-
-	rowB := h.conn.QueryRow(context.Background(), fmt.Sprintf(
-		`SELECT name FROM naap.agg_orch_state FINAL WHERE orch_address = '%s'`, orchNoName))
-	if err := rowB.Scan(&nameB); err != nil {
-		t.Fatalf("RULE-TYPED_RAW-002: scan nameB: %v", err)
-	}
-
-	if nameA != "friendly-name" {
-		t.Errorf("RULE-TYPED_RAW-002: expected name='friendly-name' (local_address), got %q", nameA)
-	}
-	// When local_address is blank, name falls back to address.
-	if nameB != orchNoName {
-		t.Errorf("RULE-TYPED_RAW-002: expected name=%q (address fallback), got %q", orchNoName, nameB)
+	if got := h.queryString(t, `SELECT name FROM naap.serving_latest_orchestrator_state WHERE orch_address = ?`, orchNoName); got != orchNoName {
+		t.Errorf("RULE-TYPED_RAW-002: latest capability fallback name = %q, want %q", got, orchNoName)
 	}
 }

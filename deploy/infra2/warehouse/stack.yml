@@ -1,0 +1,37 @@
+# NAAP Analytics — Warehouse Stack (infra2)
+#
+# Runs the dbt project in daemon mode: builds static views once on startup,
+# then rebuilds incremental (table-backed) models on DBT_CRON_SCHEDULE.
+#
+# ── HOW IT WORKS ─────────────────────────────────────────────────────────────
+# The entrypoint (dbt-entrypoint.sh) operates in two modes:
+#   - Pass-through mode: triggered when CLI args are provided (e.g. docker run -- test)
+#   - Daemon mode:       triggered when no args are given (this stack)
+#                        Builds static views once, then runs incremental models
+#                        on cron. A lockfile prevents overlapping runs.
+#
+# ── REQUIRED ENVIRONMENT VARIABLES ──────────────────────────────────────────
+#   CLICKHOUSE_WRITER_PASSWORD   — password for naap_writer (DDL + read+write)
+#
+# ── OPTIONAL ENVIRONMENT VARIABLES ──────────────────────────────────────────
+#   DBT_CRON_SCHEDULE   — cron expression for incremental model refresh
+#                         (default: */15 * * * * = every 15 minutes)
+#   IMAGE_TAG           — image tag to deploy (default: latest)
+
+services:
+  warehouse:
+    image: tztcloud/naap-dbt:${IMAGE_TAG:-latest}
+    container_name: naap-analytics-warehouse
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_HOST: naap-analytics-clickhouse
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_DB: naap
+      CLICKHOUSE_USER: naap_writer
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_WRITER_PASSWORD}
+      DBT_CRON_SCHEDULE: ${DBT_CRON_SCHEDULE:-*/15 * * * *}
+
+networks:
+  default:
+    name: ingress
+    external: true

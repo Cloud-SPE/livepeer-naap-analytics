@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS naap.agg_stream_status_samples
 )
 ENGINE = MergeTree()
 PARTITION BY toYYYYMM(sample_ts)
-ORDER BY (org, stream_id, sample_ts)
+ORDER BY (org, sample_ts, orch_address, pipeline)
 TTL toDateTime(sample_ts) + INTERVAL 30 DAY
 SETTINGS index_granularity = 8192;
 

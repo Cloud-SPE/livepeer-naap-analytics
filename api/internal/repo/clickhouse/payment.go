@@ -21,21 +21,35 @@ func (r *Repo) GetPaymentSummary(ctx context.Context, p types.QueryParams) (*typ
 	row := r.conn.QueryRow(ctx, `
 		SELECT
 			sum(total_wei)                  AS total_wei,
-			sum(event_count)                AS event_count,
-			count(DISTINCT orch_address)    AS unique_orchs
-		FROM naap.agg_payment_hourly FINAL
+			sum(event_count)                AS event_count
+		FROM naap.serving_payment_hourly
 		`+where, args...)
 
 	var totalWEI uint64
-	var eventCount, uniqueOrchs uint64
-	if err := row.Scan(&totalWEI, &eventCount, &uniqueOrchs); err != nil {
+	var eventCount uint64
+	if err := row.Scan(&totalWEI, &eventCount); err != nil {
 		return nil, fmt.Errorf("clickhouse get payment summary: %w", err)
+	}
+
+	linksWhere := "WHERE event_ts >= ? AND event_ts < ?"
+	linkArgs := []any{start, end}
+	if p.Org != "" {
+		linksWhere += " AND org = ?"
+		linkArgs = append(linkArgs, p.Org)
+	}
+	uniqueRow := r.conn.QueryRow(ctx, `
+		SELECT uniqExact(recipient_address)
+		FROM naap.serving_payment_links
+		`+linksWhere, linkArgs...)
+	var uniqueOrchs uint64
+	if err := uniqueRow.Scan(&uniqueOrchs); err != nil {
+		return nil, fmt.Errorf("clickhouse get payment summary unique orchs: %w", err)
 	}
 
 	// Breakdown by org.
 	orgRows, err := r.conn.Query(ctx, `
 		SELECT org, sum(total_wei), sum(event_count)
-		FROM naap.agg_payment_hourly FINAL
+		FROM naap.serving_payment_hourly
 		`+where+`
 		GROUP BY org
 	`, args...)
@@ -84,7 +98,7 @@ func (r *Repo) ListPaymentHistory(ctx context.Context, p types.QueryParams) ([]t
 			sum(total_wei)                  AS total_wei,
 			sum(event_count)                AS event_count,
 			count(DISTINCT orch_address)    AS unique_orchs
-		FROM naap.agg_payment_hourly FINAL
+		FROM naap.serving_payment_hourly
 		`+where+`
 		GROUP BY ts
 		ORDER BY ts ASC
@@ -124,7 +138,7 @@ func (r *Repo) ListPaymentsByPipeline(ctx context.Context, p types.QueryParams) 
 			pipeline,
 			sum(total_wei)      AS total_wei,
 			sum(event_count)    AS event_count
-		FROM naap.agg_payment_hourly FINAL
+		FROM naap.serving_payment_hourly
 		`+where+`
 		GROUP BY pipeline
 		ORDER BY total_wei DESC
@@ -166,7 +180,7 @@ func (r *Repo) ListPaymentsByOrch(ctx context.Context, p types.QueryParams) ([]t
 			orch_address,
 			sum(total_wei)   AS total_wei,
 			sum(event_count) AS payment_count
-		FROM naap.agg_payment_hourly FINAL
+		FROM naap.serving_payment_hourly
 		`+where+`
 		GROUP BY orch_address
 		ORDER BY total_wei DESC
