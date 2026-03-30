@@ -108,7 +108,7 @@ components:
       description: Filter by orchestrator Ethereum address (lowercased).
       schema:
         type: string
-        example: "0xabc123def456"
+        example: ""
     active_only:
       name: active_only
       in: query
@@ -135,7 +135,7 @@ components:
       description: Orchestrator Ethereum address (lowercased).
       schema:
         type: string
-        example: "0xabc123def456"
+        example: ""
     window:
       name: window
       in: query
@@ -169,7 +169,7 @@ components:
       description: Filter by orchestrator Ethereum address (lowercased).
       schema:
         type: string
-        example: "0xabc123def456"
+        example: ""
     pipeline_id:
       name: pipeline_id
       in: query

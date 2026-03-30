@@ -2785,8 +2785,8 @@ func (r *repo) insertGPUMetricsRollups(ctx context.Context, runID, queryID strin
 			toUInt64(0) AS inferred_swap_sessions,
 			toUInt64(countIf(b.requested_seen = 1 AND b.swap_count > 0)) AS total_swapped_sessions,
 			toUInt64(countIf(b.requested_seen = 1 AND b.error_seen = 1)) AS sessions_ending_in_error,
-			toFloat64(countIf(b.requested_seen = 1 AND b.startup_outcome = 'failed' AND b.excusal_reason = 'none')) / nullIf(toFloat64(countIf(b.requested_seen = 1)), 0.0) AS startup_failed_rate,
-			toFloat64(countIf(b.requested_seen = 1 AND b.swap_count > 0)) / nullIf(toFloat64(countIf(b.requested_seen = 1)), 0.0) AS swap_rate,
+			ifNull(toFloat64(countIf(b.requested_seen = 1 AND b.startup_outcome = 'failed' AND b.excusal_reason = 'none')) / nullIf(toFloat64(countIf(b.requested_seen = 1)), 0.0), 0.0) AS startup_failed_rate,
+			ifNull(toFloat64(countIf(b.requested_seen = 1 AND b.swap_count > 0)) / nullIf(toFloat64(countIf(b.requested_seen = 1)), 0.0), 0.0) AS swap_rate,
 			?,
 			?,
 			now64()
