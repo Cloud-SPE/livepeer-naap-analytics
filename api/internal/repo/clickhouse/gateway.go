@@ -21,7 +21,7 @@ func (r *Repo) ListGateways(ctx context.Context, p types.QueryParams) ([]types.G
 			toUInt64(gm.deposit)                                               AS deposit_wei,
 			toUInt64(gm.reserve)                                               AS reserve_wei,
 			gm.updated_at,
-			uniqExactIf(ss.stream_id, ss.sample_ts > now() - INTERVAL %d SECOND) AS active_streams
+			uniqExactIf(ss.stream_id, ss.sample_ts > now() - INTERVAL %d SECOND AND ss.stream_id != '') AS active_streams
 		FROM naap.gateway_metadata AS gm FINAL
 		LEFT JOIN naap.api_status_samples AS ss
 			ON lower(ss.gateway) = lower(gm.eth_address)
@@ -74,8 +74,8 @@ func (r *Repo) GetGatewayProfile(ctx context.Context, address string) (*types.Ga
 	// Stream stats from samples (last 30 days — TTL window)
 	statsRow := r.conn.QueryRow(ctx, fmt.Sprintf(`
 		SELECT
-			count(DISTINCT stream_id)                                              AS streams_routed,
-			uniqExactIf(stream_id, sample_ts > now() - INTERVAL %d SECOND AND state = 'ONLINE') AS active_streams
+			count(DISTINCT if(stream_id != '', stream_id, NULL))                                              AS streams_routed,
+			uniqExactIf(stream_id, sample_ts > now() - INTERVAL %d SECOND AND state = 'ONLINE' AND stream_id != '') AS active_streams
 		FROM naap.api_status_samples
 		WHERE lower(gateway) = lower(?)
 	`, activeStreamSecs), address)
@@ -137,7 +137,7 @@ func (r *Repo) ListGatewayOrchestrators(ctx context.Context, address string, p t
 		SELECT
 			ss.orch_address,
 			any(os.name)                   AS name,
-			count(DISTINCT ss.stream_id)   AS stream_count,
+			count(DISTINCT if(ss.stream_id != '', ss.stream_id, NULL))   AS stream_count,
 			max(ss.sample_ts)              AS last_seen
 		FROM naap.api_status_samples AS ss
 		LEFT JOIN naap.api_latest_orchestrator_state AS os

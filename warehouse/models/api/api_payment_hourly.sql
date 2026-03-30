@@ -1,11 +1,4 @@
-with latest_slices as (
-    select
-        org,
-        hour,
-        argMax(refresh_run_id, refreshed_at) as refresh_run_id
-    from naap.api_payment_hourly_store
-    group by org, hour
-)
+with {{ latest_value_cte('latest_slices', 'naap.api_payment_hourly_store', ['org', 'hour'], 'refresh_run_id') }}
 select
     s.hour,
     s.org,
@@ -16,6 +9,5 @@ select
     s.avg_price_wei_per_pixel
 from naap.api_payment_hourly_store s
 inner join latest_slices l
-    on s.org = l.org
-   and s.hour = l.hour
+    on {{ join_on_columns('s', 'l', ['org', 'hour']) }}
    and s.refresh_run_id = l.refresh_run_id

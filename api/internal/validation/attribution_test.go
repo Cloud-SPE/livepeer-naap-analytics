@@ -77,7 +77,7 @@ func TestRuleAttribution001_LateCapabilitySnapshotRepairsHistoricalAttribution(t
 		},
 	})
 
-	if got := h.queryString(t, `SELECT attribution_status FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, key); got != "unresolved" {
+	if got := h.queryString(t, `SELECT attribution_status FROM naap.canonical_session_current WHERE canonical_session_key = ?`, key); got != "unresolved" {
 		t.Errorf("RULE-ATTRIBUTION-001: pre-snapshot attribution_status = %q, want unresolved", got)
 	}
 
@@ -88,10 +88,10 @@ func TestRuleAttribution001_LateCapabilitySnapshotRepairsHistoricalAttribution(t
 		IngestedAt: ts.Add(30 * time.Second),
 	}})
 
-	if got := h.queryString(t, `SELECT attribution_status FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, key); got != "resolved" {
+	if got := h.queryString(t, `SELECT attribution_status FROM naap.canonical_session_current WHERE canonical_session_key = ?`, key); got != "resolved" {
 		t.Errorf("RULE-ATTRIBUTION-001: repaired attribution_status = %q, want resolved", got)
 	}
-	if got := h.queryString(t, `SELECT ifNull(attributed_orch_address, '') FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, key); got != orchAddr {
+	if got := h.queryString(t, `SELECT ifNull(attributed_orch_address, '') FROM naap.canonical_session_current WHERE canonical_session_key = ?`, key); got != orchAddr {
 		t.Errorf("RULE-ATTRIBUTION-001: repaired attributed_orch_address = %q, want %q", got, orchAddr)
 	}
 }
@@ -132,10 +132,10 @@ func TestRuleAttribution001_HistoricalMatchUsesNearestSnapshotNotNewestOverall(t
 		},
 	})
 
-	if got := h.queryString(t, `SELECT attribution_status FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, key); got != "resolved" {
+	if got := h.queryString(t, `SELECT attribution_status FROM naap.canonical_session_current WHERE canonical_session_key = ?`, key); got != "resolved" {
 		t.Fatalf("RULE-ATTRIBUTION-001: attribution_status = %q, want resolved", got)
 	}
-	if got := h.queryString(t, `SELECT ifNull(canonical_model, '') FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, key); got != "model-near" {
+	if got := h.queryString(t, `SELECT ifNull(canonical_model, '') FROM naap.canonical_session_current WHERE canonical_session_key = ?`, key); got != "model-near" {
 		t.Errorf("RULE-ATTRIBUTION-001: canonical_model = %q, want model-near", got)
 	}
 }
@@ -178,13 +178,13 @@ func TestRuleAttribution001_URIWinsOverConflictingObservedAddress(t *testing.T) 
 		},
 	})
 
-	if got := h.queryString(t, `SELECT attribution_status FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, key); got != "resolved" {
+	if got := h.queryString(t, `SELECT attribution_status FROM naap.canonical_session_current WHERE canonical_session_key = ?`, key); got != "resolved" {
 		t.Fatalf("RULE-ATTRIBUTION-001: attribution_status = %q, want resolved", got)
 	}
-	if got := h.queryString(t, `SELECT ifNull(attributed_orch_address, '') FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, key); got != addrB {
+	if got := h.queryString(t, `SELECT ifNull(attributed_orch_address, '') FROM naap.canonical_session_current WHERE canonical_session_key = ?`, key); got != addrB {
 		t.Errorf("RULE-ATTRIBUTION-001: attributed_orch_address = %q, want URI-matched %q", got, addrB)
 	}
-	if got := h.queryString(t, `SELECT ifNull(canonical_model, '') FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, key); got != "model-b" {
+	if got := h.queryString(t, `SELECT ifNull(canonical_model, '') FROM naap.canonical_session_current WHERE canonical_session_key = ?`, key); got != "model-b" {
 		t.Errorf("RULE-ATTRIBUTION-001: canonical_model = %q, want URI-matched model-b", got)
 	}
 }
@@ -237,10 +237,10 @@ func TestRuleAttribution001_FailSafeStatesRemainVisibleInServingOutputs(t *testi
 		},
 	})
 
-	if got := h.queryString(t, `SELECT attribution_status FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, hwKey); got != "hardware_less" {
+	if got := h.queryString(t, `SELECT attribution_status FROM naap.canonical_session_current WHERE canonical_session_key = ?`, hwKey); got != "hardware_less" {
 		t.Errorf("RULE-ATTRIBUTION-001: hardware-less attribution_status = %q, want hardware_less", got)
 	}
-	if got := h.queryString(t, `SELECT ifNull(attributed_orch_address, '') FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, hwKey); got != hwAddr {
+	if got := h.queryString(t, `SELECT ifNull(attributed_orch_address, '') FROM naap.canonical_session_current WHERE canonical_session_key = ?`, hwKey); got != hwAddr {
 		t.Errorf("RULE-ATTRIBUTION-001: hardware-less attributed_orch_address = %q, want %q", got, hwAddr)
 	}
 	if got := h.queryString(t, `SELECT attribution_status FROM naap.api_status_samples WHERE canonical_session_key = ? LIMIT 1`, hwKey); got != "hardware_less" {
@@ -250,7 +250,7 @@ func TestRuleAttribution001_FailSafeStatesRemainVisibleInServingOutputs(t *testi
 		t.Errorf("RULE-ATTRIBUTION-001: hardware-less session was dropped from SLA output for %s", hwAddr)
 	}
 
-	if got := h.queryString(t, `SELECT attribution_status FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, unresolvedKey); got != "unresolved" {
+	if got := h.queryString(t, `SELECT attribution_status FROM naap.canonical_session_current WHERE canonical_session_key = ?`, unresolvedKey); got != "unresolved" {
 		t.Errorf("RULE-ATTRIBUTION-001: unresolved attribution_status = %q, want unresolved", got)
 	}
 	if got := h.queryString(t, `SELECT ifNull(orch_address, '') FROM naap.api_status_samples WHERE canonical_session_key = ? LIMIT 1`, unresolvedKey); got != "" {
@@ -313,10 +313,10 @@ func TestRuleAttribution001_AmbiguousAndStaleRemainExplicit(t *testing.T) {
 		},
 	})
 
-	if got := h.queryString(t, `SELECT attribution_status FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, staleKey); got != "stale" {
+	if got := h.queryString(t, `SELECT attribution_status FROM naap.canonical_session_current WHERE canonical_session_key = ?`, staleKey); got != "stale" {
 		t.Errorf("RULE-ATTRIBUTION-001: stale attribution_status = %q, want stale", got)
 	}
-	if got := h.queryString(t, `SELECT attribution_status FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, ambiguousKey); got != "ambiguous" {
+	if got := h.queryString(t, `SELECT attribution_status FROM naap.canonical_session_current WHERE canonical_session_key = ?`, ambiguousKey); got != "ambiguous" {
 		t.Errorf("RULE-ATTRIBUTION-001: ambiguous attribution_status = %q, want ambiguous", got)
 	}
 }
@@ -352,7 +352,7 @@ func TestRuleAttribution002_PipelineAndModelStayDistinctAcrossCanonicalAndAPIVie
 		},
 	})
 
-	if got := h.queryString(t, `SELECT ifNull(canonical_pipeline, '') FROM naap.canonical_session_latest WHERE org = ? AND stream_id = ?`, h.org, streamID); got != "text-to-image" {
+	if got := h.queryString(t, `SELECT ifNull(canonical_pipeline, '') FROM naap.canonical_session_current WHERE org = ? AND stream_id = ?`, h.org, streamID); got != "text-to-image" {
 		t.Fatalf("RULE-ATTRIBUTION-002: canonical_pipeline = %q, want text-to-image", got)
 	}
 	if h.queryInt(t, `SELECT count() FROM naap.canonical_capability_hardware_inventory WHERE org = ? AND orch_address = ? AND pipeline_id = 'text-to-image' AND model_id = 'model-a'`, h.org, orchAddr) == 0 {
@@ -401,10 +401,10 @@ func TestRuleAttribution003_InWindowSnapshotWinsOverOnlyStaleEvidence(t *testing
 		},
 	})
 
-	if got := h.queryString(t, `SELECT attribution_status FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, key); got != "resolved" {
+	if got := h.queryString(t, `SELECT attribution_status FROM naap.canonical_session_current WHERE canonical_session_key = ?`, key); got != "resolved" {
 		t.Fatalf("RULE-ATTRIBUTION-003: attribution_status = %q, want resolved", got)
 	}
-	if got := h.queryInt(t, `SELECT count() FROM naap.canonical_session_latest WHERE canonical_session_key = ? AND attribution_snapshot_ts = ?`, key, ts.Add(-30*time.Second)); got != 1 {
+	if got := h.queryInt(t, `SELECT count() FROM naap.canonical_session_current WHERE canonical_session_key = ? AND attribution_snapshot_ts = ?`, key, ts.Add(-30*time.Second)); got != 1 {
 		t.Fatalf("RULE-ATTRIBUTION-003: exact in-window snapshot was not selected")
 	}
 }
@@ -466,13 +466,13 @@ func TestRuleAttribution004_FailSafeReasonsRemainExplicit(t *testing.T) {
 		},
 	})
 
-	if got := h.queryString(t, `SELECT attribution_reason FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, missingKey); got != "missing_candidate" {
+	if got := h.queryString(t, `SELECT attribution_reason FROM naap.canonical_session_current WHERE canonical_session_key = ?`, missingKey); got != "missing_candidate" {
 		t.Fatalf("RULE-ATTRIBUTION-004: missing reason = %q, want missing_candidate", got)
 	}
-	if got := h.queryString(t, `SELECT attribution_reason FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, staleKey); got != "stale_candidate" {
+	if got := h.queryString(t, `SELECT attribution_reason FROM naap.canonical_session_current WHERE canonical_session_key = ?`, staleKey); got != "stale_candidate" {
 		t.Fatalf("RULE-ATTRIBUTION-004: stale reason = %q, want stale_candidate", got)
 	}
-	if got := h.queryString(t, `SELECT attribution_reason FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, ambKey); got != "ambiguous_candidates" {
+	if got := h.queryString(t, `SELECT attribution_reason FROM naap.canonical_session_current WHERE canonical_session_key = ?`, ambKey); got != "ambiguous_candidates" {
 		t.Fatalf("RULE-ATTRIBUTION-004: ambiguous reason = %q, want ambiguous_candidates", got)
 	}
 }
@@ -498,10 +498,10 @@ func TestRuleAttribution005_UnresolvedRowsDoNotInventCanonicalFields(t *testing.
 		},
 	})
 
-	if got := h.queryString(t, `SELECT attribution_status FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, key); got != "unresolved" {
+	if got := h.queryString(t, `SELECT attribution_status FROM naap.canonical_session_current WHERE canonical_session_key = ?`, key); got != "unresolved" {
 		t.Fatalf("RULE-ATTRIBUTION-005: attribution_status = %q, want unresolved", got)
 	}
-	if got := h.queryString(t, `SELECT ifNull(canonical_model, '') FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, key); got != "" {
+	if got := h.queryString(t, `SELECT ifNull(canonical_model, '') FROM naap.canonical_session_current WHERE canonical_session_key = ?`, key); got != "" {
 		t.Fatalf("RULE-ATTRIBUTION-005: canonical_model = %q, want blank", got)
 	}
 	if got := h.queryString(t, `SELECT ifNull(model_id, '') FROM naap.api_sla_compliance_by_org WHERE org = ? AND window_start = ? AND orchestrator_address = ''`, h.org, windowStart); got != "" {
@@ -539,7 +539,7 @@ func TestRuleAttribution006_HardwareLessRowsRemainVisibleWithoutGPU(t *testing.T
 		},
 	})
 
-	if got := h.queryString(t, `SELECT attribution_status FROM naap.canonical_session_latest WHERE org = ? AND stream_id = ?`, h.org, streamID); got != "hardware_less" {
+	if got := h.queryString(t, `SELECT attribution_status FROM naap.canonical_session_current WHERE org = ? AND stream_id = ?`, h.org, streamID); got != "hardware_less" {
 		t.Fatalf("RULE-ATTRIBUTION-006: attribution_status = %q, want hardware_less", got)
 	}
 	if h.queryInt(t, `SELECT count() FROM naap.api_sla_compliance_by_org WHERE org = ? AND window_start = ? AND orchestrator_address = ? AND gpu_id IS NULL`, h.org, windowStart, orchAddr) != 1 {

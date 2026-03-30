@@ -3,6 +3,8 @@
 dbt owns the semantic analytics model downstream of the ClickHouse
 `normalized_*` tables.
 
+See [`../docs/design-docs/system-visuals.md`](../docs/design-docs/system-visuals.md) for the current system diagrams and [`../docs/operations/run-modes-and-recovery.md`](../docs/operations/run-modes-and-recovery.md) for when to run `dbt` in the supported deployment.
+
 Ownership boundary:
 
 - ClickHouse: physical schema and `raw_* -> normalized_*`
@@ -14,12 +16,14 @@ Ownership boundary:
 Model split:
 
 - `warehouse/models/staging/` exposes thin views over normalized physical tables
-- `warehouse/models/canonical/` exposes latest/current canonical contracts over
+- `warehouse/models/canonical/` exposes current canonical contracts over
   physical `canonical_*_store` tables
 - `warehouse/models/api/` exposes serving contracts over bounded resolver-fed
   store tables
 - `api_status_samples` and `api_active_stream_state` remain store-backed so
   request paths do not reconstruct hot state from wide history joins
+- `api_active_stream_state` is deterministic; recency filtering belongs in
+  request or dashboard queries, not in the semantic view itself
 
 Tier contract:
 
@@ -28,6 +32,13 @@ Tier contract:
 - `canonical_*` — authoritative corrected derivation source
 - `operational_*` — live ops tables only
 - `api_*` — serving/read models only
+
+This contract is semantic, not a promise that every physical ClickHouse object
+shares one of those prefixes. The generated bootstrap also includes
+infrastructure/runtime tables such as `accepted_raw_events`, `ignored_raw_events`,
+`kafka_*`, `resolver_*`, `agg_*`, metadata tables, and change/audit tables.
+Those physical names are part of the supported v1 schema and are not being
+renamed just to force prefix uniformity.
 
 Important rule:
 

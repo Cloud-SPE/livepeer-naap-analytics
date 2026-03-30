@@ -3,6 +3,7 @@
 package validation
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -66,8 +67,8 @@ func TestTierContract_CanonicalAndAPIViewsMirrorServingSurfaces(t *testing.T) {
 		},
 	})
 
-	if got := h.queryString(t, `SELECT attribution_status FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, key); got != "resolved" {
-		t.Fatalf("canonical_session_latest attribution_status = %q, want resolved", got)
+	if got := h.queryString(t, `SELECT attribution_status FROM naap.canonical_session_current WHERE canonical_session_key = ?`, key); got != "resolved" {
+		t.Fatalf("canonical_session_current attribution_status = %q, want resolved", got)
 	}
 	if got := h.queryInt(t, `SELECT count() FROM naap.api_status_samples WHERE canonical_session_key = ?`, key); got != 1 {
 		t.Fatalf("api_status_samples count = %d, want 1", got)
@@ -107,5 +108,35 @@ func TestTierContract_TailFilteringRemainsVisibleThroughAPISurfaces(t *testing.T
 	}
 	if got := h.queryInt(t, `SELECT count() FROM naap.api_orchestrator_reliability_hourly WHERE org = ?`, h.org); got != 1 {
 		t.Fatalf("api_orchestrator_reliability_hourly count = %d, want 1", got)
+	}
+}
+
+func TestTierContract_APIActiveStreamStateExcludesBlankStreamIDs(t *testing.T) {
+	h := newHarness(t)
+	ts := time.Now().UTC()
+
+	if err := h.conn.Exec(context.Background(), `
+		INSERT INTO naap.canonical_active_stream_state_latest_store
+		(
+			canonical_session_key, event_id, sample_ts, org, stream_id, request_id, gateway,
+			pipeline, model_id, orch_address, attribution_status, attribution_reason, state,
+			output_fps, input_fps, e2e_latency_ms, started_at, last_seen, completed,
+			refresh_run_id, artifact_checksum, refreshed_at
+		)
+		VALUES
+		(?, ?, ?, ?, '', '', 'gw-a', 'text-to-image', NULL, NULL, 'resolved', 'ok', 'ONLINE', 12.0, 0.0, NULL, NULL, ?, 0, 'test-run', 'validation', ?),
+		(?, ?, ?, ?, ?, ?, 'gw-a', 'text-to-image', NULL, NULL, 'resolved', 'ok', 'ONLINE', 12.0, 0.0, NULL, NULL, ?, 0, 'test-run', 'validation', ?)
+	`,
+		h.org+"|_missing_stream|_missing_request", uid("e"), ts, h.org, ts, ts,
+		h.org+"|stream-ok|req-ok", uid("e"), ts, h.org, "stream-ok", "req-ok", ts, ts,
+	); err != nil {
+		t.Fatalf("insert canonical_active_stream_state_latest_store: %v", err)
+	}
+
+	if got := h.queryInt(t, `SELECT count() FROM naap.api_active_stream_state WHERE org = ?`, h.org); got != 1 {
+		t.Fatalf("api_active_stream_state count = %d, want 1", got)
+	}
+	if got := h.queryInt(t, `SELECT count() FROM naap.api_active_stream_state WHERE org = ? AND stream_id = ''`, h.org); got != 0 {
+		t.Fatalf("api_active_stream_state blank stream count = %d, want 0", got)
 	}
 }

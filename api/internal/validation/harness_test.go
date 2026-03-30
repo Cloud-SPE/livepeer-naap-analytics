@@ -421,7 +421,7 @@ func (h *harness) waitForWarehouseReady(t *testing.T) {
 		"canonical_capability_hardware_inventory",
 		"canonical_latest_orchestrator_pipeline_inventory_agg",
 		"canonical_session_attribution_latest",
-		"canonical_session_latest",
+		"canonical_session_current",
 		"canonical_status_hours",
 	}
 	deadline := time.Now().Add(15 * time.Second)

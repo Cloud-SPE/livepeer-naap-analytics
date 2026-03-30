@@ -56,7 +56,7 @@ func (r *Repo) GetCapacitySummary(ctx context.Context, p types.QueryParams) (*ty
 	}
 
 	// Active streams per pipeline
-	activeWhere := "WHERE state = 'ONLINE'"
+	activeWhere := "WHERE state = 'ONLINE' AND " + activeStreamPredicate("last_seen") + " AND stream_id != ''"
 	activeArgs := []any{}
 	if p.Org != "" {
 		activeWhere += " AND org = ?"

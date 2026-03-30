@@ -1,10 +1,4 @@
-with latest_slices as (
-    select
-        window_start,
-        argMax(refresh_run_id, refreshed_at) as refresh_run_id
-    from naap.api_gpu_metrics_by_org_store
-    group by window_start
-)
+with {{ latest_value_cte('latest_slices', 'naap.api_gpu_metrics_by_org_store', ['window_start'], 'refresh_run_id') }}
 select
     s.window_start,
     cast(null as Nullable(String)) as org,
@@ -45,7 +39,7 @@ select
     sum(s.total_swapped_sessions) / nullIf(toFloat64(sum(s.known_sessions_count)), 0.0) as swap_rate
 from naap.api_gpu_metrics_by_org_store s
 inner join latest_slices l
-    on s.window_start = l.window_start
+    on {{ join_on_columns('s', 'l', ['window_start']) }}
    and s.refresh_run_id = l.refresh_run_id
 group by
     s.window_start,

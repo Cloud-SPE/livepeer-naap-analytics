@@ -42,7 +42,7 @@ func TestTierContract_APIModelsDoNotBypassCanonicalOrServingLayers(t *testing.T)
 		}
 		sql := strings.ToLower(string(body))
 		if strings.Contains(sql, "canonical_session_latest") {
-			t.Fatalf("%s still depends on canonical_session_latest instead of the selection-centered current spine", file)
+			t.Fatalf("%s still depends on removed compatibility surface canonical_session_latest", file)
 		}
 		for _, forbidden := range []string{"ref('raw_", `ref("raw_`, "from naap.raw_", "ref('normalized_", `ref("normalized_`, "from naap.normalized_", "ref('operational_", `ref("operational_`, "from naap.operational_", "ref('api_", `ref("api_`} {
 			if strings.Contains(sql, forbidden) {
@@ -104,24 +104,21 @@ func TestTierContract_ClickHouseRepoDoesNotUseCanonicalSessionLatest(t *testing.
 			t.Fatalf("ReadFile %s: %v", file, err)
 		}
 		if strings.Contains(strings.ToLower(string(body)), "canonical_session_latest") {
-			t.Fatalf("%s still depends on canonical_session_latest instead of canonical_session_current/api_* views", file)
+			t.Fatalf("%s still depends on removed compatibility surface canonical_session_latest", file)
 		}
 	}
 }
 
-func TestTierContract_CanonicalModelsDoNotUseCanonicalSessionLatestExceptCompatibilityView(t *testing.T) {
+func TestTierContract_CanonicalModelsDoNotUseCanonicalSessionLatest(t *testing.T) {
 	root := repoRoot(t)
 	canonicalDir := filepath.Join(root, "warehouse", "models", "canonical")
 	for _, file := range collectSQLFiles(t, canonicalDir) {
-		if filepath.Base(file) == "canonical_session_latest.sql" {
-			continue
-		}
 		body, err := os.ReadFile(file)
 		if err != nil {
 			t.Fatalf("ReadFile %s: %v", file, err)
 		}
 		if strings.Contains(strings.ToLower(string(body)), "canonical_session_latest") {
-			t.Fatalf("%s still depends on canonical_session_latest outside the compatibility view", file)
+			t.Fatalf("%s still depends on removed compatibility surface canonical_session_latest", file)
 		}
 	}
 }

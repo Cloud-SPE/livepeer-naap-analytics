@@ -1,51 +1,48 @@
 # ClickHouse Infrastructure
 
 Single-node ClickHouse instance that ingests Kafka topics directly via the Kafka
-engine and stores the physical `raw_*`, `normalized_*`, `canonical_*`,
-`operational_*`, and resolver-runtime state used by the analytics stack.
+engine and stores the physical schema used by the analytics stack. Semantic
+tiers still center on `raw_*`, `normalized_*`, `canonical_*`, `operational_*`,
+and `api_*`, but the supported bootstrap also includes infrastructure/runtime
+objects such as `accepted_raw_events`, `ignored_raw_events`, `kafka_*`,
+`resolver_*`, `agg_*`, metadata tables, and change/audit tables.
+
+The current fresh-volume bootstrap artifact is [`bootstrap/v1.sql`](bootstrap/v1.sql).
+The generated inventory for that bootstrap lives at [`../../docs/generated/schema.md`](../../docs/generated/schema.md).
 
 ## Directory structure
 
 ```
 infra/clickhouse/
   config/            ClickHouse server config overrides (mounted read-only)
-  init/              Migration runner and Docker entrypoint scripts
-  migrations/        SQL migrations applied in sorted order by ch-migrate
+  bootstrap/         Generated fresh-volume bootstrap schema
+  init/              Schema runner and Docker entrypoint scripts
+  migrations/        Forward migrations only after the v1 bootstrap baseline
   README.md          This file
 ```
 
+## Schema Modes
+
+The ClickHouse entrypoint supports two schema modes via `CLICKHOUSE_SCHEMA_MODE`:
+
+- `bootstrap` — apply the extracted fresh-volume baseline from [`bootstrap/v1.sql`](bootstrap/v1.sql), then apply any forward migrations present in [`migrations/`](migrations/)
+- `migrations` — apply forward migrations from [`migrations/`](migrations/) to an existing database
+
 ## Migrations
 
-| File | Description |
-|------|-------------|
-| `001_database.sql` | Database `naap`, application users (`naap_writer`, `naap_reader`) |
-| `002_events.sql` | Legacy raw events table used before routed accepted/ignored raw cutover |
-| `003_kafka_tables.sql` | Kafka engine tables for `network_events` and `streaming_events` |
-| `004_ingest_mvs.sql` | Legacy materialized views: Kafka tables → `naap.events` |
-| `005_network_state.sql` | `agg_orch_state` — current orch capabilities (R1) |
-| `006_stream_activity.sql` | `agg_stream_state` + `agg_stream_hourly` (R2) |
-| `007_payments.sql` | `agg_payment_hourly` (R4) |
-| `008_reliability.sql` | `agg_orch_reliability_hourly` (R5) |
-| `009_performance.sql` | `agg_fps_hourly`, `agg_discovery_latency_hourly`, `agg_webrtc_hourly` (R3) |
-| `010_fix_orch_uri.sql` | Fix `uri` extraction in `mv_orch_state` (`orch_uri` not `uri`) |
-| `011_fix_orch_address.sql` | Fix `orch_address` in stream state and reliability tables (use ETH addr not local key) |
-| `012_enrichment.sql` | `naap.orch_metadata` + `naap.gateway_metadata` — Livepeer API enrichment tables (ENS names, stake, deposits) |
-| `013_stream_status_samples.sql` | `naap.agg_stream_status_samples` — per-sample stream status (MV-populated from `ai_stream_status` events, 30-day TTL). Resolves canonical ETH orch address via `agg_orch_state.uri` JOIN (same pattern as migration 011). Powers Grafana live-operations and overview dashboards. |
-| `014_gpu_inventory.sql` | `naap.agg_gpu_inventory` — structured GPU inventory (worker-populated, not MV). The enrichment worker reads `agg_orch_state.raw_capabilities`, parses the `gpu_info` map in Go, and batch-inserts into this table every 5m. ReplacingMergeTree(last_seen) deduplicates on (orch_address, gpu_id); 7-day TTL. Powers the Supply & Inventory dashboard. |
-| `018_refresh_runtime_and_namespaces.sql` | Legacy namespace aliases from the refresh-era design |
-| `019_canonical_store_tables.sql` | Legacy refresh-era store tables kept only for migration history |
-| `020_api_rollup_store_tables.sql` | Legacy rollup store schema later superseded by lifecycle cutover migrations |
-| `021_api_stream_state_store_tables.sql` | Physical serving store tables |
-| `025_session_evidence_rollups.sql` | Session-grain evidence rollups and capability inventory tables used by the resolver |
-| `047_ingest_routed_raw_tables.sql` | Routed ingest cutover: Kafka → `accepted_raw_events` / `ignored_raw_events` plus normalized MVs sourced from accepted raw only |
-| `048_lifecycle_semantics_cutover.sql` | Hard-cutover lifecycle fields (`requested_seen`, `selection_outcome`, `startup_outcome`, `excusal_reason`) |
-| `049_rollup_store_lifecycle_cutover.sql` | Rollup-store lifecycle metric cutover |
-| `050_restore_selection_spine_tables.sql` | Restores resolver-owned selection spine physical tables |
-| `051_repoint_raw_alias_and_payments.sql` | Repoints raw aliases and payment typing to `accepted_raw_events` |
+The historical migration chain has been retired from the active repo path.
+Fresh volumes bootstrap from [`bootstrap/v1.sql`](bootstrap/v1.sql). Future schema
+changes should be added as forward-only migrations in [`migrations/`](migrations/).
 
-Migrations are managed by the repo-native `ch-migrate` runner, which records
-checksums in `naap.schema_migrations` and supports `up`, `status`, and
-`validate`.
+Forward migrations are managed by the repo-native `ch-migrate` runner, which
+records checksums in `naap.schema_migrations` only when forward migrations are
+actually present and supports `up`, `bootstrap`, `status`, and `validate`.
+
+Regenerate the bootstrap artifact from a clean bootstrap-backed validation stack with:
+
+```bash
+make bootstrap-extract
+```
 
 ### Table population strategies
 
@@ -54,7 +51,7 @@ checksums in `naap.schema_migrations` and supports `up`, `status`, and
 | **MV-populated** | `accepted_raw_events`, `ignored_raw_events`, `normalized_*`, event-driven aggregates | Fires synchronously as Kafka rows are routed by the ingest materialized views |
 | **Worker-populated** | `orch_metadata`, `gateway_metadata`, `agg_gpu_inventory` | API enrichment worker polls every 5m and batch-inserts |
 
-Worker-populated tables are applied manually on existing volumes — migrations only create the table schema. The enrichment worker will populate them on next startup.
+Worker-populated tables are applied manually on existing volumes — the bootstrap and any future forward migrations only create the table schema. The enrichment worker will populate them on next startup.
 
 ### Tier contract
 
@@ -63,6 +60,10 @@ Worker-populated tables are applied manually on existing volumes — migrations 
 - `canonical_*` — authoritative corrected derivation source
 - `operational_*` — low-latency live ops tables
 - `api_*` — serving/read models only
+
+This contract governs semantic data flow, not physical naming uniformity. The
+generated bootstrap in [`../../docs/generated/schema.md`](../../docs/generated/schema.md)
+is the source of truth for the supported physical object inventory.
 
 `canonical_*` is the only valid source for downstream derivations. `api_*` is a
 serving layer and must not be used as truth for new warehouse logic.
@@ -79,7 +80,7 @@ Resolver/store rule:
 
 Bounded rebuild path:
 
-1. Apply migrations and bring up the stack.
+1. Apply the bootstrap baseline and bring up the stack.
 2. Run a bounded resolver backfill on a representative `(org, time window)`.
 3. Run `make parity-verify` on the same window.
 4. Only after bounded replay/backfill looks clean should you perform a wider
@@ -91,7 +92,7 @@ Prometheus alert rules scrape the resolver and serving stack; legacy
 ## Running locally
 
 ```bash
-# Start everything (ClickHouse + Kafka broker):
+# Start the runtime stack:
 make up
 
 # Verify ClickHouse is healthy:
@@ -120,7 +121,7 @@ To point ClickHouse at a different broker:
    ```
    KAFKA_BROKER_LIST=new-broker:9092
    ```
-2. Restart the stack so migrations re-apply on a fresh ClickHouse container:
+2. Restart the stack so the bootstrap re-applies on a fresh ClickHouse container:
    ```bash
    make down && make up
    ```

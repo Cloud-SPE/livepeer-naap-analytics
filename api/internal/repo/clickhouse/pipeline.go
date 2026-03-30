@@ -128,7 +128,7 @@ func (r *Repo) ListPipelines(ctx context.Context, p types.QueryParams) ([]types.
 	}
 
 	// Active streams per pipeline
-	activeWhere := "WHERE state = 'ONLINE'"
+	activeWhere := "WHERE state = 'ONLINE' AND " + activeStreamPredicate("last_seen") + " AND stream_id != ''"
 	activeArgs := []any{}
 	if p.Org != "" {
 		activeWhere += " AND org = ?"
@@ -256,7 +256,7 @@ func (r *Repo) GetPipelineDetail(ctx context.Context, pipeline string, p types.Q
 	}
 
 	// Active streams
-	activeWhere := "WHERE state = 'ONLINE' AND pipeline = ?"
+	activeWhere := "WHERE state = 'ONLINE' AND " + activeStreamPredicate("last_seen") + " AND stream_id != '' AND pipeline = ?"
 	activeArgs := []any{pipeline}
 	if p.Org != "" {
 		activeWhere += " AND org = ?"

@@ -219,7 +219,7 @@ A compliant system must enforce these minimum logical raw elements:
 - `domain`: accepted vs ignored raw events
 - `priority`: `P0`
 - `severity`: blocking
-- `status`: `active_contracted`
+- `status`: `active_inferred`
 - `confidence`: `mixed`
 
 **Business purpose**
@@ -235,10 +235,6 @@ Prevent low-value or known non-contract traces from contaminating correctness an
 - `data.client_source`
 
 **Requirement**
-A compliant system must enforce an explicit allowlist at the earliest controlled
-post-Kafka ingest boundary. Unsupported families or subtypes must bypass the
-accepted raw analytics path and land only in ignored-event diagnostics.
-
 A compliant system must explicitly classify these inbound cases as ignored, not canonical:
 
 - unsupported top-level event types
@@ -657,11 +653,6 @@ At minimum, these trace subtypes have fixed meaning:
 
 **Output obligations**
 - startup, latency, and swap metrics use these canonical meanings only
-- latency proxies are fixed to these edge pairs:
-  - startup proxy: `gateway_receive_stream_request` -> `gateway_receive_first_processed_segment`
-  - E2E proxy: `gateway_send_first_ingest_segment` -> `runner_send_first_processed_segment`
-  - prompt-to-playable proxy: `ai_stream_status.start_time` -> `gateway_receive_few_processed_segments`
-- latency is nullable when either edge is missing or the ordering is inverted; it is never fabricated from unrelated status timestamps
 
 **Validator checks**
 - trace normalization never repurposes these subtypes silently
@@ -677,35 +668,26 @@ At minimum, these trace subtypes have fixed meaning:
 - `confidence`: `documented`
 
 **Business purpose**
-Make request denominator, selection outcome, startup outcome, and excusal treatment portable and deterministic.
+Make startup success, excused failure, and unexcused failure portable and deterministic.
 
 **Requirement**
-The lifecycle model is split into explicit steady-state fields:
+Startup outcome precedence is fixed:
 
-- `requested_seen`
-- `playable_seen`
-- `selection_outcome = selected | no_orch | unknown`
-- `startup_outcome = success | failed | unknown`
-- `excusal_reason = none | no_orch | excusable_error`
-
-Classification precedence is fixed:
-
-1. if the session is not a known stream, `requested_seen = 0`, `startup_outcome = unknown`, and `selection_outcome = unknown`
-2. if playable evidence exists, `startup_outcome = success`
-3. else if explicit no-orchestrator evidence exists, `selection_outcome = no_orch`, `startup_outcome = failed`, and `excusal_reason = no_orch`
-4. else if the session has errors and all counted errors are excusable, `startup_outcome = failed` and `excusal_reason = excusable_error`
-5. else if it is a known stream, `startup_outcome = failed` and `excusal_reason = none`
+1. if the session is not a known stream, it is outside the startup denominator
+2. if playable evidence exists, classify as `success`
+3. else if explicit no-orchestrator evidence exists, classify as `excused`
+4. else if the session has errors and all counted errors are excusable, classify as `excused`
+5. else if it is a known stream, classify as `unexcused`
 
 Known stream means a `gateway_receive_stream_request` was observed.
 Playable evidence means `gateway_receive_few_processed_segments` was observed.
 
 **Output obligations**
-- `requested_seen` does not imply success or playability
-- startup success, excusal treatment, and failure treatment remain mutually exclusive for known streams
+- startup success, startup excused, and startup unexcused remain mutually exclusive for known streams
 
 **Validator checks**
-- success always overrides excusal treatment
-- unexcused failure treatment is only possible for known streams
+- success always overrides excused or unexcused
+- unexcused is only possible for known streams
 
 ### RULE-LIFECYCLE-004 Excused Error Taxonomy Must Be Exact And Case-Insensitive
 
@@ -735,7 +717,7 @@ Error excusability is substring-based, case-insensitive, and currently defined b
 
 **Output obligations**
 - excusable error count is explicit
-- `excusal_reason = excusable_error` may use these strings
+- startup excused classification may use these strings
 
 **Validator checks**
 - case differences do not change classification
@@ -903,6 +885,12 @@ Separate active-hour reliability from session-start demand semantics and prevent
 **Requirement**
 SLA and GPU reliability surfaces are anchored to hours with attributed status evidence, not session-start hours.
 
+For tail filtering and active-hour classification, the current running-state set is:
+
+- `ONLINE`
+- `DEGRADED_INFERENCE`
+- `DEGRADED_INPUT`
+
 Only true rollover terminal tail artifacts may be filtered. A terminal tail artifact requires all of the following:
 
 - the session started before the hour
@@ -920,6 +908,17 @@ The following must remain visible:
 
 - same-hour failed no-output attempts
 - active zero-output hours with material status evidence
+
+Current same-hour failed no-output semantics are:
+
+- the session starts and ends in the same hour
+- the hour has `fps_positive_samples = 0`
+- the hour has `running_state_samples = 0`
+- the hour has `status_samples < 3`
+- the session shows at least one failure indicator:
+  - `last_error_occurred`
+  - `loading_only_session`
+  - `zero_output_fps_session`
 
 **Output obligations**
 - reliability/SLA rows describe active status-hour evidence
@@ -959,50 +958,12 @@ The contract distinguishes:
 
 When canonical capability evidence exists, gold and serving outputs must use canonical orchestrator identity, not raw proxy identity.
 
-**Implementation note (current simplified schema)**
-`ai_stream_status` carries two orchestrator fields:
-
-- `orchestrator_info.address` — the local/hot-wallet keypair address (not the on-chain ETH address)
-- `orchestrator_info.url` — the orchestrator's public service URL
-
-`network_capabilities` carries the canonical on-chain ETH address keyed by `orch_uri`.
-
-The current implementation resolves canonical identity via URI join:
-
-```
-ai_stream_status.orchestrator_info.url
-    → agg_orch_state.uri  (populated from network_capabilities.orch_uri)
-    → agg_orch_state.orch_address  (canonical lowercase ETH address)
-```
-
-Aggregate tables (`agg_orch_reliability_hourly`, `agg_stream_state`) store the resolved canonical address.
-Events where `orchestrator_info.url` is absent or has no matching `agg_orch_state` entry resolve to `orch_address = ''`.
-All stored addresses are lowercased at write time.
-
 **Output obligations**
 - canonicalized lifecycle outputs do not persist hot-wallet identity as canonical orchestrator identity
-- aggregate tables use the canonical ETH address resolved via URI, not the raw proxy address from status events
-- addresses are stored in lowercase throughout all aggregate tables
 
 **Validator checks**
 - canonical rows are keyed by canonical orchestrator identity
 - proxy-to-canonical multiplicity is surfaced and unsafe fanout is rejected
-- mixed-case raw addresses must not appear in any aggregate table
-- the URI-based join correctly maps status event URLs to canonical ETH addresses from capability snapshots
-
-**Resolver outcome notes**
-- `missing_uri_snapshot_local_alias_present` means exact URI-based canonicalization
-  failed inside the attribution window even though a local/proxy alias match
-  existed
-- `missing_uri_snapshot_address_match_present` means exact URI-based
-  canonicalization failed inside the attribution window even though a canonical
-  address-compatible match existed
-- both of the above remain `attribution_status = unresolved`
-- `matched_without_hardware` is the distinct `hardware_less` case and is only
-  valid when canonical attribution succeeded but hardware metadata did not
-  resolve
-- unresolved URI/address-gap sessions remain visible in session and
-  status-hour facts, but they are not equivalent to hardware-less GPU matches
 
 ### RULE-ATTRIBUTION-002 Pipeline And Model Must Be Normalized Across Event Families
 
@@ -1292,13 +1253,12 @@ Demand rows are valid even when one side is absent.
 
 Current active demand formulas:
 
-- `requested_sessions = sessions with requested_seen = 1`
-- `startup_success_sessions = requested sessions with startup_outcome = success`
-- `no_orch_sessions = requested sessions with selection_outcome = no_orch`
-- `startup_failed_sessions = requested sessions with startup_outcome = failed AND excusal_reason = none`
-- `startup_success_rate = startup_success_sessions / requested_sessions`
-- `effective_failed_sessions = startup_failed_sessions OR zero_output_fps_session OR loading_only_session`
-- `effective_success_rate = 1 - effective_failed_sessions / requested_sessions`
+- `known_sessions_count = known sessions`
+- `served_sessions = known sessions with canonical orchestrator identity`
+- `unserved_sessions = known sessions without canonical orchestrator identity`
+- `startup_success_rate = 1 - startup_unexcused / known`
+- `effective_failed_sessions = startup_unexcused OR zero_output_fps_session OR loading_only_session`
+- `effective_success_rate = 1 - effective_failed_sessions / known`
 
 `last_error_occurred` alone does not reduce effective success under the current active contract.
 
@@ -1341,6 +1301,10 @@ When canonical model/orchestrator attribution exists but GPU identity is still u
 
 Capacity fields on these surfaces are capability-based advertised capacity proxies, not observed saturation metrics.
 
+Current derived formula:
+
+- `advertised_capacity_utilization_rate = used_inference_minutes / advertised_capacity_minutes`, defaulting to `0` when the denominator is `0`
+
 **Output obligations**
 - GPU-sliced demand carries explicit GPU identity status
 - unresolved GPU rows remain distinguishable from malformed rows
@@ -1374,8 +1338,8 @@ Current derived formulas include:
 - `avg_output_fps = output_fps_sum / status_samples` when `status_samples > 0`
 - `fps_jitter_coefficient = stddev(output_fps) / mean_output_fps` when mean FPS is positive
 - latency averages use `sum / sample_count` only when sample count is positive
-- `startup_failed_rate = startup_failed_sessions / requested_sessions`
-- `swap_rate = total_swapped / requested_sessions`
+- `startup_unexcused_rate = startup_unexcused / known`
+- `swap_rate = total_swapped / known`
 
 **Output obligations**
 - GPU metrics excludes unresolved GPU identity rows
@@ -1408,12 +1372,12 @@ Freeze the exact meaning of SLA and related reliability ratios.
 **Requirement**
 The current active formulas are:
 
-- `startup_success_rate = startup_success_sessions / requested_sessions`
-- `effective_failed_sessions = startup_failed_sessions OR zero_output_fps_session OR loading_only_session`
-- `effective_success_rate = 1 - effective_failed_sessions / requested_sessions`
-- `no_swap_rate = 1 - total_swapped / requested_sessions`
+- `startup_success_rate = 1 - startup_unexcused / known`
+- `effective_failed_sessions = startup_unexcused OR zero_output_fps_session OR loading_only_session`
+- `effective_success_rate = 1 - effective_failed_sessions / known`
+- `no_swap_rate = 1 - total_swapped / known`
 - `health_signal_coverage_ratio = health_signal_count / health_expected_signal_count`, defaulting to `1.0` when the denominator is `0`
-- `output_viability_rate = 1 - (loading_only_sessions + zero_output_fps_sessions) / requested_sessions`
+- `output_viability_rate = 1 - sessions_with(loading_only_session OR zero_output_fps_session) / known`
 - `sla_score = 100 * health_signal_coverage_ratio * ((0.4 * startup_success_rate) + (0.2 * no_swap_rate) + (0.4 * output_viability_rate))`
 
 Bounds are part of the contract:
@@ -1533,7 +1497,6 @@ Where org-aware and public outputs both exist:
 **Validator checks**
 - public outputs equal explicit recomputation from lower canonical layers
 - serving logic does not redefine lifecycle or attribution semantics
-- `/v1/perf/e2e-latency`, status samples, and GPU metrics reuse the canonical session-edge latency facts rather than raw producer-specific latency payloads
 
 ## Parity And Quality Rules
 
@@ -1686,81 +1649,3 @@ Without depending on the current repository layout, a compliant validator must b
 5. reproduce safe attribution decisions, including unresolved, ambiguous, stale, and hardware-less cases
 6. recompute demand, GPU, and SLA outputs from canonical latest facts
 7. prove that final outputs preserve the same business semantics and data-quality guarantees as this contract
-
-## Validation Test Harness
-
-The repository includes a scenario-based data-quality test harness at `api/internal/validation/`.
-Tests route synthetic raw events through the ingest-router contract into
-`naap.accepted_raw_events` or `naap.ignored_raw_events` and then assert on the
-normalized, canonical, and serving tables that ClickHouse materialized views
-populate synchronously.
-
-### Running the harness
-
-```bash
-# Runs against the isolated validation profile
-make test-validation
-```
-
-Or directly:
-
-```bash
-CLICKHOUSE_ADDR=localhost:9000 \
-CLICKHOUSE_WRITER_USER=naap_writer \
-CLICKHOUSE_WRITER_PASSWORD=naap_writer_changeme \
-go test -tags=validation ./internal/validation/... -v -timeout=120s
-```
-
-Tests skip automatically when `CLICKHOUSE_ADDR` is not set.
-
-### Resolver operational seam
-
-The production resolver deployment now runs in `auto` mode:
-
-- visible closed historical backlog is processed first
-- late accepted raw rows can enqueue exact dirty historical `(org, event_date)` repairs
-- live lateness-window tail updates continue in the same service
-
-Manual `backfill` and `repair-window` remain operator tools, but they are no
-longer the normal steady-state path.
-
-### Isolation model
-
-Each test generates a unique `org` tag (`vtest_<rand32>`). All inserted rows and aggregate queries are scoped to that org, so tests can run against a live cluster without touching production data and require no cleanup.
-
-Exception: `agg_orch_state` is keyed by `orch_address` only (no org). Tests that seed this table use unique UIDs per run to avoid cross-test pollution.
-
-### Rule coverage
-
-| Rule | Tests | Notes |
-|------|-------|-------|
-| `RULE-INGEST-001` | `TestRuleIngest001_AcceptedEventsHaveNonBlankEnvelope`, `TestRuleIngest001_SupportedFamiliesAreContracted` | envelope validity and family contract |
-| `RULE-INGEST-002` | `TestRuleIngest002_StreamFamiliesHaveStreamId`, `TestRuleIngest002_PaymentHasRequiredFields` | minimum required fields per family |
-| `RULE-INGEST-003` | `TestRuleIngest003_AppSendStreamRequestDoesNotCountAsStarted`, `TestRuleIngest003_ScopeClientTracesDoNotCountAsStarted`, `TestRuleIngest003_UnknownTraceTypesAreDetectable` | ignored subtypes do not inflate lifecycle counters |
-| `RULE-LINEAGE-001` | `TestRuleLineage001_DuplicateEventIdCollapsesUnderFinal`, `TestRuleLineage001_AllAcceptedEventsHaveNonBlankId`, `TestRuleLineage001_ReplayDoesNotInflateAggregates` | dedup via full composite key `(org, event_type, event_ts, event_id)`; known gap: SummingMergeTree counts both writes before background merge |
-| `RULE-LINEAGE-002` | `TestRuleLineage002_StatusWithoutTraceStartIsDetectable`, `TestRuleLineage002_ClosedStreamHasTraceableLineage` | orphan detection and full lifecycle traceability |
-| `RULE-TYPED_RAW-002` | `TestRuleTypedRaw002_CapabilityArrayFansOutToOneRowPerOrch`, `TestRuleTypedRaw002_BlankAddressOrchIsFilteredOut`, `TestRuleTypedRaw002_EmptyCapabilityDataProducesNoOrchRows`, `TestRuleTypedRaw002_CapabilityNameFallback` | array fanout, blank-address filter, empty-data guard, `local_address` → `address` name fallback |
-| `RULE-FACT-001` | `TestRuleFact001_HistoricalVersionsAreRecoverable`, `TestRuleFact001_LatestStateReflectsLastEvent` | historical vs FINAL views; correct latest-state selection |
-| `RULE-FACT-002` | `TestRuleFact002_LatestStateHasOneRowPerStream`, `TestRuleFact002_NoConflictingLatestRowsForSameStream`, `TestRuleFact002_OrchestratorStateConvergesOnLatest` | one canonical row per stream and orch after FINAL dedup |
-| `RULE-LIFECYCLE-002` | `TestRuleLifecycle002_ContractedSubtypesDriveCorrectCounters` | `requested_seen`, `completed`, `selection_outcome`, `orch_swap` counts |
-| `RULE-LIFECYCLE-003` | `TestRuleLifecycle003_CleanSuccessStream`, `TestRuleLifecycle003_NoOrchStartupFailure`, `TestRuleLifecycle003_UnexcusedFailureIsDetectable`, `TestRuleLifecycle003_OrphanedCloseDoesNotCountAsKnownStream` | startup outcome classification and orphaned close detection |
-| `RULE-LIFECYCLE-007` | `TestRuleLifecycle007_DarkStreamsAreDetectable`, `TestRuleLifecycle007_HealthSignalCoverageRatioIsComputable` | dark stream detection and health signal coverage ratio |
-| `RULE-ATTRIBUTION-001` (partial) | `TestRuleAttribution001_OrchAddressNormalizedToLowercase`, `TestRuleAttribution001_StreamStateOrchAddressIsLowercase`, `TestRuleAttribution001_DiscoveryOrchAddressIsLowercase` | lowercase normalization via URI-join resolution chain for status/reliability tables; direct lowercasing for discovery |
-| `RULE-ATTRIBUTION-007` | `TestRuleAttribution007_BlankGatewayRateIsComputable`, `TestRuleAttribution007_BlankGatewayRateByFamilyIsComputable` | blank-gateway rate is computable per event family |
-| `RULE-AGGREGATE-004` (partial) | `TestRuleAggregate004_ZeroFpsSamplesExcludedFromAggregate`, `TestRuleAggregate004_PositiveFpsSamplesAreAggregated`, `TestRuleAggregate004_ZeroAndPositiveSamplesAreSeparated` | `WHERE fps > 0` filter in `mv_fps_hourly` |
-
-### Known gaps
-
-The following rules require intermediate tables (session spine, attribution decision, GPU-level metrics) or serving-layer APIs not present in the current simplified schema and are not yet covered by the harness:
-
-- `RULE-INGEST-004` — reject/quarantine accounting
-- `RULE-TYPED_RAW-001` — lossless non-fanout projection
-- `RULE-TYPED_RAW-003` — no-op capability snapshot handling
-- `RULE-FACT-003` — selection decision facts
-- `RULE-LIFECYCLE-001` — session identity determinism
-- `RULE-LIFECYCLE-004` through `RULE-LIFECYCLE-006`, `RULE-LIFECYCLE-008`, `RULE-LIFECYCLE-009` — segment boundaries, parameter updates, demand and SLA hour semantics
-- `RULE-ATTRIBUTION-002` through `RULE-ATTRIBUTION-006` — pipeline/model normalization, capability selection, safe failure, hardware-less attribution
-- `RULE-AGGREGATE-001` through `RULE-AGGREGATE-003`, `RULE-AGGREGATE-005`, `RULE-AGGREGATE-006` — rollup algebra and SLA formulas
-- `RULE-SERVING-001`, `RULE-SERVING-002` — serving output contract
-- `RULE-PARITY-001`, `RULE-PARITY-002` — end-to-end parity replay
-- `RULE-QUALITY-001`, `RULE-QUALITY-002` — quality diagnostics and scenario coverage

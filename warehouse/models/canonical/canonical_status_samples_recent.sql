@@ -1,10 +1,4 @@
-with latest_events as (
-    select
-        event_id,
-        argMax(refreshed_at, refreshed_at) as refreshed_at
-    from naap.canonical_status_samples_recent_store
-    group by event_id
-)
+with {{ latest_value_cte('latest_events', 'naap.canonical_status_samples_recent_store', ['event_id'], 'refreshed_at') }}
 select
     s.canonical_session_key,
     s.event_id,
@@ -25,5 +19,5 @@ select
     s.is_attributed
 from naap.canonical_status_samples_recent_store s
 inner join latest_events l
-    on s.event_id = l.event_id
+    on {{ join_on_columns('s', 'l', ['event_id']) }}
    and s.refreshed_at = l.refreshed_at

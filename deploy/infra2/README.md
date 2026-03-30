@@ -3,6 +3,8 @@
 Production deployment for `infra2.cloudspe.com`. Each service is a separate
 Portainer stack for independent lifecycle management.
 
+For the standard runtime and recovery model, see [`../../docs/operations/run-modes-and-recovery.md`](../../docs/operations/run-modes-and-recovery.md).
+
 ## Architecture
 
 | Stack | Services | Domain |
@@ -110,10 +112,11 @@ Deploy in this order, waiting for each to become healthy before the next:
 
 1. **naap-clickhouse** — `deploy/infra2/clickhouse/stack.yml`
 2. **naap-app** — `deploy/infra2/app/stack.yml`
-3. **naap-prometheus** — `deploy/infra2/prometheus/stack.yml`
-4. **naap-grafana** — `deploy/infra2/grafana/stack.yml`
-5. **naap-kafka-ui** — `deploy/infra2/kafka-ui/stack.yml`
-6. **naap-mirrormaker2** — `deploy/infra2/mirrormaker2/stack.yml`
+3. **naap-warehouse** — `deploy/infra2/warehouse/stack.yml` when you need scheduled or one-shot `dbt` publication
+4. **naap-prometheus** — `deploy/infra2/prometheus/stack.yml`
+5. **naap-grafana** — `deploy/infra2/grafana/stack.yml`
+6. **naap-kafka-ui** — `deploy/infra2/kafka-ui/stack.yml`
+7. **naap-mirrormaker2** — `deploy/infra2/mirrormaker2/stack.yml`
 
 ## Environment Variables
 
@@ -149,8 +152,7 @@ make push IMAGE_TAG=latest
 # 2. In Portainer: update naap-clickhouse and/or naap-app stacks (pull + redeploy)
 ```
 
-ClickHouse data survives redeployment. New migrations in the image **will not**
-run automatically on an existing volume — apply them manually via `clickhouse-client`.
+ClickHouse data survives redeployment. Fresh volumes can use the extracted bootstrap baseline in [`../../infra/clickhouse/bootstrap/v1.sql`](../../infra/clickhouse/bootstrap/v1.sql); existing volumes still require deliberate schema management rather than assuming automatic replay on redeploy.
 
 ## Accessing Internal Services
 

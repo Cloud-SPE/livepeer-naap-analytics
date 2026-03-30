@@ -13,7 +13,7 @@ models:
           - accepted_values:
               arguments:
                 values: ['resolved', 'hardware_less', 'stale', 'ambiguous', 'unresolved']
-  - name: canonical_session_latest
+  - name: canonical_session_current
     columns:
       - name: canonical_session_key
         tests:

@@ -58,8 +58,8 @@ func TestRuleParity001_RawReplayPropagatesThroughFinalOutputs(t *testing.T) {
 	if got := h.queryInt(t, `SELECT count() FROM naap.normalized_ai_stream_status WHERE org = ?`, h.org); got != 1 {
 		t.Fatalf("normalized_ai_stream_status rows = %d, want 1", got)
 	}
-	if got := h.queryInt(t, `SELECT count() FROM naap.canonical_session_latest WHERE canonical_session_key = ? AND attribution_status = 'resolved'`, key); got != 1 {
-		t.Fatalf("canonical_session_latest did not produce one resolved row for %s", key)
+	if got := h.queryInt(t, `SELECT count() FROM naap.canonical_session_current WHERE canonical_session_key = ? AND attribution_status = 'resolved'`, key); got != 1 {
+		t.Fatalf("canonical_session_current did not produce one resolved row for %s", key)
 	}
 	if got := h.queryInt(t, `SELECT count() FROM naap.canonical_status_hours WHERE canonical_session_key = ? AND is_terminal_tail_artifact = 0`, key); got != 1 {
 		t.Fatalf("canonical_status_hours did not produce one active hour for %s", key)
@@ -108,8 +108,8 @@ func TestRuleParity002_ReplaySliceCoversAllSemanticLayers(t *testing.T) {
 	if got := h.queryInt(t, `SELECT count() FROM naap.raw_events WHERE org = ? AND gateway = 'gw-parity'`, h.org); got != 3 {
 		t.Fatalf("raw parity slice = %d, want 3 non-capability service events", got)
 	}
-	if got := h.queryInt(t, `SELECT count() FROM naap.canonical_session_latest WHERE canonical_session_key = ? AND startup_outcome = 'success' AND attribution_status = 'resolved'`, key); got != 1 {
-		t.Fatalf("canonical_session_latest did not preserve success + resolved semantics for %s", key)
+	if got := h.queryInt(t, `SELECT count() FROM naap.canonical_session_current WHERE canonical_session_key = ? AND startup_outcome = 'success' AND attribution_status = 'resolved'`, key); got != 1 {
+		t.Fatalf("canonical_session_current did not preserve success + resolved semantics for %s", key)
 	}
 	if got := h.queryInt(t, `SELECT count() FROM naap.canonical_status_hours WHERE canonical_session_key = ? AND status_samples = 1 AND is_terminal_tail_artifact = 0`, key); got != 1 {
 		t.Fatalf("canonical_status_hours did not preserve aggregate semantics for %s", key)

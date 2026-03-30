@@ -3,6 +3,8 @@
 Production stack files for Portainer. No local file mounts — everything is
 baked into the Docker images.
 
+For the supported runtime story, see [`../docs/operations/run-modes-and-recovery.md`](../docs/operations/run-modes-and-recovery.md).
+
 ## Images
 
 | Image | Registry | What's in it |
@@ -23,8 +25,9 @@ make push-clickhouse               # ClickHouse image only
 
 The ClickHouse image bakes in:
 - `infra/clickhouse/config/` — server config overrides (Kafka offset policy, listen addr)
-- `infra/clickhouse/migrations/` — all SQL migrations
-- `infra/clickhouse/init/00_run_migrations.sh` — migration runner (runs once on first start)
+- `infra/clickhouse/bootstrap/` — generated fresh-volume bootstrap baseline
+- `infra/clickhouse/migrations/` — migration/reference path
+- `infra/clickhouse/init/00_run_migrations.sh` — schema runner (bootstrap or migrations)
 
 Any change to migrations or config requires a new image build and push.
 
@@ -214,5 +217,6 @@ make push IMAGE_TAG=latest
 ```
 
 ClickHouse data is preserved in the `clickhouse_data` named volume across
-redeployments. New migrations in the image will **not** run automatically
-on an existing volume — apply them manually via `clickhouse-client`.
+redeployments. Fresh volumes can use the extracted bootstrap baseline; existing
+volumes still need deliberate schema management rather than assuming automatic
+replay on redeploy.

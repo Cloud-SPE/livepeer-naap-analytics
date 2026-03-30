@@ -18,5 +18,5 @@ select
     last_seen,
     completed
 from {{ ref('canonical_active_stream_state_latest') }}
-where last_seen > now() - interval 90 second
-  and completed = 0
+where completed = 0
+  and nullIf(stream_id, '') is not null

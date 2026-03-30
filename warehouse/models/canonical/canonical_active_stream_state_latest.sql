@@ -1,10 +1,4 @@
-with latest_sessions as (
-    select
-        canonical_session_key,
-        argMax(refreshed_at, refreshed_at) as refreshed_at
-    from naap.canonical_active_stream_state_latest_store
-    group by canonical_session_key
-)
+with {{ latest_value_cte('latest_sessions', 'naap.canonical_active_stream_state_latest_store', ['canonical_session_key'], 'refreshed_at') }}
 select
     s.canonical_session_key,
     s.event_id,
@@ -27,5 +21,5 @@ select
     s.completed
 from naap.canonical_active_stream_state_latest_store s
 inner join latest_sessions l
-    on s.canonical_session_key = l.canonical_session_key
+    on {{ join_on_columns('s', 'l', ['canonical_session_key']) }}
    and s.refreshed_at = l.refreshed_at

@@ -1,17 +1,18 @@
 package clickhouse
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/livepeer/naap-analytics/internal/types"
 )
 
 const (
-	activeOrchMinutes  = 10
-	activeStreamSecs   = 30
+	activeOrchMinutes     = 10
+	activeStreamSecs      = 120
 	minReliabilitySamples = 5
-	defaultLimit       = 50
-	maxFailureLimit    = 500
+	defaultLimit          = 50
+	maxFailureLimit       = 500
 )
 
 // effectiveWindow returns the query time window, applying defaults when zero.
@@ -52,4 +53,8 @@ func rateOrNil(num, denom int64) *float64 {
 	}
 	v := float64(num) / float64(denom)
 	return &v
+}
+
+func activeStreamPredicate(column string) string {
+	return fmt.Sprintf("%s > now() - INTERVAL %d SECOND", column, activeStreamSecs)
 }

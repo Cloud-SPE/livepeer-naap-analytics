@@ -9,10 +9,7 @@ import (
 
 // GetActiveStreams returns currently active stream counts by org, pipeline, state (STR-001).
 func (r *Repo) GetActiveStreams(ctx context.Context, p types.QueryParams) (*types.ActiveStreamsSummary, error) {
-	where := fmt.Sprintf(
-		"WHERE sample_ts > now() - INTERVAL %d SECOND",
-		activeStreamSecs,
-	)
+	where := "WHERE " + activeStreamPredicate("last_seen") + " AND stream_id != ''"
 	args := []any{}
 	if p.Org != "" {
 		where += " AND org = ?"

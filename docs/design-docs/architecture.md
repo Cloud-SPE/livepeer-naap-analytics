@@ -76,6 +76,12 @@ The analytics storage/runtime contract uses explicit semantic tiers:
 - `operational_*` — low-latency live ops tables only
 - `api_*` — service-facing read models only
 
+Those prefixes describe semantic tiers and allowed derivation flow. They do not
+mean every physical ClickHouse table must use one of those prefixes. The
+supported bootstrap intentionally also includes infrastructure/runtime tables
+such as `accepted_raw_events`, `ignored_raw_events`, `kafka_*`, `resolver_*`,
+`agg_*`, metadata tables, and change/audit tables.
+
 Allowed data flow:
 
 ```text

@@ -3,6 +3,7 @@ set -euo pipefail
 
 MODE="${1:-up}"
 MIGRATIONS_DIR="${MIGRATIONS_DIR:-/migrations}"
+BOOTSTRAP_SQL="${BOOTSTRAP_SQL:-/bootstrap/v1.sql}"
 CH_HOST="${CH_HOST:-localhost}"
 CH_USER="${CLICKHOUSE_USER:-naap_admin}"
 CH_PASSWORD="${CLICKHOUSE_PASSWORD:-changeme}"
@@ -65,8 +66,15 @@ record_migration() {
 }
 
 run_up() {
+    shopt -s nullglob
+    local files=("${MIGRATIONS_DIR}"/*.sql)
+    shopt -u nullglob
+    if [ "${#files[@]}" -eq 0 ]; then
+        echo "[migrations] no forward migrations to apply"
+        return 0
+    fi
     ensure_history_table
-    for f in $(ls "${MIGRATIONS_DIR}"/*.sql | sort); do
+    for f in $(printf '%s\n' "${files[@]}" | sort); do
         local_name="$(basename "$f")"
         local_sum="$(sha256sum "$f" | awk '{print $1}')"
         applied_sum="$(current_checksum "${local_name}")"
@@ -91,8 +99,15 @@ run_up() {
 }
 
 run_status() {
+    shopt -s nullglob
+    local files=("${MIGRATIONS_DIR}"/*.sql)
+    shopt -u nullglob
+    if [ "${#files[@]}" -eq 0 ]; then
+        echo "[migrations] no forward migrations present"
+        return 0
+    fi
     ensure_history_table
-    for f in $(ls "${MIGRATIONS_DIR}"/*.sql | sort); do
+    for f in $(printf '%s\n' "${files[@]}" | sort); do
         local_name="$(basename "$f")"
         local_sum="$(sha256sum "$f" | awk '{print $1}')"
         applied_sum="$(current_checksum "${local_name}")"
@@ -107,9 +122,16 @@ run_status() {
 }
 
 run_validate() {
+    shopt -s nullglob
+    local files=("${MIGRATIONS_DIR}"/*.sql)
+    shopt -u nullglob
+    if [ "${#files[@]}" -eq 0 ]; then
+        echo "[migrations] no forward migrations to validate"
+        return 0
+    fi
     ensure_history_table
     local failed=0
-    for f in $(ls "${MIGRATIONS_DIR}"/*.sql | sort); do
+    for f in $(printf '%s\n' "${files[@]}" | sort); do
         local_name="$(basename "$f")"
         local_sum="$(sha256sum "$f" | awk '{print $1}')"
         applied_sum="$(current_checksum "${local_name}")"
@@ -125,19 +147,48 @@ run_validate() {
 }
 
 run_dry_run() {
-    for f in $(ls "${MIGRATIONS_DIR}"/*.sql | sort); do
+    shopt -s nullglob
+    local files=("${MIGRATIONS_DIR}"/*.sql)
+    shopt -u nullglob
+    if [ "${#files[@]}" -eq 0 ]; then
+        echo "[migrations] no forward migrations to apply"
+        return 0
+    fi
+    for f in $(printf '%s\n' "${files[@]}" | sort); do
         local_name="$(basename "$f")"
         echo "[migrations] would apply ${local_name}"
     done
 }
 
+run_bootstrap() {
+    if [ ! -f "${BOOTSTRAP_SQL}" ]; then
+        echo "[bootstrap] bootstrap file not found: ${BOOTSTRAP_SQL}" >&2
+        exit 1
+    fi
+    echo "[bootstrap] Applying ${BOOTSTRAP_SQL}"
+    render_sql "${BOOTSTRAP_SQL}" | clickhouse-client \
+        --host "${CH_HOST}" \
+        --user "${CH_USER}" \
+        --password "${CH_PASSWORD}" \
+        --multiquery
+    echo "[bootstrap] Bootstrap applied successfully"
+}
+
+# ClickHouse sources .sh files in /docker-entrypoint-initdb.d. This script must
+# only run when invoked explicitly by 00_run_migrations.sh, not when sourced as
+# a plain shell fragment during init discovery.
+if [ "${BASH_SOURCE[0]}" != "$0" ]; then
+    return 0
+fi
+
 case "${MODE}" in
     up) run_up ;;
+    bootstrap) run_bootstrap ;;
     status) run_status ;;
     validate) run_validate ;;
     dry-run) run_dry_run ;;
     *)
-        echo "usage: $0 {up|status|validate|dry-run}" >&2
+        echo "usage: $0 {up|bootstrap|status|validate|dry-run}" >&2
         exit 1
         ;;
 esac

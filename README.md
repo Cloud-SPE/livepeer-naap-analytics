@@ -5,45 +5,26 @@ ClickHouse via the Kafka Engine, and are surfaced through a Go REST API covering
 network state, stream activity, performance, payments, reliability, and an
 orchestrator leaderboard.
 
-## How it works
+## Current Architecture
 
-```
-Kafka topics                 ClickHouse                          Go API / Grafana
-──────────────────────────────────────────────────────────────────────────────────
-network_events   ──Kafka──►  Kafka Engine ──MV──►  naap.events
-streaming_events ──Engine──►  tables          │      │
-                                              │      └──► Aggregate MVs (MV-populated)
-                                              │             agg_orch_state
-                                              │             agg_stream_*
-                                              │             agg_stream_status_samples  ← migration 013
-                                              │             agg_payment_*
-                                              │             agg_*_hourly
-                                              └──────────────────────────► HTTP :8000
-                                                                           Grafana :3000
+The supported pipeline is:
 
-Livepeer API (poll every 5m)   enrichment worker        ClickHouse
-──────────────────────────────────────────────────────────────────────────────────
-/api/orchestrator  ──HTTP──►  Go goroutine  ──INSERT──►  naap.orch_metadata
-/api/gateways      ──poll──►  (in API proc) ──INSERT──►  naap.gateway_metadata
-agg_orch_state     ──read──►  (same worker) ──INSERT──►  naap.agg_gpu_inventory    ← migration 014
-```
+1. Kafka topics land in ClickHouse Kafka engine tables.
+2. Ingest materialized views route rows into `accepted_raw_events` and `ignored_raw_events`.
+3. `normalized_*` tables capture event-family facts and rollups.
+4. The resolver publishes corrected current and serving state into `canonical_*_store` and `api_*_store` tables.
+5. `dbt` publishes semantic `canonical_*` and `api_*` views.
+6. The Go API and Grafana read those published serving contracts.
 
-Two Kafka topics are consumed directly by ClickHouse:
+The hot read path is no longer built around `naap.events` or compatibility `v_api_*` views. The supported serving spine is the accepted-raw -> normalized -> resolver current/store -> dbt semantic-view path.
 
-| Topic | Org | Volume | Content |
-|---|---|---|---|
-| `network_events` | `daydream` | ~4.6M events/day | Orch capabilities, discovery, network caps |
-| `streaming_events` | `cloudspe` | ~35K events/day | Stream lifecycle, payments, AI status |
+## Key Docs
 
-Events land in `naap.events` (raw, 365-day TTL) and fan out to pre-aggregated
-tables via Materialized Views. The Go API queries only the aggregate tables — no
-raw-event queries at request time.
-
-A background enrichment worker polls the [Livepeer public API](https://livepeer-api.livepeer.cloud)
-every 5 minutes and upserts orchestrator and gateway metadata (ENS names, stake, service URIs,
-deposits) into `naap.orch_metadata` and `naap.gateway_metadata`. It also reads the current
-`agg_orch_state` snapshot, parses the `raw_capabilities` JSON blob to extract per-slot GPU info,
-and writes structured rows to `naap.agg_gpu_inventory` (used by the Supply & Inventory dashboard).
+- [`docs/design-docs/system-visuals.md`](docs/design-docs/system-visuals.md) shows the supported data-flow and deployment diagrams.
+- [`docs/operations/run-modes-and-recovery.md`](docs/operations/run-modes-and-recovery.md) documents standard runtime modes, failure recovery, and rebuild procedures.
+- [`docs/operations/compose-services.md`](docs/operations/compose-services.md) documents each Docker Compose service, profile, and responsibility.
+- [`docs/generated/schema.md`](docs/generated/schema.md) lists the extracted v1 bootstrap schema inventory.
+- [`infra/clickhouse/bootstrap/v1.sql`](infra/clickhouse/bootstrap/v1.sql) is the generated fresh-volume bootstrap baseline.
 
 ## Project structure
 
@@ -64,8 +45,9 @@ api/                    Go REST API (port 8000)
 infra/
   clickhouse/
     config/             ClickHouse server config overrides (including Prometheus endpoint)
-    init/               Docker entrypoint migration runner
-    migrations/         SQL migrations (applied in sort order on first start)
+    bootstrap/          Generated fresh-volume bootstrap schema
+    init/               Docker entrypoint schema runner (bootstrap or migrations)
+    migrations/         Forward migrations only after the v1 bootstrap baseline
   docker/               Dockerfiles for api
   grafana/
     dashboards/         Grafana dashboard JSON files (auto-loaded on startup)
@@ -83,6 +65,8 @@ docs/
   PLANS.md              Phase planning and status
   PRODUCT_SENSE.md      Product goals and success criteria
   design-docs/          Architecture decision records (ADRs) and behavioral contracts
+  operations/           Supported run modes and recovery guides
+  generated/            Generated schema and baseline references
   exec-plans/           Per-phase execution plans (active + completed)
   product-specs/        Feature requirements (R1–R6)
 
@@ -105,10 +89,10 @@ tools/inspector/        Event inspection utility
 cp .env.example .env
 # Edit .env — at minimum set passwords; see Configuration below
 
-# 2. Start the full stack
+# 2. Start the runtime stack
 make up
 
-# 3. Verify everything is healthy (~30s for migrations to apply)
+# 3. Verify everything is healthy (~30s for bootstrap and service startup)
 curl http://localhost:8000/healthz
 # → {"status":"ok"}
 
@@ -121,10 +105,16 @@ open http://localhost:3000        # Grafana (anonymous admin, no login required)
 make down
 ```
 
+`make up` starts the always-on runtime and includes a one-shot `warehouse-init`
+service so fresh volumes get the semantic `canonical_*` and `api_*` views
+without keeping a warehouse container idling in the default stack.
+
 **Useful make targets:**
 
 ```bash
 make logs             # Follow all service logs
+make up-tooling       # Start the optional dbt tooling container
+make warehouse-run    # Publish dbt semantic views once
 make ch-query         # Interactive ClickHouse shell
 make ch-smoke         # Quick smoke test (event counts, agg table rows)
 make inspect          # Run event inspector against production broker
@@ -165,7 +155,7 @@ make test             # Go unit tests with race detector (includes enrichment cl
 # Integration tests — requires a running ClickHouse (make up first)
 CLICKHOUSE_ADDR=localhost:9000 make test-integration
 
-# Data-quality validation tests — requires a running ClickHouse (make up first)
+# Data-quality validation tests — run against an isolated validation profile
 make test-validation
 
 # Benchmarks
@@ -310,7 +300,7 @@ passes them to the ClickHouse container at startup).
 
 > **Important:** `KAFKA_BROKER_LIST` is baked into the Kafka Engine table DDL at
 > migration time. To change the broker on an already-running instance, set the new
-> value in `.env` then run `make down && make up` (migrations re-apply on a fresh
+> value in `.env` then run `make down && make up` (bootstrap re-applies on a fresh
 > container). See `infra/clickhouse/README.md` for details.
 
 ## Deploying to production
@@ -378,20 +368,18 @@ to consume full topic history. Monitor progress:
 ```bash
 docker compose exec clickhouse clickhouse-client \
   --user naap_admin --password <password> \
-  --query "SELECT count(), min(event_ts), max(event_ts) FROM naap.events"
+  --query "SELECT count(), min(event_ts), max(event_ts) FROM naap.accepted_raw_events"
 ```
 
 Once the backfill is complete, change to `KAFKA_AUTO_OFFSET_RESET=latest` and
 run `make down && make up` so new consumer sessions start from the current end.
 
-After backfill, re-run the orch address backfill (migration 011 backfills
-reliability and stream state from `naap.events` using the then-complete
-`agg_orch_state` lookup):
+After backfill, restart the stack or run the resolver repair path so the
+bootstrap-backed aggregates and current-store surfaces catch up against the
+completed accepted-raw history:
 
 ```bash
-docker compose exec clickhouse clickhouse-client \
-  --user naap_admin --password <password> \
-  --queries-file /migrations/011_fix_orch_address.sql
+make resolver-repair-window FROM=2026-03-01T00:00:00Z TO=2026-03-02T00:00:00Z
 ```
 
 ## ClickHouse management
@@ -403,7 +391,7 @@ make ch-query
 # Check event ingestion
 docker compose exec clickhouse clickhouse-client \
   --user naap_admin --password changeme \
-  --query "SELECT event_type, count() FROM naap.events GROUP BY event_type"
+  --query "SELECT event_type, count() FROM naap.accepted_raw_events GROUP BY event_type"
 
 # Check Kafka consumer progress
 docker compose exec clickhouse clickhouse-client \

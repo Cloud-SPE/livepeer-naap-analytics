@@ -128,14 +128,14 @@ func TestRuleServing002_APIOutputsRemainDerivableFromCanonicalFacts(t *testing.T
 	if got := h.queryInt(t, `SELECT known_sessions_count FROM naap.api_gpu_metrics_by_org WHERE org = ? AND window_start = ? AND orchestrator_address = ? AND pipeline_id = 'text-to-image'`, h.org, windowStart, orchAddr); got != 1 {
 		t.Fatalf("api_gpu_metrics_by_org known_sessions_count = %d, want 1", got)
 	}
-	if got := h.queryInt(t, `SELECT count() FROM naap.canonical_session_latest WHERE canonical_session_key = ? AND startup_outcome = 'success' AND attributed_orch_address = ?`, key, orchAddr); got != 1 {
-		t.Fatalf("canonical_session_latest did not retain the canonical success row for %s", key)
+	if got := h.queryInt(t, `SELECT count() FROM naap.canonical_session_current WHERE canonical_session_key = ? AND startup_outcome = 'success' AND attributed_orch_address = ?`, key, orchAddr); got != 1 {
+		t.Fatalf("canonical_session_current did not retain the canonical success row for %s", key)
 	}
 	if got := h.queryInt(t, `SELECT count() FROM naap.canonical_status_hours WHERE canonical_session_key = ? AND hour = ? AND is_terminal_tail_artifact = 0 AND status_samples = 1`, key, windowStart); got != 1 {
 		t.Fatalf("canonical_status_hours did not retain the non-tail hourly status row for %s", key)
 	}
-	if got := h.queryString(t, `SELECT ifNull(canonical_pipeline, '') FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, key); got != "text-to-image" {
-		t.Fatalf("canonical_session_latest canonical_pipeline = %q, want text-to-image", got)
+	if got := h.queryString(t, `SELECT ifNull(canonical_pipeline, '') FROM naap.canonical_session_current WHERE canonical_session_key = ?`, key); got != "text-to-image" {
+		t.Fatalf("canonical_session_current canonical_pipeline = %q, want text-to-image", got)
 	}
 }
 

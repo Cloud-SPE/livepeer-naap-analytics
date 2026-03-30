@@ -45,7 +45,7 @@ session_linked as (
         'session_id' as link_method,
         'resolved' as link_status
     from {{ ref('stg_payments') }} p
-    inner join naap.typed_payments anchor
+    inner join {{ ref('stg_payments') }} anchor
         on p.org = anchor.org
        and p.request_id = ''
        and p.session_id != ''

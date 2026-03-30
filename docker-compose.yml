@@ -56,6 +56,8 @@ services:
         condition: service_healthy
       clickhouse:
         condition: service_healthy
+      warehouse-init:
+        condition: service_completed_successfully
     ports:
       - "8000:8000"
     environment:
@@ -75,6 +77,27 @@ services:
     volumes:
       - ./api:/app/api
     restart: on-failure
+
+  warehouse-init:
+    build:
+      context: .
+      dockerfile: infra/docker/dbt.Dockerfile
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    environment:
+      DBT_PROFILES_DIR: /app/warehouse
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_DB: naap
+      CLICKHOUSE_USER: naap_admin
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_ADMIN_PASSWORD:-changeme}
+      DBT_AUTO_RUN_ON_START: "false"
+    volumes:
+      - ./warehouse:/app/warehouse
+    working_dir: /app/warehouse
+    command: ["run"]
+    restart: "no"
 
   resolver:
     build:
@@ -108,6 +131,7 @@ services:
     restart: unless-stopped
 
   warehouse:
+    profiles: ["tooling"]
     build:
       context: .
       dockerfile: infra/docker/dbt.Dockerfile
@@ -121,7 +145,7 @@ services:
       CLICKHOUSE_DB: naap
       CLICKHOUSE_USER: naap_admin
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_ADMIN_PASSWORD:-changeme}
-      DBT_AUTO_RUN_ON_START: ${DBT_AUTO_RUN_ON_START:-true}
+      DBT_AUTO_RUN_ON_START: "false"
     volumes:
       - ./warehouse:/app/warehouse
     working_dir: /app/warehouse
@@ -140,6 +164,7 @@ services:
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
       CLICKHOUSE_WRITER_PASSWORD: ${CLICKHOUSE_WRITER_PASSWORD:-naap_writer_changeme}
       CLICKHOUSE_READER_PASSWORD: ${CLICKHOUSE_READER_PASSWORD:-naap_reader_changeme}
+      CLICKHOUSE_SCHEMA_MODE: ${VALIDATION_CLICKHOUSE_SCHEMA_MODE:-bootstrap}
       KAFKA_BROKER_LIST: ${VALIDATION_KAFKA_BROKER_LIST:-localhost:9092}
       KAFKA_AUTO_OFFSET_RESET: latest
       KAFKA_NETWORK_GROUP: clickhouse-naap-validation-network
@@ -151,6 +176,7 @@ services:
     volumes:
       - validation_clickhouse_data:/var/lib/clickhouse
       - ./infra/clickhouse/config:/etc/clickhouse-server/config.d:ro
+      - ./infra/clickhouse/bootstrap:/bootstrap:ro
       - ./infra/clickhouse/migrations:/migrations:ro
       - ./infra/clickhouse/init:/docker-entrypoint-initdb.d:ro
     ulimits:
@@ -178,19 +204,11 @@ services:
       CLICKHOUSE_DB: naap
       CLICKHOUSE_USER: naap_admin
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_ADMIN_PASSWORD:-changeme}
-      DBT_AUTO_RUN_ON_START: "true"
+      DBT_AUTO_RUN_ON_START: "false"
     volumes:
       - ./warehouse:/app/warehouse
     working_dir: /app/warehouse
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "python -c \"import os,sys,urllib.request,urllib.parse; qs=urllib.parse.urlencode({'database':'naap','user':'naap_admin','password':os.getenv('CLICKHOUSE_PASSWORD','changeme'),'query':'EXISTS TABLE naap.canonical_session_current'}); data=urllib.request.urlopen('http://validation-clickhouse:8123/?'+qs, timeout=5).read().strip(); sys.exit(0 if data==b'1' else 1)\""
-        ]
-      interval: 10s
-      timeout: 10s
-      retries: 18
+    command: ["run"]
     restart: "no"
 
   validation-go:
@@ -200,7 +218,7 @@ services:
       validation-clickhouse:
         condition: service_healthy
       warehouse-validation:
-        condition: service_healthy
+        condition: service_completed_successfully
     environment:
       CLICKHOUSE_ADDR: validation-clickhouse:9000
       CLICKHOUSE_DB: naap
@@ -303,6 +321,7 @@ services:
       # KAFKA_AUTO_OFFSET_RESET: earliest = full history, latest = new data only.
       CLICKHOUSE_WRITER_PASSWORD: ${CLICKHOUSE_WRITER_PASSWORD:-naap_writer_changeme}
       CLICKHOUSE_READER_PASSWORD: ${CLICKHOUSE_READER_PASSWORD:-naap_reader_changeme}
+      CLICKHOUSE_SCHEMA_MODE: ${CLICKHOUSE_SCHEMA_MODE:-bootstrap}
       KAFKA_BROKER_LIST: ${KAFKA_BROKER_LIST:-infra2.cloudspe.com:9092}
       KAFKA_AUTO_OFFSET_RESET: ${KAFKA_AUTO_OFFSET_RESET:-earliest}
       KAFKA_NETWORK_GROUP: ${KAFKA_NETWORK_GROUP:-clickhouse-naap-network}
@@ -314,6 +333,7 @@ services:
     volumes:
       - clickhouse_data:/var/lib/clickhouse
       - ./infra/clickhouse/config:/etc/clickhouse-server/config.d:ro
+      - ./infra/clickhouse/bootstrap:/bootstrap:ro
       - ./infra/clickhouse/migrations:/migrations:ro
       - ./infra/clickhouse/init:/docker-entrypoint-initdb.d:ro
     ulimits:

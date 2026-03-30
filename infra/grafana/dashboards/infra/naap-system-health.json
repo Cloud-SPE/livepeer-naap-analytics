@@ -376,7 +376,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "red",
+                "color": "green",
                 "value": 0
               },
               {
@@ -384,7 +384,7 @@
                 "value": 1
               },
               {
-                "color": "green",
+                "color": "red",
                 "value": 10
               }
             ]

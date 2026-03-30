@@ -184,7 +184,7 @@ func TestRuleIngest003_NonCoreAppStreamTraceDoesNotCountAsStarted(t *testing.T) 
 	})
 
 	started := h.queryInt(t,
-		`SELECT countIf(started = 1) FROM naap.canonical_session_latest WHERE canonical_session_key = ?`,
+		`SELECT countIf(started = 1) FROM naap.canonical_session_current WHERE canonical_session_key = ?`,
 		key)
 	if started != 0 {
 		t.Errorf("RULE-INGEST-003: non-core app traces contributed %d to canonical started semantics (expected 0)", started)
@@ -223,7 +223,7 @@ func TestRuleIngest003_ScopeClientTracesDoNotCountAsStarted(t *testing.T) {
 	}
 	h.insert(t, events)
 
-	if h.queryInt(t, `SELECT count() FROM naap.canonical_session_latest WHERE org = ?`, h.org) != 0 {
+	if h.queryInt(t, `SELECT count() FROM naap.canonical_session_current WHERE org = ?`, h.org) != 0 {
 		t.Errorf("RULE-INGEST-003: scope client traces unexpectedly produced canonical session rows")
 	}
 	if got := h.queryInt(t, `SELECT count() FROM naap.canonical_session_current_store FINAL WHERE org = ?`, h.org); got != 0 {

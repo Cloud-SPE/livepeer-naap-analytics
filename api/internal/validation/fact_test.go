@@ -68,13 +68,13 @@ func TestRuleFact001_SessionFactReflectsLatestLifecycleState(t *testing.T) {
 		},
 	})
 
-	if h.queryInt(t, `SELECT toUInt64(completed) FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, key) != 1 {
+	if h.queryInt(t, `SELECT toUInt64(completed) FROM naap.canonical_session_current WHERE canonical_session_key = ?`, key) != 1 {
 		t.Errorf("RULE-FACT-001: canonical session fact did not retain completed=1")
 	}
-	if h.queryInt(t, `SELECT toUInt64(restart_seen) FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, key) != 1 {
+	if h.queryInt(t, `SELECT toUInt64(restart_seen) FROM naap.canonical_session_current WHERE canonical_session_key = ?`, key) != 1 {
 		t.Errorf("RULE-FACT-001: canonical session fact did not retain restart_seen=1")
 	}
-	if h.queryInt(t, `SELECT toUInt64(error_seen) FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, key) != 1 {
+	if h.queryInt(t, `SELECT toUInt64(error_seen) FROM naap.canonical_session_current WHERE canonical_session_key = ?`, key) != 1 {
 		t.Errorf("RULE-FACT-001: canonical session fact did not retain error_seen=1")
 	}
 }
@@ -95,10 +95,10 @@ func TestRuleFact002_CanonicalSessionFactsConvergeToOneRowPerSession(t *testing.
 		}})
 	}
 
-	if h.queryInt(t, `SELECT count() FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, key) != 1 {
+	if h.queryInt(t, `SELECT count() FROM naap.canonical_session_current WHERE canonical_session_key = ?`, key) != 1 {
 		t.Errorf("RULE-FACT-002: canonical session fact did not converge to one row for %s", key)
 	}
-	if h.queryInt(t, `SELECT status_sample_count FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, key) != 3 {
+	if h.queryInt(t, `SELECT status_sample_count FROM naap.canonical_session_current WHERE canonical_session_key = ?`, key) != 3 {
 		t.Errorf("RULE-FACT-002: canonical session fact did not retain all 3 status samples")
 	}
 }

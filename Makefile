@@ -1,4 +1,4 @@
-.PHONY: up down build test test-integration bench load-test lint dev-api setup fmt ch-smoke ch-query push push-api push-clickhouse push-dbt push-resolver warehouse-run warehouse-test warehouse-compile test-validation test-validation-host test-validation-docker test-validation-clean measure-baseline measure-refactor-replay migrate-status migrate-validate migrate-up resolver-logs resolver-auto resolver-bootstrap resolver-tail resolver-backfill resolver-repair-window parity-verify backfill-rollups backfill-raw-mv-views
+.PHONY: up up-tooling down build test test-integration bench load-test lint dev-api setup fmt ch-smoke ch-query push push-api push-clickhouse push-dbt push-resolver warehouse-run warehouse-test warehouse-compile test-validation test-validation-host test-validation-docker test-validation-clean measure-baseline measure-refactor-replay migrate-status migrate-validate migrate-up bootstrap-extract resolver-logs resolver-auto resolver-bootstrap resolver-tail resolver-backfill resolver-repair-window parity-verify backfill-rollups backfill-raw-mv-views
 
 REGISTRY  ?= tztcloud
 IMAGE_TAG ?= latest
@@ -8,8 +8,11 @@ IMAGE_TAG ?= latest
 up:
 	docker compose up --build -d
 
+up-tooling:
+	docker compose --profile tooling up --build -d warehouse
+
 down:
-	docker compose down -v
+	docker compose --profile tooling --profile validation down -v --remove-orphans
 
 logs:
 	docker compose logs -f
@@ -88,13 +91,13 @@ test-validation-clean:
 	docker compose --profile validation run --rm validation-go
 
 warehouse-run:
-	docker compose run --rm warehouse run
+	docker compose --profile tooling run --rm warehouse run
 
 warehouse-test:
-	docker compose run --rm warehouse test
+	docker compose --profile tooling run --rm warehouse test
 
 warehouse-compile:
-	docker compose run --rm warehouse compile
+	docker compose --profile tooling run --rm warehouse compile
 
 # Benchmarks: measures handler+JSON overhead using the noop repo.
 bench:
@@ -149,6 +152,9 @@ migrate-validate:
 
 migrate-up:
 	docker compose exec clickhouse bash /docker-entrypoint-initdb.d/ch-migrate.sh up
+
+bootstrap-extract:
+	python3 scripts/extract_clickhouse_bootstrap.py
 
 resolver-logs:
 	docker compose logs -f resolver

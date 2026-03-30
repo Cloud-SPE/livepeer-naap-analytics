@@ -45,5 +45,6 @@ Thumbs.db
 # Generated
 docs/generated/*.md
 !docs/generated/.gitkeep
+!docs/generated/schema.md
 warehouse/target/
 warehouse/logs/

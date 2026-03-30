@@ -67,6 +67,12 @@ exact write ownership and bounded padded reads.
 - `operational_*` — low-latency live ops tables
 - `api_*` — service/dashboard read models only
 
+This tier contract is documentation for semantic derivation flow. The physical
+bootstrap also contains infrastructure/runtime namespaces such as `resolver_*`,
+`agg_*`, `kafka_*`, metadata tables, and change/audit tables. Those objects are
+supported as-is; we are not planning another broad schema rename just to force
+every table into the semantic prefixes.
+
 Medallion mapping is documentation-only:
 
 - bronze = `raw_*`

@@ -37,18 +37,21 @@ See `docs/design-docs/architecture.md` for per-component layer rules.
 
 | File | Purpose |
 |------|---------|
-| `docs/DESIGN.md` | Architecture overview and layering rules |
-| `docs/PLANS.md` | Active and completed plans index |
-| `docs/PRODUCT_SENSE.md` | Product principles and goals |
-| `docs/design-docs/index.md` | All design documents with status |
-| `docs/design-docs/core-beliefs.md` | Agent-first operating principles |
-| `docs/design-docs/architecture.md` | Detailed per-component architecture |
-| `docs/design-docs/data-validation-rules.md` | Behavioral contract for all data validation rules (17 rules, 31 tests) |
-| `docs/exec-plans/active/` | In-progress execution plans |
-| `docs/exec-plans/completed/` | Historical execution plans |
-| `docs/exec-plans/tech-debt-tracker.md` | Known technical debt |
-| `docs/generated/schema.md` | Auto-generated schema reference |
-| `docs/product-specs/index.md` | Feature and product specifications |
+| [`docs/DESIGN.md`](docs/DESIGN.md) | Architecture overview and layering rules |
+| [`docs/PLANS.md`](docs/PLANS.md) | Active and completed plans index |
+| [`docs/PRODUCT_SENSE.md`](docs/PRODUCT_SENSE.md) | Product principles and goals |
+| [`docs/design-docs/index.md`](docs/design-docs/index.md) | All design documents with status |
+| [`docs/design-docs/core-beliefs.md`](docs/design-docs/core-beliefs.md) | Agent-first operating principles |
+| [`docs/design-docs/architecture.md`](docs/design-docs/architecture.md) | Detailed per-component architecture |
+| [`docs/design-docs/system-visuals.md`](docs/design-docs/system-visuals.md) | Visual data-flow and deployment diagrams |
+| [`docs/design-docs/data-validation-rules.md`](docs/design-docs/data-validation-rules.md) | Behavioral contract for all data validation rules (17 rules, 31 tests) |
+| [`docs/operations/run-modes-and-recovery.md`](docs/operations/run-modes-and-recovery.md) | Supported runtime modes, recovery, and rebuild procedures |
+| [`docs/operations/compose-services.md`](docs/operations/compose-services.md) | Docker Compose services, profiles, and runtime responsibilities |
+| [`docs/exec-plans/active/`](docs/exec-plans/active/) | In-progress execution plans |
+| [`docs/exec-plans/completed/`](docs/exec-plans/completed/) | Historical execution plans |
+| [`docs/exec-plans/tech-debt-tracker.md`](docs/exec-plans/tech-debt-tracker.md) | Known technical debt |
+| [`docs/generated/schema.md`](docs/generated/schema.md) | Auto-generated schema reference |
+| [`docs/product-specs/index.md`](docs/product-specs/index.md) | Feature and product specifications |
 
 ## Non-negotiable tenants
 

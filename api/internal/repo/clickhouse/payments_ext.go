@@ -3,6 +3,7 @@ package clickhouse
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/livepeer/naap-analytics/internal/types"
 )
@@ -38,6 +39,8 @@ func (r *Repo) ListPaymentsByGateway(ctx context.Context, p types.QueryParams) (
 	defer rows.Close()
 
 	var result []types.GatewayPayment
+	var gatewayKeys []string
+	indexByGateway := map[string]int{}
 	for rows.Next() {
 		var gp types.GatewayPayment
 		var wei, count, orchs uint64
@@ -47,17 +50,52 @@ func (r *Repo) ListPaymentsByGateway(ctx context.Context, p types.QueryParams) (
 		gp.TotalWEI = types.WEI(wei)
 		gp.EventCount = int64(count)
 		gp.UniqueOrchs = int64(orchs)
-
-		// Resolve name from gateway_metadata
-		nameRow := r.conn.QueryRow(ctx, `
-			SELECT coalesce(name, '') FROM naap.gateway_metadata FINAL
-			WHERE lower(eth_address) = lower(?)
-		`, gp.GatewayAddress)
-		_ = nameRow.Scan(&gp.Name)
-
+		key := strings.ToLower(gp.GatewayAddress)
+		if _, exists := indexByGateway[key]; !exists {
+			indexByGateway[key] = len(gatewayKeys)
+			gatewayKeys = append(gatewayKeys, key)
+		}
 		result = append(result, gp)
 	}
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(gatewayKeys) == 0 {
+		return result, nil
+	}
+
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(gatewayKeys)), ",")
+	args = make([]any, 0, len(gatewayKeys))
+	for _, key := range gatewayKeys {
+		args = append(args, key)
+	}
+
+	nameRows, err := r.conn.Query(ctx, `
+		SELECT lower(eth_address) AS gateway_key, coalesce(argMax(name, updated_at), '') AS name
+		FROM naap.gateway_metadata
+		WHERE lower(eth_address) IN (`+placeholders+`)
+		GROUP BY gateway_key
+	`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("clickhouse list payments by gateway names: %w", err)
+	}
+	defer nameRows.Close()
+
+	nameByGateway := map[string]string{}
+	for nameRows.Next() {
+		var gatewayKey, name string
+		if err := nameRows.Scan(&gatewayKey, &name); err != nil {
+			return nil, fmt.Errorf("clickhouse list payments by gateway names scan: %w", err)
+		}
+		nameByGateway[gatewayKey] = name
+	}
+	if err := nameRows.Err(); err != nil {
+		return nil, fmt.Errorf("clickhouse list payments by gateway names rows: %w", err)
+	}
+	for i := range result {
+		result[i].Name = nameByGateway[strings.ToLower(result[i].GatewayAddress)]
+	}
+	return result, nil
 }
 
 // ListPaymentsByStream returns total payments per stream (GPAY-002).

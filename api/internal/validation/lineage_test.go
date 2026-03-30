@@ -62,10 +62,10 @@ func TestRuleLineage001_ReplayDoesNotInflateCanonicalFacts(t *testing.T) {
 		},
 	})
 
-	if h.queryInt(t, `SELECT count() FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, key) != 1 {
+	if h.queryInt(t, `SELECT count() FROM naap.canonical_session_current WHERE canonical_session_key = ?`, key) != 1 {
 		t.Errorf("RULE-LINEAGE-001: replay produced duplicate canonical session rows for %s", key)
 	}
-	if h.queryInt(t, `SELECT toUInt64(started) FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, key) != 1 {
+	if h.queryInt(t, `SELECT toUInt64(started) FROM naap.canonical_session_current WHERE canonical_session_key = ?`, key) != 1 {
 		t.Errorf("RULE-LINEAGE-001: replay inflated started semantics for %s", key)
 	}
 }
@@ -114,13 +114,13 @@ func TestRuleLineage002_StatusWithoutTraceStartRemainsDetectable(t *testing.T) {
 		},
 	})
 
-	if h.queryInt(t, `SELECT toUInt64(started) FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, knownKey) != 1 {
+	if h.queryInt(t, `SELECT toUInt64(started) FROM naap.canonical_session_current WHERE canonical_session_key = ?`, knownKey) != 1 {
 		t.Errorf("RULE-LINEAGE-002: known session did not retain started=1")
 	}
-	if h.queryInt(t, `SELECT toUInt64(started) FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, orphanKey) != 0 {
+	if h.queryInt(t, `SELECT toUInt64(started) FROM naap.canonical_session_current WHERE canonical_session_key = ?`, orphanKey) != 0 {
 		t.Errorf("RULE-LINEAGE-002: orphan status session was incorrectly coerced into started=1")
 	}
-	if h.queryInt(t, `SELECT status_sample_count FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, orphanKey) != 1 {
+	if h.queryInt(t, `SELECT status_sample_count FROM naap.canonical_session_current WHERE canonical_session_key = ?`, orphanKey) != 1 {
 		t.Errorf("RULE-LINEAGE-002: orphan status session lost its status sample lineage")
 	}
 }
@@ -145,10 +145,10 @@ func TestRuleLineage002_ClosedStreamHasTraceableLineage(t *testing.T) {
 		},
 	})
 
-	if h.queryInt(t, `SELECT toUInt64(started) FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, key) != 1 {
+	if h.queryInt(t, `SELECT toUInt64(started) FROM naap.canonical_session_current WHERE canonical_session_key = ?`, key) != 1 {
 		t.Errorf("RULE-LINEAGE-002: closed session lost start lineage")
 	}
-	if h.queryInt(t, `SELECT toUInt64(completed) FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, key) != 1 {
+	if h.queryInt(t, `SELECT toUInt64(completed) FROM naap.canonical_session_current WHERE canonical_session_key = ?`, key) != 1 {
 		t.Errorf("RULE-LINEAGE-002: closed session lost close lineage")
 	}
 }
