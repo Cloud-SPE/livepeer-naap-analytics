@@ -22,10 +22,10 @@ func (r *Repo) ListFailuresByPipeline(ctx context.Context, p types.QueryParams) 
 
 	streamRows, err := r.conn.Query(ctx, `
 		SELECT pipeline,
-			sum(started)   AS started,
-			sum(no_orch)   AS no_orch,
-			sum(orch_swap) AS orch_swap
-		FROM naap.serving_stream_hourly
+			sum(requested_sessions) AS requested,
+			sum(no_orch_sessions) AS no_orch,
+			sum(orch_swap_sessions) AS orch_swap
+		FROM naap.api_stream_hourly
 		`+where+`
 		GROUP BY pipeline
 		ORDER BY no_orch + orch_swap DESC
@@ -39,8 +39,8 @@ func (r *Repo) ListFailuresByPipeline(ctx context.Context, p types.QueryParams) 
 	var result []types.FailuresByPipeline
 	for streamRows.Next() {
 		var pipeline string
-		var started, noOrch, orchSwap uint64
-		if err := streamRows.Scan(&pipeline, &started, &noOrch, &orchSwap); err != nil {
+		var requested, noOrch, orchSwap uint64
+		if err := streamRows.Scan(&pipeline, &requested, &noOrch, &orchSwap); err != nil {
 			return nil, fmt.Errorf("clickhouse list failures by pipeline scan: %w", err)
 		}
 		total := int64(noOrch) + int64(orchSwap)
@@ -51,7 +51,7 @@ func (r *Repo) ListFailuresByPipeline(ctx context.Context, p types.QueryParams) 
 			InferenceErrorCount:   0, // Not available at pipeline level
 			InferenceRestartCount: 0, // Not available at pipeline level
 			TotalFailures:         total,
-			FailureRate:           divSafe(float64(total), float64(started)),
+			FailureRate:           divSafe(float64(total), float64(requested)),
 		})
 	}
 	if err := streamRows.Err(); err != nil {
@@ -80,8 +80,8 @@ func (r *Repo) ListFailuresByOrch(ctx context.Context, p types.QueryParams) ([]t
 			sum(r.ai_stream_count)             AS streams_handled,
 			sum(r.error_count)                 AS inference_errors,
 			sum(r.restart_count)               AS inference_restarts
-		FROM naap.serving_orch_reliability_hourly AS r
-		LEFT JOIN naap.serving_latest_orchestrator_state AS s ON r.orch_address = s.orch_address
+		FROM naap.api_orchestrator_reliability_hourly AS r
+		LEFT JOIN naap.api_latest_orchestrator_state AS s ON r.orch_address = s.orch_address
 		`+where+`
 		GROUP BY r.orch_address, name
 		ORDER BY inference_errors + inference_restarts DESC

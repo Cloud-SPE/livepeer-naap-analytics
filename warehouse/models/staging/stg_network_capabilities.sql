@@ -1,3 +1,3 @@
 select *
-from naap.typed_network_capabilities final
+from naap.normalized_network_capabilities final
 where row_id != ''

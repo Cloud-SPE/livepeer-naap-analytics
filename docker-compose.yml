@@ -76,6 +76,36 @@ services:
       - ./api:/app/api
     restart: on-failure
 
+  resolver:
+    build:
+      context: .
+      dockerfile: infra/docker/resolver.Dockerfile
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    environment:
+      ENV: development
+      LOG_LEVEL: debug
+      CLICKHOUSE_ADDR: clickhouse:9000
+      CLICKHOUSE_DB: naap
+      CLICKHOUSE_WRITER_USER: naap_writer
+      CLICKHOUSE_WRITER_PASSWORD: naap_writer_changeme
+      RESOLVER_ENABLED: "true"
+      # auto = single-service production mode:
+      #   bootstrap visible closed backlog,
+      #   repair dirty historical partitions from late accepted raw arrivals,
+      #   then keep tail current continuously
+      # bootstrap = bounded backlog catch-up only, then enter tail automatically
+      # tail = steady-state tail only
+      RESOLVER_MODE: ${RESOLVER_MODE:-auto}
+      RESOLVER_INTERVAL: 1m
+      RESOLVER_LATENESS_WINDOW: 10m
+      RESOLVER_CLAIM_TTL: 2m
+      RESOLVER_VERSION: selection-centered-v1
+      RESOLVER_BATCH_SIZE: "500"
+      RESOLVER_PORT: "9102"
+    restart: unless-stopped
+
   warehouse:
     build:
       context: .
@@ -90,19 +120,88 @@ services:
       CLICKHOUSE_DB: naap
       CLICKHOUSE_USER: naap_admin
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_ADMIN_PASSWORD:-changeme}
-      DBT_CRON_SCHEDULE: ${DBT_CRON_SCHEDULE:-*/5 * * * *}
+      DBT_AUTO_RUN_ON_START: ${DBT_AUTO_RUN_ON_START:-true}
     volumes:
       - ./warehouse:/app/warehouse
     working_dir: /app/warehouse
     restart: unless-stopped
 
-  validation-go:
-    image: golang:1.24-alpine
+  validation-clickhouse:
+    profiles: ["validation"]
+    image: clickhouse/clickhouse-server:24.3
+    ports:
+      - "18123:8123"
+      - "19000:9000"
+    environment:
+      CLICKHOUSE_DB: naap
+      CLICKHOUSE_USER: naap_admin
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_ADMIN_PASSWORD:-changeme}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+      CLICKHOUSE_WRITER_PASSWORD: ${CLICKHOUSE_WRITER_PASSWORD:-naap_writer_changeme}
+      CLICKHOUSE_READER_PASSWORD: ${CLICKHOUSE_READER_PASSWORD:-naap_reader_changeme}
+      KAFKA_BROKER_LIST: ${VALIDATION_KAFKA_BROKER_LIST:-localhost:9092}
+      KAFKA_AUTO_OFFSET_RESET: latest
+      KAFKA_NETWORK_GROUP: clickhouse-naap-validation-network
+      KAFKA_STREAMING_GROUP: clickhouse-naap-validation-streaming
+      KAFKA_SECURITY_PROTOCOL: ${KAFKA_SECURITY_PROTOCOL:-}
+      KAFKA_SASL_MECHANISM: ${KAFKA_SASL_MECHANISM:-}
+      KAFKA_SASL_USERNAME: ${KAFKA_SASL_USERNAME:-}
+      KAFKA_SASL_PASSWORD: ${KAFKA_SASL_PASSWORD:-}
+    volumes:
+      - validation_clickhouse_data:/var/lib/clickhouse
+      - ./infra/clickhouse/config:/etc/clickhouse-server/config.d:ro
+      - ./infra/clickhouse/migrations:/migrations:ro
+      - ./infra/clickhouse/init:/docker-entrypoint-initdb.d:ro
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  warehouse-validation:
+    profiles: ["validation"]
+    build:
+      context: .
+      dockerfile: infra/docker/dbt.Dockerfile
     depends_on:
-      clickhouse:
+      validation-clickhouse:
         condition: service_healthy
     environment:
-      CLICKHOUSE_ADDR: clickhouse:9000
+      DBT_PROFILES_DIR: /app/warehouse
+      CLICKHOUSE_HOST: validation-clickhouse
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_DB: naap
+      CLICKHOUSE_USER: naap_admin
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_ADMIN_PASSWORD:-changeme}
+      DBT_AUTO_RUN_ON_START: "true"
+    volumes:
+      - ./warehouse:/app/warehouse
+    working_dir: /app/warehouse
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import os,sys,urllib.request,urllib.parse; qs=urllib.parse.urlencode({'database':'naap','user':'naap_admin','password':os.getenv('CLICKHOUSE_PASSWORD','changeme'),'query':'EXISTS TABLE naap.canonical_session_current'}); data=urllib.request.urlopen('http://validation-clickhouse:8123/?'+qs, timeout=5).read().strip(); sys.exit(0 if data==b'1' else 1)\""
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 18
+    restart: "no"
+
+  validation-go:
+    profiles: ["validation"]
+    image: golang:1.24-alpine
+    depends_on:
+      validation-clickhouse:
+        condition: service_healthy
+      warehouse-validation:
+        condition: service_healthy
+    environment:
+      CLICKHOUSE_ADDR: validation-clickhouse:9000
       CLICKHOUSE_DB: naap
       CLICKHOUSE_WRITER_USER: naap_writer
       CLICKHOUSE_WRITER_PASSWORD: naap_writer_changeme
@@ -111,9 +210,10 @@ services:
     working_dir: /workspace/api
     volumes:
       - ./api:/workspace/api
+      - ./warehouse:/workspace/warehouse:ro
       - /tmp/go-build-cache:/tmp/go-build-cache
       - /tmp/go-mod-cache:/go/pkg/mod
-    command: ["go", "test", "-tags=validation", "./internal/validation/...", "-v", "-count=1", "-timeout=120s"]
+    command: ["go", "test", "-tags=validation", "./internal/validation/...", "-v", "-count=1", "-timeout=240s"]
     restart: "no"
 
   # ── Observability ────────────────────────────────────────────────────────────
@@ -157,6 +257,7 @@ services:
     image: prom/prometheus:latest
     depends_on:
       - api
+      - resolver
       - clickhouse
       - kafka-exporter
       - node-exporter
@@ -171,6 +272,7 @@ services:
     depends_on:
       - prometheus
       - clickhouse
+      - resolver
     ports:
       - "3000:3000"
     environment:
@@ -225,3 +327,4 @@ services:
 
 volumes:
   clickhouse_data:
+  validation_clickhouse_data:

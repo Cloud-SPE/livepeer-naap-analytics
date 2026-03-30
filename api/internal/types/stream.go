@@ -13,21 +13,21 @@ type ActiveStreamsSummary struct {
 
 // StreamSummary is the response payload for GET /v1/streams/summary (STR-002).
 type StreamSummary struct {
-	StartTime            time.Time
-	EndTime              time.Time
-	TotalStarted         int64
-	TotalCompleted       int64
-	NoOrchAvailableCount int64
-	SuccessRate          float64
-	NoOrchAvailableRate  float64
-	OrchSwapCount        int64
+	StartTime          time.Time
+	EndTime            time.Time
+	TotalRequested     int64
+	StartupSuccesses   int64
+	NoOrchSessionCount int64
+	StartupSuccessRate float64
+	NoOrchSessionRate  float64
+	OrchSwapCount      int64
 }
 
 // StreamBucket is one time-bucket entry for GET /v1/streams/history (STR-003).
 type StreamBucket struct {
-	Timestamp       time.Time
-	Started         int64
-	Completed       int64
-	NoOrchAvailable int64
-	OrchSwap        int64
+	Timestamp              time.Time
+	RequestedSessions      int64
+	StartupSuccessSessions int64
+	NoOrchSessions         int64
+	OrchSwapSessions       int64
 }

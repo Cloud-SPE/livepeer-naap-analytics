@@ -19,7 +19,7 @@ func (r *Repo) ListPricing(ctx context.Context, p types.QueryParams) ([]types.Or
 	}
 
 	rows, err := r.conn.Query(ctx,
-		"SELECT orch_address, name, raw_capabilities FROM naap.serving_latest_orchestrator_state "+where, args...)
+		"SELECT orch_address, name, raw_capabilities FROM naap.api_latest_orchestrator_state "+where, args...)
 	if err != nil {
 		return nil, fmt.Errorf("clickhouse list pricing: %w", err)
 	}
@@ -50,7 +50,7 @@ func (r *Repo) GetOrchPricingProfile(ctx context.Context, address string) (*type
 	row := r.conn.QueryRow(ctx, fmt.Sprintf(`
 		SELECT orch_address, name, raw_capabilities,
 		       last_seen > now() - INTERVAL %d MINUTE AS is_active
-		FROM naap.serving_latest_orchestrator_state
+		FROM naap.api_latest_orchestrator_state
 		WHERE orch_address = ?
 	`, activeOrchMinutes), address)
 

@@ -8,7 +8,7 @@ type FailuresByPipeline struct {
 	OrchSwapCount         int64
 	InferenceRestartCount int64
 	TotalFailures         int64
-	FailureRate           float64 // total failures / streams started
+	FailureRate           float64 // total failures / requested sessions
 }
 
 // FailuresByOrch is one row for GET /v1/failures/by-orch (FAGG-002).

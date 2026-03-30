@@ -13,6 +13,11 @@ package validation
 // is seen, excused when no orchestrator is seen without success, otherwise
 // unexcused for started sessions.
 //
+// ── RULE-LIFECYCLE-004 ────────────────────────────────────────────────────────
+// Excused Error Taxonomy Must Be Exact And Case-Insensitive
+// Known startup-error strings must classify started sessions as excused without
+// broadening the excused bucket to unrelated failures.
+//
 // ── RULE-LIFECYCLE-007 ────────────────────────────────────────────────────────
 // Session Health Signals Must Be Explicit Additive Facts
 // Sessions with no status or playable evidence remain visible with zero health
@@ -87,19 +92,19 @@ func TestRuleLifecycle002_ContractedSubtypesDriveCanonicalFacts(t *testing.T) {
 	}
 	h.insert(t, events)
 
-	if h.queryInt(t, `SELECT toUInt64(started) FROM naap.fact_workflow_sessions WHERE canonical_session_key = ?`, startKey) != 1 {
+	if h.queryInt(t, `SELECT toUInt64(started) FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, startKey) != 1 {
 		t.Errorf("RULE-LIFECYCLE-002: started trace did not set started=1 for %s", startKey)
 	}
-	if h.queryInt(t, `SELECT toUInt64(completed) FROM naap.fact_workflow_sessions WHERE canonical_session_key = ?`, closeKey) != 1 {
+	if h.queryInt(t, `SELECT toUInt64(completed) FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, closeKey) != 1 {
 		t.Errorf("RULE-LIFECYCLE-002: close trace did not set completed=1 for %s", closeKey)
 	}
-	if h.queryInt(t, `SELECT toUInt64(no_orch) FROM naap.fact_workflow_sessions WHERE canonical_session_key = ?`, noOrchKey) != 1 {
+	if h.queryInt(t, `SELECT toUInt64(no_orch) FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, noOrchKey) != 1 {
 		t.Errorf("RULE-LIFECYCLE-002: no-orch trace did not set no_orch=1 for %s", noOrchKey)
 	}
-	if h.queryInt(t, `SELECT swap_count FROM naap.fact_workflow_sessions WHERE canonical_session_key = ?`, swapKey) != 1 {
+	if h.queryInt(t, `SELECT swap_count FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, swapKey) != 1 {
 		t.Errorf("RULE-LIFECYCLE-002: swap trace did not set swap_count=1 for %s", swapKey)
 	}
-	if h.queryInt(t, `SELECT toUInt64(playable_seen) FROM naap.fact_workflow_sessions WHERE canonical_session_key = ?`, swapKey) != 1 {
+	if h.queryInt(t, `SELECT toUInt64(playable_seen) FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, swapKey) != 1 {
 		t.Errorf("RULE-LIFECYCLE-002: playable trace did not set playable_seen=1 for %s", swapKey)
 	}
 }
@@ -129,10 +134,10 @@ func TestRuleLifecycle003_CleanSuccessStreamUsesCanonicalPrecedence(t *testing.T
 		},
 	})
 
-	if got := h.queryString(t, `SELECT startup_outcome FROM naap.fact_workflow_sessions WHERE canonical_session_key = ?`, key); got != "success" {
+	if got := h.queryString(t, `SELECT startup_outcome FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, key); got != "success" {
 		t.Errorf("RULE-LIFECYCLE-003: clean success startup_outcome = %q, want success", got)
 	}
-	if h.queryInt(t, `SELECT toUInt64(completed) FROM naap.fact_workflow_sessions WHERE canonical_session_key = ?`, key) != 1 {
+	if h.queryInt(t, `SELECT toUInt64(completed) FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, key) != 1 {
 		t.Errorf("RULE-LIFECYCLE-003: clean success session did not retain completed=1")
 	}
 }
@@ -166,11 +171,67 @@ func TestRuleLifecycle003_NoOrchAndUnexcusedFailuresRemainDistinct(t *testing.T)
 		},
 	})
 
-	if got := h.queryString(t, `SELECT startup_outcome FROM naap.fact_workflow_sessions WHERE canonical_session_key = ?`, noOrchKey); got != "excused" {
+	if got := h.queryString(t, `SELECT startup_outcome FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, noOrchKey); got != "excused" {
 		t.Errorf("RULE-LIFECYCLE-003: no-orch startup_outcome = %q, want excused", got)
 	}
-	if got := h.queryString(t, `SELECT startup_outcome FROM naap.fact_workflow_sessions WHERE canonical_session_key = ?`, unexcusedKey); got != "unexcused" {
+	if got := h.queryString(t, `SELECT startup_outcome FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, unexcusedKey); got != "unexcused" {
 		t.Errorf("RULE-LIFECYCLE-003: unexcused startup_outcome = %q, want unexcused", got)
+	}
+}
+
+func TestRuleLifecycle004_ExcusableErrorsAreCaseInsensitiveAndExplicit(t *testing.T) {
+	h := newHarness(t)
+	ts := anchor()
+	streamID := uid("excused")
+	requestID := uid("req")
+	key := canonicalSessionKey(h.org, streamID, requestID)
+
+	h.insert(t, []rawEvent{
+		{
+			EventID: uid("e"), EventType: "stream_trace", EventTs: ts, Org: h.org,
+			Data:       fmt.Sprintf(`{"stream_id":%q,"request_id":%q,"type":"gateway_receive_stream_request"}`, streamID, requestID),
+			IngestedAt: ts,
+		},
+		{
+			EventID: uid("e"), EventType: "ai_stream_events", EventTs: ts.Add(time.Second), Org: h.org,
+			Data:       fmt.Sprintf(`{"stream_id":%q,"request_id":%q,"type":"error","message":"WHIP Disconnected by client"}`, streamID, requestID),
+			IngestedAt: ts.Add(time.Second),
+		},
+	})
+
+	if got := h.queryString(t, `SELECT startup_outcome FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, key); got != "excused" {
+		t.Fatalf("RULE-LIFECYCLE-004: startup_outcome = %q, want excused", got)
+	}
+	if got := h.queryInt(t, `SELECT excusable_error_count FROM naap.canonical_session_current_store FINAL WHERE canonical_session_key = ?`, key); got != 1 {
+		t.Fatalf("RULE-LIFECYCLE-004: excusable_error_count = %d, want 1", got)
+	}
+}
+
+func TestRuleLifecycle004_NonExcusableErrorsRemainUnexcused(t *testing.T) {
+	h := newHarness(t)
+	ts := anchor()
+	streamID := uid("unexcused-msg")
+	requestID := uid("req")
+	key := canonicalSessionKey(h.org, streamID, requestID)
+
+	h.insert(t, []rawEvent{
+		{
+			EventID: uid("e"), EventType: "stream_trace", EventTs: ts, Org: h.org,
+			Data:       fmt.Sprintf(`{"stream_id":%q,"request_id":%q,"type":"gateway_receive_stream_request"}`, streamID, requestID),
+			IngestedAt: ts,
+		},
+		{
+			EventID: uid("e"), EventType: "ai_stream_events", EventTs: ts.Add(time.Second), Org: h.org,
+			Data:       fmt.Sprintf(`{"stream_id":%q,"request_id":%q,"type":"error","message":"GPU kernel panic"}`, streamID, requestID),
+			IngestedAt: ts.Add(time.Second),
+		},
+	})
+
+	if got := h.queryString(t, `SELECT startup_outcome FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, key); got != "unexcused" {
+		t.Fatalf("RULE-LIFECYCLE-004: startup_outcome = %q, want unexcused", got)
+	}
+	if got := h.queryInt(t, `SELECT excusable_error_count FROM naap.canonical_session_current_store FINAL WHERE canonical_session_key = ?`, key); got != 0 {
+		t.Fatalf("RULE-LIFECYCLE-004: excusable_error_count = %d, want 0", got)
 	}
 }
 
@@ -203,16 +264,16 @@ func TestRuleLifecycle007_DarkSessionsRemainVisibleWithZeroCoverage(t *testing.T
 		},
 	})
 
-	if h.queryInt(t, `SELECT health_signal_count FROM naap.fact_workflow_sessions WHERE canonical_session_key = ?`, darkKey) != 0 {
+	if h.queryInt(t, `SELECT health_signal_count FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, darkKey) != 0 {
 		t.Errorf("RULE-LIFECYCLE-007: dark session should keep health_signal_count=0")
 	}
-	if h.queryInt(t, `SELECT health_expected_signal_count FROM naap.fact_workflow_sessions WHERE canonical_session_key = ?`, darkKey) != 3 {
+	if h.queryInt(t, `SELECT health_expected_signal_count FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, darkKey) != 3 {
 		t.Errorf("RULE-LIFECYCLE-007: dark session should keep health_expected_signal_count=3")
 	}
-	if got := h.queryFloat(t, `SELECT health_signal_coverage_ratio FROM naap.fact_workflow_sessions WHERE canonical_session_key = ?`, darkKey); got != 0 {
+	if got := h.queryFloat(t, `SELECT health_signal_coverage_ratio FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, darkKey); got != 0 {
 		t.Errorf("RULE-LIFECYCLE-007: dark session coverage ratio = %.2f, want 0", got)
 	}
-	if got := h.queryFloat(t, `SELECT health_signal_coverage_ratio FROM naap.fact_workflow_sessions WHERE canonical_session_key = ?`, litKey); got <= 0 {
+	if got := h.queryFloat(t, `SELECT health_signal_coverage_ratio FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, litKey); got <= 0 {
 		t.Errorf("RULE-LIFECYCLE-007: lit session coverage ratio = %.2f, want > 0", got)
 	}
 }

@@ -19,15 +19,15 @@ func (r *Repo) GetReliabilitySummary(ctx context.Context, p types.QueryParams) (
 
 	row := r.conn.QueryRow(ctx, `
 		SELECT
-			countIf(started = 1),
-			countIf(playable_seen = 1 OR completed = 1 OR startup_outcome = 'excused'),
-			countIf(no_orch = 1),
+			countIf(requested_seen = 1),
+			countIf(startup_outcome = 'success'),
+			countIf(selection_outcome = 'no_orch'),
 			countIf(swap_count > 0)
-		FROM naap.serving_stream_sessions
+		FROM naap.api_stream_sessions
 		`+where, args...)
 
-	var started, completed, noOrch, orchSwap uint64
-	if err := row.Scan(&started, &completed, &noOrch, &orchSwap); err != nil {
+	var requested, successes, noOrch, orchSwap uint64
+	if err := row.Scan(&requested, &successes, &noOrch, &orchSwap); err != nil {
 		return nil, fmt.Errorf("clickhouse get reliability summary streams: %w", err)
 	}
 
@@ -45,7 +45,7 @@ func (r *Repo) GetReliabilitySummary(ctx context.Context, p types.QueryParams) (
 			sum(error_count),
 			sum(degraded_inference_count),
 			sum(degraded_input_count)
-		FROM naap.serving_orch_reliability_hourly
+		FROM naap.api_orchestrator_reliability_hourly
 		`+statusWhere, statusArgs...)
 
 	var aiCount, degraded, restarts, errors, degradedInference, degradedInput uint64
@@ -56,14 +56,14 @@ func (r *Repo) GetReliabilitySummary(ctx context.Context, p types.QueryParams) (
 	return &types.ReliabilitySummary{
 		StartTime:            start,
 		EndTime:              end,
-		StreamSuccessRate:    divSafe(float64(completed), float64(started)),
-		NoOrchAvailableRate:  divSafe(float64(noOrch), float64(started)),
+		StartupSuccessRate:   divSafe(float64(successes), float64(requested)),
+		NoOrchSessionRate:    divSafe(float64(noOrch), float64(requested)),
 		OrchSwapCount:        int64(orchSwap),
-		OrchSwapRate:         divSafe(float64(orchSwap), float64(started)),
+		OrchSwapRate:         divSafe(float64(orchSwap), float64(requested)),
 		InferenceRestartRate: divSafe(float64(restarts), float64(aiCount)),
 		DegradedStateRate:    divSafe(float64(degraded), float64(aiCount)),
 		FailureBreakdown: types.FailureBreakdown{
-			NoOrchAvailable:   int64(noOrch),
+			NoOrchSessions:    int64(noOrch),
 			OrchSwap:          int64(orchSwap),
 			InferenceRestart:  int64(restarts),
 			InferenceError:    int64(errors),
@@ -86,10 +86,10 @@ func (r *Repo) ListReliabilityHistory(ctx context.Context, p types.QueryParams) 
 	rows, err := r.conn.Query(ctx, `
 		SELECT
 			toStartOfHour(hour) AS ts,
-			sum(started),
-			sum(completed),
-			sum(no_orch)
-		FROM naap.serving_stream_hourly
+			sum(requested_sessions),
+			sum(startup_success_sessions),
+			sum(no_orch_sessions)
+		FROM naap.api_stream_hourly
 		`+where+`
 		GROUP BY ts
 		ORDER BY ts ASC
@@ -102,13 +102,13 @@ func (r *Repo) ListReliabilityHistory(ctx context.Context, p types.QueryParams) 
 	var result []types.ReliabilityBucket
 	for rows.Next() {
 		var b types.ReliabilityBucket
-		var started, completed, noOrch uint64
-		if err := rows.Scan(&b.Timestamp, &started, &completed, &noOrch); err != nil {
+		var requested, successes, noOrch uint64
+		if err := rows.Scan(&b.Timestamp, &requested, &successes, &noOrch); err != nil {
 			return nil, fmt.Errorf("clickhouse list reliability history scan: %w", err)
 		}
-		b.Started = int64(started)
-		b.SuccessRate = rateOrNil(int64(completed), int64(started))
-		b.NoOrchAvailableRate = rateOrNil(int64(noOrch), int64(started))
+		b.RequestedSessions = int64(requested)
+		b.StartupSuccessRate = rateOrNil(int64(successes), int64(requested))
+		b.NoOrchSessionRate = rateOrNil(int64(noOrch), int64(requested))
 		result = append(result, b)
 	}
 	return result, rows.Err()
@@ -138,7 +138,7 @@ func (r *Repo) ListOrchReliability(ctx context.Context, p types.QueryParams) ([]
 			sum(degraded_count)   AS degraded,
 			sum(restart_count)    AS restarts,
 			sum(error_count)      AS errors
-		FROM naap.serving_orch_reliability_hourly
+		FROM naap.api_orchestrator_reliability_hourly
 		`+where+`
 		GROUP BY orch_address
 		HAVING stream_count >= 10
@@ -215,7 +215,7 @@ func (r *Repo) ListFailures(ctx context.Context, p types.QueryParams) ([]types.F
 			org,
 			gateway,
 			detail
-		FROM naap.serving_failure_events
+		FROM naap.api_failure_events
 		`+where+`
 		ORDER BY failure_ts DESC
 		LIMIT ? OFFSET ?

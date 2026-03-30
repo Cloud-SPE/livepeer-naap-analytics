@@ -53,7 +53,7 @@ func TestGetStreamSummary_HappyPath(t *testing.T) {
 	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
-	for _, field := range []string{"TotalStarted", "SuccessRate"} {
+	for _, field := range []string{"TotalRequested", "StartupSuccessRate"} {
 		if _, ok := body[field]; !ok {
 			t.Errorf("missing field %s", field)
 		}

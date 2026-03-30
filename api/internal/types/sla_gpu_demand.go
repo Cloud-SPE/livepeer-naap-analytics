@@ -40,8 +40,9 @@ type SLAComplianceRow struct {
 	Region                    *string   `json:"region"`
 	KnownSessionsCount        uint64    `json:"known_sessions_count"`
 	StartupSuccessSessions    uint64    `json:"startup_success_sessions"`
+	NoOrchSessions            uint64    `json:"no_orch_sessions"`
 	StartupExcusedSessions    uint64    `json:"startup_excused_sessions"`
-	StartupUnexcusedSessions  uint64    `json:"startup_unexcused_sessions"`
+	StartupFailedSessions     uint64    `json:"startup_failed_sessions"`
 	ConfirmedSwappedSessions  uint64    `json:"confirmed_swapped_sessions"`
 	InferredSwapSessions      uint64    `json:"inferred_swap_sessions"`
 	TotalSwappedSessions      uint64    `json:"total_swapped_sessions"`
@@ -49,7 +50,7 @@ type SLAComplianceRow struct {
 	ErrorStatusSamples        uint64    `json:"error_status_samples"`
 	HealthSignalCoverageRatio float64   `json:"health_signal_coverage_ratio"`
 	StartupSuccessRate        *float64  `json:"startup_success_rate"`
-	EffectiveSuccessRate      *float64  `json:"effective_success_rate"`
+	ExcusedFailureRate        *float64  `json:"excused_failure_rate"`
 	NoSwapRate                *float64  `json:"no_swap_rate"`
 	SLAScore                  *float64  `json:"sla_score"`
 }
@@ -83,10 +84,11 @@ type NetworkDemandRow struct {
 	AvgOutputFPS              float64   `json:"avg_output_fps"`
 	TotalMinutes              float64   `json:"total_minutes"`
 	KnownSessionsCount        uint64    `json:"known_sessions_count"`
-	ServedSessions            uint64    `json:"served_sessions"`
-	UnservedSessions          uint64    `json:"unserved_sessions"`
-	TotalDemandSessions       uint64    `json:"total_demand_sessions"`
-	StartupUnexcusedSessions  uint64    `json:"startup_unexcused_sessions"`
+	RequestedSessions         uint64    `json:"requested_sessions"`
+	StartupSuccessSessions    uint64    `json:"startup_success_sessions"`
+	NoOrchSessions            uint64    `json:"no_orch_sessions"`
+	StartupExcusedSessions    uint64    `json:"startup_excused_sessions"`
+	StartupFailedSessions     uint64    `json:"startup_failed_sessions"`
 	ConfirmedSwappedSessions  uint64    `json:"confirmed_swapped_sessions"`
 	InferredSwapSessions      uint64    `json:"inferred_swap_sessions"`
 	TotalSwappedSessions      uint64    `json:"total_swapped_sessions"`
@@ -94,7 +96,7 @@ type NetworkDemandRow struct {
 	ErrorStatusSamples        uint64    `json:"error_status_samples"`
 	HealthSignalCoverageRatio float64   `json:"health_signal_coverage_ratio"`
 	StartupSuccessRate        float64   `json:"startup_success_rate"`
-	EffectiveSuccessRate      float64   `json:"effective_success_rate"`
+	ExcusedFailureRate        float64   `json:"excused_failure_rate"`
 	TicketFaceValueETH        float64   `json:"ticket_face_value_eth"`
 }
 
@@ -136,10 +138,10 @@ type GPUMetric struct {
 	HealthSignalCoverageRatio float64   `json:"health_signal_coverage_ratio"`
 
 	// Hardware dimensions (from naap.agg_gpu_inventory join)
-	GPUModelName        *string  `json:"gpu_model_name"`
-	GPUMemoryBytesTotal *uint64  `json:"gpu_memory_bytes_total"`
-	RunnerVersion       *string  `json:"runner_version"`
-	CudaVersion         *string  `json:"cuda_version"`
+	GPUModelName        *string `json:"gpu_model_name"`
+	GPUMemoryBytesTotal *uint64 `json:"gpu_memory_bytes_total"`
+	RunnerVersion       *string `json:"runner_version"`
+	CudaVersion         *string `json:"cuda_version"`
 
 	// Latency metrics
 	AvgPromptToFirstFrameMS        *float64 `json:"avg_prompt_to_first_frame_ms"`
@@ -157,14 +159,15 @@ type GPUMetric struct {
 	// Session breakdowns
 	KnownSessionsCount       uint64 `json:"known_sessions_count"`
 	StartupSuccessSessions   uint64 `json:"startup_success_sessions"`
+	NoOrchSessions           uint64 `json:"no_orch_sessions"`
 	StartupExcusedSessions   uint64 `json:"startup_excused_sessions"`
-	StartupUnexcusedSessions uint64 `json:"startup_unexcused_sessions"`
+	StartupFailedSessions    uint64 `json:"startup_failed_sessions"`
 	ConfirmedSwappedSessions uint64 `json:"confirmed_swapped_sessions"`
 	InferredSwapSessions     uint64 `json:"inferred_swap_sessions"`
 	TotalSwappedSessions     uint64 `json:"total_swapped_sessions"`
 	SessionsEndingInError    uint64 `json:"sessions_ending_in_error"`
 
 	// Rates
-	StartupUnexcusedRate float64 `json:"startup_unexcused_rate"`
-	SwapRate             float64 `json:"swap_rate"`
+	StartupFailedRate float64 `json:"startup_failed_rate"`
+	SwapRate          float64 `json:"swap_rate"`
 }

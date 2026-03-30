@@ -20,7 +20,7 @@ func TestGetReliabilitySummary_HappyPath(t *testing.T) {
 	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
-	for _, field := range []string{"StreamSuccessRate", "FailureBreakdown"} {
+	for _, field := range []string{"StartupSuccessRate", "FailureBreakdown"} {
 		if _, ok := body[field]; !ok {
 			t.Errorf("missing field %s", field)
 		}

@@ -43,19 +43,19 @@ func TestRulePaymentLinkage001_RequestAndAnchoredSessionLinksRemainCanonical(t *
 		},
 	})
 
-	if got := h.queryString(t, `SELECT canonical_session_key FROM naap.fact_workflow_payment_links WHERE event_id = 'pay_request'`); got != key {
+	if got := h.queryString(t, `SELECT canonical_session_key FROM naap.canonical_payment_links WHERE org = ? AND event_id = 'pay_request'`, h.org); got != key {
 		t.Errorf("RULE-PAYMENT-LINKAGE-001: request-linked payment key = %q, want %q", got, key)
 	}
-	if got := h.queryString(t, `SELECT link_method FROM naap.fact_workflow_payment_links WHERE event_id = 'pay_request'`); got != "request_id" {
+	if got := h.queryString(t, `SELECT link_method FROM naap.canonical_payment_links WHERE org = ? AND event_id = 'pay_request'`, h.org); got != "request_id" {
 		t.Errorf("RULE-PAYMENT-LINKAGE-001: request-linked payment method = %q, want request_id", got)
 	}
-	if got := h.queryString(t, `SELECT canonical_session_key FROM naap.fact_workflow_payment_links WHERE event_id = 'pay_session'`); got != key {
+	if got := h.queryString(t, `SELECT canonical_session_key FROM naap.canonical_payment_links WHERE org = ? AND event_id = 'pay_session'`, h.org); got != key {
 		t.Errorf("RULE-PAYMENT-LINKAGE-001: anchored session payment key = %q, want %q", got, key)
 	}
-	if got := h.queryString(t, `SELECT link_method FROM naap.fact_workflow_payment_links WHERE event_id = 'pay_session'`); got != "session_id" {
+	if got := h.queryString(t, `SELECT link_method FROM naap.canonical_payment_links WHERE org = ? AND event_id = 'pay_session'`, h.org); got != "session_id" {
 		t.Errorf("RULE-PAYMENT-LINKAGE-001: anchored session payment method = %q, want session_id", got)
 	}
-	if got := h.queryString(t, `SELECT link_status FROM naap.fact_workflow_payment_links WHERE event_id = 'pay_unresolved'`); got != "unresolved" {
+	if got := h.queryString(t, `SELECT link_status FROM naap.canonical_payment_links WHERE org = ? AND event_id = 'pay_unresolved'`, h.org); got != "unresolved" {
 		t.Errorf("RULE-PAYMENT-LINKAGE-001: unresolved payment status = %q, want unresolved", got)
 	}
 }
@@ -77,7 +77,7 @@ func TestRulePaymentLinkage001_ManifestIDAloneDoesNotInventSessionLinks(t *testi
 		},
 	})
 
-	if got := h.queryString(t, `SELECT link_status FROM naap.fact_workflow_payment_links WHERE event_id = 'manifest_only_payment'`); got != "unresolved" {
+	if got := h.queryString(t, `SELECT link_status FROM naap.canonical_payment_links WHERE org = ? AND event_id = 'manifest_only_payment'`, h.org); got != "unresolved" {
 		t.Errorf("RULE-PAYMENT-LINKAGE-001: manifest-only payment status = %q, want unresolved", got)
 	}
 }

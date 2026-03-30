@@ -2,10 +2,12 @@
 
 // Package validation is a scenario-based data-quality test harness.
 //
-// Each test inserts synthetic raw events directly into naap.events, then
-// asserts on the canonical typed, fact, and serving tables/views that are
-// rebuilt from those events. Tests are fully isolated via a unique per-run org
-// tag, so they can run against a live cluster without polluting real data.
+// Each test inserts synthetic inbound raw events through a local copy of the
+// ingest-router contract. Accepted rows land in naap.accepted_raw_events and
+// ignored rows land in naap.ignored_raw_events, then the test asserts on the
+// canonical typed, fact, and serving tables/views rebuilt from those events.
+// Tests are fully isolated via a unique per-run org tag, so they can run
+// against a live cluster without polluting real data.
 //
 // Usage:
 //
@@ -18,20 +20,25 @@ package validation
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	ch "github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
+	"go.uber.org/zap"
+
+	"github.com/livepeer/naap-analytics/internal/config"
+	"github.com/livepeer/naap-analytics/internal/resolver"
 )
 
-// rawEvent mirrors a row in naap.events.
-// Tests insert directly into this table; ClickHouse MVs fire synchronously
-// and populate typed tables before Insert returns, while canonical fact and
-// serving views reflect the new raw state immediately because they are views.
+// rawEvent mirrors an inbound raw Kafka record after envelope extraction.
+// The harness applies the same allowlist logic as the ingest boundary and
+// routes the row into accepted or ignored raw storage.
 type rawEvent struct {
 	EventID    string
 	EventType  string
@@ -44,8 +51,10 @@ type rawEvent struct {
 
 // harness holds a ClickHouse connection and the unique org tag for one test run.
 type harness struct {
-	conn driver.Conn
-	org  string // e.g. "vtest_3f2a1b8c" — namespaces all test rows
+	conn            driver.Conn
+	resolverEngine  *resolver.Engine
+	resolverInitErr error
+	org             string // e.g. "vtest_3f2a1b8c" — namespaces all test rows
 }
 
 // newHarness opens a ClickHouse writer connection and returns a harness.
@@ -79,31 +88,142 @@ func newHarness(t *testing.T) *harness {
 		conn: conn,
 		org:  fmt.Sprintf("vtest_%08x", rand.Uint32()),
 	}
-	t.Cleanup(func() { _ = conn.Close() })
+	cfg := &config.Config{
+		ClickHouseAddr:           addr,
+		ClickHouseDB:             envOrDefault("CLICKHOUSE_DB", "naap"),
+		ClickHouseWriterUser:     envOrDefault("CLICKHOUSE_WRITER_USER", "naap_writer"),
+		ClickHouseWriterPassword: envOrDefault("CLICKHOUSE_WRITER_PASSWORD", "naap_writer_changeme"),
+		ResolverEnabled:          true,
+		ResolverMode:             string(resolver.ModeRepairWindow),
+		ResolverInterval:         time.Minute,
+		ResolverLatenessWindow:   10 * time.Minute,
+		ResolverClaimTTL:         2 * time.Minute,
+		ResolverPort:             "0",
+		ResolverVersion:          "validation-selection-centered-v1",
+		ResolverBatchSize:        10000,
+	}
+	resolverEngine, resolverErr := resolver.New(cfg, zap.NewNop())
+	h.resolverEngine = resolverEngine
+	h.resolverInitErr = resolverErr
+	t.Cleanup(func() {
+		if resolverEngine != nil {
+			_ = resolverEngine.Close(context.Background())
+		}
+		_ = conn.Close()
+	})
 	return h
 }
 
-// insert writes a batch of raw events into naap.events.
-// ClickHouse materialized views fire synchronously, so typed tables are
-// populated by the time this function returns.
+// insert routes a batch of inbound raw events into accepted or ignored raw
+// storage. ClickHouse materialized views fire synchronously for accepted rows,
+// so typed tables are populated by the time this function returns.
 func (h *harness) insert(t *testing.T, events []rawEvent) {
 	t.Helper()
-	batch, err := h.conn.PrepareBatch(
-		context.Background(),
-		"INSERT INTO naap.events (event_id, event_type, event_ts, org, gateway, data, ingested_at)",
-	)
-	if err != nil {
-		t.Fatalf("PrepareBatch: %v", err)
+	h.insertRaw(t, events)
+	h.resolveInsertedBatch(t, events)
+}
+
+func (h *harness) insertRaw(t *testing.T, events []rawEvent) {
+	t.Helper()
+	if len(events) == 0 {
+		return
 	}
-	for _, e := range events {
-		if appendErr := batch.Append(
-			e.EventID, e.EventType, e.EventTs, e.Org, e.Gateway, e.Data, e.IngestedAt,
-		); appendErr != nil {
-			t.Fatalf("batch.Append: %v", appendErr)
+	minIngestedAt := events[0].IngestedAt
+	maxIngestedAt := events[0].IngestedAt
+	for _, e := range events[1:] {
+		if e.IngestedAt.Before(minIngestedAt) {
+			minIngestedAt = e.IngestedAt
+		}
+		if e.IngestedAt.After(maxIngestedAt) {
+			maxIngestedAt = e.IngestedAt
 		}
 	}
-	if sendErr := batch.Send(); sendErr != nil {
-		t.Fatalf("batch.Send: %v", sendErr)
+	batchAnchor := time.Now().UTC().Add(-maxIngestedAt.Sub(minIngestedAt))
+	type routedEvent struct {
+		rawEvent
+		eventSubtype string
+		ignoreReason string
+	}
+	var accepted []routedEvent
+	var ignored []routedEvent
+	for _, e := range events {
+		subtype := extractEventSubtype(e.Data)
+		ignoreReason, accept := routeInboundEvent(e.EventType, subtype)
+		routed := routedEvent{
+			rawEvent:     e,
+			eventSubtype: subtype,
+			ignoreReason: ignoreReason,
+		}
+		if accept {
+			accepted = append(accepted, routed)
+		} else {
+			ignored = append(ignored, routed)
+		}
+	}
+	if len(accepted) > 0 {
+		batch, err := h.conn.PrepareBatch(
+			context.Background(),
+			"INSERT INTO naap.accepted_raw_events (event_id, event_type, event_subtype, event_ts, org, gateway, data, source_topic, source_partition, source_offset, payload_hash, schema_version, ingested_at)",
+		)
+		if err != nil {
+			t.Fatalf("PrepareBatch accepted_raw_events: %v", err)
+		}
+		for _, e := range accepted {
+			shiftedIngestedAt := batchAnchor.Add(e.IngestedAt.Sub(minIngestedAt))
+			if appendErr := batch.Append(
+				e.EventID,
+				e.EventType,
+				e.eventSubtype,
+				e.EventTs,
+				e.Org,
+				e.Gateway,
+				e.Data,
+				"validation",
+				int32(0),
+				int64(0),
+				"",
+				"",
+				shiftedIngestedAt,
+			); appendErr != nil {
+				t.Fatalf("accepted batch.Append: %v", appendErr)
+			}
+		}
+		if sendErr := batch.Send(); sendErr != nil {
+			t.Fatalf("accepted batch.Send: %v", sendErr)
+		}
+	}
+	if len(ignored) > 0 {
+		batch, err := h.conn.PrepareBatch(
+			context.Background(),
+			"INSERT INTO naap.ignored_raw_events (event_id, event_type, event_subtype, event_ts, org, gateway, data, ignore_reason, source_topic, source_partition, source_offset, payload_hash, schema_version, ingested_at)",
+		)
+		if err != nil {
+			t.Fatalf("PrepareBatch ignored_raw_events: %v", err)
+		}
+		for _, e := range ignored {
+			shiftedIngestedAt := batchAnchor.Add(e.IngestedAt.Sub(minIngestedAt))
+			if appendErr := batch.Append(
+				e.EventID,
+				e.EventType,
+				e.eventSubtype,
+				e.EventTs,
+				e.Org,
+				e.Gateway,
+				e.Data,
+				e.ignoreReason,
+				"validation",
+				int32(0),
+				int64(0),
+				"",
+				"",
+				shiftedIngestedAt,
+			); appendErr != nil {
+				t.Fatalf("ignored batch.Append: %v", appendErr)
+			}
+		}
+		if sendErr := batch.Send(); sendErr != nil {
+			t.Fatalf("ignored batch.Send: %v", sendErr)
+		}
 	}
 }
 
@@ -168,4 +288,258 @@ func envOrDefault(key, def string) string {
 		return v
 	}
 	return def
+}
+
+var acceptedFamilies = map[string]struct{}{
+	"stream_trace":          {},
+	"ai_stream_status":      {},
+	"ai_stream_events":      {},
+	"stream_ingest_metrics": {},
+	"network_capabilities":  {},
+	"discovery_results":     {},
+	"create_new_payment":    {},
+}
+
+var acceptedStreamTraceSubtypes = map[string]struct{}{
+	"gateway_receive_stream_request":          {},
+	"gateway_ingest_stream_closed":            {},
+	"gateway_send_first_ingest_segment":       {},
+	"gateway_receive_first_processed_segment": {},
+	"gateway_receive_few_processed_segments":  {},
+	"gateway_receive_first_data_segment":      {},
+	"gateway_no_orchestrators_available":      {},
+	"orchestrator_swap":                       {},
+	"runner_receive_first_ingest_segment":     {},
+	"runner_send_first_processed_segment":     {},
+}
+
+var ignoredNonCoreStreamTraceSubtypes = map[string]struct{}{
+	"app_capacity_query_response": {},
+	"app_user_page_unload":        {},
+	"app_start_broadcast_stream":  {},
+	"app_send_stream_request":     {},
+	"app_param_update":            {},
+	"app_receive_first_segment":   {},
+}
+
+var ignoredScopeClientStreamTraceSubtypes = map[string]struct{}{
+	"stream_heartbeat":       {},
+	"pipeline_load_start":    {},
+	"pipeline_loaded":        {},
+	"pipeline_unloaded":      {},
+	"session_created":        {},
+	"session_closed":         {},
+	"stream_started":         {},
+	"stream_stopped":         {},
+	"playback_ready":         {},
+	"websocket_connected":    {},
+	"websocket_disconnected": {},
+}
+
+func extractEventSubtype(data string) string {
+	if data == "" {
+		return ""
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(data), &payload); err != nil {
+		return ""
+	}
+	subtype, _ := payload["type"].(string)
+	return subtype
+}
+
+func routeInboundEvent(eventType, eventSubtype string) (ignoreReason string, accepted bool) {
+	if _, ok := acceptedFamilies[eventType]; !ok {
+		return "unsupported_event_family", false
+	}
+	if eventType != "stream_trace" {
+		return "", true
+	}
+	if _, ok := acceptedStreamTraceSubtypes[eventSubtype]; ok {
+		return "", true
+	}
+	if _, ok := ignoredNonCoreStreamTraceSubtypes[eventSubtype]; ok {
+		return "ignored_stream_trace_non_core_app", false
+	}
+	if _, ok := ignoredScopeClientStreamTraceSubtypes[eventSubtype]; ok {
+		return "ignored_stream_trace_scope_client_noise", false
+	}
+	if eventSubtype == "" {
+		return "malformed_or_invalid_payload", false
+	}
+	return "unsupported_stream_trace_type", false
+}
+
+func (h *harness) resolveSelectionCentered(t *testing.T, start, end time.Time) resolver.RunStats {
+	t.Helper()
+	if h.resolverInitErr != nil {
+		t.Fatalf("resolver init failed: %v", h.resolverInitErr)
+	}
+	if h.resolverEngine == nil {
+		t.Fatalf("resolver engine not initialized")
+	}
+	h.waitForResolverWarehouseReady(t)
+	stats, err := h.resolverEngine.Execute(context.Background(), resolver.RunRequest{
+		Mode:  resolver.ModeRepairWindow,
+		Org:   h.org,
+		Start: timePointer(start.UTC()),
+		End:   timePointer(end.UTC()),
+	})
+	if err != nil {
+		t.Fatalf("selection-centered resolver: %v", err)
+	}
+	return stats
+}
+
+func (h *harness) resolveAuto(t *testing.T) resolver.RunStats {
+	t.Helper()
+	if h.resolverInitErr != nil {
+		t.Fatalf("resolver init failed: %v", h.resolverInitErr)
+	}
+	if h.resolverEngine == nil {
+		t.Fatalf("resolver engine not initialized")
+	}
+	h.waitForResolverWarehouseReady(t)
+	stats, err := h.resolverEngine.Execute(context.Background(), resolver.RunRequest{
+		Mode: resolver.ModeAuto,
+		Org:  h.org,
+	})
+	if err != nil {
+		t.Fatalf("resolver auto: %v", err)
+	}
+	return stats
+}
+
+func (h *harness) waitForWarehouseReady(t *testing.T) {
+	t.Helper()
+	required := []string{
+		"stg_stream_trace",
+		"stg_ai_stream_status",
+		"stg_ai_stream_events",
+		"canonical_capability_snapshots",
+		"canonical_capability_hardware_inventory",
+		"canonical_latest_orchestrator_pipeline_inventory_agg",
+		"canonical_session_attribution_latest",
+		"canonical_session_latest",
+		"canonical_status_hours",
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		var available uint64
+		err := h.conn.QueryRow(
+			context.Background(),
+			`SELECT count()
+			 FROM system.tables
+			 WHERE database = ?
+			   AND table IN ?`,
+			envOrDefault("CLICKHOUSE_DB", "naap"),
+			required,
+		).Scan(&available)
+		if err == nil && available == uint64(len(required)) {
+			return
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	var present []string
+	rows, err := h.conn.Query(
+		context.Background(),
+		`SELECT table
+		 FROM system.tables
+		 WHERE database = ?
+		   AND table IN ?
+		 ORDER BY table`,
+		envOrDefault("CLICKHOUSE_DB", "naap"),
+		required,
+	)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var table string
+			if scanErr := rows.Scan(&table); scanErr == nil {
+				present = append(present, table)
+			}
+		}
+	}
+	t.Fatalf("validation warehouse not ready; present tables: %s", strings.Join(present, ", "))
+}
+
+func (h *harness) waitForResolverWarehouseReady(t *testing.T) {
+	t.Helper()
+	required := []string{
+		"accepted_raw_events",
+		"ignored_raw_events",
+		"normalized_stream_trace",
+		"normalized_ai_stream_status",
+		"normalized_ai_stream_events",
+		"normalized_network_capabilities",
+		"canonical_selection_events",
+		"canonical_selection_attribution_current",
+		"canonical_session_current_store",
+		"canonical_status_hours_store",
+		"canonical_session_demand_input_current",
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		var available uint64
+		err := h.conn.QueryRow(
+			context.Background(),
+			`SELECT count()
+			 FROM system.tables
+			 WHERE database = ?
+			   AND table IN ?`,
+			envOrDefault("CLICKHOUSE_DB", "naap"),
+			required,
+		).Scan(&available)
+		if err == nil && available == uint64(len(required)) {
+			return
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	var present []string
+	rows, err := h.conn.Query(
+		context.Background(),
+		`SELECT table
+		 FROM system.tables
+		 WHERE database = ?
+		   AND table IN ?
+		 ORDER BY table`,
+		envOrDefault("CLICKHOUSE_DB", "naap"),
+		required,
+	)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var table string
+			if scanErr := rows.Scan(&table); scanErr == nil {
+				present = append(present, table)
+			}
+		}
+	}
+	t.Fatalf("selection-centered warehouse not ready; present tables: %s", strings.Join(present, ", "))
+}
+
+func timePointer(ts time.Time) *time.Time {
+	return &ts
+}
+
+func (h *harness) resolveInsertedBatch(t *testing.T, events []rawEvent) {
+	t.Helper()
+	if len(events) == 0 {
+		return
+	}
+	minTS := events[0].EventTs.UTC()
+	maxTS := events[0].EventTs.UTC()
+	for _, event := range events[1:] {
+		if event.EventTs.Before(minTS) {
+			minTS = event.EventTs.UTC()
+		}
+		if event.EventTs.After(maxTS) {
+			maxTS = event.EventTs.UTC()
+		}
+	}
+	// Mirror resolver attribution windows so validation inserts exercise the
+	// same repair semantics as bounded repair-window runs.
+	start := minTS.Add(-10 * time.Minute)
+	end := maxTS.Add(time.Minute)
+	h.resolveSelectionCentered(t, start, end)
 }

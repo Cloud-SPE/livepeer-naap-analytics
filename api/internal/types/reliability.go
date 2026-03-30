@@ -4,7 +4,7 @@ import "time"
 
 // FailureBreakdown holds individual failure type counts (REL-001).
 type FailureBreakdown struct {
-	NoOrchAvailable   int64
+	NoOrchSessions    int64
 	OrchSwap          int64
 	InferenceRestart  int64
 	InferenceError    int64
@@ -16,8 +16,8 @@ type FailureBreakdown struct {
 type ReliabilitySummary struct {
 	StartTime            time.Time
 	EndTime              time.Time
-	StreamSuccessRate    float64
-	NoOrchAvailableRate  float64
+	StartupSuccessRate   float64
+	NoOrchSessionRate    float64
 	OrchSwapCount        int64
 	OrchSwapRate         float64
 	InferenceRestartRate float64
@@ -28,11 +28,11 @@ type ReliabilitySummary struct {
 // ReliabilityBucket is one time-bucket for GET /v1/reliability/history (REL-002).
 // Rates are nil when the sample count is below the minimum threshold (5 streams).
 type ReliabilityBucket struct {
-	Timestamp           time.Time
-	Started             int64
-	SuccessRate         *float64
-	NoOrchAvailableRate *float64
-	DegradedRate        *float64
+	Timestamp          time.Time
+	RequestedSessions  int64
+	StartupSuccessRate *float64
+	NoOrchSessionRate  *float64
+	DegradedRate       *float64
 }
 
 // OrchReliability is one orch row for GET /v1/reliability/orchestrators (REL-003).

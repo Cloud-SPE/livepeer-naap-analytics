@@ -39,7 +39,7 @@ func (r *Repo) ListStreamSamples(ctx context.Context, p types.QueryParams) ([]ty
 		SELECT
 			sample_ts, org, stream_id, gateway, orch_address,
 			pipeline, state, output_fps, input_fps, e2e_latency_ms, is_attributed
-		FROM naap.serving_status_samples
+		FROM naap.api_status_samples
 		`+where+`
 		ORDER BY sample_ts DESC
 		LIMIT ? OFFSET ?
@@ -78,7 +78,7 @@ func (r *Repo) GetStreamDetail(ctx context.Context, streamID string) (*types.Str
 			last_seen,
 			completed,
 			error_seen
-		FROM naap.serving_stream_sessions
+		FROM naap.api_stream_sessions
 		WHERE stream_id = ?
 		ORDER BY last_seen DESC
 		LIMIT 1
@@ -99,13 +99,13 @@ func (r *Repo) GetStreamDetail(ctx context.Context, streamID string) (*types.Str
 	sd.HasFailure = hasFailure != 0
 	// Resolve gateway from samples
 	gwRow := r.conn.QueryRow(ctx, `
-		SELECT any(gateway) FROM naap.serving_status_samples WHERE stream_id = ?
+		SELECT any(gateway) FROM naap.api_status_samples WHERE stream_id = ?
 	`, streamID)
 	_ = gwRow.Scan(&sd.Gateway)
 
 	latestStateRow := r.conn.QueryRow(ctx, `
 		SELECT state
-		FROM naap.serving_status_samples
+		FROM naap.api_status_samples
 		WHERE stream_id = ?
 		ORDER BY sample_ts DESC
 		LIMIT 1
@@ -117,7 +117,7 @@ func (r *Repo) GetStreamDetail(ctx context.Context, streamID string) (*types.Str
 		SELECT
 			sample_ts, org, stream_id, gateway, orch_address,
 			pipeline, state, output_fps, input_fps, e2e_latency_ms, is_attributed
-		FROM naap.serving_status_samples
+		FROM naap.api_status_samples
 		WHERE stream_id = ?
 		ORDER BY sample_ts ASC
 		LIMIT 1000
@@ -165,7 +165,7 @@ func (r *Repo) GetAttributionSummary(ctx context.Context, p types.QueryParams) (
 			count()                        AS total_samples,
 			countIf(is_attributed = 1)     AS attributed,
 			countIf(is_attributed = 0)     AS unattributed
-		FROM naap.serving_status_samples
+		FROM naap.api_status_samples
 		`+where, args...)
 
 	var total, attributed, unattributed uint64

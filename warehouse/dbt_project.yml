@@ -16,7 +16,7 @@ models:
   naap_analytics:
     staging:
       +materialized: view
-    facts:
+    canonical:
       +materialized: view
-    serving:
+    api:
       +materialized: view

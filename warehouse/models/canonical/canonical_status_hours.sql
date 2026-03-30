@@ -1,0 +1,51 @@
+select
+    canonical_session_key,
+    org,
+    hour,
+    stream_id,
+    request_id,
+    canonical_pipeline,
+    canonical_model,
+    orch_address,
+    attribution_status,
+    attribution_reason,
+    started_at,
+    session_last_seen,
+    status_samples,
+    fps_positive_samples,
+    running_state_samples,
+    degraded_input_samples,
+    degraded_inference_samples,
+    error_samples,
+    avg_output_fps,
+    avg_input_fps,
+    avg_e2e_latency_ms,
+    is_terminal_tail_artifact
+from (
+    select
+        canonical_session_key,
+        org,
+        hour,
+        stream_id,
+        request_id,
+        canonical_pipeline,
+        canonical_model,
+        orch_address,
+        attribution_status,
+        attribution_reason,
+        started_at,
+        session_last_seen,
+        status_samples,
+        fps_positive_samples,
+        running_state_samples,
+        degraded_input_samples,
+        degraded_inference_samples,
+        error_samples,
+        avg_output_fps,
+        avg_input_fps,
+        avg_e2e_latency_ms,
+        is_terminal_tail_artifact
+    from naap.canonical_status_hours_store
+    order by canonical_session_key, hour, refreshed_at desc
+)
+limit 1 by canonical_session_key, hour

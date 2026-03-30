@@ -40,7 +40,7 @@ func (r *Repo) GetFPSSummary(ctx context.Context, p types.QueryParams) (*types.F
 			quantile(0.5)(input_fps)   AS p50_inp,
 			quantile(0.99)(input_fps)  AS p99_inp,
 			count()                                                          AS n
-		FROM naap.serving_status_samples
+		FROM naap.api_status_samples
 		`+where+`
 		GROUP BY pipeline
 		ORDER BY n DESC
@@ -83,7 +83,7 @@ func (r *Repo) GetFPSSummary(ctx context.Context, p types.QueryParams) (*types.F
 			quantile(0.5)(input_fps)   AS p50_inp,
 			quantile(0.99)(input_fps)  AS p99_inp,
 			count()                                                           AS n
-		FROM naap.serving_status_samples
+		FROM naap.api_status_samples
 		`+where+`
 		AND orch_address != ''
 		GROUP BY addr, pipeline
@@ -141,7 +141,7 @@ func (r *Repo) ListFPSHistory(ctx context.Context, p types.QueryParams) ([]types
 			sum(inference_fps_sum) / sum(sample_count)   AS avg_inf,
 			sum(input_fps_sum) / sum(sample_count)       AS avg_inp,
 			sum(sample_count)                            AS n
-		FROM naap.serving_fps_hourly
+		FROM naap.api_fps_hourly
 		`+where+`
 		GROUP BY ts
 		ORDER BY ts ASC
@@ -189,7 +189,7 @@ func (r *Repo) GetLatencySummary(ctx context.Context, p types.QueryParams) (*typ
 			quantile(0.95)(latency_ms) AS p95,
 			quantile(0.99)(latency_ms) AS p99,
 			count()                                                            AS n
-		FROM naap.serving_discovery_results
+		FROM naap.api_discovery_results
 		WHERE `+innerConds+`
 		  AND orch_address != ''
 		  AND latency_ms > 0

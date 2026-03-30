@@ -23,9 +23,9 @@ func (r *Repo) ListPipelines(ctx context.Context, p types.QueryParams) ([]types.
 	streamRows, err := r.conn.Query(ctx, `
 		SELECT
 			pipeline,
-			sum(started)   AS started,
-			sum(completed) AS completed
-		FROM naap.serving_stream_hourly
+			sum(requested_sessions) AS requested,
+			sum(startup_success_sessions) AS completed
+		FROM naap.api_stream_hourly
 		WHERE hour >= ? AND hour < ?`+orgFilter+`
 		GROUP BY pipeline
 	`, args...)
@@ -35,7 +35,7 @@ func (r *Repo) ListPipelines(ctx context.Context, p types.QueryParams) ([]types.
 	defer streamRows.Close()
 
 	type pipeStats struct {
-		started   int64
+		requested int64
 		completed int64
 		fpsSumW   float64
 		fpsSampW  float64
@@ -47,8 +47,8 @@ func (r *Repo) ListPipelines(ctx context.Context, p types.QueryParams) ([]types.
 	pmap := map[string]*pipeStats{}
 	for streamRows.Next() {
 		var pipeline string
-		var started, completed uint64
-		if err := streamRows.Scan(&pipeline, &started, &completed); err != nil {
+		var requested, completed uint64
+		if err := streamRows.Scan(&pipeline, &requested, &completed); err != nil {
 			return nil, fmt.Errorf("clickhouse list pipelines stream scan: %w", err)
 		}
 		ps := pmap[pipeline]
@@ -56,7 +56,7 @@ func (r *Repo) ListPipelines(ctx context.Context, p types.QueryParams) ([]types.
 			ps = &pipeStats{}
 			pmap[pipeline] = ps
 		}
-		ps.started += int64(started)
+		ps.requested += int64(requested)
 		ps.completed += int64(completed)
 	}
 	if err := streamRows.Err(); err != nil {
@@ -69,7 +69,7 @@ func (r *Repo) ListPipelines(ctx context.Context, p types.QueryParams) ([]types.
 			pipeline,
 			sum(inference_fps_sum) AS fps_sum,
 			sum(sample_count)      AS samp
-		FROM naap.serving_fps_hourly
+		FROM naap.api_fps_hourly
 		WHERE hour >= ? AND hour < ?`+orgFilter+`
 		GROUP BY pipeline
 	`, args...)
@@ -100,7 +100,7 @@ func (r *Repo) ListPipelines(ctx context.Context, p types.QueryParams) ([]types.
 	// Payment per pipeline
 	payRows, err := r.conn.Query(ctx, `
 		SELECT pipeline, sum(total_wei), sum(event_count)
-		FROM naap.serving_payment_hourly
+		FROM naap.api_payment_hourly
 		WHERE hour >= ? AND hour < ?`+orgFilter+`
 		GROUP BY pipeline
 	`, args...)
@@ -136,7 +136,7 @@ func (r *Repo) ListPipelines(ctx context.Context, p types.QueryParams) ([]types.
 	}
 	activeRows, err := r.conn.Query(ctx, `
 		SELECT pipeline, count() AS active
-		FROM naap.serving_active_stream_state
+		FROM naap.api_active_stream_state
 		`+activeWhere+`
 		GROUP BY pipeline
 	`, activeArgs...)
@@ -167,7 +167,7 @@ func (r *Repo) ListPipelines(ctx context.Context, p types.QueryParams) ([]types.
 	}
 	warmRows, err := r.conn.Query(ctx, `
 		SELECT pipeline, count(DISTINCT orch_address) AS warm, any(orch_address) AS top_orch
-		FROM naap.serving_gpu_inventory
+		FROM naap.api_gpu_inventory
 		`+warmWhere+`
 		GROUP BY pipeline
 	`, warmArgs...)
@@ -200,8 +200,8 @@ func (r *Repo) ListPipelines(ctx context.Context, p types.QueryParams) ([]types.
 		s := types.PipelineSummary{
 			Pipeline:         pipeline,
 			ActiveStreams:    activeMap[pipeline],
-			StartedCount:     ps.started,
-			SuccessRate:      divSafe(float64(ps.completed), float64(ps.started)),
+			RequestedCount:   ps.requested,
+			SuccessRate:      divSafe(float64(ps.completed), float64(ps.requested)),
 			AvgInferenceFPS:  divSafe(ps.fpsSumW, ps.fpsSampW),
 			TotalPaymentsWEI: types.WEI(ps.payWEI),
 			WarmOrchCount:    ps.warmOrchs,
@@ -225,19 +225,19 @@ func (r *Repo) GetPipelineDetail(ctx context.Context, pipeline string, p types.Q
 
 	// Stream summary
 	streamRow := r.conn.QueryRow(ctx, `
-		SELECT sum(started), sum(completed)
-		FROM naap.serving_stream_hourly
+		SELECT sum(requested_sessions), sum(startup_success_sessions)
+		FROM naap.api_stream_hourly
 		`+where, args...)
 
-	var started, completed uint64
-	if err := streamRow.Scan(&started, &completed); err != nil {
+	var requested, completed uint64
+	if err := streamRow.Scan(&requested, &completed); err != nil {
 		return nil, fmt.Errorf("clickhouse get pipeline detail streams: %w", err)
 	}
 
 	// FPS
 	fpsRow := r.conn.QueryRow(ctx, `
 		SELECT sum(inference_fps_sum), sum(sample_count)
-		FROM naap.serving_fps_hourly
+		FROM naap.api_fps_hourly
 		`+where, args...)
 	var fpsSum float64
 	var fpsSamp uint64
@@ -248,7 +248,7 @@ func (r *Repo) GetPipelineDetail(ctx context.Context, pipeline string, p types.Q
 	// Payments
 	payRow := r.conn.QueryRow(ctx, `
 		SELECT sum(total_wei)
-		FROM naap.serving_payment_hourly
+		FROM naap.api_payment_hourly
 		`+where, args...)
 	var payWEI uint64
 	if err := payRow.Scan(&payWEI); err != nil {
@@ -263,7 +263,7 @@ func (r *Repo) GetPipelineDetail(ctx context.Context, pipeline string, p types.Q
 		activeArgs = append(activeArgs, p.Org)
 	}
 	activeRow := r.conn.QueryRow(ctx, `
-		SELECT count() FROM naap.serving_active_stream_state `+activeWhere, activeArgs...)
+		SELECT count() FROM naap.api_active_stream_state `+activeWhere, activeArgs...)
 	var active uint64
 	_ = activeRow.Scan(&active)
 
@@ -276,7 +276,7 @@ func (r *Repo) GetPipelineDetail(ctx context.Context, pipeline string, p types.Q
 	}
 	modelRows, err := r.conn.Query(ctx, `
 		SELECT model_id, count(DISTINCT orch_address) AS warm
-		FROM naap.serving_gpu_inventory
+		FROM naap.api_gpu_inventory
 		`+warmWhere+`
 		GROUP BY model_id
 		ORDER BY warm DESC
@@ -310,8 +310,8 @@ func (r *Repo) GetPipelineDetail(ctx context.Context, pipeline string, p types.Q
 		StartTime:        start,
 		EndTime:          end,
 		ActiveStreams:    int64(active),
-		StartedCount:     int64(started),
-		SuccessRate:      divSafe(float64(completed), float64(started)),
+		RequestedCount:   int64(requested),
+		SuccessRate:      divSafe(float64(completed), float64(requested)),
 		AvgInferenceFPS:  divSafe(fpsSum, float64(fpsSamp)),
 		TotalPaymentsWEI: types.WEI(payWEI),
 		WarmOrchCount:    int64(totalWarm),

@@ -43,6 +43,16 @@ type Config struct {
 
 	// Telemetry
 	OTLPEndpoint string `envconfig:"OTLP_ENDPOINT" default:""`
+
+	// Selection-centered resolver runtime
+	ResolverEnabled        bool          `envconfig:"RESOLVER_ENABLED" default:"false"`
+	ResolverMode           string        `envconfig:"RESOLVER_MODE" default:"auto"`
+	ResolverInterval       time.Duration `envconfig:"RESOLVER_INTERVAL" default:"1m"`
+	ResolverLatenessWindow time.Duration `envconfig:"RESOLVER_LATENESS_WINDOW" default:"10m"`
+	ResolverClaimTTL       time.Duration `envconfig:"RESOLVER_CLAIM_TTL" default:"2m"`
+	ResolverPort           string        `envconfig:"RESOLVER_PORT" default:"9102"`
+	ResolverVersion        string        `envconfig:"RESOLVER_VERSION" default:"selection-centered-v1"`
+	ResolverBatchSize      int           `envconfig:"RESOLVER_BATCH_SIZE" default:"10000"`
 }
 
 // Brokers parses the KAFKA_BROKERS env var (comma-separated) into a slice.

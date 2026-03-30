@@ -21,7 +21,7 @@ func (r *Repo) GetActiveStreams(ctx context.Context, p types.QueryParams) (*type
 
 	rows, err := r.conn.Query(ctx, `
 		SELECT org, pipeline, state, count() AS n
-		FROM naap.serving_active_stream_state
+		FROM naap.api_active_stream_state
 		`+where+`
 		GROUP BY org, pipeline, state
 	`, args...)
@@ -69,28 +69,28 @@ func (r *Repo) GetStreamSummary(ctx context.Context, p types.QueryParams) (*type
 
 	row := r.conn.QueryRow(ctx, `
 		SELECT
-			countIf(started = 1) AS total_started,
-			countIf(playable_seen = 1 OR completed = 1 OR startup_outcome = 'excused') AS total_completed,
-			countIf(no_orch = 1) AS no_orch_count,
+			countIf(requested_seen = 1) AS total_requested,
+			countIf(startup_outcome = 'success') AS startup_success_count,
+			countIf(selection_outcome = 'no_orch') AS no_orch_count,
 			countIf(swap_count > 0) AS orch_swap_count
-		FROM naap.serving_stream_sessions
+		FROM naap.api_stream_sessions
 		`+where, args...)
 
 	// sum() of UInt64 columns returns UInt64; scan into uint64 then cast.
-	var started, completed, noOrch, orchSwap uint64
-	if err := row.Scan(&started, &completed, &noOrch, &orchSwap); err != nil {
+	var requested, successes, noOrch, orchSwap uint64
+	if err := row.Scan(&requested, &successes, &noOrch, &orchSwap); err != nil {
 		return nil, fmt.Errorf("clickhouse get stream summary: %w", err)
 	}
 
 	return &types.StreamSummary{
-		StartTime:            start,
-		EndTime:              end,
-		TotalStarted:         int64(started),
-		TotalCompleted:       int64(completed),
-		NoOrchAvailableCount: int64(noOrch),
-		OrchSwapCount:        int64(orchSwap),
-		SuccessRate:          divSafe(float64(completed), float64(started)),
-		NoOrchAvailableRate:  divSafe(float64(noOrch), float64(started)),
+		StartTime:          start,
+		EndTime:            end,
+		TotalRequested:     int64(requested),
+		StartupSuccesses:   int64(successes),
+		NoOrchSessionCount: int64(noOrch),
+		OrchSwapCount:      int64(orchSwap),
+		StartupSuccessRate: divSafe(float64(successes), float64(requested)),
+		NoOrchSessionRate:  divSafe(float64(noOrch), float64(requested)),
 	}, nil
 }
 
@@ -107,11 +107,11 @@ func (r *Repo) ListStreamHistory(ctx context.Context, p types.QueryParams) ([]ty
 	rows, err := r.conn.Query(ctx, `
 		SELECT
 			toStartOfHour(hour) AS ts,
-			sum(started),
-			sum(completed),
-			sum(no_orch),
-			sum(orch_swap)
-		FROM naap.serving_stream_hourly
+			sum(requested_sessions),
+			sum(startup_success_sessions),
+			sum(no_orch_sessions),
+			sum(orch_swap_sessions)
+		FROM naap.api_stream_hourly
 		`+where+`
 		GROUP BY ts
 		ORDER BY ts ASC
@@ -124,14 +124,14 @@ func (r *Repo) ListStreamHistory(ctx context.Context, p types.QueryParams) ([]ty
 	var result []types.StreamBucket
 	for rows.Next() {
 		var b types.StreamBucket
-		var started, completed, noOrch, orchSwap uint64
-		if err := rows.Scan(&b.Timestamp, &started, &completed, &noOrch, &orchSwap); err != nil {
+		var requested, successes, noOrch, orchSwap uint64
+		if err := rows.Scan(&b.Timestamp, &requested, &successes, &noOrch, &orchSwap); err != nil {
 			return nil, fmt.Errorf("clickhouse list stream history scan: %w", err)
 		}
-		b.Started = int64(started)
-		b.Completed = int64(completed)
-		b.NoOrchAvailable = int64(noOrch)
-		b.OrchSwap = int64(orchSwap)
+		b.RequestedSessions = int64(requested)
+		b.StartupSuccessSessions = int64(successes)
+		b.NoOrchSessions = int64(noOrch)
+		b.OrchSwapSessions = int64(orchSwap)
 		result = append(result, b)
 	}
 	return result, rows.Err()

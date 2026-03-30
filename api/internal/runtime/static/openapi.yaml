@@ -428,20 +428,20 @@ components:
         EndTime:
           type: string
           format: date-time
-        TotalStarted:
+        TotalRequested:
           type: integer
           format: int64
-        TotalCompleted:
+        StartupSuccesses:
           type: integer
           format: int64
-        NoOrchAvailableCount:
+        NoOrchSessionCount:
           type: integer
           format: int64
-        SuccessRate:
+        StartupSuccessRate:
           type: number
           format: double
-          description: Fraction of started streams that completed successfully (0–1).
-        NoOrchAvailableRate:
+          description: Fraction of requested sessions that reached startup success (0–1).
+        NoOrchSessionRate:
           type: number
           format: double
         OrchSwapCount:
@@ -454,16 +454,16 @@ components:
         Timestamp:
           type: string
           format: date-time
-        Started:
+        RequestedSessions:
           type: integer
           format: int64
-        Completed:
+        StartupSuccessSessions:
           type: integer
           format: int64
-        NoOrchAvailable:
+        NoOrchSessions:
           type: integer
           format: int64
-        OrchSwap:
+        OrchSwapSessions:
           type: integer
           format: int64
 
@@ -689,7 +689,7 @@ components:
     FailureBreakdown:
       type: object
       properties:
-        NoOrchAvailable:
+        NoOrchSessions:
           type: integer
           format: int64
         OrchSwap:
@@ -717,10 +717,10 @@ components:
         EndTime:
           type: string
           format: date-time
-        StreamSuccessRate:
+        StartupSuccessRate:
           type: number
           format: double
-        NoOrchAvailableRate:
+        NoOrchSessionRate:
           type: number
           format: double
         OrchSwapCount:
@@ -744,15 +744,15 @@ components:
         Timestamp:
           type: string
           format: date-time
-        Started:
+        RequestedSessions:
           type: integer
           format: int64
-        SuccessRate:
+        StartupSuccessRate:
           type: number
           format: double
           nullable: true
           description: Null when sample count is below minimum threshold (5 streams).
-        NoOrchAvailableRate:
+        NoOrchSessionRate:
           type: number
           format: double
           nullable: true
@@ -976,7 +976,7 @@ components:
       properties:
         Pipeline: { type: string }
         ActiveStreams: { type: integer, format: int64 }
-        StartedCount: { type: integer, format: int64 }
+        RequestedCount: { type: integer, format: int64 }
         SuccessRate: { type: number, format: double }
         AvgInferenceFPS: { type: number, format: double }
         TotalPaymentsWEI: { $ref: "#/components/schemas/WEI" }
@@ -997,7 +997,7 @@ components:
         StartTime: { type: string, format: date-time }
         EndTime: { type: string, format: date-time }
         ActiveStreams: { type: integer, format: int64 }
-        StartedCount: { type: integer, format: int64 }
+        RequestedCount: { type: integer, format: int64 }
         SuccessRate: { type: number, format: double }
         AvgInferenceFPS: { type: number, format: double }
         TotalPaymentsWEI: { $ref: "#/components/schemas/WEI" }
@@ -1111,7 +1111,7 @@ components:
         OrchSwapCount: { type: integer, format: int64 }
         InferenceRestartCount: { type: integer, format: int64 }
         TotalFailures: { type: integer, format: int64 }
-        FailureRate: { type: number, format: double, description: "total failures / streams started (0–1)" }
+        FailureRate: { type: number, format: double, description: "total failures / requested sessions (0–1)" }
 
     FailuresByOrch:
       type: object
@@ -1168,8 +1168,9 @@ components:
         region:                      { type: string, nullable: true, description: "Always null — not captured in event data." }
         known_sessions_count:        { type: integer, format: int64 }
         startup_success_sessions:    { type: integer, format: int64 }
-        startup_excused_sessions:    { type: integer, format: int64, description: "Always 0 — excusal logic not implemented." }
-        startup_unexcused_sessions:  { type: integer, format: int64 }
+        no_orch_sessions:            { type: integer, format: int64 }
+        startup_excused_sessions:    { type: integer, format: int64, description: "Failed sessions whose KPI treatment is explicitly excused by canonical lifecycle rules." }
+        startup_failed_sessions:     { type: integer, format: int64 }
         confirmed_swapped_sessions:  { type: integer, format: int64, description: "Always 0 — confirmation signal absent." }
         inferred_swap_sessions:      { type: integer, format: int64 }
         total_swapped_sessions:      { type: integer, format: int64 }
@@ -1177,7 +1178,7 @@ components:
         error_status_samples:        { type: integer, format: int64 }
         health_signal_coverage_ratio: { type: number, format: double }
         startup_success_rate:        { type: number, format: double, nullable: true, description: "Null when known_sessions_count < 5." }
-        effective_success_rate:      { type: number, format: double, nullable: true }
+        excused_failure_rate:        { type: number, format: double, nullable: true }
         no_swap_rate:                { type: number, format: double, nullable: true }
         sla_score:                   { type: number, format: double, nullable: true, description: "0.6×startup_success_rate + 0.4×no_swap_rate." }
 
@@ -1203,10 +1204,11 @@ components:
         avg_output_fps:              { type: number, format: double }
         total_minutes:               { type: number, format: double }
         known_sessions_count:        { type: integer, format: int64 }
-        served_sessions:             { type: integer, format: int64 }
-        unserved_sessions:           { type: integer, format: int64 }
-        total_demand_sessions:       { type: integer, format: int64 }
-        startup_unexcused_sessions:  { type: integer, format: int64 }
+        requested_sessions:          { type: integer, format: int64 }
+        startup_success_sessions:    { type: integer, format: int64 }
+        no_orch_sessions:            { type: integer, format: int64 }
+        startup_excused_sessions:    { type: integer, format: int64 }
+        startup_failed_sessions:     { type: integer, format: int64 }
         confirmed_swapped_sessions:  { type: integer, format: int64 }
         inferred_swap_sessions:      { type: integer, format: int64 }
         total_swapped_sessions:      { type: integer, format: int64 }
@@ -1214,7 +1216,7 @@ components:
         error_status_samples:        { type: integer, format: int64 }
         health_signal_coverage_ratio: { type: number, format: double }
         startup_success_rate:        { type: number, format: double }
-        effective_success_rate:      { type: number, format: double }
+        excused_failure_rate:        { type: number, format: double }
         ticket_face_value_eth:       { type: number, format: double, description: "Proportional ETH payment estimate for this gateway's sessions." }
 
     NetworkDemandResponse:
@@ -1257,13 +1259,14 @@ components:
         e2e_latency_sample_count:       { type: integer, format: int64 }
         known_sessions_count:           { type: integer, format: int64 }
         startup_success_sessions:       { type: integer, format: int64 }
+        no_orch_sessions:               { type: integer, format: int64 }
         startup_excused_sessions:       { type: integer, format: int64 }
-        startup_unexcused_sessions:     { type: integer, format: int64 }
+        startup_failed_sessions:        { type: integer, format: int64 }
         confirmed_swapped_sessions:     { type: integer, format: int64 }
         inferred_swap_sessions:         { type: integer, format: int64 }
         total_swapped_sessions:         { type: integer, format: int64 }
         sessions_ending_in_error:       { type: integer, format: int64 }
-        startup_unexcused_rate:         { type: number, format: double }
+        startup_failed_rate:            { type: number, format: double }
         swap_rate:                      { type: number, format: double }
 
     GPUMetricsResponse:
@@ -2307,7 +2310,6 @@ paths:
 
         **Approximations vs. source schema:**
         - `region` is always null (not captured in event data)
-        - `startup_excused_sessions` is always 0
         - `confirmed_swapped_sessions` is always 0
         - `sla_score` = 0.6×startup_success_rate + 0.4×no_swap_rate
         - Fields with < 5 sessions return null for rate fields

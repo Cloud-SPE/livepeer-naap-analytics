@@ -12,6 +12,7 @@ package validation
 import (
 	"fmt"
 	"testing"
+	"time"
 )
 
 func TestRuleIngest001_AcceptedEventsHaveNonBlankEnvelope(t *testing.T) {
@@ -38,7 +39,7 @@ func TestRuleIngest001_AcceptedEventsHaveNonBlankEnvelope(t *testing.T) {
 
 	// All accepted events must have non-empty event_id and event_type.
 	blank := h.queryInt(t,
-		`SELECT countIf(event_id = '' OR event_type = '') FROM naap.events WHERE org = ?`,
+		`SELECT countIf(event_id = '' OR event_type = '') FROM naap.accepted_raw_events WHERE org = ?`,
 		h.org)
 	if blank != 0 {
 		t.Errorf("RULE-INGEST-001: %d events have blank event_id or event_type (expected 0)", blank)
@@ -71,10 +72,10 @@ func TestRuleIngest001_SupportedFamiliesAreContracted(t *testing.T) {
 			'stream_ingest_metrics','network_capabilities',
 			'discovery_results','create_new_payment'
 		))
-		FROM naap.events WHERE org = ?`, h.org)
+		FROM naap.accepted_raw_events WHERE org = ?`, h.org)
 
 	total := h.queryInt(t,
-		`SELECT count() FROM naap.events WHERE org = ?`, h.org)
+		`SELECT count() FROM naap.accepted_raw_events WHERE org = ?`, h.org)
 
 	if contracted != total {
 		t.Errorf("RULE-INGEST-001: %d of %d events have non-contracted event_type", total-contracted, total)
@@ -109,7 +110,7 @@ func TestRuleIngest002_StreamFamiliesHaveStreamId(t *testing.T) {
 	// Detectable: stream_trace/ai_stream_status with blank stream_id in data.
 	missing := h.queryInt(t, `
 		SELECT countIf(JSONExtractString(data, 'stream_id') = '')
-		FROM naap.events
+		FROM naap.accepted_raw_events
 		WHERE org = ? AND event_type IN ('stream_trace', 'ai_stream_status')`,
 		h.org)
 
@@ -149,7 +150,7 @@ func TestRuleIngest002_PaymentHasRequiredFields(t *testing.T) {
 			JSONExtractString(data, 'sender') = '' OR
 			JSONExtractString(data, 'recipient') = ''
 		)
-		FROM naap.events
+		FROM naap.accepted_raw_events
 		WHERE org = ? AND event_type = 'create_new_payment'`, h.org)
 
 	if missingFaceValue != 1 {
@@ -159,28 +160,43 @@ func TestRuleIngest002_PaymentHasRequiredFields(t *testing.T) {
 
 // ── RULE-INGEST-003 ──────────────────────────────────────────────────────────
 // Ignored Raw Families And Subtypes Must Be Explicit
-// app_send_stream_request traces and scope-client traces (no stream_id) must
-// not contribute to canonical started-session facts.
+// non-core app traces and scope-client traces must not contribute to canonical
+// started-session facts.
 
-func TestRuleIngest003_AppSendStreamRequestDoesNotCountAsStarted(t *testing.T) {
+func TestRuleIngest003_NonCoreAppStreamTraceDoesNotCountAsStarted(t *testing.T) {
 	h := newHarness(t)
 	ts := anchor()
 	streamID := uid("s")
 	requestID := "r1"
 	key := canonicalSessionKey(h.org, streamID, requestID)
 
-	// This trace type is in the explicit ignore list (RULE-INGEST-003).
-	h.insert(t, []rawEvent{{
-		EventID: uid("e"), EventType: "stream_trace", EventTs: ts, Org: h.org,
-		Data:       fmt.Sprintf(`{"stream_id":%q,"request_id":%q,"type":"app_send_stream_request"}`, streamID, requestID),
-		IngestedAt: ts,
-	}})
+	h.insert(t, []rawEvent{
+		{
+			EventID: uid("e"), EventType: "stream_trace", EventTs: ts, Org: h.org,
+			Data:       fmt.Sprintf(`{"stream_id":%q,"request_id":%q,"type":"app_send_stream_request"}`, streamID, requestID),
+			IngestedAt: ts,
+		},
+		{
+			EventID: uid("e"), EventType: "stream_trace", EventTs: ts.Add(time.Second), Org: h.org,
+			Data:       fmt.Sprintf(`{"stream_id":%q,"request_id":%q,"type":"app_param_update"}`, streamID, requestID),
+			IngestedAt: ts.Add(time.Second),
+		},
+	})
 
 	started := h.queryInt(t,
-		`SELECT toUInt64(started) FROM naap.fact_workflow_sessions WHERE canonical_session_key = ?`,
+		`SELECT countIf(started = 1) FROM naap.canonical_session_latest WHERE canonical_session_key = ?`,
 		key)
 	if started != 0 {
-		t.Errorf("RULE-INGEST-003: app_send_stream_request contributed %d to canonical started semantics (expected 0)", started)
+		t.Errorf("RULE-INGEST-003: non-core app traces contributed %d to canonical started semantics (expected 0)", started)
+	}
+	if got := h.queryInt(t, `SELECT count() FROM naap.canonical_selection_events WHERE org = ?`, h.org); got != 0 {
+		t.Errorf("RULE-INGEST-003: non-core app traces created %d selection-centered events (expected 0)", got)
+	}
+	if got := h.queryInt(t, `SELECT count() FROM naap.canonical_session_current_store FINAL WHERE org = ?`, h.org); got != 0 {
+		t.Errorf("RULE-INGEST-003: non-core app traces created %d selection-centered session rows (expected 0)", got)
+	}
+	if got := h.queryInt(t, `SELECT count() FROM naap.ignored_raw_event_diagnostics WHERE org = ? AND ignored_reason = 'ignored_stream_trace_non_core_app'`, h.org); got != 2 {
+		t.Errorf("RULE-INGEST-003: non-core app diagnostics rows = %d, want 2", got)
 	}
 }
 
@@ -201,14 +217,20 @@ func TestRuleIngest003_ScopeClientTracesDoNotCountAsStarted(t *testing.T) {
 		events = append(events, rawEvent{
 			EventID: uid("e"), EventType: "stream_trace", EventTs: ts, Org: h.org,
 			// No stream_id — matches scope client shape from the rule.
-			Data:       fmt.Sprintf(`{"type":%q}`, typ),
+			Data:       fmt.Sprintf(`{"type":%q,"client_source":"scope"}`, typ),
 			IngestedAt: ts,
 		})
 	}
 	h.insert(t, events)
 
-	if h.queryInt(t, `SELECT count() FROM naap.fact_workflow_sessions WHERE org = ?`, h.org) != 0 {
+	if h.queryInt(t, `SELECT count() FROM naap.canonical_session_latest WHERE org = ?`, h.org) != 0 {
 		t.Errorf("RULE-INGEST-003: scope client traces unexpectedly produced canonical session rows")
+	}
+	if got := h.queryInt(t, `SELECT count() FROM naap.canonical_session_current_store FINAL WHERE org = ?`, h.org); got != 0 {
+		t.Errorf("RULE-INGEST-003: scope client traces created %d selection-centered session rows", got)
+	}
+	if got := h.queryInt(t, `SELECT count() FROM naap.ignored_raw_event_diagnostics WHERE org = ? AND ignored_reason = 'ignored_stream_trace_scope_client_noise'`, h.org); got != uint64(len(scopeTypes)) {
+		t.Errorf("RULE-INGEST-003: scope client diagnostics rows = %d, want %d", got, len(scopeTypes))
 	}
 }
 
@@ -231,26 +253,20 @@ func TestRuleIngest003_UnknownTraceTypesAreDetectable(t *testing.T) {
 	})
 
 	unknown := h.queryInt(t, `
-		SELECT countIf(
-			JSONExtractString(data, 'type') NOT IN (
-				-- contracted
-				'gateway_receive_stream_request','gateway_ingest_stream_closed',
-				'gateway_send_first_ingest_segment','gateway_receive_first_processed_segment',
-				'gateway_receive_few_processed_segments','gateway_receive_first_data_segment',
-				'gateway_no_orchestrators_available','orchestrator_swap',
-				-- explicit ignore list
-				'app_send_stream_request','stream_heartbeat','pipeline_load_start',
-				'pipeline_loaded','session_created','stream_started','playback_ready',
-				'session_closed','stream_stopped','pipeline_unloaded',
-				'websocket_connected','websocket_disconnected','error',
-				-- runner-side informational (not contracted but not noise)
-				'runner_receive_first_ingest_segment','runner_send_first_processed_segment'
-			)
-		)
-		FROM naap.events
-		WHERE org = ? AND event_type = 'stream_trace'`, h.org)
+		SELECT count()
+		FROM naap.ignored_raw_events
+		WHERE org = ?
+		  AND event_type = 'stream_trace'
+		  AND event_subtype = 'some_new_unknown_type_xyz'
+		  AND ignore_reason = 'unsupported_stream_trace_type'`, h.org)
 
 	if unknown != 1 {
-		t.Errorf("RULE-INGEST-003: expected 1 unknown trace type to be detectable, got %d", unknown)
+		t.Errorf("RULE-INGEST-003: expected 1 unknown trace type in ignored diagnostics, got %d", unknown)
+	}
+	if got := h.queryInt(t, `SELECT count() FROM naap.ignored_raw_event_diagnostics WHERE org = ? AND ignored_reason = 'unsupported_stream_trace_type'`, h.org); got != 1 {
+		t.Errorf("RULE-INGEST-003: expected 1 unsupported_stream_trace_type diagnostic row, got %d", got)
+	}
+	if got := h.queryInt(t, `SELECT count() FROM naap.canonical_selection_events WHERE org = ?`, h.org); got != 0 {
+		t.Errorf("RULE-INGEST-003: unsupported trace types should not inflate selection events; got %d", got)
 	}
 }

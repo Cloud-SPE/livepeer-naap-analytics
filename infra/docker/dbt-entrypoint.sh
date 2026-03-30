@@ -7,26 +7,17 @@ if [ $# -gt 0 ]; then
     exec dbt "$@"
 fi
 
-# Daemon mode: run dbt on a cron schedule.
-SCHEDULE="${DBT_CRON_SCHEDULE:-*/5 * * * *}"
+# Tooling mode: publish dbt relations once on startup, then stay idle so the
+# container remains available for manual run/test/compile commands. Freshness is
+# owned by the canonical refresh worker, not by recurring dbt cron.
+AUTO_RUN="${DBT_AUTO_RUN_ON_START:-true}"
 
-echo "[dbt-daemon] Schedule: ${SCHEDULE}"
+if [ "${AUTO_RUN}" = "true" ]; then
+    echo "[dbt-tooling] Running initial dbt run..."
+    dbt run
+    echo "[dbt-tooling] Running dbt compile for canonical refresh artifacts..."
+    dbt compile
+fi
 
-# Persist Docker env vars so cron jobs can see them (cron doesn't inherit the container env).
-printenv | sed "s/'/'\\\\''/g; s/\(.*\)=\(.*\)/export \1='\2'/" > /tmp/dbt-env.sh
-
-# Install crontab entry.
-cat > /etc/cron.d/dbt-run <<EOF
-SHELL=/bin/bash
-PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-
-${SCHEDULE} root . /tmp/dbt-env.sh && cd /app/warehouse && dbt run >> /proc/1/fd/1 2>&1
-EOF
-chmod 0644 /etc/cron.d/dbt-run
-
-# Run once immediately on startup.
-echo "[dbt-daemon] Running initial dbt run..."
-dbt run
-
-echo "[dbt-daemon] Starting cron..."
-exec cron -f
+echo "[dbt-tooling] Idle container started; use docker compose run --rm warehouse <dbt-command> for manual actions."
+exec tail -f /dev/null

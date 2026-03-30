@@ -35,10 +35,10 @@ func TestRuleFact001_HistoricalCapabilitySnapshotsAndLatestStateAreRecoverable(t
 		},
 	})
 
-	if h.queryInt(t, `SELECT count() FROM naap.capability_snapshots WHERE org = ? AND orch_address = ?`, h.org, orchAddr) != 2 {
+	if h.queryInt(t, `SELECT count() FROM naap.canonical_capability_snapshots WHERE org = ? AND orch_address = ?`, h.org, orchAddr) != 2 {
 		t.Errorf("RULE-FACT-001: expected 2 historical capability rows for %s", orchAddr)
 	}
-	if got := h.queryString(t, `SELECT version FROM naap.serving_latest_orchestrator_state WHERE orch_address = ?`, orchAddr); got != "0.8.0" {
+	if got := h.queryString(t, `SELECT version FROM naap.canonical_latest_orchestrator_state WHERE orch_address = ?`, orchAddr); got != "0.8.0" {
 		t.Errorf("RULE-FACT-001: latest orchestrator version = %q, want 0.8.0", got)
 	}
 }
@@ -68,13 +68,13 @@ func TestRuleFact001_SessionFactReflectsLatestLifecycleState(t *testing.T) {
 		},
 	})
 
-	if h.queryInt(t, `SELECT toUInt64(completed) FROM naap.fact_workflow_sessions WHERE canonical_session_key = ?`, key) != 1 {
+	if h.queryInt(t, `SELECT toUInt64(completed) FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, key) != 1 {
 		t.Errorf("RULE-FACT-001: canonical session fact did not retain completed=1")
 	}
-	if h.queryInt(t, `SELECT toUInt64(restart_seen) FROM naap.fact_workflow_sessions WHERE canonical_session_key = ?`, key) != 1 {
+	if h.queryInt(t, `SELECT toUInt64(restart_seen) FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, key) != 1 {
 		t.Errorf("RULE-FACT-001: canonical session fact did not retain restart_seen=1")
 	}
-	if h.queryInt(t, `SELECT toUInt64(error_seen) FROM naap.fact_workflow_sessions WHERE canonical_session_key = ?`, key) != 1 {
+	if h.queryInt(t, `SELECT toUInt64(error_seen) FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, key) != 1 {
 		t.Errorf("RULE-FACT-001: canonical session fact did not retain error_seen=1")
 	}
 }
@@ -95,10 +95,10 @@ func TestRuleFact002_CanonicalSessionFactsConvergeToOneRowPerSession(t *testing.
 		}})
 	}
 
-	if h.queryInt(t, `SELECT count() FROM naap.fact_workflow_sessions WHERE canonical_session_key = ?`, key) != 1 {
+	if h.queryInt(t, `SELECT count() FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, key) != 1 {
 		t.Errorf("RULE-FACT-002: canonical session fact did not converge to one row for %s", key)
 	}
-	if h.queryInt(t, `SELECT status_sample_count FROM naap.fact_workflow_sessions WHERE canonical_session_key = ?`, key) != 3 {
+	if h.queryInt(t, `SELECT status_sample_count FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, key) != 3 {
 		t.Errorf("RULE-FACT-002: canonical session fact did not retain all 3 status samples")
 	}
 }

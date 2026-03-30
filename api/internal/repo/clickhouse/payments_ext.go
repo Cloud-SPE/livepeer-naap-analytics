@@ -26,7 +26,7 @@ func (r *Repo) ListPaymentsByGateway(ctx context.Context, p types.QueryParams) (
 			sum(face_value_wei) AS total_wei,
 			count() AS event_count,
 			uniqExact(recipient_address) AS unique_orchs
-		FROM naap.serving_payment_links
+		FROM naap.api_payment_links
 		`+where+`
 		GROUP BY gateway
 		ORDER BY total_wei DESC
@@ -84,8 +84,8 @@ func (r *Repo) ListPaymentsByStream(ctx context.Context, p types.QueryParams) ([
 			coalesce(fs.canonical_pipeline, p.pipeline_hint) AS pipeline,
 			sum(p.face_value_wei) AS total_wei,
 			count() AS event_count
-		FROM naap.fact_workflow_payment_links p
-		LEFT JOIN naap.fact_workflow_sessions fs ON p.canonical_session_key = fs.canonical_session_key
+		FROM naap.canonical_payment_links p
+		LEFT JOIN naap.canonical_session_current fs ON p.canonical_session_key = fs.canonical_session_key
 		`+where+`
 		GROUP BY stream_id, org, pipeline
 		ORDER BY total_wei DESC

@@ -12,19 +12,19 @@ import (
 // SLA Compliance  —  GET /v1/sla/compliance
 // ---------------------------------------------------------------------------
 
-// ListSLACompliance returns paginated SLA compliance rows from canonical
-// serving views.
+// ListSLACompliance returns paginated SLA compliance rows from api_* read
+// models. These are service-facing relations only; downstream derivations must
+// use canonical_* instead.
 //
 // Field approximations vs leaderboard-serverless source:
 //   - region                   → always NULL (not captured in canonical sources)
-//   - startup_excused_sessions → 0 (excusal logic absent)
 //   - confirmed_swapped_sessions → 0 (confirmation signal absent)
 //   - inferred_swap_sessions   → 0 (restart events not linked per-session here)
 //   - sla_score                → 0.6*startup_success_rate + 0.4*no_swap_rate
 func (r *Repo) ListSLACompliance(ctx context.Context, p types.SLAComplianceParams) ([]types.SLAComplianceRow, int, error) {
-	view := "naap.v_api_sla_compliance"
+	view := "naap.api_sla_compliance"
 	if p.Org != "" {
-		view = "naap.v_api_sla_compliance_by_org"
+		view = "naap.api_sla_compliance_by_org"
 	}
 
 	where, args := buildSLAWhere(p)
@@ -43,11 +43,11 @@ func (r *Repo) ListSLACompliance(ctx context.Context, p types.SLAComplianceParam
 		SELECT
 			window_start, org, orchestrator_address, pipeline_id,
 			model_id, gpu_id, region,
-			known_sessions_count, startup_success_sessions, startup_excused_sessions,
-			startup_unexcused_sessions, confirmed_swapped_sessions, inferred_swap_sessions,
+			known_sessions_count, startup_success_sessions, no_orch_sessions, startup_excused_sessions,
+			startup_failed_sessions, confirmed_swapped_sessions, inferred_swap_sessions,
 			total_swapped_sessions, sessions_ending_in_error, error_status_samples,
 			health_signal_coverage_ratio,
-			startup_success_rate, effective_success_rate, no_swap_rate, sla_score
+			startup_success_rate, excused_failure_rate, no_swap_rate, sla_score
 		FROM `+view+` `+where+`
 		ORDER BY window_start DESC
 		LIMIT ? OFFSET ?
@@ -63,11 +63,11 @@ func (r *Repo) ListSLACompliance(ctx context.Context, p types.SLAComplianceParam
 		if err := rows.Scan(
 			&row.WindowStart, &row.Org, &row.OrchestratorAddress, &row.PipelineID,
 			&row.ModelID, &row.GPUID, &row.Region,
-			&row.KnownSessionsCount, &row.StartupSuccessSessions, &row.StartupExcusedSessions,
-			&row.StartupUnexcusedSessions, &row.ConfirmedSwappedSessions, &row.InferredSwapSessions,
+			&row.KnownSessionsCount, &row.StartupSuccessSessions, &row.NoOrchSessions, &row.StartupExcusedSessions,
+			&row.StartupFailedSessions, &row.ConfirmedSwappedSessions, &row.InferredSwapSessions,
 			&row.TotalSwappedSessions, &row.SessionsEndingInError, &row.ErrorStatusSamples,
 			&row.HealthSignalCoverageRatio,
-			&row.StartupSuccessRate, &row.EffectiveSuccessRate, &row.NoSwapRate, &row.SLAScore,
+			&row.StartupSuccessRate, &row.ExcusedFailureRate, &row.NoSwapRate, &row.SLAScore,
 		); err != nil {
 			return nil, 0, fmt.Errorf("clickhouse sla compliance scan: %w", err)
 		}
@@ -112,17 +112,18 @@ func buildSLAWhere(p types.SLAComplianceParams) (string, []any) {
 // Network Demand  —  GET /v1/network/demand
 // ---------------------------------------------------------------------------
 
-// ListNetworkDemand returns paginated network demand rows from canonical
-// serving views.
+// ListNetworkDemand returns paginated network demand rows from api_* read
+// models. These are service-facing relations only; downstream derivations must
+// use canonical_* instead.
 //
 // Field approximations:
 //   - region                → always NULL
 //   - confirmed/inferred swapped → 0
 //   - ticket_face_value_eth → 0 (payment-to-gateway correlation not available)
 func (r *Repo) ListNetworkDemand(ctx context.Context, p types.NetworkDemandParams) ([]types.NetworkDemandRow, int, error) {
-	view := "naap.v_api_network_demand"
+	view := "naap.api_network_demand"
 	if p.Org != "" {
-		view = "naap.v_api_network_demand_by_org"
+		view = "naap.api_network_demand_by_org"
 	}
 
 	where, args := buildDemandWhere(p)
@@ -139,10 +140,10 @@ func (r *Repo) ListNetworkDemand(ctx context.Context, p types.NetworkDemandParam
 		SELECT
 			window_start, org, gateway, region, pipeline_id, model_id,
 			sessions_count, avg_output_fps, total_minutes,
-			known_sessions_count, served_sessions, unserved_sessions, total_demand_sessions,
-			startup_unexcused_sessions, confirmed_swapped_sessions, inferred_swap_sessions,
+			known_sessions_count, requested_sessions, startup_success_sessions, no_orch_sessions,
+			startup_excused_sessions, startup_failed_sessions, confirmed_swapped_sessions, inferred_swap_sessions,
 			total_swapped_sessions, sessions_ending_in_error, error_status_samples,
-			health_signal_coverage_ratio, startup_success_rate, effective_success_rate,
+			health_signal_coverage_ratio, startup_success_rate, excused_failure_rate,
 			ticket_face_value_eth
 		FROM `+view+` `+where+`
 		ORDER BY window_start DESC
@@ -159,10 +160,10 @@ func (r *Repo) ListNetworkDemand(ctx context.Context, p types.NetworkDemandParam
 		if err := rows.Scan(
 			&row.WindowStart, &row.Org, &row.Gateway, &row.Region, &row.PipelineID, &row.ModelID,
 			&row.SessionsCount, &row.AvgOutputFPS, &row.TotalMinutes,
-			&row.KnownSessionsCount, &row.ServedSessions, &row.UnservedSessions, &row.TotalDemandSessions,
-			&row.StartupUnexcusedSessions, &row.ConfirmedSwappedSessions, &row.InferredSwapSessions,
+			&row.KnownSessionsCount, &row.RequestedSessions, &row.StartupSuccessSessions, &row.NoOrchSessions,
+			&row.StartupExcusedSessions, &row.StartupFailedSessions, &row.ConfirmedSwappedSessions, &row.InferredSwapSessions,
 			&row.TotalSwappedSessions, &row.SessionsEndingInError, &row.ErrorStatusSamples,
-			&row.HealthSignalCoverageRatio, &row.StartupSuccessRate, &row.EffectiveSuccessRate,
+			&row.HealthSignalCoverageRatio, &row.StartupSuccessRate, &row.ExcusedFailureRate,
 			&row.TicketFaceValueETH,
 		); err != nil {
 			return nil, 0, fmt.Errorf("clickhouse network demand scan: %w", err)
@@ -204,8 +205,9 @@ func buildDemandWhere(p types.NetworkDemandParams) (string, []any) {
 // GPU Metrics  —  GET /v1/gpu/metrics
 // ---------------------------------------------------------------------------
 
-// ListGPUMetrics returns paginated GPU performance metrics from canonical
-// serving views.
+// ListGPUMetrics returns paginated GPU performance metrics from api_* read
+// models. These are service-facing relations only; downstream derivations must
+// use canonical_* instead.
 //
 // Field approximations:
 //   - region, runner_version, cuda_version → always NULL
@@ -213,9 +215,9 @@ func buildDemandWhere(p types.NetworkDemandParams) (string, []any) {
 //   - fps_jitter_coefficient → NULL
 //   - confirmed/inferred swapped → 0
 func (r *Repo) ListGPUMetrics(ctx context.Context, p types.GPUMetricsParams) ([]types.GPUMetric, int, error) {
-	view := "naap.v_api_gpu_metrics"
+	view := "naap.api_gpu_metrics"
 	if p.Org != "" {
-		view = "naap.v_api_gpu_metrics_by_org"
+		view = "naap.api_gpu_metrics_by_org"
 	}
 
 	where, args := buildGPUWhere(p)
@@ -237,10 +239,10 @@ func (r *Repo) ListGPUMetrics(ctx context.Context, p types.GPUMetricsParams) ([]
 			avg_prompt_to_first_frame_ms, avg_startup_latency_ms, avg_e2e_latency_ms,
 			p95_prompt_to_first_frame_latency_ms, p95_startup_latency_ms, p95_e2e_latency_ms,
 			prompt_to_first_frame_sample_count, startup_latency_sample_count, e2e_latency_sample_count,
-			known_sessions_count, startup_success_sessions, startup_excused_sessions,
-			startup_unexcused_sessions, confirmed_swapped_sessions, inferred_swap_sessions,
+			known_sessions_count, startup_success_sessions, no_orch_sessions, startup_excused_sessions,
+			startup_failed_sessions, confirmed_swapped_sessions, inferred_swap_sessions,
 			total_swapped_sessions, sessions_ending_in_error,
-			startup_unexcused_rate, swap_rate
+			startup_failed_rate, swap_rate
 		FROM `+view+` `+where+`
 		ORDER BY window_start DESC
 		LIMIT ? OFFSET ?
@@ -264,10 +266,10 @@ func (r *Repo) ListGPUMetrics(ctx context.Context, p types.GPUMetricsParams) ([]
 			&m.AvgPromptToFirstFrameMS, &m.AvgStartupLatencyMS, &m.AvgE2ELatencyMS,
 			&m.P95PromptToFirstFrameLatencyMS, &m.P95StartupLatencyMS, &m.P95E2ELatencyMS,
 			&m.PromptToFirstFrameSampleCount, &m.StartupLatencySampleCount, &m.E2ELatencySampleCount,
-			&m.KnownSessionsCount, &m.StartupSuccessSessions, &m.StartupExcusedSessions,
-			&m.StartupUnexcusedSessions, &m.ConfirmedSwappedSessions, &m.InferredSwapSessions,
+			&m.KnownSessionsCount, &m.StartupSuccessSessions, &m.NoOrchSessions, &m.StartupExcusedSessions,
+			&m.StartupFailedSessions, &m.ConfirmedSwappedSessions, &m.InferredSwapSessions,
 			&m.TotalSwappedSessions, &m.SessionsEndingInError,
-			&m.StartupUnexcusedRate, &m.SwapRate,
+			&m.StartupFailedRate, &m.SwapRate,
 		); err != nil {
 			return nil, 0, fmt.Errorf("clickhouse gpu metrics scan: %w", err)
 		}

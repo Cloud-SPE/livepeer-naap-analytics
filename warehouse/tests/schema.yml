@@ -1,7 +1,7 @@
 version: 2
 
 models:
-  - name: fact_workflow_sessions
+  - name: canonical_session_attribution_latest
     columns:
       - name: canonical_session_key
         tests:
@@ -13,7 +13,24 @@ models:
           - accepted_values:
               arguments:
                 values: ['resolved', 'hardware_less', 'stale', 'ambiguous', 'unresolved']
-  - name: fact_workflow_payment_links
+  - name: canonical_session_latest
+    columns:
+      - name: canonical_session_key
+        tests:
+          - unique
+          - not_null
+      - name: attribution_status
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['resolved', 'hardware_less', 'stale', 'ambiguous', 'unresolved']
+  - name: canonical_status_hours
+    columns:
+      - name: canonical_session_key
+        tests:
+          - not_null
+  - name: canonical_payment_links
     columns:
       - name: event_id
         tests:
@@ -25,8 +42,3 @@ models:
           - accepted_values:
               arguments:
                 values: ['resolved', 'unresolved']
-  - name: fact_workflow_status_hours
-    columns:
-      - name: canonical_session_key
-        tests:
-          - not_null

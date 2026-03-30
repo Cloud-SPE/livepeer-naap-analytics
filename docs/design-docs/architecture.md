@@ -66,6 +66,33 @@ Examples:
 Topic definitions: `infra/kafka/topics.yaml`
 Schema reference: `docs/generated/schema.md`
 
+## Analytics tier contract
+
+The analytics storage/runtime contract uses explicit semantic tiers:
+
+- `raw_*` — accepted raw envelopes
+- `normalized_*` — normalized event-family records
+- `canonical_*` — authoritative corrected derivation source
+- `operational_*` — low-latency live ops tables only
+- `api_*` — service-facing read models only
+
+Allowed data flow:
+
+```text
+raw_* -> normalized_* -> canonical_* -> api_*
+raw_* / normalized_* -> operational_*
+```
+
+Forbidden data flow:
+
+- `api_* -> canonical_*`
+- `operational_* -> canonical_*`
+- any downstream derivation sourcing truth from `api_*`
+
+Future consumer surfaces may add new namespaces such as `dashboard_*`,
+`export_*`, `partner_*`, or `feature_*`, but they must derive from
+`canonical_*`, never from `api_*` or `operational_*`.
+
 ## Dependency injection pattern
 
 ### Go

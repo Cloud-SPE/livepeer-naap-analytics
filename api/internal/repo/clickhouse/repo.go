@@ -1,4 +1,10 @@
 // Package clickhouse implements repo.AnalyticsRepo backed by ClickHouse.
+//
+// Query routing rules:
+//   - API handlers read `naap.api_*` read models.
+//   - Canonical derivation and future downstream logic must not treat `api_*`
+//     as a source-of-truth layer; that role belongs to `canonical_*`.
+//
 // Uses the clickhouse-go/v2 native protocol (port 9000) for full type support,
 // including UInt64 columns used for WEI payment amounts.
 package clickhouse

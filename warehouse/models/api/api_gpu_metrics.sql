@@ -1,0 +1,56 @@
+with latest_slices as (
+    select
+        window_start,
+        argMax(refresh_run_id, refreshed_at) as refresh_run_id
+    from naap.api_gpu_metrics_by_org_store
+    group by window_start
+)
+select
+    s.window_start,
+    cast(null as Nullable(String)) as org,
+    s.orchestrator_address,
+    s.pipeline_id,
+    s.model_id,
+    s.gpu_id,
+    s.region,
+    avg(s.avg_output_fps) as avg_output_fps,
+    quantile(0.95)(s.avg_output_fps) as p95_output_fps,
+    cast(null as Nullable(Float64)) as fps_jitter_coefficient,
+    sum(s.status_samples) as status_samples,
+    sum(s.error_status_samples) as error_status_samples,
+    avg(s.health_signal_coverage_ratio) as health_signal_coverage_ratio,
+    any(s.gpu_model_name) as gpu_model_name,
+    any(s.gpu_memory_bytes_total) as gpu_memory_bytes_total,
+    any(s.runner_version) as runner_version,
+    any(s.cuda_version) as cuda_version,
+    cast(null as Nullable(Float64)) as avg_prompt_to_first_frame_ms,
+    cast(null as Nullable(Float64)) as avg_startup_latency_ms,
+    avgIf(s.avg_e2e_latency_ms, s.avg_e2e_latency_ms > 0) as avg_e2e_latency_ms,
+    cast(null as Nullable(Float64)) as p95_prompt_to_first_frame_latency_ms,
+    cast(null as Nullable(Float64)) as p95_startup_latency_ms,
+    quantileIf(0.95)(s.avg_e2e_latency_ms, s.avg_e2e_latency_ms > 0) as p95_e2e_latency_ms,
+    sum(s.prompt_to_first_frame_sample_count) as prompt_to_first_frame_sample_count,
+    sum(s.startup_latency_sample_count) as startup_latency_sample_count,
+    sum(s.e2e_latency_sample_count) as e2e_latency_sample_count,
+    sum(s.known_sessions_count) as known_sessions_count,
+    sum(s.startup_success_sessions) as startup_success_sessions,
+    sum(s.no_orch_sessions) as no_orch_sessions,
+    sum(s.startup_excused_sessions) as startup_excused_sessions,
+    sum(s.startup_failed_sessions) as startup_failed_sessions,
+    sum(s.confirmed_swapped_sessions) as confirmed_swapped_sessions,
+    sum(s.inferred_swap_sessions) as inferred_swap_sessions,
+    sum(s.total_swapped_sessions) as total_swapped_sessions,
+    sum(s.sessions_ending_in_error) as sessions_ending_in_error,
+    sum(s.startup_failed_sessions) / nullIf(toFloat64(sum(s.known_sessions_count)), 0.0) as startup_failed_rate,
+    sum(s.total_swapped_sessions) / nullIf(toFloat64(sum(s.known_sessions_count)), 0.0) as swap_rate
+from naap.api_gpu_metrics_by_org_store s
+inner join latest_slices l
+    on s.window_start = l.window_start
+   and s.refresh_run_id = l.refresh_run_id
+group by
+    s.window_start,
+    s.orchestrator_address,
+    s.pipeline_id,
+    s.model_id,
+    s.gpu_id,
+    s.region

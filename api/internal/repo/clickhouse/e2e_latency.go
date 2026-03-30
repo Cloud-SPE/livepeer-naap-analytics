@@ -30,7 +30,7 @@ func (r *Repo) GetE2ELatencySummary(ctx context.Context, p types.QueryParams) (*
 			quantile(0.95)(e2e_latency_ms)   AS p95_ms,
 			quantile(0.99)(e2e_latency_ms)   AS p99_ms,
 			count()                          AS n
-		FROM naap.serving_status_samples
+		FROM naap.api_status_samples
 		`+where, args...)
 
 	var overall types.E2ELatencyStats
@@ -49,7 +49,7 @@ func (r *Repo) GetE2ELatencySummary(ctx context.Context, p types.QueryParams) (*
 			quantile(0.95)(e2e_latency_ms),
 			quantile(0.99)(e2e_latency_ms),
 			count()
-		FROM naap.serving_status_samples
+		FROM naap.api_status_samples
 		`+where+`
 		GROUP BY pipeline
 		ORDER BY count() DESC
@@ -84,7 +84,7 @@ func (r *Repo) GetE2ELatencySummary(ctx context.Context, p types.QueryParams) (*
 			quantile(0.95)(e2e_latency_ms),
 			quantile(0.99)(e2e_latency_ms),
 			count()
-		FROM naap.serving_status_samples
+		FROM naap.api_status_samples
 		`+where+`
 		  AND orch_address != ''
 		GROUP BY orch_address, pipeline
@@ -150,7 +150,7 @@ func (r *Repo) ListE2ELatencyHistory(ctx context.Context, p types.QueryParams) (
 			quantile(0.5)(e2e_latency_ms)  AS p50_ms,
 			quantile(0.95)(e2e_latency_ms) AS p95_ms,
 			count()                        AS n
-		FROM naap.serving_status_samples
+		FROM naap.api_status_samples
 		`+where+`
 		GROUP BY hour
 		ORDER BY hour ASC

@@ -22,7 +22,7 @@ func (r *Repo) GetPaymentSummary(ctx context.Context, p types.QueryParams) (*typ
 		SELECT
 			sum(total_wei)                  AS total_wei,
 			sum(event_count)                AS event_count
-		FROM naap.serving_payment_hourly
+		FROM naap.api_payment_hourly
 		`+where, args...)
 
 	var totalWEI uint64
@@ -39,7 +39,7 @@ func (r *Repo) GetPaymentSummary(ctx context.Context, p types.QueryParams) (*typ
 	}
 	uniqueRow := r.conn.QueryRow(ctx, `
 		SELECT uniqExact(recipient_address)
-		FROM naap.serving_payment_links
+		FROM naap.api_payment_links
 		`+linksWhere, linkArgs...)
 	var uniqueOrchs uint64
 	if err := uniqueRow.Scan(&uniqueOrchs); err != nil {
@@ -49,7 +49,7 @@ func (r *Repo) GetPaymentSummary(ctx context.Context, p types.QueryParams) (*typ
 	// Breakdown by org.
 	orgRows, err := r.conn.Query(ctx, `
 		SELECT org, sum(total_wei), sum(event_count)
-		FROM naap.serving_payment_hourly
+		FROM naap.api_payment_hourly
 		`+where+`
 		GROUP BY org
 	`, args...)
@@ -98,7 +98,7 @@ func (r *Repo) ListPaymentHistory(ctx context.Context, p types.QueryParams) ([]t
 			sum(total_wei)                  AS total_wei,
 			sum(event_count)                AS event_count,
 			count(DISTINCT orch_address)    AS unique_orchs
-		FROM naap.serving_payment_hourly
+		FROM naap.api_payment_hourly
 		`+where+`
 		GROUP BY ts
 		ORDER BY ts ASC
@@ -138,7 +138,7 @@ func (r *Repo) ListPaymentsByPipeline(ctx context.Context, p types.QueryParams) 
 			pipeline,
 			sum(total_wei)      AS total_wei,
 			sum(event_count)    AS event_count
-		FROM naap.serving_payment_hourly
+		FROM naap.api_payment_hourly
 		`+where+`
 		GROUP BY pipeline
 		ORDER BY total_wei DESC
@@ -180,7 +180,7 @@ func (r *Repo) ListPaymentsByOrch(ctx context.Context, p types.QueryParams) ([]t
 			orch_address,
 			sum(total_wei)   AS total_wei,
 			sum(event_count) AS payment_count
-		FROM naap.serving_payment_hourly
+		FROM naap.api_payment_hourly
 		`+where+`
 		GROUP BY orch_address
 		ORDER BY total_wei DESC

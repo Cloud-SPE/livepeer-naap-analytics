@@ -36,7 +36,7 @@ func TestRuleLineage001_DuplicateEventIdCollapsesUnderFinal(t *testing.T) {
 		},
 	})
 
-	if h.queryInt(t, `SELECT count() FROM naap.events FINAL WHERE org = ? AND event_id = ?`, h.org, eventID) != 1 {
+	if h.queryInt(t, `SELECT count() FROM naap.accepted_raw_events FINAL WHERE org = ? AND event_id = ?`, h.org, eventID) != 1 {
 		t.Errorf("RULE-LINEAGE-001: duplicate raw event_id did not collapse under FINAL")
 	}
 }
@@ -62,10 +62,10 @@ func TestRuleLineage001_ReplayDoesNotInflateCanonicalFacts(t *testing.T) {
 		},
 	})
 
-	if h.queryInt(t, `SELECT count() FROM naap.fact_workflow_sessions WHERE canonical_session_key = ?`, key) != 1 {
+	if h.queryInt(t, `SELECT count() FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, key) != 1 {
 		t.Errorf("RULE-LINEAGE-001: replay produced duplicate canonical session rows for %s", key)
 	}
-	if h.queryInt(t, `SELECT toUInt64(started) FROM naap.fact_workflow_sessions WHERE canonical_session_key = ?`, key) != 1 {
+	if h.queryInt(t, `SELECT toUInt64(started) FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, key) != 1 {
 		t.Errorf("RULE-LINEAGE-001: replay inflated started semantics for %s", key)
 	}
 }
@@ -80,7 +80,7 @@ func TestRuleLineage001_AllAcceptedEventsHaveNonBlankId(t *testing.T) {
 		{EventID: uid("e"), EventType: "create_new_payment", EventTs: ts, Org: h.org, Data: `{"sessionID":"s","manifestID":"m","faceValue":"100 WEI","sender":"0xa","recipient":"0xb","orchestrator":"https://o","numTickets":"1","price":"1 wei","winProb":"0.001"}`, IngestedAt: ts},
 	})
 
-	if h.queryInt(t, `SELECT countIf(event_id = '') FROM naap.events WHERE org = ?`, h.org) != 0 {
+	if h.queryInt(t, `SELECT countIf(event_id = '') FROM naap.accepted_raw_events WHERE org = ?`, h.org) != 0 {
 		t.Errorf("RULE-LINEAGE-001: blank event_id leaked into accepted events")
 	}
 }
@@ -114,13 +114,13 @@ func TestRuleLineage002_StatusWithoutTraceStartRemainsDetectable(t *testing.T) {
 		},
 	})
 
-	if h.queryInt(t, `SELECT toUInt64(started) FROM naap.fact_workflow_sessions WHERE canonical_session_key = ?`, knownKey) != 1 {
+	if h.queryInt(t, `SELECT toUInt64(started) FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, knownKey) != 1 {
 		t.Errorf("RULE-LINEAGE-002: known session did not retain started=1")
 	}
-	if h.queryInt(t, `SELECT toUInt64(started) FROM naap.fact_workflow_sessions WHERE canonical_session_key = ?`, orphanKey) != 0 {
+	if h.queryInt(t, `SELECT toUInt64(started) FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, orphanKey) != 0 {
 		t.Errorf("RULE-LINEAGE-002: orphan status session was incorrectly coerced into started=1")
 	}
-	if h.queryInt(t, `SELECT status_sample_count FROM naap.fact_workflow_sessions WHERE canonical_session_key = ?`, orphanKey) != 1 {
+	if h.queryInt(t, `SELECT status_sample_count FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, orphanKey) != 1 {
 		t.Errorf("RULE-LINEAGE-002: orphan status session lost its status sample lineage")
 	}
 }
@@ -145,10 +145,10 @@ func TestRuleLineage002_ClosedStreamHasTraceableLineage(t *testing.T) {
 		},
 	})
 
-	if h.queryInt(t, `SELECT toUInt64(started) FROM naap.fact_workflow_sessions WHERE canonical_session_key = ?`, key) != 1 {
+	if h.queryInt(t, `SELECT toUInt64(started) FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, key) != 1 {
 		t.Errorf("RULE-LINEAGE-002: closed session lost start lineage")
 	}
-	if h.queryInt(t, `SELECT toUInt64(completed) FROM naap.fact_workflow_sessions WHERE canonical_session_key = ?`, key) != 1 {
+	if h.queryInt(t, `SELECT toUInt64(completed) FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, key) != 1 {
 		t.Errorf("RULE-LINEAGE-002: closed session lost close lineage")
 	}
 }

@@ -56,13 +56,13 @@ func TestRuleAggregate004_DegradedModesRemainSplitInReliabilityFacts(t *testing.
 	})
 
 	hour := ts.Truncate(time.Hour)
-	if h.queryInt(t, `SELECT degraded_input_count FROM naap.serving_orch_reliability_hourly WHERE org = ? AND hour = ? AND orch_address = ?`, h.org, hour, orchAddr) != 1 {
+	if h.queryInt(t, `SELECT uniqExactIf(canonical_session_key, degraded_input_samples > 0) FROM naap.canonical_status_hours WHERE org = ? AND hour = ? AND orch_address = ? AND is_terminal_tail_artifact = 0`, h.org, hour, orchAddr) != 1 {
 		t.Errorf("RULE-AGGREGATE-004: degraded_input_count did not stay split at 1")
 	}
-	if h.queryInt(t, `SELECT degraded_inference_count FROM naap.serving_orch_reliability_hourly WHERE org = ? AND hour = ? AND orch_address = ?`, h.org, hour, orchAddr) != 1 {
+	if h.queryInt(t, `SELECT uniqExactIf(canonical_session_key, degraded_inference_samples > 0) FROM naap.canonical_status_hours WHERE org = ? AND hour = ? AND orch_address = ? AND is_terminal_tail_artifact = 0`, h.org, hour, orchAddr) != 1 {
 		t.Errorf("RULE-AGGREGATE-004: degraded_inference_count did not stay split at 1")
 	}
-	if h.queryInt(t, `SELECT degraded_count FROM naap.serving_orch_reliability_hourly WHERE org = ? AND hour = ? AND orch_address = ?`, h.org, hour, orchAddr) != 2 {
+	if h.queryInt(t, `SELECT uniqExactIf(canonical_session_key, degraded_input_samples > 0 or degraded_inference_samples > 0) FROM naap.canonical_status_hours WHERE org = ? AND hour = ? AND orch_address = ? AND is_terminal_tail_artifact = 0`, h.org, hour, orchAddr) != 2 {
 		t.Errorf("RULE-AGGREGATE-004: degraded_count did not total 2")
 	}
 }
@@ -87,10 +87,10 @@ func TestRuleAggregate004_SameHourFailedNoOutputSessionIsRetained(t *testing.T) 
 		},
 	})
 
-	if h.queryInt(t, `SELECT error_samples FROM naap.fact_workflow_status_hours WHERE canonical_session_key = ?`, key) != 1 {
+	if h.queryInt(t, `SELECT error_samples FROM naap.canonical_status_hours WHERE canonical_session_key = ?`, key) != 1 {
 		t.Errorf("RULE-AGGREGATE-004: same-hour failed no-output session lost error_samples")
 	}
-	if h.queryInt(t, `SELECT toUInt64(is_terminal_tail_artifact) FROM naap.fact_workflow_status_hours WHERE canonical_session_key = ?`, key) != 0 {
+	if h.queryInt(t, `SELECT toUInt64(is_terminal_tail_artifact) FROM naap.canonical_status_hours WHERE canonical_session_key = ?`, key) != 0 {
 		t.Errorf("RULE-AGGREGATE-004: same-hour failed no-output session was incorrectly tail-filtered")
 	}
 }
@@ -120,14 +120,64 @@ func TestRuleLifecycle009_TailFilteringIsNarrowAndDeterministic(t *testing.T) {
 		},
 	})
 
-	if h.queryInt(t, `SELECT toUInt64(is_terminal_tail_artifact) FROM naap.fact_workflow_status_hours WHERE canonical_session_key = ? AND hour = ?`, key, baseHour) != 0 {
+	if h.queryInt(t, `SELECT toUInt64(is_terminal_tail_artifact) FROM naap.canonical_status_hours WHERE canonical_session_key = ? AND hour = ?`, key, baseHour) != 0 {
 		t.Errorf("RULE-LIFECYCLE-009: previous active hour was incorrectly tail-filtered")
 	}
-	if h.queryInt(t, `SELECT toUInt64(is_terminal_tail_artifact) FROM naap.fact_workflow_status_hours WHERE canonical_session_key = ? AND hour = ?`, key, baseHour.Add(time.Hour)) != 1 {
+	if h.queryInt(t, `SELECT toUInt64(is_terminal_tail_artifact) FROM naap.canonical_status_hours WHERE canonical_session_key = ? AND hour = ?`, key, baseHour.Add(time.Hour)) != 1 {
 		t.Errorf("RULE-LIFECYCLE-009: terminal rollover hour was not tail-filtered")
 	}
-	if h.queryInt(t, `SELECT count() FROM naap.serving_orch_reliability_hourly WHERE org = ?`, h.org) != 1 {
+	if h.queryInt(t, `SELECT count() FROM naap.canonical_status_hours WHERE org = ? AND is_terminal_tail_artifact = 0`, h.org) != 1 {
 		t.Errorf("RULE-LIFECYCLE-009: serving reliability kept tail noise instead of filtering it")
+	}
+}
+
+func TestRuleLifecycle008And009_DemandUsesStartHourWhileReliabilityUsesStatusHour(t *testing.T) {
+	h := newHarness(t)
+	startTS := anchor().Add(-30 * time.Minute)
+	statusTS := startTS.Add(70 * time.Minute)
+	streamID := uid("cross-hour")
+	requestID := uid("req")
+	key := canonicalSessionKey(h.org, streamID, requestID)
+	orchAddr := strings.ToLower(fmt.Sprintf("0x%s", uid("orch")))
+	orchURI := fmt.Sprintf("https://orch-%s.example.com", uid("uri"))
+	startHour := startTS.Truncate(time.Hour)
+	statusHour := statusTS.Truncate(time.Hour)
+
+	h.insert(t, []rawEvent{
+		{
+			EventID: uid("e"), EventType: "network_capabilities", EventTs: startTS, Org: h.org,
+			Data:       fmt.Sprintf(`[{"address":%q,"local_address":"orch","uri":%q,"version":"0.9.0","hardware":[{"pipeline":"text-to-image","model_id":"model-a","gpu_info":[{"id":"gpu-a","name":"L4","memory_total":24576}]}]}]`, orchAddr, orchURI),
+			IngestedAt: startTS,
+		},
+		{
+			EventID: uid("e"), EventType: "stream_trace", EventTs: startTS, Org: h.org, Gateway: "gw-cross-hour",
+			Data:       fmt.Sprintf(`{"stream_id":%q,"request_id":%q,"type":"gateway_receive_stream_request","pipeline":"text-to-image","orchestrator_info":{"address":%q,"url":%q}}`, streamID, requestID, orchAddr, orchURI),
+			IngestedAt: startTS,
+		},
+		{
+			EventID: uid("e"), EventType: "ai_stream_status", EventTs: statusTS, Org: h.org, Gateway: "gw-cross-hour",
+			Data:       fmt.Sprintf(`{"stream_id":%q,"request_id":%q,"pipeline":"text-to-image","state":"ONLINE","orchestrator_info":{"address":%q,"url":%q},"inference_status":{"fps":11.0,"restart_count":0,"last_error":""}}`, streamID, requestID, orchAddr, orchURI),
+			IngestedAt: statusTS,
+		},
+	})
+
+	if got := h.queryInt(t, `SELECT count() FROM naap.canonical_session_demand_input_current WHERE canonical_session_key = ? AND window_start = ?`, key, startHour); got != 1 {
+		t.Fatalf("RULE-LIFECYCLE-008: demand row count at session start hour = %d, want 1", got)
+	}
+	if got := h.queryInt(t, `SELECT count() FROM naap.canonical_session_demand_input_current WHERE canonical_session_key = ? AND window_start = ?`, key, statusHour); got != 0 {
+		t.Fatalf("RULE-LIFECYCLE-008: demand row leaked into status hour, got %d", got)
+	}
+	if got := h.queryInt(t, `SELECT count() FROM naap.canonical_status_hours WHERE canonical_session_key = ? AND hour = ? AND is_terminal_tail_artifact = 0 AND status_samples = 1`, key, statusHour); got != 1 {
+		t.Fatalf("RULE-LIFECYCLE-009: status-hour row count at active hour = %d, want 1", got)
+	}
+	if got := h.queryInt(t, `SELECT count() FROM naap.api_network_demand_by_org WHERE org = ? AND window_start = ? AND gateway = 'gw-cross-hour' AND pipeline_id = 'text-to-image'`, h.org, startHour); got != 1 {
+		t.Fatalf("RULE-LIFECYCLE-008: demand serving row at start hour = %d, want 1", got)
+	}
+	if got := h.queryInt(t, `SELECT count() FROM naap.api_network_demand_by_org WHERE org = ? AND window_start = ? AND gateway = 'gw-cross-hour'`, h.org, statusHour); got != 0 {
+		t.Fatalf("RULE-LIFECYCLE-008: demand serving row leaked into status hour, got %d", got)
+	}
+	if got := h.queryInt(t, `SELECT count() FROM naap.api_sla_compliance_by_org WHERE org = ? AND window_start = ? AND orchestrator_address = ? AND known_sessions_count = 1 AND startup_failed_sessions = 1`, h.org, statusHour, orchAddr); got != 1 {
+		t.Fatalf("RULE-LIFECYCLE-009: SLA serving row at status hour = %d, want 1", got)
 	}
 }
 
@@ -147,10 +197,10 @@ func TestRuleTypedRaw002_CapabilityArrayFansOutWithoutBlankAddresses(t *testing.
 		IngestedAt: ts,
 	}})
 
-	if h.queryInt(t, `SELECT count() FROM naap.capability_snapshots WHERE org = ?`, h.org) != 2 {
+	if h.queryInt(t, `SELECT count() FROM naap.canonical_capability_snapshots WHERE org = ?`, h.org) != 2 {
 		t.Errorf("RULE-TYPED_RAW-002: capability fanout did not produce exactly 2 canonical snapshots")
 	}
-	if h.queryInt(t, `SELECT count() FROM naap.capability_snapshots WHERE org = ? AND orch_address = ''`, h.org) != 0 {
+	if h.queryInt(t, `SELECT count() FROM naap.canonical_capability_snapshots WHERE org = ? AND orch_address = ''`, h.org) != 0 {
 		t.Errorf("RULE-TYPED_RAW-002: blank orchestrator address leaked into capability snapshots")
 	}
 }
@@ -170,10 +220,10 @@ func TestRuleTypedRaw002_LatestCapabilityStateKeepsNameFallback(t *testing.T) {
 		IngestedAt: ts,
 	}})
 
-	if got := h.queryString(t, `SELECT name FROM naap.serving_latest_orchestrator_state WHERE orch_address = ?`, orchWithName); got != "friendly-name" {
+	if got := h.queryString(t, `SELECT name FROM naap.canonical_latest_orchestrator_state WHERE orch_address = ?`, orchWithName); got != "friendly-name" {
 		t.Errorf("RULE-TYPED_RAW-002: latest capability name = %q, want friendly-name", got)
 	}
-	if got := h.queryString(t, `SELECT name FROM naap.serving_latest_orchestrator_state WHERE orch_address = ?`, orchNoName); got != orchNoName {
+	if got := h.queryString(t, `SELECT name FROM naap.canonical_latest_orchestrator_state WHERE orch_address = ?`, orchNoName); got != orchNoName {
 		t.Errorf("RULE-TYPED_RAW-002: latest capability fallback name = %q, want %q", got, orchNoName)
 	}
 }

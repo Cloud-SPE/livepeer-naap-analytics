@@ -23,7 +23,7 @@ func (r *Repo) GetCapacitySummary(ctx context.Context, p types.QueryParams) (*ty
 			model_id,
 			count(DISTINCT orch_address) AS warm_orchs,
 			sum(memory_bytes)            AS total_vram
-		FROM naap.serving_gpu_inventory
+		FROM naap.api_gpu_inventory
 		`+warmWhere+`
 		GROUP BY pipeline, model_id
 		ORDER BY warm_orchs DESC
@@ -64,7 +64,7 @@ func (r *Repo) GetCapacitySummary(ctx context.Context, p types.QueryParams) (*ty
 	}
 	activeRows, err := r.conn.Query(ctx, `
 		SELECT pipeline, count() AS active
-		FROM naap.serving_active_stream_state
+		FROM naap.api_active_stream_state
 		`+activeWhere+`
 		GROUP BY pipeline
 	`, activeArgs...)

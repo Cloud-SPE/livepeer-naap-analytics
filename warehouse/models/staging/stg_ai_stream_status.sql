@@ -5,7 +5,7 @@ select
     gateway,
     stream_id,
     request_id,
-    {{ canonical_session_key("org", "stream_id", "request_id") }} as canonical_session_key,
+    canonical_session_key,
     raw_pipeline_hint,
     state,
     orch_raw_address,
@@ -17,5 +17,5 @@ select
     last_error,
     last_error_ts,
     data
-from naap.typed_ai_stream_status final
+from naap.normalized_ai_stream_status final
 where event_id != ''

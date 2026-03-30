@@ -23,7 +23,7 @@ func (r *Repo) ListGateways(ctx context.Context, p types.QueryParams) ([]types.G
 			gm.updated_at,
 			uniqExactIf(ss.stream_id, ss.sample_ts > now() - INTERVAL %d SECOND) AS active_streams
 		FROM naap.gateway_metadata AS gm FINAL
-		LEFT JOIN naap.serving_status_samples AS ss
+		LEFT JOIN naap.api_status_samples AS ss
 			ON lower(ss.gateway) = lower(gm.eth_address)
 			AND ss.sample_ts > now() - INTERVAL %d SECOND
 		GROUP BY gm.eth_address, gm.name, gm.avatar, gm.deposit, gm.reserve, gm.updated_at
@@ -76,7 +76,7 @@ func (r *Repo) GetGatewayProfile(ctx context.Context, address string) (*types.Ga
 		SELECT
 			count(DISTINCT stream_id)                                              AS streams_routed,
 			uniqExactIf(stream_id, sample_ts > now() - INTERVAL %d SECOND AND state = 'ONLINE') AS active_streams
-		FROM naap.serving_status_samples
+		FROM naap.api_status_samples
 		WHERE lower(gateway) = lower(?)
 	`, activeStreamSecs), address)
 
@@ -90,7 +90,7 @@ func (r *Repo) GetGatewayProfile(ctx context.Context, address string) (*types.Ga
 	// Total payments (raw events — gateway is top-level column)
 	payRow := r.conn.QueryRow(ctx, `
 		SELECT sum(face_value_wei)
-		FROM naap.serving_payment_links
+		FROM naap.api_payment_links
 		WHERE lower(gateway) = lower(?)
 	`, address)
 	var totalWEI uint64
@@ -103,7 +103,7 @@ func (r *Repo) GetGatewayProfile(ctx context.Context, address string) (*types.Ga
 	// Orchs used
 	orchRows, err := r.conn.Query(ctx, `
 		SELECT DISTINCT orch_address
-		FROM naap.serving_status_samples
+		FROM naap.api_status_samples
 		WHERE lower(gateway) = lower(?) AND orch_address != ''
 		LIMIT 100
 	`, address)
@@ -139,8 +139,8 @@ func (r *Repo) ListGatewayOrchestrators(ctx context.Context, address string, p t
 			any(os.name)                   AS name,
 			count(DISTINCT ss.stream_id)   AS stream_count,
 			max(ss.sample_ts)              AS last_seen
-		FROM naap.serving_status_samples AS ss
-		LEFT JOIN naap.serving_latest_orchestrator_state AS os
+		FROM naap.api_status_samples AS ss
+		LEFT JOIN naap.api_latest_orchestrator_state AS os
 			ON ss.orch_address = os.orch_address
 		WHERE lower(ss.gateway) = lower(?)
 		  AND ss.orch_address != ''
