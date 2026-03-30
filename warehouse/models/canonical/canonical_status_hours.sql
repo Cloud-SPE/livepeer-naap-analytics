@@ -11,6 +11,7 @@ select
     attribution_reason,
     started_at,
     session_last_seen,
+    startup_latency_ms,
     status_samples,
     fps_positive_samples,
     running_state_samples,
@@ -20,6 +21,7 @@ select
     avg_output_fps,
     avg_input_fps,
     avg_e2e_latency_ms,
+    prompt_to_playable_latency_ms,
     is_terminal_tail_artifact
 from (
     select
@@ -35,6 +37,7 @@ from (
         attribution_reason,
         started_at,
         session_last_seen,
+        startup_latency_ms,
         status_samples,
         fps_positive_samples,
         running_state_samples,
@@ -44,6 +47,7 @@ from (
         avg_output_fps,
         avg_input_fps,
         avg_e2e_latency_ms,
+        prompt_to_playable_latency_ms,
         is_terminal_tail_artifact
     from naap.canonical_status_hours_store
     order by canonical_session_key, hour, refreshed_at desc

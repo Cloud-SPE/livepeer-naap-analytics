@@ -167,6 +167,11 @@ type SessionEvidence struct {
 	RequestID                  string
 	Gateway                    string
 	StartedAt                  *time.Time
+	FirstProcessedAt           *time.Time
+	FewProcessedAt             *time.Time
+	FirstIngestAt              *time.Time
+	RunnerFirstProcessedAt     *time.Time
+	StatusStartTime            *time.Time
 	StartedCount               uint64
 	PlayableSeenCount          uint64
 	NoOrchCount                uint64
@@ -204,6 +209,9 @@ type SessionCurrentRow struct {
 	GPUID                     string
 	StartedAt                 *time.Time
 	LastSeen                  time.Time
+	StartupLatencyMS          *float64
+	E2ELatencyMS              *float64
+	PromptToPlayableLatencyMS *float64
 	RequestedSeen             uint8
 	PlayableSeen              uint8
 	SelectionOutcome          string
@@ -236,28 +244,30 @@ type SessionCurrentRow struct {
 }
 
 type StatusHourRow struct {
-	SessionKey               string
-	Org                      string
-	Hour                     time.Time
-	StreamID                 string
-	RequestID                string
-	CanonicalPipeline        string
-	CanonicalModel           string
-	OrchAddress              string
-	AttributionStatus        string
-	AttributionReason        string
-	StartedAt                *time.Time
-	SessionLastSeen          time.Time
-	StatusSamples            uint64
-	FPSPositiveSamples       uint64
-	RunningStateSamples      uint64
-	DegradedInputSamples     uint64
-	DegradedInferenceSamples uint64
-	ErrorSamples             uint64
-	AvgOutputFPS             float64
-	AvgInputFPS              float64
-	AvgE2ELatencyMS          *float64
-	IsTerminalTailArtifact   uint8
+	SessionKey                string
+	Org                       string
+	Hour                      time.Time
+	StreamID                  string
+	RequestID                 string
+	CanonicalPipeline         string
+	CanonicalModel            string
+	OrchAddress               string
+	AttributionStatus         string
+	AttributionReason         string
+	StartedAt                 *time.Time
+	SessionLastSeen           time.Time
+	StartupLatencyMS          *float64
+	E2ELatencyMS              *float64
+	PromptToPlayableLatencyMS *float64
+	StatusSamples             uint64
+	FPSPositiveSamples        uint64
+	RunningStateSamples       uint64
+	DegradedInputSamples      uint64
+	DegradedInferenceSamples  uint64
+	ErrorSamples              uint64
+	AvgOutputFPS              float64
+	AvgInputFPS               float64
+	IsTerminalTailArtifact    uint8
 }
 
 type statusHourEvidence struct {
@@ -274,8 +284,6 @@ type statusHourEvidence struct {
 	ErrorSamples             uint64
 	OutputFPSSum             float64
 	InputFPSSum              float64
-	E2ELatencySum            float64
-	E2ELatencyCount          uint64
 }
 
 type windowClaim struct {

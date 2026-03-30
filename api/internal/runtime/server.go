@@ -171,6 +171,7 @@ func (s *Server) buildRouter() chi.Router {
 		// SLA / GPU / Network Demand (ported from leaderboard-serverless)
 		r.Get("/sla/compliance", s.handleListSLACompliance)
 		r.Get("/network/demand", s.handleListNetworkDemand)
+		r.Get("/gpu/network-demand", s.handleListGPUNetworkDemand)
 		r.Get("/gpu/metrics", s.handleListGPUMetrics)
 	})
 

@@ -154,6 +154,42 @@ func parseNetworkDemandParams(r *http.Request) types.NetworkDemandParams {
 }
 
 // ---------------------------------------------------------------------------
+// GET /v1/gpu/network-demand
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleListGPUNetworkDemand(w http.ResponseWriter, r *http.Request) {
+	p := parseGPUNetworkDemandParams(r)
+	rows, total, err := s.svc.ListGPUNetworkDemand(r.Context(), p)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Internal Server Error", err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{
+		"demand":     rows,
+		"pagination": buildPagination(p.Page, p.PageSize, total),
+	})
+}
+
+func parseGPUNetworkDemandParams(r *http.Request) types.GPUNetworkDemandParams {
+	start, end, _ := parseWindowParam(r, 3*time.Hour, time.Minute, 30*24*time.Hour)
+	page, pageSize := parsePageParams(r, 50)
+	q := r.URL.Query()
+	return types.GPUNetworkDemandParams{
+		Gateway:             trimStr(q.Get("gateway"), 256),
+		OrchestratorAddress: strings.ToLower(trimStr(q.Get("orchestrator_address"), 256)),
+		Region:              trimStr(q.Get("region"), 64),
+		PipelineID:          trimStr(q.Get("pipeline_id"), 256),
+		ModelID:             trimStr(q.Get("model_id"), 256),
+		GPUID:               trimStr(q.Get("gpu_id"), 256),
+		Org:                 trimStr(q.Get("org"), 256),
+		Start:               start,
+		End:                 end,
+		Page:                page,
+		PageSize:            pageSize,
+	}
+}
+
+// ---------------------------------------------------------------------------
 // GET /v1/gpu/metrics
 // ---------------------------------------------------------------------------
 

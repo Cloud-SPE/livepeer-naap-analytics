@@ -1,4 +1,4 @@
-.PHONY: up down build test test-integration bench load-test lint dev-api setup fmt ch-smoke ch-query push push-api push-clickhouse push-dbt push-resolver warehouse-run warehouse-test warehouse-compile test-validation test-validation-host test-validation-docker test-validation-clean measure-baseline measure-refactor-replay migrate-status migrate-validate migrate-up resolver-logs resolver-auto resolver-bootstrap resolver-tail resolver-backfill resolver-repair-window parity-verify backfill-rollups
+.PHONY: up down build test test-integration bench load-test lint dev-api setup fmt ch-smoke ch-query push push-api push-clickhouse push-dbt push-resolver warehouse-run warehouse-test warehouse-compile test-validation test-validation-host test-validation-docker test-validation-clean measure-baseline measure-refactor-replay migrate-status migrate-validate migrate-up resolver-logs resolver-auto resolver-bootstrap resolver-tail resolver-backfill resolver-repair-window parity-verify backfill-rollups backfill-raw-mv-views
 
 REGISTRY  ?= tztcloud
 IMAGE_TAG ?= latest
@@ -173,6 +173,9 @@ parity-verify:
 
 backfill-rollups:
 	docker compose exec -T clickhouse clickhouse-client --user naap_admin --password changeme --multiquery < scripts/backfill_session_rollups.sql
+
+backfill-raw-mv-views:
+	docker compose exec -T clickhouse clickhouse-client --user naap_admin --password changeme --multiquery < scripts/backfill_repointed_raw_views.sql
 
 # ── Inspector ─────────────────────────────────────────────────────────────────
 

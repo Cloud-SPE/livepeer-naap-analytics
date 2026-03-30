@@ -15,12 +15,6 @@ import (
 // ListSLACompliance returns paginated SLA compliance rows from api_* read
 // models. These are service-facing relations only; downstream derivations must
 // use canonical_* instead.
-//
-// Field approximations vs leaderboard-serverless source:
-//   - region                   → always NULL (not captured in canonical sources)
-//   - confirmed_swapped_sessions → 0 (confirmation signal absent)
-//   - inferred_swap_sessions   → 0 (restart events not linked per-session here)
-//   - sla_score                → 0.6*startup_success_rate + 0.4*no_swap_rate
 func (r *Repo) ListSLACompliance(ctx context.Context, p types.SLAComplianceParams) ([]types.SLAComplianceRow, int, error) {
 	view := "naap.api_sla_compliance"
 	if p.Org != "" {
@@ -43,11 +37,12 @@ func (r *Repo) ListSLACompliance(ctx context.Context, p types.SLAComplianceParam
 		SELECT
 			window_start, org, orchestrator_address, pipeline_id,
 			model_id, gpu_id, region,
-			known_sessions_count, startup_success_sessions, no_orch_sessions, startup_excused_sessions,
-			startup_failed_sessions, confirmed_swapped_sessions, inferred_swap_sessions,
-			total_swapped_sessions, sessions_ending_in_error, error_status_samples,
+			known_sessions_count, requested_sessions, startup_success_sessions, no_orch_sessions, startup_excused_sessions,
+			startup_failed_sessions, loading_only_sessions, zero_output_fps_sessions, effective_failed_sessions,
+			confirmed_swapped_sessions, inferred_swap_sessions, total_swapped_sessions, sessions_ending_in_error, error_status_samples,
+			health_signal_count, health_expected_signal_count,
 			health_signal_coverage_ratio,
-			startup_success_rate, excused_failure_rate, no_swap_rate, sla_score
+			startup_success_rate, excused_failure_rate, effective_success_rate, no_swap_rate, output_viability_rate, sla_score
 		FROM `+view+` `+where+`
 		ORDER BY window_start DESC
 		LIMIT ? OFFSET ?
@@ -63,11 +58,12 @@ func (r *Repo) ListSLACompliance(ctx context.Context, p types.SLAComplianceParam
 		if err := rows.Scan(
 			&row.WindowStart, &row.Org, &row.OrchestratorAddress, &row.PipelineID,
 			&row.ModelID, &row.GPUID, &row.Region,
-			&row.KnownSessionsCount, &row.StartupSuccessSessions, &row.NoOrchSessions, &row.StartupExcusedSessions,
-			&row.StartupFailedSessions, &row.ConfirmedSwappedSessions, &row.InferredSwapSessions,
-			&row.TotalSwappedSessions, &row.SessionsEndingInError, &row.ErrorStatusSamples,
+			&row.KnownSessionsCount, &row.RequestedSessions, &row.StartupSuccessSessions, &row.NoOrchSessions, &row.StartupExcusedSessions,
+			&row.StartupFailedSessions, &row.LoadingOnlySessions, &row.ZeroOutputFPSSessions, &row.EffectiveFailedSessions,
+			&row.ConfirmedSwappedSessions, &row.InferredSwapSessions, &row.TotalSwappedSessions, &row.SessionsEndingInError, &row.ErrorStatusSamples,
+			&row.HealthSignalCount, &row.HealthExpectedSignalCount,
 			&row.HealthSignalCoverageRatio,
-			&row.StartupSuccessRate, &row.ExcusedFailureRate, &row.NoSwapRate, &row.SLAScore,
+			&row.StartupSuccessRate, &row.ExcusedFailureRate, &row.EffectiveSuccessRate, &row.NoSwapRate, &row.OutputViabilityRate, &row.SLAScore,
 		); err != nil {
 			return nil, 0, fmt.Errorf("clickhouse sla compliance scan: %w", err)
 		}
@@ -115,11 +111,6 @@ func buildSLAWhere(p types.SLAComplianceParams) (string, []any) {
 // ListNetworkDemand returns paginated network demand rows from api_* read
 // models. These are service-facing relations only; downstream derivations must
 // use canonical_* instead.
-//
-// Field approximations:
-//   - region                → always NULL
-//   - confirmed/inferred swapped → 0
-//   - ticket_face_value_eth → 0 (payment-to-gateway correlation not available)
 func (r *Repo) ListNetworkDemand(ctx context.Context, p types.NetworkDemandParams) ([]types.NetworkDemandRow, int, error) {
 	view := "naap.api_network_demand"
 	if p.Org != "" {
@@ -141,9 +132,10 @@ func (r *Repo) ListNetworkDemand(ctx context.Context, p types.NetworkDemandParam
 			window_start, org, gateway, region, pipeline_id, model_id,
 			sessions_count, avg_output_fps, total_minutes,
 			known_sessions_count, requested_sessions, startup_success_sessions, no_orch_sessions,
-			startup_excused_sessions, startup_failed_sessions, confirmed_swapped_sessions, inferred_swap_sessions,
-			total_swapped_sessions, sessions_ending_in_error, error_status_samples,
-			health_signal_coverage_ratio, startup_success_rate, excused_failure_rate,
+			startup_excused_sessions, startup_failed_sessions, loading_only_sessions, zero_output_fps_sessions,
+			effective_failed_sessions, confirmed_swapped_sessions, inferred_swap_sessions, total_swapped_sessions,
+			sessions_ending_in_error, error_status_samples, health_signal_count, health_expected_signal_count,
+			health_signal_coverage_ratio, startup_success_rate, excused_failure_rate, effective_success_rate,
 			ticket_face_value_eth
 		FROM `+view+` `+where+`
 		ORDER BY window_start DESC
@@ -161,9 +153,10 @@ func (r *Repo) ListNetworkDemand(ctx context.Context, p types.NetworkDemandParam
 			&row.WindowStart, &row.Org, &row.Gateway, &row.Region, &row.PipelineID, &row.ModelID,
 			&row.SessionsCount, &row.AvgOutputFPS, &row.TotalMinutes,
 			&row.KnownSessionsCount, &row.RequestedSessions, &row.StartupSuccessSessions, &row.NoOrchSessions,
-			&row.StartupExcusedSessions, &row.StartupFailedSessions, &row.ConfirmedSwappedSessions, &row.InferredSwapSessions,
-			&row.TotalSwappedSessions, &row.SessionsEndingInError, &row.ErrorStatusSamples,
-			&row.HealthSignalCoverageRatio, &row.StartupSuccessRate, &row.ExcusedFailureRate,
+			&row.StartupExcusedSessions, &row.StartupFailedSessions, &row.LoadingOnlySessions, &row.ZeroOutputFPSSessions,
+			&row.EffectiveFailedSessions, &row.ConfirmedSwappedSessions, &row.InferredSwapSessions, &row.TotalSwappedSessions,
+			&row.SessionsEndingInError, &row.ErrorStatusSamples, &row.HealthSignalCount, &row.HealthExpectedSignalCount,
+			&row.HealthSignalCoverageRatio, &row.StartupSuccessRate, &row.ExcusedFailureRate, &row.EffectiveSuccessRate,
 			&row.TicketFaceValueETH,
 		); err != nil {
 			return nil, 0, fmt.Errorf("clickhouse network demand scan: %w", err)
@@ -197,6 +190,97 @@ func buildDemandWhere(p types.NetworkDemandParams) (string, []any) {
 	if p.ModelID != "" {
 		conds = append(conds, "model_id = ?")
 		args = append(args, p.ModelID)
+	}
+	return "WHERE " + strings.Join(conds, " AND "), args
+}
+
+// ---------------------------------------------------------------------------
+// GPU-Sliced Network Demand  —  GET /v1/gpu/network-demand
+// ---------------------------------------------------------------------------
+
+func (r *Repo) ListGPUNetworkDemand(ctx context.Context, p types.GPUNetworkDemandParams) ([]types.GPUNetworkDemandRow, int, error) {
+	view := "naap.api_gpu_network_demand"
+	if p.Org != "" {
+		view = "naap.api_gpu_network_demand_by_org"
+	}
+
+	where, args := buildGPUDemandWhere(p)
+	offset := (p.Page - 1) * p.PageSize
+
+	var total uint64
+	countRow := r.conn.QueryRow(ctx, `SELECT count() FROM `+view+` `+where, args...)
+	if err := countRow.Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("clickhouse gpu network demand count: %w", err)
+	}
+
+	args = append(args, p.PageSize, offset)
+	rows, err := r.conn.Query(ctx, `
+		SELECT
+			window_start, org, gateway, orchestrator_address, region, pipeline_id, model_id, gpu_id, gpu_identity_status,
+			sessions_count, avg_output_fps, total_minutes, known_sessions_count, requested_sessions, startup_success_sessions,
+			no_orch_sessions, startup_excused_sessions, startup_failed_sessions, loading_only_sessions, zero_output_fps_sessions,
+			effective_failed_sessions, confirmed_swapped_sessions, inferred_swap_sessions, total_swapped_sessions,
+			sessions_ending_in_error, error_status_samples, health_signal_count, health_expected_signal_count,
+			health_signal_coverage_ratio, startup_success_rate, excused_failure_rate, effective_success_rate, ticket_face_value_eth
+		FROM `+view+` `+where+`
+		ORDER BY window_start DESC
+		LIMIT ? OFFSET ?
+	`, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("clickhouse gpu network demand query: %w", err)
+	}
+	defer rows.Close()
+
+	var result []types.GPUNetworkDemandRow
+	for rows.Next() {
+		var row types.GPUNetworkDemandRow
+		if err := rows.Scan(
+			&row.WindowStart, &row.Org, &row.Gateway, &row.OrchestratorAddress, &row.Region, &row.PipelineID, &row.ModelID, &row.GPUID, &row.GPUIdentityStatus,
+			&row.SessionsCount, &row.AvgOutputFPS, &row.TotalMinutes, &row.KnownSessionsCount, &row.RequestedSessions, &row.StartupSuccessSessions,
+			&row.NoOrchSessions, &row.StartupExcusedSessions, &row.StartupFailedSessions, &row.LoadingOnlySessions, &row.ZeroOutputFPSSessions,
+			&row.EffectiveFailedSessions, &row.ConfirmedSwappedSessions, &row.InferredSwapSessions, &row.TotalSwappedSessions,
+			&row.SessionsEndingInError, &row.ErrorStatusSamples, &row.HealthSignalCount, &row.HealthExpectedSignalCount,
+			&row.HealthSignalCoverageRatio, &row.StartupSuccessRate, &row.ExcusedFailureRate, &row.EffectiveSuccessRate, &row.TicketFaceValueETH,
+		); err != nil {
+			return nil, 0, fmt.Errorf("clickhouse gpu network demand scan: %w", err)
+		}
+		result = append(result, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("clickhouse gpu network demand rows: %w", err)
+	}
+	if result == nil {
+		result = []types.GPUNetworkDemandRow{}
+	}
+	return result, int(total), nil
+}
+
+func buildGPUDemandWhere(p types.GPUNetworkDemandParams) (string, []any) {
+	conds := []string{"window_start >= ? AND window_start < ?"}
+	args := []any{p.Start.UTC(), p.End.UTC()}
+	if p.Org != "" {
+		conds = append(conds, "org = ?")
+		args = append(args, p.Org)
+	}
+	if p.Gateway != "" {
+		conds = append(conds, "gateway = ?")
+		args = append(args, p.Gateway)
+	}
+	if p.OrchestratorAddress != "" {
+		conds = append(conds, "orchestrator_address = ?")
+		args = append(args, strings.ToLower(p.OrchestratorAddress))
+	}
+	if p.PipelineID != "" {
+		conds = append(conds, "pipeline_id = ?")
+		args = append(args, p.PipelineID)
+	}
+	if p.ModelID != "" {
+		conds = append(conds, "model_id = ?")
+		args = append(args, p.ModelID)
+	}
+	if p.GPUID != "" {
+		conds = append(conds, "gpu_id = ?")
+		args = append(args, p.GPUID)
 	}
 	return "WHERE " + strings.Join(conds, " AND "), args
 }

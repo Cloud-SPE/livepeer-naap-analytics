@@ -30,14 +30,23 @@ func TestRuleServing001_APIOutputsExposeStableRequiredFields(t *testing.T) {
 			table: "api_sla_compliance_by_org",
 			fields: []string{
 				"window_start", "org", "orchestrator_address", "pipeline_id", "model_id", "gpu_id",
-				"known_sessions_count", "startup_success_sessions", "startup_failed_sessions", "excused_failure_rate", "sla_score",
+				"requested_sessions", "effective_failed_sessions", "health_signal_count",
+				"startup_success_sessions", "startup_failed_sessions", "effective_success_rate", "output_viability_rate", "sla_score",
 			},
 		},
 		{
 			table: "api_network_demand_by_org",
 			fields: []string{
 				"window_start", "org", "gateway", "pipeline_id", "model_id", "sessions_count",
-				"requested_sessions", "startup_success_sessions", "startup_failed_sessions", "startup_success_rate", "ticket_face_value_eth",
+				"requested_sessions", "effective_failed_sessions", "health_signal_count",
+				"startup_success_sessions", "startup_failed_sessions", "startup_success_rate", "effective_success_rate", "ticket_face_value_eth",
+			},
+		},
+		{
+			table: "api_gpu_network_demand_by_org",
+			fields: []string{
+				"window_start", "org", "gateway", "orchestrator_address", "pipeline_id", "model_id", "gpu_id",
+				"gpu_identity_status", "requested_sessions", "effective_failed_sessions", "effective_success_rate",
 			},
 		},
 		{
@@ -62,7 +71,7 @@ func TestRuleServing001_APIOutputsExposeStableRequiredFields(t *testing.T) {
 		})
 	}
 
-	for _, publicTable := range []string{"api_sla_compliance", "api_network_demand", "api_gpu_metrics"} {
+	for _, publicTable := range []string{"api_sla_compliance", "api_network_demand", "api_gpu_network_demand", "api_gpu_metrics"} {
 		t.Run(publicTable, func(t *testing.T) {
 			if got := h.queryInt(t, fmt.Sprintf(
 				`SELECT count() FROM system.columns WHERE database = 'naap' AND table = '%s' AND name = 'org'`,
@@ -113,6 +122,9 @@ func TestRuleServing002_APIOutputsRemainDerivableFromCanonicalFacts(t *testing.T
 	if got := h.queryInt(t, `SELECT status_samples FROM naap.api_gpu_metrics_by_org WHERE org = ? AND window_start = ? AND orchestrator_address = ? AND pipeline_id = 'text-to-image'`, h.org, windowStart, orchAddr); got != 1 {
 		t.Fatalf("api_gpu_metrics_by_org status_samples = %d, want 1", got)
 	}
+	if got := h.queryInt(t, `SELECT count() FROM naap.api_gpu_network_demand_by_org WHERE org = ? AND window_start = ? AND orchestrator_address = ? AND pipeline_id = 'text-to-image' AND gpu_id = 'gpu-serve'`, h.org, windowStart, orchAddr); got != 1 {
+		t.Fatalf("api_gpu_network_demand_by_org row count = %d, want 1", got)
+	}
 	if got := h.queryInt(t, `SELECT known_sessions_count FROM naap.api_gpu_metrics_by_org WHERE org = ? AND window_start = ? AND orchestrator_address = ? AND pipeline_id = 'text-to-image'`, h.org, windowStart, orchAddr); got != 1 {
 		t.Fatalf("api_gpu_metrics_by_org known_sessions_count = %d, want 1", got)
 	}
@@ -124,5 +136,95 @@ func TestRuleServing002_APIOutputsRemainDerivableFromCanonicalFacts(t *testing.T
 	}
 	if got := h.queryString(t, `SELECT ifNull(canonical_pipeline, '') FROM naap.canonical_session_latest WHERE canonical_session_key = ?`, key); got != "text-to-image" {
 		t.Fatalf("canonical_session_latest canonical_pipeline = %q, want text-to-image", got)
+	}
+}
+
+func TestRuleServing002_SessionEdgeLatencyFlowsToServingOutputs(t *testing.T) {
+	h := newHarness(t)
+	ts := anchor().Add(15 * time.Minute)
+	streamID := uid("latency")
+	requestID := uid("latency_req")
+	key := canonicalSessionKey(h.org, streamID, requestID)
+	orchAddr := strings.ToLower(fmt.Sprintf("0x%s", uid("orch")))
+	orchURI := fmt.Sprintf("https://orch-%s.example.com", uid("uri"))
+	windowStart := ts.Truncate(time.Hour)
+	startTime := ts.Add(1 * time.Second)
+
+	h.insert(t, []rawEvent{
+		{
+			EventID: uid("e"), EventType: "network_capabilities", EventTs: ts.Add(-5 * time.Minute), Org: h.org,
+			Data:       fmt.Sprintf(`[{"address":%q,"local_address":"orch","uri":%q,"version":"0.9.0","hardware":[{"pipeline":"text-to-image","model_id":"model-latency","gpu_info":[{"id":"gpu-latency","name":"L4","memory_total":24576}]}]}]`, orchAddr, orchURI),
+			IngestedAt: ts.Add(-5 * time.Minute),
+		},
+		{
+			EventID: uid("e"), EventType: "stream_trace", EventTs: ts, Org: h.org, Gateway: "gw-us-east-1",
+			Data:       fmt.Sprintf(`{"stream_id":%q,"request_id":%q,"type":"gateway_receive_stream_request","pipeline":"text-to-image","orchestrator_info":{"address":%q,"url":%q}}`, streamID, requestID, orchAddr, orchURI),
+			IngestedAt: ts,
+		},
+		{
+			EventID: uid("e"), EventType: "stream_trace", EventTs: ts.Add(2 * time.Second), Org: h.org, Gateway: "gw-us-east-1",
+			Data:       fmt.Sprintf(`{"stream_id":%q,"request_id":%q,"type":"gateway_send_first_ingest_segment","pipeline":"text-to-image","orchestrator_info":{"address":%q,"url":%q}}`, streamID, requestID, orchAddr, orchURI),
+			IngestedAt: ts.Add(2 * time.Second),
+		},
+		{
+			EventID: uid("e"), EventType: "stream_trace", EventTs: ts.Add(4 * time.Second), Org: h.org, Gateway: "gw-us-east-1",
+			Data:       fmt.Sprintf(`{"stream_id":%q,"request_id":%q,"type":"gateway_receive_first_processed_segment","pipeline":"text-to-image","orchestrator_info":{"address":%q,"url":%q}}`, streamID, requestID, orchAddr, orchURI),
+			IngestedAt: ts.Add(4 * time.Second),
+		},
+		{
+			EventID: uid("e"), EventType: "stream_trace", EventTs: ts.Add(5 * time.Second), Org: h.org, Gateway: "gw-us-east-1",
+			Data:       fmt.Sprintf(`{"stream_id":%q,"request_id":%q,"type":"runner_send_first_processed_segment","pipeline":"text-to-image","orchestrator_info":{"address":%q,"url":%q}}`, streamID, requestID, orchAddr, orchURI),
+			IngestedAt: ts.Add(5 * time.Second),
+		},
+		{
+			EventID: uid("e"), EventType: "stream_trace", EventTs: ts.Add(7 * time.Second), Org: h.org, Gateway: "gw-us-east-1",
+			Data:       fmt.Sprintf(`{"stream_id":%q,"request_id":%q,"type":"gateway_receive_few_processed_segments","pipeline":"text-to-image","orchestrator_info":{"address":%q,"url":%q}}`, streamID, requestID, orchAddr, orchURI),
+			IngestedAt: ts.Add(7 * time.Second),
+		},
+		{
+			EventID: uid("e"), EventType: "ai_stream_status", EventTs: ts.Add(20 * time.Second), Org: h.org, Gateway: "gw-us-east-1",
+			Data:       fmt.Sprintf(`{"stream_id":%q,"request_id":%q,"pipeline":"text-to-image","start_time":%q,"state":"ONLINE","orchestrator_info":{"address":%q,"url":%q},"inference_status":{"fps":15.0,"restart_count":0,"last_error":""},"input_status":{"fps":15.0}}`, streamID, requestID, startTime.Format(time.RFC3339Nano), orchAddr, orchURI),
+			IngestedAt: ts.Add(20 * time.Second),
+		},
+	})
+
+	if got := h.queryFloat(t, `SELECT ifNull(startup_latency_ms, -1) FROM naap.canonical_session_current WHERE canonical_session_key = ?`, key); got != 4000 {
+		t.Fatalf("canonical_session_current startup_latency_ms = %v, want 4000", got)
+	}
+	if got := h.queryFloat(t, `SELECT ifNull(e2e_latency_ms, -1) FROM naap.canonical_session_current WHERE canonical_session_key = ?`, key); got != 3000 {
+		t.Fatalf("canonical_session_current e2e_latency_ms = %v, want 3000", got)
+	}
+	if got := h.queryFloat(t, `SELECT ifNull(prompt_to_playable_latency_ms, -1) FROM naap.canonical_session_current WHERE canonical_session_key = ?`, key); got != 6000 {
+		t.Fatalf("canonical_session_current prompt_to_playable_latency_ms = %v, want 6000", got)
+	}
+	if got := h.queryFloat(t, `SELECT ifNull(startup_latency_ms, -1) FROM naap.canonical_status_hours WHERE canonical_session_key = ? AND hour = ?`, key, windowStart); got != 4000 {
+		t.Fatalf("canonical_status_hours startup_latency_ms = %v, want 4000", got)
+	}
+	if got := h.queryFloat(t, `SELECT ifNull(avg_e2e_latency_ms, -1) FROM naap.canonical_status_hours WHERE canonical_session_key = ? AND hour = ?`, key, windowStart); got != 3000 {
+		t.Fatalf("canonical_status_hours avg_e2e_latency_ms = %v, want 3000", got)
+	}
+	if got := h.queryFloat(t, `SELECT ifNull(prompt_to_playable_latency_ms, -1) FROM naap.canonical_status_hours WHERE canonical_session_key = ? AND hour = ?`, key, windowStart); got != 6000 {
+		t.Fatalf("canonical_status_hours prompt_to_playable_latency_ms = %v, want 6000", got)
+	}
+	if got := h.queryFloat(t, `SELECT ifNull(e2e_latency_ms, -1) FROM naap.api_status_samples WHERE canonical_session_key = ? LIMIT 1`, key); got != 3000 {
+		t.Fatalf("api_status_samples e2e_latency_ms = %v, want 3000", got)
+	}
+	if got := h.queryFloat(t, `SELECT ifNull(avg_prompt_to_first_frame_ms, -1) FROM naap.api_gpu_metrics_by_org WHERE org = ? AND window_start = ? AND orchestrator_address = ? AND pipeline_id = 'text-to-image'`, h.org, windowStart, orchAddr); got != 6000 {
+		t.Fatalf("api_gpu_metrics_by_org avg_prompt_to_first_frame_ms = %v, want 6000", got)
+	}
+	if got := h.queryFloat(t, `SELECT ifNull(avg_startup_latency_ms, -1) FROM naap.api_gpu_metrics_by_org WHERE org = ? AND window_start = ? AND orchestrator_address = ? AND pipeline_id = 'text-to-image'`, h.org, windowStart, orchAddr); got != 4000 {
+		t.Fatalf("api_gpu_metrics_by_org avg_startup_latency_ms = %v, want 4000", got)
+	}
+	if got := h.queryFloat(t, `SELECT ifNull(avg_e2e_latency_ms, -1) FROM naap.api_gpu_metrics_by_org WHERE org = ? AND window_start = ? AND orchestrator_address = ? AND pipeline_id = 'text-to-image'`, h.org, windowStart, orchAddr); got != 3000 {
+		t.Fatalf("api_gpu_metrics_by_org avg_e2e_latency_ms = %v, want 3000", got)
+	}
+	if got := h.queryInt(t, `SELECT prompt_to_first_frame_sample_count FROM naap.api_gpu_metrics_by_org WHERE org = ? AND window_start = ? AND orchestrator_address = ? AND pipeline_id = 'text-to-image'`, h.org, windowStart, orchAddr); got != 1 {
+		t.Fatalf("api_gpu_metrics_by_org prompt_to_first_frame_sample_count = %d, want 1", got)
+	}
+	if got := h.queryInt(t, `SELECT startup_latency_sample_count FROM naap.api_gpu_metrics_by_org WHERE org = ? AND window_start = ? AND orchestrator_address = ? AND pipeline_id = 'text-to-image'`, h.org, windowStart, orchAddr); got != 1 {
+		t.Fatalf("api_gpu_metrics_by_org startup_latency_sample_count = %d, want 1", got)
+	}
+	if got := h.queryInt(t, `SELECT e2e_latency_sample_count FROM naap.api_gpu_metrics_by_org WHERE org = ? AND window_start = ? AND orchestrator_address = ? AND pipeline_id = 'text-to-image'`, h.org, windowStart, orchAddr); got != 1 {
+		t.Fatalf("api_gpu_metrics_by_org e2e_latency_sample_count = %d, want 1", got)
 	}
 }

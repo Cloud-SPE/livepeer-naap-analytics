@@ -2,16 +2,19 @@ with latest_slices as (
     select
         window_start,
         argMax(refresh_run_id, refreshed_at) as refresh_run_id
-    from naap.api_network_demand_by_org_store
+    from naap.api_gpu_network_demand_by_org_store
     group by window_start
 )
 select
     s.window_start,
     cast(null as Nullable(String)) as org,
     s.gateway,
+    s.orchestrator_address,
     s.region,
     s.pipeline_id,
     s.model_id,
+    s.gpu_id,
+    s.gpu_identity_status,
     sum(s.sessions_count) as sessions_count,
     avg(s.avg_output_fps) as avg_output_fps,
     sum(s.total_minutes) as total_minutes,
@@ -36,13 +39,16 @@ select
     sum(s.startup_excused_sessions) / nullIf(toFloat64(sum(s.requested_sessions)), 0.0) as excused_failure_rate,
     1.0 - (sum(s.effective_failed_sessions) / nullIf(toFloat64(sum(s.requested_sessions)), 0.0)) as effective_success_rate,
     sum(s.ticket_face_value_eth) as ticket_face_value_eth
-from naap.api_network_demand_by_org_store s
+from naap.api_gpu_network_demand_by_org_store s
 inner join latest_slices l
     on s.window_start = l.window_start
    and s.refresh_run_id = l.refresh_run_id
 group by
     s.window_start,
     s.gateway,
+    s.orchestrator_address,
     s.region,
     s.pipeline_id,
-    s.model_id
+    s.model_id,
+    s.gpu_id,
+    s.gpu_identity_status

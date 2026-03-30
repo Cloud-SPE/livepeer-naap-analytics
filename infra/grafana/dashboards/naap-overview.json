@@ -176,11 +176,11 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "sql",
-          "rawSql": "SELECT toFloat64(countDistinct(stream_id)) AS value\nFROM naap.api_status_samples\nWHERE sample_ts >= now() - INTERVAL 15 MINUTE\nAND is_attributed = 1 AND orch_address != ''\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nAND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address))",
+          "rawSql": "SELECT toFloat64(count()) AS value\nFROM naap.api_active_stream_state\nWHERE ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nAND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), ifNull(orch_address, '')))",
           "refId": "A"
         }
       ],
-      "title": "Active Streams (15m)",
+      "title": "Current Active Streams",
       "type": "stat"
     },
     {
@@ -421,11 +421,11 @@
               },
               {
                 "color": "yellow",
-                "value": 2
+                "value": 6
               },
               {
                 "color": "red",
-                "value": 5
+                "value": 12
               }
             ]
           },
@@ -532,7 +532,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "sql",
-          "rawSql": "SELECT toFloat64(sum(requested_sessions)) AS value\nFROM naap.api_stream_hourly\nWHERE hour >= now() - INTERVAL 1 HOUR\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))",
+          "rawSql": "SELECT toFloat64(sum(greatest(requested_sessions - no_orch_sessions, 0))) AS value\nFROM naap.api_network_demand_by_org\nWHERE window_start >= now() - INTERVAL 1 HOUR\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))",
           "refId": "A"
         }
       ],
@@ -553,6 +553,10 @@
       "type": "row"
     },
     {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -631,10 +635,14 @@
       },
       "targets": [
         {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT toStartOfInterval(hour, INTERVAL 1 HOUR) AS time,\n    sum(requested_sessions) AS requested_sessions,\n    sum(no_orch_sessions) AS no_orch_sessions\nFROM naap.api_stream_hourly\nWHERE $__timeFilter(hour)\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY time ORDER BY time",
+          "rawSql": "SELECT toStartOfInterval(window_start, INTERVAL 1 HOUR) AS time,\n    sum(greatest(requested_sessions - no_orch_sessions, 0)) AS served_sessions,\n    sum(no_orch_sessions) AS unserved_sessions\nFROM naap.api_network_demand_by_org\nWHERE $__timeFilter(window_start)\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY time ORDER BY time",
           "refId": "A"
         }
       ],
@@ -642,6 +650,10 @@
       "type": "timeseries"
     },
     {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -686,10 +698,14 @@
       },
       "targets": [
         {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT if(gateway = '', 'unknown_gateway', gateway) AS \"Gateway\",\n    sum(requested_sessions) AS \"Requested Sessions\",\n    sum(no_orch_sessions) AS \"No Orch Sessions\",\n    sum(orch_swap_sessions) AS \"Orch Swaps\",\n    if(sum(requested_sessions) > 0,\n        toFloat64(sum(no_orch_sessions)) / toFloat64(sum(requested_sessions)), 0.0) AS \"No Orch Rate\"\nFROM naap.api_stream_hourly\nWHERE $__timeFilter(hour)\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY \"Gateway\"\nORDER BY \"No Orch Sessions\" DESC",
+          "rawSql": "SELECT if(gateway = '', 'unattributed_gateway', gateway) AS \"Gateway\",\n    sum(requested_sessions) AS \"Requested Sessions\",\n    sum(no_orch_sessions) AS \"No Orch Sessions\",\n    sum(total_swapped_sessions) AS \"Swapped Sessions\",\n    sum(startup_failed_sessions) AS \"Startup Failed Sessions\",\n    if(sum(requested_sessions) > 0,\n        toFloat64(sum(no_orch_sessions)) / toFloat64(sum(requested_sessions)), 0.0) AS \"Unmet Demand Rate\"\nFROM naap.api_network_demand_by_org\nWHERE $__timeFilter(window_start)\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY if(gateway = '', 'unattributed_gateway', gateway)\nORDER BY sum(no_orch_sessions) DESC, sum(requested_sessions) DESC",
           "refId": "A"
         }
       ],
@@ -697,6 +713,10 @@
       "type": "table"
     },
     {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -741,10 +761,14 @@
       },
       "targets": [
         {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT ifNull(pipeline, '') AS \"Pipeline\",\n    ifNull(gateway, '') AS \"Gateway\",\n    sum(no_orch_sessions) AS \"No Orch Sessions\",\n    sum(requested_sessions) AS \"Requested Sessions\",\n    if(sum(requested_sessions) > 0,\n        toFloat64(sum(no_orch_sessions)) / toFloat64(sum(requested_sessions)), 0.0) AS \"No Orch Rate\"\nFROM naap.api_stream_hourly\nWHERE $__timeFilter(hour)\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY \"Pipeline\", \"Gateway\"\nHAVING \"No Orch Sessions\" > 0\nORDER BY \"No Orch Sessions\" DESC\nLIMIT 12",
+          "rawSql": "SELECT ifNull(nullIf(pipeline_id, ''), 'unknown_pipeline') AS \"Pipeline\",\n    ifNull(nullIf(gateway, ''), 'unattributed_gateway') AS \"Gateway\",\n    sum(no_orch_sessions) AS \"No Orch Sessions\",\n    sum(requested_sessions) AS \"Requested Sessions\",\n    if(sum(requested_sessions) > 0,\n        toFloat64(sum(no_orch_sessions)) / toFloat64(sum(requested_sessions)), 0.0) AS \"Unmet Demand Rate\"\nFROM naap.api_network_demand_by_org\nWHERE $__timeFilter(window_start)\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY ifNull(nullIf(pipeline_id, ''), 'unknown_pipeline'), ifNull(nullIf(gateway, ''), 'unattributed_gateway')\nHAVING sum(no_orch_sessions) > 0\nORDER BY sum(no_orch_sessions) DESC, sum(requested_sessions) DESC\nLIMIT 12",
           "refId": "A"
         }
       ],
@@ -1070,137 +1094,12 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "WITH ens AS (SELECT orch_address AS addr, name AS ens_name FROM naap.api_latest_orchestrator_state)\nSELECT s.stream_id AS \"Stream ID\",\n    if(ifNull(ens.ens_name, '') != '' AND NOT startsWith(lower(ens.ens_name), '0x'), ens.ens_name, s.orch_address) AS \"Orchestrator\",\n    ifNull(s.pipeline, 'unknown') AS \"Pipeline\",\n    round(ifNull(s.output_fps, 0), 2) AS \"FPS\",\n    s.state AS \"State\",\n    toUInt64(greatest(dateDiff('second', s.sample_ts, now()), 0)) AS \"Last Sample Age (s)\"\nFROM naap.api_active_stream_state s\nLEFT JOIN ens e ON e.addr = s.orch_address\nWHERE ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), s.org))\nAND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), s.orch_address))\nORDER BY \"Last Sample Age (s)\" ASC, \"FPS\" DESC\nLIMIT 20",
+          "rawSql": "WITH ens AS (SELECT orch_address AS addr, name AS ens_name FROM naap.api_latest_orchestrator_state)\nSELECT s.stream_id AS \"Stream ID\",\n    if(ifNull(e.ens_name, '') != '' AND NOT startsWith(lower(e.ens_name), '0x'), e.ens_name, ifNull(nullIf(s.orch_address, ''), 'unresolved')) AS \"Orchestrator\",\n    ifNull(s.pipeline, 'unknown') AS \"Pipeline\",\n    s.attribution_status AS \"Attribution Status\",\n    round(ifNull(s.output_fps, 0), 2) AS \"FPS\",\n    s.state AS \"State\",\n    toUInt64(greatest(dateDiff('second', s.sample_ts, now()), 0)) AS \"Last Sample Age (s)\"\nFROM naap.api_active_stream_state s\nLEFT JOIN ens e ON e.addr = s.orch_address\nWHERE ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), s.org))\nAND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), s.orch_address))\nORDER BY \"Last Sample Age (s)\" ASC, \"FPS\" DESC\nLIMIT 20",
           "refId": "A"
         }
       ],
       "title": "Current Active Streams",
       "type": "table"
-    },
-    {
-      "id": 104,
-      "title": "Resolver Repair Debug",
-      "type": "row",
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 44
-      }
-    },
-    {
-      "id": 14,
-      "title": "Pending Historical Repairs By Day",
-      "type": "table",
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 45
-      },
-      "datasource": {
-        "type": "grafana-clickhouse-datasource",
-        "uid": "${clickhouse_ds}"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "grafana-clickhouse-datasource",
-            "uid": "${clickhouse_ds}"
-          },
-          "editorType": "sql",
-          "format": 1,
-          "queryType": "table",
-          "rawSql": "SELECT org AS \"Org\", event_date AS \"Event Date\", status AS \"Status\", reason AS \"Reason\", last_dirty_at AS \"Last Dirty\", attempt_count AS \"Attempts\" FROM naap.resolver_dirty_partitions FINAL WHERE status IN ('pending', 'failed') AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) ORDER BY event_date ASC, org ASC LIMIT 100",
-          "refId": "A"
-        }
-      ],
-      "options": {
-        "cellHeight": "sm",
-        "showHeader": true
-      },
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            },
-            "footer": {
-              "reducers": []
-            },
-            "inspect": false
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": 0
-              }
-            ]
-          }
-        },
-        "overrides": []
-      }
-    },
-    {
-      "id": 15,
-      "title": "Current Attribution Mix After Repair",
-      "type": "table",
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 45
-      },
-      "datasource": {
-        "type": "grafana-clickhouse-datasource",
-        "uid": "${clickhouse_ds}"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "grafana-clickhouse-datasource",
-            "uid": "${clickhouse_ds}"
-          },
-          "editorType": "sql",
-          "format": 1,
-          "queryType": "table",
-          "rawSql": "SELECT attribution_status AS \"Status\", attribution_reason AS \"Reason\", count() AS \"Sessions\" FROM naap.canonical_session_current_store FINAL WHERE ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) GROUP BY attribution_status, attribution_reason ORDER BY \"Sessions\" DESC LIMIT 20",
-          "refId": "A"
-        }
-      ],
-      "options": {
-        "cellHeight": "sm",
-        "showHeader": true
-      },
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            },
-            "footer": {
-              "reducers": []
-            },
-            "inspect": false
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": 0
-              }
-            ]
-          }
-        },
-        "overrides": []
-      }
     }
   ],
   "refresh": "15m",
@@ -1231,14 +1130,14 @@
           "text": "All",
           "value": "__all"
         },
-        "definition": "SELECT DISTINCT org FROM naap.api_latest_orchestrator_state WHERE org != '' ORDER BY org",
+        "definition": "SELECT DISTINCT org FROM (SELECT org FROM naap.api_network_demand_by_org WHERE org != '' UNION ALL SELECT org FROM naap.api_status_samples WHERE org != '' UNION ALL SELECT org FROM naap.api_active_stream_state WHERE org != '' UNION ALL SELECT ifNull(org, '') AS org FROM naap.resolver_dirty_partitions FINAL WHERE ifNull(org, '') != '' UNION ALL SELECT org FROM naap.api_latest_orchestrator_state WHERE org != '') AS orgs WHERE org != '' ORDER BY org",
         "hide": 0,
         "includeAll": true,
         "label": "Org",
         "multi": true,
         "name": "org",
         "options": [],
-        "query": "SELECT DISTINCT org FROM naap.api_latest_orchestrator_state WHERE org != '' ORDER BY org",
+        "query": "SELECT DISTINCT org FROM (SELECT org FROM naap.api_network_demand_by_org WHERE org != '' UNION ALL SELECT org FROM naap.api_status_samples WHERE org != '' UNION ALL SELECT org FROM naap.api_active_stream_state WHERE org != '' UNION ALL SELECT ifNull(org, '') AS org FROM naap.resolver_dirty_partitions FINAL WHERE ifNull(org, '') != '' UNION ALL SELECT org FROM naap.api_latest_orchestrator_state WHERE org != '') AS orgs WHERE org != '' ORDER BY org",
         "refresh": 1,
         "sort": 1,
         "type": "query",

@@ -85,6 +85,7 @@ type AnalyticsRepo interface {
 	// SLA / GPU / Network Demand (ported from leaderboard-serverless)
 	ListSLACompliance(ctx context.Context, p types.SLAComplianceParams) ([]types.SLAComplianceRow, int, error)
 	ListNetworkDemand(ctx context.Context, p types.NetworkDemandParams) ([]types.NetworkDemandRow, int, error)
+	ListGPUNetworkDemand(ctx context.Context, p types.GPUNetworkDemandParams) ([]types.GPUNetworkDemandRow, int, error)
 	ListGPUMetrics(ctx context.Context, p types.GPUMetricsParams) ([]types.GPUMetric, int, error)
 
 	// Healthcheck
@@ -218,6 +219,9 @@ func (n *NoopAnalyticsRepo) ListSLACompliance(_ context.Context, _ types.SLAComp
 	return nil, 0, nil
 }
 func (n *NoopAnalyticsRepo) ListNetworkDemand(_ context.Context, _ types.NetworkDemandParams) ([]types.NetworkDemandRow, int, error) {
+	return nil, 0, nil
+}
+func (n *NoopAnalyticsRepo) ListGPUNetworkDemand(_ context.Context, _ types.GPUNetworkDemandParams) ([]types.GPUNetworkDemandRow, int, error) {
 	return nil, 0, nil
 }
 func (n *NoopAnalyticsRepo) ListGPUMetrics(_ context.Context, _ types.GPUMetricsParams) ([]types.GPUMetric, int, error) {

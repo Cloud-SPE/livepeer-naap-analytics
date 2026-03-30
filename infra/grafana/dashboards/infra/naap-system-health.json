@@ -1,0 +1,1292 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "description": "Infrastructure and solution-health dashboard spanning accepted raw ingest, resolver scan lag, repair backlog, repair throughput, and recent resolver history.",
+  "editable": true,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "dashboard",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false,
+      "title": "Overview",
+      "type": "link",
+      "url": "/d/naap-overview"
+    },
+    {
+      "asDropdown": false,
+      "icon": "cloud",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false,
+      "title": "Live Ops",
+      "type": "link",
+      "url": "/d/naap-live-operations"
+    },
+    {
+      "asDropdown": false,
+      "icon": "shield",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false,
+      "title": "System Health",
+      "type": "link",
+      "url": "/d/naap-system-health"
+    },
+    {
+      "asDropdown": false,
+      "icon": "bolt",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false,
+      "title": "Performance",
+      "type": "link",
+      "url": "/d/naap-performance-drilldown"
+    }
+  ],
+  "panels": [
+    {
+      "id": 1,
+      "title": "Accepted Raw Events (15m)",
+      "type": "stat",
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT toFloat64(count()) AS value FROM naap.accepted_raw_events WHERE ingested_at >= now() - INTERVAL 15 MINUTE AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "green",
+                "value": 100
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "title": "Raw Ingest Lag (s)",
+      "type": "stat",
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 4,
+        "y": 0
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT toFloat64(greatest(dateDiff('second', max(ingested_at), now()), 0)) AS value FROM naap.accepted_raw_events WHERE ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 30
+              },
+              {
+                "color": "red",
+                "value": 120
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "title": "Dirty Scan Lag (s)",
+      "type": "stat",
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 8,
+        "y": 0
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "WITH raw AS (SELECT max(ingested_at) AS raw_max FROM naap.accepted_raw_events WHERE event_type IN ('stream_trace', 'ai_stream_status', 'ai_stream_events', 'network_capabilities') AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))), wm AS (SELECT max(last_ingested_at) AS wm_max FROM naap.resolver_runtime_state FINAL) SELECT toFloat64(greatest(dateDiff('second', ifNull(wm_max, raw_max), raw_max), 0)) AS value FROM raw CROSS JOIN wm",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 30
+              },
+              {
+                "color": "red",
+                "value": 120
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "title": "Dirty Historical Queue",
+      "type": "stat",
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 12,
+        "y": 0
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT toFloat64(count()) AS value FROM naap.resolver_dirty_partitions FINAL WHERE status = 'pending' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 25
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "title": "Dirty Repairs (24h)",
+      "type": "stat",
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 16,
+        "y": 0
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT toFloat64(count()) AS value FROM naap.resolver_dirty_partitions FINAL WHERE status = 'success' AND updated_at >= now() - INTERVAL 24 HOUR AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "green",
+                "value": 10
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "title": "Claim Conflicts (1h)",
+      "type": "stat",
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 20,
+        "y": 0
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT toFloat64(count()) AS value FROM naap.resolver_runs WHERE status = 'skipped_claimed' AND finished_at >= now() - INTERVAL 1 HOUR AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), ifNull(org, '')))",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 7,
+      "title": "Stage Throughput (Events/Minute)",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 5
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT toStartOfInterval(event_ts, INTERVAL 1 MINUTE) AS time, event_type AS stage, count() AS events_per_minute FROM naap.accepted_raw_events WHERE $__timeFilter(event_ts) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) GROUP BY time, stage ORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "events/min",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 24,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "showValues": false,
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 8,
+      "title": "Resolver Run History (24h)",
+      "type": "table",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 5
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT started_at AS \"Started\", ifNull(finished_at, cast(null, 'Nullable(DateTime64(3, \\'UTC\\'))')) AS \"Finished\", mode AS \"Mode\", status AS \"Status\", ifNull(org, 'all') AS \"Org\", rows_processed AS \"Rows Processed\", if(finished_at IS NOT NULL, toUInt64(greatest(dateDiff('second', started_at, finished_at), 0)), cast(null, 'Nullable(UInt64)')) AS \"Elapsed (s)\", if(finished_at IS NOT NULL AND dateDiff('second', started_at, finished_at) > 0, round(toFloat64(rows_processed) / toFloat64(dateDiff('second', started_at, finished_at)), 2), cast(null, 'Nullable(Float64)')) AS \"Rows/s\", mismatch_count AS \"Mismatches\", ifNull(error_summary, '') AS \"Error Summary\" FROM naap.resolver_runs WHERE started_at >= now() - INTERVAL 24 HOUR AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), ifNull(org, ''))) ORDER BY started_at DESC LIMIT 100",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Started"
+          }
+        ]
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "footer": {
+              "reducers": []
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 9,
+      "title": "Dirty Repair Throughput (24h)",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 13
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT toStartOfInterval(updated_at, INTERVAL 1 HOUR) AS time, status, count() AS partitions FROM naap.resolver_dirty_partitions FINAL WHERE updated_at >= now() - INTERVAL 24 HOUR AND status IN ('success', 'failed') AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) GROUP BY time, status ORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "partitions/hour",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 24,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "showValues": false,
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 10,
+      "title": "Pending Historical Repairs By Day",
+      "type": "table",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 13
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "WITH pending AS (\n    SELECT org,\n        toString(event_date) AS event_date,\n        status,\n        reason,\n        toString(first_dirty_at) AS first_dirty,\n        toString(last_dirty_at) AS last_dirty,\n        toUInt64(attempt_count) AS attempts\n    FROM naap.resolver_dirty_partitions FINAL\n    WHERE status IN ('pending', 'failed')\n    AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n)\nSELECT *\nFROM (\n    SELECT org AS \"Org\",\n        event_date AS \"Event Date\",\n        status AS \"Status\",\n        reason AS \"Reason\",\n        first_dirty AS \"First Dirty\",\n        last_dirty AS \"Last Dirty\",\n        attempts AS \"Attempts\"\n    FROM pending\n    UNION ALL\n    SELECT 'all' AS \"Org\",\n        '' AS \"Event Date\",\n        'none' AS \"Status\",\n        'no pending or failed historical repairs' AS \"Reason\",\n        '' AS \"First Dirty\",\n        '' AS \"Last Dirty\",\n        toUInt64(0) AS \"Attempts\"\n    WHERE NOT EXISTS (SELECT 1 FROM pending)\n)\nORDER BY \"Event Date\" ASC, \"Org\" ASC\nLIMIT 100",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "footer": {
+              "reducers": []
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 11,
+      "title": "Current Attribution Mix After Repair",
+      "type": "table",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 21
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT attribution_status AS \"Status\", attribution_reason AS \"Reason\", count() AS \"Sessions\" FROM naap.canonical_session_current_store FINAL WHERE ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) GROUP BY attribution_status, attribution_reason ORDER BY count() DESC LIMIT 20",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "footer": {
+              "reducers": []
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 18,
+      "title": "Historical Repair Run History (24h)",
+      "type": "table",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 21
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT started_at AS \"Started\", ifNull(finished_at, cast(null, 'Nullable(DateTime64(3, \\'UTC\\'))')) AS \"Finished\", org AS \"Org\", event_date AS \"Event Date\", status AS \"Status\", rows_processed AS \"Rows Processed\", if(finished_at IS NOT NULL, toUInt64(greatest(dateDiff('second', started_at, finished_at), 0)), cast(null, 'Nullable(UInt64)')) AS \"Elapsed (s)\", if(finished_at IS NOT NULL AND dateDiff('second', started_at, finished_at) > 0, round(toFloat64(rows_processed) / toFloat64(dateDiff('second', started_at, finished_at)), 2), cast(null, 'Nullable(Float64)')) AS \"Rows/s\", mismatch_count AS \"Mismatches\", ifNull(error_summary, '') AS \"Error Summary\" FROM naap.resolver_backfill_runs WHERE started_at >= now() - INTERVAL 24 HOUR AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) ORDER BY started_at DESC LIMIT 100",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Started"
+          }
+        ]
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "footer": {
+              "reducers": []
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 12,
+      "title": "Progress To Steady State",
+      "type": "row",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 29
+      }
+    },
+    {
+      "id": 13,
+      "title": "Closed Historical Org-Days Seen",
+      "type": "stat",
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 30
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "WITH raw_days AS (\n    SELECT org, toDate(event_ts) AS event_date\n    FROM naap.accepted_raw_events\n    WHERE toDate(event_ts) < today()\n    AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n    GROUP BY org, event_date\n)\nSELECT toFloat64(count()) AS value FROM raw_days",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 14,
+      "title": "Closed Historical Org-Days Remaining",
+      "type": "stat",
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 6,
+        "y": 30
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "WITH raw_days AS (\n    SELECT org, toDate(event_ts) AS event_date\n    FROM naap.accepted_raw_events\n    WHERE toDate(event_ts) < today()\n    AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n    GROUP BY org, event_date\n), repaired_days AS (\n    SELECT org, event_date\n    FROM naap.resolver_backfill_runs\n    WHERE status = 'success'\n    AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n    GROUP BY org, event_date\n)\nSELECT toFloat64(count()) AS value\nFROM raw_days\nLEFT JOIN repaired_days USING (org, event_date)\nWHERE repaired_days.org IS NULL",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 15,
+      "title": "Closed Historical Coverage",
+      "type": "stat",
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 12,
+        "y": 30
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "WITH raw_days AS (\n    SELECT org, toDate(event_ts) AS event_date\n    FROM naap.accepted_raw_events\n    WHERE toDate(event_ts) < today()\n    AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n    GROUP BY org, event_date\n), repaired_days AS (\n    SELECT org, event_date\n    FROM naap.resolver_backfill_runs\n    WHERE status = 'success'\n    AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n    GROUP BY org, event_date\n)\nSELECT if(count() > 0, 100.0 * toFloat64(countIf(repaired_days.org IS NOT NULL)) / toFloat64(count()), 100.0) AS value\nFROM raw_days\nLEFT JOIN repaired_days USING (org, event_date)",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 95
+              },
+              {
+                "color": "green",
+                "value": 99.9
+              }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 16,
+      "title": "Oldest Closed Historical Gap (days)",
+      "type": "stat",
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 18,
+        "y": 30
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "WITH raw_days AS (\n    SELECT org, toDate(event_ts) AS event_date\n    FROM naap.accepted_raw_events\n    WHERE toDate(event_ts) < today()\n    AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n    GROUP BY org, event_date\n), repaired_days AS (\n    SELECT org, event_date\n    FROM naap.resolver_backfill_runs\n    WHERE status = 'success'\n    AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n    GROUP BY org, event_date\n)\nSELECT toFloat64(ifNull(max(dateDiff('day', raw_days.event_date, today())), 0)) AS value\nFROM raw_days\nLEFT JOIN repaired_days USING (org, event_date)\nWHERE repaired_days.org IS NULL",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 3
+              }
+            ]
+          },
+          "unit": "d"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 17,
+      "title": "Closed Historical Org-Days Still Unrepaired",
+      "type": "table",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 35
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "WITH raw_days AS (\n    SELECT org, toDate(event_ts) AS event_date\n    FROM naap.accepted_raw_events\n    WHERE toDate(event_ts) < today()\n    AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n    GROUP BY org, event_date\n), repaired_days AS (\n    SELECT org, event_date\n    FROM naap.resolver_backfill_runs\n    WHERE status = 'success'\n    AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n    GROUP BY org, event_date\n), pending AS (\n    SELECT raw_days.org AS org,\n        toString(raw_days.event_date) AS event_date,\n        toUInt64(dateDiff('day', raw_days.event_date, today())) AS age_days,\n        'waiting_for_first_successful_historical_run' AS reason\n    FROM raw_days\n    LEFT JOIN repaired_days USING (org, event_date)\n    WHERE repaired_days.org IS NULL\n)\nSELECT *\nFROM (\n    SELECT org AS \"Org\",\n        event_date AS \"Event Date\",\n        age_days AS \"Age (days)\",\n        reason AS \"Reason\"\n    FROM pending\n    UNION ALL\n    SELECT 'all' AS \"Org\",\n        '' AS \"Event Date\",\n        toUInt64(0) AS \"Age (days)\",\n        'no unrepaired closed historical org-days' AS \"Reason\"\n    WHERE NOT EXISTS (SELECT 1 FROM pending)\n)\nORDER BY \"Age (days)\" DESC, \"Org\" ASC\nLIMIT 100",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "footer": {
+              "reducers": []
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    }
+  ],
+  "refresh": "1m",
+  "schemaVersion": 39,
+  "tags": [
+    "naap",
+    "infra",
+    "system-health"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "text": "ClickHouse Prod",
+          "value": "clickhouse_prod"
+        },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Datasource",
+        "name": "clickhouse_ds",
+        "options": [],
+        "query": "grafana-clickhouse-datasource",
+        "refresh": 1,
+        "type": "datasource"
+      },
+      {
+        "current": {
+          "text": "All",
+          "value": "__all"
+        },
+        "definition": "SELECT DISTINCT org FROM (SELECT org FROM naap.accepted_raw_events WHERE org != '' UNION ALL SELECT org FROM naap.api_status_samples WHERE org != '' UNION ALL SELECT org FROM naap.api_active_stream_state WHERE org != '' UNION ALL SELECT ifNull(org, '') AS org FROM naap.resolver_dirty_partitions FINAL WHERE ifNull(org, '') != '' UNION ALL SELECT ifNull(org, '') AS org FROM naap.resolver_runs WHERE ifNull(org, '') != '') AS orgs WHERE org != '' ORDER BY org",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Org",
+        "multi": true,
+        "name": "org",
+        "options": [],
+        "query": "SELECT DISTINCT org FROM (SELECT org FROM naap.accepted_raw_events WHERE org != '' UNION ALL SELECT org FROM naap.api_status_samples WHERE org != '' UNION ALL SELECT org FROM naap.api_active_stream_state WHERE org != '' UNION ALL SELECT ifNull(org, '') AS org FROM naap.resolver_dirty_partitions FINAL WHERE ifNull(org, '') != '' UNION ALL SELECT ifNull(org, '') AS org FROM naap.resolver_runs WHERE ifNull(org, '') != '') AS orgs WHERE org != '' ORDER BY org",
+        "refresh": 1,
+        "sort": 1,
+        "type": "query",
+        "datasource": {
+          "uid": "${clickhouse_ds}",
+          "type": "grafana-clickhouse-datasource"
+        }
+      }
+    ]
+  },
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "",
+  "title": "NaaP: System Health",
+  "uid": "naap-system-health",
+  "version": 1
+}

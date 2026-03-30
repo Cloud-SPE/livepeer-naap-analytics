@@ -66,3 +66,23 @@ func TestListGPUMetrics_HappyPath(t *testing.T) {
 		}
 	}
 }
+
+func TestListGPUNetworkDemand_HappyPath(t *testing.T) {
+	srv := newTestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/v1/gpu/network-demand", nil)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var body map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	for _, field := range []string{"demand", "pagination"} {
+		if _, ok := body[field]; !ok {
+			t.Errorf("missing field %s", field)
+		}
+	}
+}

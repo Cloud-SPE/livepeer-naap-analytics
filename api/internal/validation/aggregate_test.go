@@ -173,11 +173,120 @@ func TestRuleLifecycle008And009_DemandUsesStartHourWhileReliabilityUsesStatusHou
 	if got := h.queryInt(t, `SELECT count() FROM naap.api_network_demand_by_org WHERE org = ? AND window_start = ? AND gateway = 'gw-cross-hour' AND pipeline_id = 'text-to-image'`, h.org, startHour); got != 1 {
 		t.Fatalf("RULE-LIFECYCLE-008: demand serving row at start hour = %d, want 1", got)
 	}
-	if got := h.queryInt(t, `SELECT count() FROM naap.api_network_demand_by_org WHERE org = ? AND window_start = ? AND gateway = 'gw-cross-hour'`, h.org, statusHour); got != 0 {
-		t.Fatalf("RULE-LIFECYCLE-008: demand serving row leaked into status hour, got %d", got)
+	if got := h.queryInt(t, `SELECT count() FROM naap.api_network_demand_by_org WHERE org = ? AND window_start = ? AND gateway = 'gw-cross-hour'`, h.org, statusHour); got != 1 {
+		t.Fatalf("RULE-AGGREGATE-002: perf-backed demand row at status hour = %d, want 1", got)
+	}
+	if got := h.queryInt(t, `SELECT requested_sessions FROM naap.api_network_demand_by_org WHERE org = ? AND window_start = ? AND gateway = 'gw-cross-hour'`, h.org, statusHour); got != 0 {
+		t.Fatalf("RULE-AGGREGATE-002: perf-only demand row requested_sessions = %d, want 0", got)
+	}
+	if got := h.queryFloat(t, `SELECT avg_output_fps FROM naap.api_network_demand_by_org WHERE org = ? AND window_start = ? AND gateway = 'gw-cross-hour'`, h.org, statusHour); got != 11 {
+		t.Fatalf("RULE-AGGREGATE-002: perf-only demand row avg_output_fps = %v, want 11", got)
 	}
 	if got := h.queryInt(t, `SELECT count() FROM naap.api_sla_compliance_by_org WHERE org = ? AND window_start = ? AND orchestrator_address = ? AND known_sessions_count = 1 AND startup_failed_sessions = 1`, h.org, statusHour, orchAddr); got != 1 {
 		t.Fatalf("RULE-LIFECYCLE-009: SLA serving row at status hour = %d, want 1", got)
+	}
+}
+
+func TestRuleAggregate002And005_DemandAndSLAUseContractedFailureSemantics(t *testing.T) {
+	h := newHarness(t)
+	ts := anchor().Add(20 * time.Minute)
+	windowStart := ts.Truncate(time.Hour)
+	orchAddr := strings.ToLower(fmt.Sprintf("0x%s", uid("orch")))
+	orchURI := fmt.Sprintf("https://orch-%s.example.com", uid("uri"))
+
+	successStream := uid("success")
+	successRequest := uid("req")
+	zeroStream := uid("zero")
+	zeroRequest := uid("req")
+
+	h.insert(t, []rawEvent{
+		{
+			EventID: uid("e"), EventType: "network_capabilities", EventTs: ts.Add(-time.Minute), Org: h.org,
+			Data:       fmt.Sprintf(`[{"address":%q,"local_address":"orch","uri":%q,"version":"0.9.0","hardware":[{"pipeline":"text-to-image","model_id":"model-a","gpu_info":[{"id":"gpu-a","name":"L4","memory_total":24576}]}]}]`, orchAddr, orchURI),
+			IngestedAt: ts.Add(-time.Minute),
+		},
+		{
+			EventID: uid("e"), EventType: "stream_trace", EventTs: ts, Org: h.org, Gateway: "gw-contract",
+			Data:       fmt.Sprintf(`{"stream_id":%q,"request_id":%q,"type":"gateway_receive_stream_request","pipeline":"text-to-image","orchestrator_info":{"address":%q,"url":%q}}`, successStream, successRequest, orchAddr, orchURI),
+			IngestedAt: ts,
+		},
+		{
+			EventID: uid("e"), EventType: "stream_trace", EventTs: ts.Add(2 * time.Second), Org: h.org, Gateway: "gw-contract",
+			Data:       fmt.Sprintf(`{"stream_id":%q,"request_id":%q,"type":"gateway_receive_few_processed_segments","pipeline":"text-to-image","orchestrator_info":{"address":%q,"url":%q}}`, successStream, successRequest, orchAddr, orchURI),
+			IngestedAt: ts.Add(2 * time.Second),
+		},
+		{
+			EventID: uid("e"), EventType: "ai_stream_status", EventTs: ts.Add(4 * time.Second), Org: h.org, Gateway: "gw-contract",
+			Data:       fmt.Sprintf(`{"stream_id":%q,"request_id":%q,"pipeline":"text-to-image","state":"ONLINE","orchestrator_info":{"address":%q,"url":%q},"inference_status":{"fps":12.0,"restart_count":0,"last_error":""}}`, successStream, successRequest, orchAddr, orchURI),
+			IngestedAt: ts.Add(4 * time.Second),
+		},
+		{
+			EventID: uid("e"), EventType: "stream_trace", EventTs: ts.Add(10 * time.Second), Org: h.org, Gateway: "gw-contract",
+			Data:       fmt.Sprintf(`{"stream_id":%q,"request_id":%q,"type":"gateway_receive_stream_request","pipeline":"text-to-image","orchestrator_info":{"address":%q,"url":%q}}`, zeroStream, zeroRequest, orchAddr, orchURI),
+			IngestedAt: ts.Add(10 * time.Second),
+		},
+		{
+			EventID: uid("e"), EventType: "ai_stream_status", EventTs: ts.Add(12 * time.Second), Org: h.org, Gateway: "gw-contract",
+			Data:       fmt.Sprintf(`{"stream_id":%q,"request_id":%q,"pipeline":"text-to-image","state":"ONLINE","orchestrator_info":{"address":%q,"url":%q},"inference_status":{"fps":0.0,"restart_count":0,"last_error":"boom"}}`, zeroStream, zeroRequest, orchAddr, orchURI),
+			IngestedAt: ts.Add(12 * time.Second),
+		},
+	})
+
+	if got := h.queryInt(t, `SELECT effective_failed_sessions FROM naap.api_network_demand_by_org WHERE org = ? AND window_start = ? AND gateway = 'gw-contract' AND pipeline_id = 'text-to-image'`, h.org, windowStart); got != 1 {
+		t.Fatalf("RULE-AGGREGATE-002: effective_failed_sessions = %d, want 1", got)
+	}
+	if got := h.queryFloat(t, `SELECT round(effective_success_rate, 6) FROM naap.api_network_demand_by_org WHERE org = ? AND window_start = ? AND gateway = 'gw-contract' AND pipeline_id = 'text-to-image'`, h.org, windowStart); got != 0.5 {
+		t.Fatalf("RULE-AGGREGATE-002: effective_success_rate = %v, want 0.5", got)
+	}
+	if got := h.queryFloat(t, `SELECT round(health_signal_coverage_ratio, 6) FROM naap.api_sla_compliance_by_org WHERE org = ? AND window_start = ? AND orchestrator_address = ? AND pipeline_id = 'text-to-image'`, h.org, windowStart, orchAddr); got != 0.833333 {
+		t.Fatalf("RULE-AGGREGATE-005: health_signal_coverage_ratio = %v, want 0.833333", got)
+	}
+	if got := h.queryFloat(t, `SELECT round(effective_success_rate, 6) FROM naap.api_sla_compliance_by_org WHERE org = ? AND window_start = ? AND orchestrator_address = ? AND pipeline_id = 'text-to-image'`, h.org, windowStart, orchAddr); got != 0.5 {
+		t.Fatalf("RULE-AGGREGATE-005: effective_success_rate = %v, want 0.5", got)
+	}
+	if got := h.queryFloat(t, `SELECT round(output_viability_rate, 6) FROM naap.api_sla_compliance_by_org WHERE org = ? AND window_start = ? AND orchestrator_address = ? AND pipeline_id = 'text-to-image'`, h.org, windowStart, orchAddr); got != 0.5 {
+		t.Fatalf("RULE-AGGREGATE-005: output_viability_rate = %v, want 0.5", got)
+	}
+	if got := h.queryFloat(t, `SELECT round(sla_score, 6) FROM naap.api_sla_compliance_by_org WHERE org = ? AND window_start = ? AND orchestrator_address = ? AND pipeline_id = 'text-to-image'`, h.org, windowStart, orchAddr); got != 50 {
+		t.Fatalf("RULE-AGGREGATE-005: sla_score = %v, want 50", got)
+	}
+}
+
+func TestRuleAggregate004AndServing001_HardwareUnresolvedRowsStayOutOfGPUMetricsButRemainVisibleInGPUDemand(t *testing.T) {
+	h := newHarness(t)
+	ts := anchor().Add(25 * time.Minute)
+	windowStart := ts.Truncate(time.Hour)
+	streamID := uid("hwless")
+	requestID := uid("req")
+	orchAddr := strings.ToLower(fmt.Sprintf("0x%s", uid("orch")))
+	orchURI := fmt.Sprintf("https://orch-%s.example.com", uid("uri"))
+
+	h.insert(t, []rawEvent{
+		{
+			EventID: uid("e"), EventType: "network_capabilities", EventTs: ts.Add(-time.Minute), Org: h.org,
+			Data:       fmt.Sprintf(`[{"address":%q,"local_address":"orch","uri":%q,"version":"0.9.0","hardware":[{"pipeline":"text-to-image","model_id":"model-hwless"}]}]`, orchAddr, orchURI),
+			IngestedAt: ts.Add(-time.Minute),
+		},
+		{
+			EventID: uid("e"), EventType: "stream_trace", EventTs: ts, Org: h.org, Gateway: "gw-hwless",
+			Data:       fmt.Sprintf(`{"stream_id":%q,"request_id":%q,"type":"gateway_receive_stream_request","pipeline":"text-to-image","orchestrator_info":{"address":%q,"url":%q}}`, streamID, requestID, orchAddr, orchURI),
+			IngestedAt: ts,
+		},
+		{
+			EventID: uid("e"), EventType: "ai_stream_status", EventTs: ts.Add(2 * time.Second), Org: h.org, Gateway: "gw-hwless",
+			Data:       fmt.Sprintf(`{"stream_id":%q,"request_id":%q,"pipeline":"text-to-image","state":"ONLINE","orchestrator_info":{"address":%q,"url":%q},"inference_status":{"fps":9.0,"restart_count":0,"last_error":""}}`, streamID, requestID, orchAddr, orchURI),
+			IngestedAt: ts.Add(2 * time.Second),
+		},
+	})
+
+	if got := h.queryInt(t, `SELECT count() FROM naap.api_gpu_metrics_by_org WHERE org = ? AND window_start = ? AND orchestrator_address = ?`, h.org, windowStart, orchAddr); got != 0 {
+		t.Fatalf("RULE-AGGREGATE-004: hardware-unresolved row leaked into gpu metrics, got %d rows", got)
+	}
+	if got := h.queryInt(t, `SELECT count() FROM naap.api_gpu_network_demand_by_org WHERE org = ? AND window_start = ? AND orchestrator_address = ? AND gpu_identity_status = 'hardware_unresolved'`, h.org, windowStart, orchAddr); got != 1 {
+		t.Fatalf("RULE-SERVING-001: gpu-sliced demand row count = %d, want 1", got)
+	}
+	if got := h.queryInt(t, `SELECT count() FROM naap.api_gpu_network_demand_by_org WHERE org = ? AND window_start = ? AND orchestrator_address = ? AND gpu_id IS NULL`, h.org, windowStart, orchAddr); got != 1 {
+		t.Fatalf("RULE-SERVING-001: gpu-sliced demand did not preserve null gpu_id for hardware-unresolved row")
 	}
 }
 

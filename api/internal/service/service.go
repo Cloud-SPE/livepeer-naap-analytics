@@ -88,6 +88,7 @@ type AnalyticsService interface {
 	// SLA / GPU / Network Demand (ported from leaderboard-serverless)
 	ListSLACompliance(ctx context.Context, p types.SLAComplianceParams) ([]types.SLAComplianceRow, int, error)
 	ListNetworkDemand(ctx context.Context, p types.NetworkDemandParams) ([]types.NetworkDemandRow, int, error)
+	ListGPUNetworkDemand(ctx context.Context, p types.GPUNetworkDemandParams) ([]types.GPUNetworkDemandRow, int, error)
 	ListGPUMetrics(ctx context.Context, p types.GPUMetricsParams) ([]types.GPUMetric, int, error)
 
 	// Health
@@ -493,6 +494,14 @@ func (s *analyticsService) ListNetworkDemand(ctx context.Context, p types.Networ
 	rows, total, err := s.repo.ListNetworkDemand(ctx, p)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list network demand: %w", err)
+	}
+	return rows, total, nil
+}
+
+func (s *analyticsService) ListGPUNetworkDemand(ctx context.Context, p types.GPUNetworkDemandParams) ([]types.GPUNetworkDemandRow, int, error) {
+	rows, total, err := s.repo.ListGPUNetworkDemand(ctx, p)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list gpu network demand: %w", err)
 	}
 	return rows, total, nil
 }

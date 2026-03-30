@@ -39,19 +39,27 @@ type SLAComplianceRow struct {
 	GPUID                     *string   `json:"gpu_id"`
 	Region                    *string   `json:"region"`
 	KnownSessionsCount        uint64    `json:"known_sessions_count"`
+	RequestedSessions         uint64    `json:"requested_sessions"`
 	StartupSuccessSessions    uint64    `json:"startup_success_sessions"`
 	NoOrchSessions            uint64    `json:"no_orch_sessions"`
 	StartupExcusedSessions    uint64    `json:"startup_excused_sessions"`
 	StartupFailedSessions     uint64    `json:"startup_failed_sessions"`
+	LoadingOnlySessions       uint64    `json:"loading_only_sessions"`
+	ZeroOutputFPSSessions     uint64    `json:"zero_output_fps_sessions"`
+	EffectiveFailedSessions   uint64    `json:"effective_failed_sessions"`
 	ConfirmedSwappedSessions  uint64    `json:"confirmed_swapped_sessions"`
 	InferredSwapSessions      uint64    `json:"inferred_swap_sessions"`
 	TotalSwappedSessions      uint64    `json:"total_swapped_sessions"`
 	SessionsEndingInError     uint64    `json:"sessions_ending_in_error"`
 	ErrorStatusSamples        uint64    `json:"error_status_samples"`
+	HealthSignalCount         uint64    `json:"health_signal_count"`
+	HealthExpectedSignalCount uint64    `json:"health_expected_signal_count"`
 	HealthSignalCoverageRatio float64   `json:"health_signal_coverage_ratio"`
 	StartupSuccessRate        *float64  `json:"startup_success_rate"`
 	ExcusedFailureRate        *float64  `json:"excused_failure_rate"`
+	EffectiveSuccessRate      *float64  `json:"effective_success_rate"`
 	NoSwapRate                *float64  `json:"no_swap_rate"`
+	OutputViabilityRate       *float64  `json:"output_viability_rate"`
 	SLAScore                  *float64  `json:"sla_score"`
 }
 
@@ -89,14 +97,76 @@ type NetworkDemandRow struct {
 	NoOrchSessions            uint64    `json:"no_orch_sessions"`
 	StartupExcusedSessions    uint64    `json:"startup_excused_sessions"`
 	StartupFailedSessions     uint64    `json:"startup_failed_sessions"`
+	LoadingOnlySessions       uint64    `json:"loading_only_sessions"`
+	ZeroOutputFPSSessions     uint64    `json:"zero_output_fps_sessions"`
+	EffectiveFailedSessions   uint64    `json:"effective_failed_sessions"`
 	ConfirmedSwappedSessions  uint64    `json:"confirmed_swapped_sessions"`
 	InferredSwapSessions      uint64    `json:"inferred_swap_sessions"`
 	TotalSwappedSessions      uint64    `json:"total_swapped_sessions"`
 	SessionsEndingInError     uint64    `json:"sessions_ending_in_error"`
 	ErrorStatusSamples        uint64    `json:"error_status_samples"`
+	HealthSignalCount         uint64    `json:"health_signal_count"`
+	HealthExpectedSignalCount uint64    `json:"health_expected_signal_count"`
 	HealthSignalCoverageRatio float64   `json:"health_signal_coverage_ratio"`
 	StartupSuccessRate        float64   `json:"startup_success_rate"`
 	ExcusedFailureRate        float64   `json:"excused_failure_rate"`
+	EffectiveSuccessRate      float64   `json:"effective_success_rate"`
+	TicketFaceValueETH        float64   `json:"ticket_face_value_eth"`
+}
+
+// ---------------------------------------------------------------------------
+// GPU-Sliced Network Demand
+// ---------------------------------------------------------------------------
+
+// GPUNetworkDemandParams holds validated query parameters for GET /v1/gpu/network-demand.
+type GPUNetworkDemandParams struct {
+	Gateway             string
+	OrchestratorAddress string
+	Region              string
+	PipelineID          string
+	ModelID             string
+	GPUID               string
+	Org                 string
+	Start               time.Time
+	End                 time.Time
+	Page                int
+	PageSize            int
+}
+
+// GPUNetworkDemandRow is one row in the /v1/gpu/network-demand response.
+type GPUNetworkDemandRow struct {
+	WindowStart               time.Time `json:"window_start"`
+	Org                       *string   `json:"org,omitempty"`
+	Gateway                   string    `json:"gateway"`
+	OrchestratorAddress       string    `json:"orchestrator_address"`
+	Region                    *string   `json:"region"`
+	PipelineID                string    `json:"pipeline_id"`
+	ModelID                   *string   `json:"model_id"`
+	GPUID                     *string   `json:"gpu_id"`
+	GPUIdentityStatus         string    `json:"gpu_identity_status"`
+	SessionsCount             uint64    `json:"sessions_count"`
+	AvgOutputFPS              float64   `json:"avg_output_fps"`
+	TotalMinutes              float64   `json:"total_minutes"`
+	KnownSessionsCount        uint64    `json:"known_sessions_count"`
+	RequestedSessions         uint64    `json:"requested_sessions"`
+	StartupSuccessSessions    uint64    `json:"startup_success_sessions"`
+	NoOrchSessions            uint64    `json:"no_orch_sessions"`
+	StartupExcusedSessions    uint64    `json:"startup_excused_sessions"`
+	StartupFailedSessions     uint64    `json:"startup_failed_sessions"`
+	LoadingOnlySessions       uint64    `json:"loading_only_sessions"`
+	ZeroOutputFPSSessions     uint64    `json:"zero_output_fps_sessions"`
+	EffectiveFailedSessions   uint64    `json:"effective_failed_sessions"`
+	ConfirmedSwappedSessions  uint64    `json:"confirmed_swapped_sessions"`
+	InferredSwapSessions      uint64    `json:"inferred_swap_sessions"`
+	TotalSwappedSessions      uint64    `json:"total_swapped_sessions"`
+	SessionsEndingInError     uint64    `json:"sessions_ending_in_error"`
+	ErrorStatusSamples        uint64    `json:"error_status_samples"`
+	HealthSignalCount         uint64    `json:"health_signal_count"`
+	HealthExpectedSignalCount uint64    `json:"health_expected_signal_count"`
+	HealthSignalCoverageRatio float64   `json:"health_signal_coverage_ratio"`
+	StartupSuccessRate        float64   `json:"startup_success_rate"`
+	ExcusedFailureRate        float64   `json:"excused_failure_rate"`
+	EffectiveSuccessRate      float64   `json:"effective_success_rate"`
 	TicketFaceValueETH        float64   `json:"ticket_face_value_eth"`
 }
 

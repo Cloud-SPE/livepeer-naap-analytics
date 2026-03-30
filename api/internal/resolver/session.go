@@ -46,42 +46,45 @@ func buildSessionCurrentRows(evidence map[string]SessionEvidence, decisions map[
 		}
 
 		row := SessionCurrentRow{
-			SessionKey:             key,
-			Org:                    ev.Org,
-			StreamID:               firstNonEmpty(ev.StreamID, ""),
-			RequestID:              firstNonEmpty(ev.RequestID, ""),
-			Gateway:                firstNonEmpty(ev.Gateway, ""),
-			CanonicalPipeline:      canonicalPipeline,
-			CanonicalModel:         canonicalModel,
-			GPUID:                  decision.GPUID,
-			StartedAt:              ev.StartedAt,
-			LastSeen:               lastSeen.UTC(),
-			RequestedSeen:          boolToUInt8(ev.StartedCount > 0),
-			PlayableSeen:           boolToUInt8(ev.PlayableSeenCount > 0),
-			SelectionOutcome:       selectionOutcome,
-			Completed:              boolToUInt8(ev.CompletedCount > 0),
-			SwapCount:              ev.SwapCount,
-			RestartSeen:            boolToUInt8(ev.RestartSeenCount > 0),
-			ErrorSeen:              boolToUInt8(ev.ErrorSeenCount > 0),
-			DegradedInputSeen:      boolToUInt8(ev.DegradedInputSeenCount > 0),
-			DegradedInferenceSeen:  boolToUInt8(ev.DegradedInferenceSeenCount > 0),
-			StatusSampleCount:      ev.StatusSampleCount,
-			StatusErrorSampleCount: ev.StatusErrorSampleCount,
-			StartupErrorCount:      ev.StartupErrorCount,
-			ExcusableErrorCount:    ev.ExcusableErrorCount,
-			LoadingOnlySession:     boolToUInt8(ev.StatusSampleCount > 0 && ev.RunningStateSamplesCount == 0 && ev.OnlineSeenCount == 0),
-			ZeroOutputFPSSession:   boolToUInt8(ev.StatusSampleCount > 0 && ev.PositiveOutputSeenCount == 0),
-			StartupOutcome:         "unknown",
-			ExcusalReason:          "none",
-			AttributionReason:      attributionReason,
-			AttributionStatus:      firstNonEmpty(decision.Status, "unresolved"),
-			AttributedOrchAddress:  decision.AttributedOrchAddress,
-			AttributedOrchURI:      decision.AttributedOrchURI,
-			AttributionSnapshotTS:  decision.SnapshotTS,
-			HasAmbiguousIdentity:   boolToUInt8(decision.Status == "ambiguous"),
-			HasSnapshotMatch:       boolToUInt8(decision.CapabilityVersionID != ""),
-			IsHardwareLess:         boolToUInt8(decision.Status == "hardware_less"),
-			IsStale:                boolToUInt8(decision.Status == "stale"),
+			SessionKey:                key,
+			Org:                       ev.Org,
+			StreamID:                  firstNonEmpty(ev.StreamID, ""),
+			RequestID:                 firstNonEmpty(ev.RequestID, ""),
+			Gateway:                   firstNonEmpty(ev.Gateway, ""),
+			CanonicalPipeline:         canonicalPipeline,
+			CanonicalModel:            canonicalModel,
+			GPUID:                     decision.GPUID,
+			StartedAt:                 ev.StartedAt,
+			LastSeen:                  lastSeen.UTC(),
+			StartupLatencyMS:          deriveLatencyMS(ev.StartedAt, ev.FirstProcessedAt),
+			E2ELatencyMS:              deriveLatencyMS(ev.FirstIngestAt, ev.RunnerFirstProcessedAt),
+			PromptToPlayableLatencyMS: deriveLatencyMS(ev.StatusStartTime, ev.FewProcessedAt),
+			RequestedSeen:             boolToUInt8(ev.StartedCount > 0),
+			PlayableSeen:              boolToUInt8(ev.PlayableSeenCount > 0),
+			SelectionOutcome:          selectionOutcome,
+			Completed:                 boolToUInt8(ev.CompletedCount > 0),
+			SwapCount:                 ev.SwapCount,
+			RestartSeen:               boolToUInt8(ev.RestartSeenCount > 0),
+			ErrorSeen:                 boolToUInt8(ev.ErrorSeenCount > 0),
+			DegradedInputSeen:         boolToUInt8(ev.DegradedInputSeenCount > 0),
+			DegradedInferenceSeen:     boolToUInt8(ev.DegradedInferenceSeenCount > 0),
+			StatusSampleCount:         ev.StatusSampleCount,
+			StatusErrorSampleCount:    ev.StatusErrorSampleCount,
+			StartupErrorCount:         ev.StartupErrorCount,
+			ExcusableErrorCount:       ev.ExcusableErrorCount,
+			LoadingOnlySession:        boolToUInt8(ev.StatusSampleCount > 0 && ev.RunningStateSamplesCount == 0 && ev.OnlineSeenCount == 0),
+			ZeroOutputFPSSession:      boolToUInt8(ev.StatusSampleCount > 0 && ev.PositiveOutputSeenCount == 0),
+			StartupOutcome:            "unknown",
+			ExcusalReason:             "none",
+			AttributionReason:         attributionReason,
+			AttributionStatus:         firstNonEmpty(decision.Status, "unresolved"),
+			AttributedOrchAddress:     decision.AttributedOrchAddress,
+			AttributedOrchURI:         decision.AttributedOrchURI,
+			AttributionSnapshotTS:     decision.SnapshotTS,
+			HasAmbiguousIdentity:      boolToUInt8(decision.Status == "ambiguous"),
+			HasSnapshotMatch:          boolToUInt8(decision.CapabilityVersionID != ""),
+			IsHardwareLess:            boolToUInt8(decision.Status == "hardware_less"),
+			IsStale:                   boolToUInt8(decision.Status == "stale"),
 		}
 		if decision.SelectionEventID != "" {
 			row.CurrentSelectionEventID = decision.SelectionEventID
@@ -138,30 +141,29 @@ func buildStatusHourRows(evidence []statusHourEvidence, sessions map[string]Sess
 			continue
 		}
 		row := StatusHourRow{
-			SessionKey:               ev.SessionKey,
-			Org:                      ev.Org,
-			Hour:                     ev.Hour.UTC(),
-			StreamID:                 firstNonEmpty(ev.StreamID, session.StreamID),
-			RequestID:                firstNonEmpty(ev.RequestID, session.RequestID),
-			CanonicalPipeline:        session.CanonicalPipeline,
-			CanonicalModel:           session.CanonicalModel,
-			OrchAddress:              session.AttributedOrchAddress,
-			AttributionStatus:        session.AttributionStatus,
-			AttributionReason:        session.AttributionReason,
-			StartedAt:                session.StartedAt,
-			SessionLastSeen:          session.LastSeen.UTC(),
-			StatusSamples:            ev.StatusSamples,
-			FPSPositiveSamples:       ev.FPSPositiveSamples,
-			RunningStateSamples:      ev.RunningStateSamples,
-			DegradedInputSamples:     ev.DegradedInputSamples,
-			DegradedInferenceSamples: ev.DegradedInferenceSamples,
-			ErrorSamples:             ev.ErrorSamples,
-			AvgOutputFPS:             average(ev.OutputFPSSum, ev.StatusSamples),
-			AvgInputFPS:              average(ev.InputFPSSum, ev.StatusSamples),
-		}
-		if ev.E2ELatencyCount > 0 {
-			v := ev.E2ELatencySum / float64(ev.E2ELatencyCount)
-			row.AvgE2ELatencyMS = &v
+			SessionKey:                ev.SessionKey,
+			Org:                       ev.Org,
+			Hour:                      ev.Hour.UTC(),
+			StreamID:                  firstNonEmpty(ev.StreamID, session.StreamID),
+			RequestID:                 firstNonEmpty(ev.RequestID, session.RequestID),
+			CanonicalPipeline:         session.CanonicalPipeline,
+			CanonicalModel:            session.CanonicalModel,
+			OrchAddress:               session.AttributedOrchAddress,
+			AttributionStatus:         session.AttributionStatus,
+			AttributionReason:         session.AttributionReason,
+			StartedAt:                 session.StartedAt,
+			SessionLastSeen:           session.LastSeen.UTC(),
+			StartupLatencyMS:          session.StartupLatencyMS,
+			E2ELatencyMS:              session.E2ELatencyMS,
+			PromptToPlayableLatencyMS: session.PromptToPlayableLatencyMS,
+			StatusSamples:             ev.StatusSamples,
+			FPSPositiveSamples:        ev.FPSPositiveSamples,
+			RunningStateSamples:       ev.RunningStateSamples,
+			DegradedInputSamples:      ev.DegradedInputSamples,
+			DegradedInferenceSamples:  ev.DegradedInferenceSamples,
+			ErrorSamples:              ev.ErrorSamples,
+			AvgOutputFPS:              average(ev.OutputFPSSum, ev.StatusSamples),
+			AvgInputFPS:               average(ev.InputFPSSum, ev.StatusSamples),
 		}
 
 		prev := prevBySession[ev.SessionKey]
@@ -257,6 +259,18 @@ func average(sum float64, count uint64) float64 {
 		return 0
 	}
 	return sum / float64(count)
+}
+
+func deriveLatencyMS(start, end *time.Time) *float64 {
+	if start == nil || end == nil || start.IsZero() || end.IsZero() {
+		return nil
+	}
+	delta := end.UTC().Sub(start.UTC())
+	if delta < 0 {
+		return nil
+	}
+	ms := float64(delta) / float64(time.Millisecond)
+	return &ms
 }
 
 func boolToU64(v bool) uint64 {

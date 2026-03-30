@@ -657,6 +657,11 @@ At minimum, these trace subtypes have fixed meaning:
 
 **Output obligations**
 - startup, latency, and swap metrics use these canonical meanings only
+- latency proxies are fixed to these edge pairs:
+  - startup proxy: `gateway_receive_stream_request` -> `gateway_receive_first_processed_segment`
+  - E2E proxy: `gateway_send_first_ingest_segment` -> `runner_send_first_processed_segment`
+  - prompt-to-playable proxy: `ai_stream_status.start_time` -> `gateway_receive_few_processed_segments`
+- latency is nullable when either edge is missing or the ordering is inverted; it is never fabricated from unrelated status timestamps
 
 **Validator checks**
 - trace normalization never repurposes these subtypes silently
@@ -1528,6 +1533,7 @@ Where org-aware and public outputs both exist:
 **Validator checks**
 - public outputs equal explicit recomputation from lower canonical layers
 - serving logic does not redefine lifecycle or attribution semantics
+- `/v1/perf/e2e-latency`, status samples, and GPU metrics reuse the canonical session-edge latency facts rather than raw producer-specific latency payloads
 
 ## Parity And Quality Rules
 

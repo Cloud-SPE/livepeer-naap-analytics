@@ -1167,20 +1167,28 @@ components:
         gpu_id:                      { type: string, nullable: true }
         region:                      { type: string, nullable: true, description: "Always null — not captured in event data." }
         known_sessions_count:        { type: integer, format: int64 }
+        requested_sessions:          { type: integer, format: int64 }
         startup_success_sessions:    { type: integer, format: int64 }
         no_orch_sessions:            { type: integer, format: int64 }
         startup_excused_sessions:    { type: integer, format: int64, description: "Failed sessions whose KPI treatment is explicitly excused by canonical lifecycle rules." }
         startup_failed_sessions:     { type: integer, format: int64 }
+        loading_only_sessions:       { type: integer, format: int64 }
+        zero_output_fps_sessions:    { type: integer, format: int64 }
+        effective_failed_sessions:   { type: integer, format: int64 }
         confirmed_swapped_sessions:  { type: integer, format: int64, description: "Always 0 — confirmation signal absent." }
         inferred_swap_sessions:      { type: integer, format: int64 }
         total_swapped_sessions:      { type: integer, format: int64 }
         sessions_ending_in_error:    { type: integer, format: int64 }
         error_status_samples:        { type: integer, format: int64 }
+        health_signal_count:         { type: integer, format: int64 }
+        health_expected_signal_count: { type: integer, format: int64 }
         health_signal_coverage_ratio: { type: number, format: double }
-        startup_success_rate:        { type: number, format: double, nullable: true, description: "Null when known_sessions_count < 5." }
+        startup_success_rate:        { type: number, format: double, nullable: true }
         excused_failure_rate:        { type: number, format: double, nullable: true }
+        effective_success_rate:      { type: number, format: double, nullable: true }
         no_swap_rate:                { type: number, format: double, nullable: true }
-        sla_score:                   { type: number, format: double, nullable: true, description: "0.6×startup_success_rate + 0.4×no_swap_rate." }
+        output_viability_rate:       { type: number, format: double, nullable: true }
+        sla_score:                   { type: number, format: double, nullable: true, description: "100×health_signal_coverage_ratio×((0.4×startup_success_rate)+(0.2×no_swap_rate)+(0.4×output_viability_rate))." }
 
     SLAComplianceResponse:
       type: object
@@ -1209,14 +1217,20 @@ components:
         no_orch_sessions:            { type: integer, format: int64 }
         startup_excused_sessions:    { type: integer, format: int64 }
         startup_failed_sessions:     { type: integer, format: int64 }
+        loading_only_sessions:       { type: integer, format: int64 }
+        zero_output_fps_sessions:    { type: integer, format: int64 }
+        effective_failed_sessions:   { type: integer, format: int64 }
         confirmed_swapped_sessions:  { type: integer, format: int64 }
         inferred_swap_sessions:      { type: integer, format: int64 }
         total_swapped_sessions:      { type: integer, format: int64 }
         sessions_ending_in_error:    { type: integer, format: int64 }
         error_status_samples:        { type: integer, format: int64 }
+        health_signal_count:         { type: integer, format: int64 }
+        health_expected_signal_count: { type: integer, format: int64 }
         health_signal_coverage_ratio: { type: number, format: double }
         startup_success_rate:        { type: number, format: double }
         excused_failure_rate:        { type: number, format: double }
+        effective_success_rate:      { type: number, format: double }
         ticket_face_value_eth:       { type: number, format: double, description: "Proportional ETH payment estimate for this gateway's sessions." }
 
     NetworkDemandResponse:
@@ -1225,6 +1239,52 @@ components:
         demand:
           type: array
           items: { $ref: "#/components/schemas/NetworkDemandRow" }
+        pagination: { $ref: "#/components/schemas/Pagination" }
+
+    GPUNetworkDemandRow:
+      type: object
+      description: GPU-sliced network demand metrics for one (gateway, orchestrator, pipeline, model, gpu, window) bucket.
+      properties:
+        window_start:                { type: string, format: date-time }
+        org:                         { type: string, nullable: true }
+        gateway:                     { type: string }
+        orchestrator_address:        { type: string }
+        region:                      { type: string, nullable: true, description: "Always null." }
+        pipeline_id:                 { type: string }
+        model_id:                    { type: string, nullable: true }
+        gpu_id:                      { type: string, nullable: true }
+        gpu_identity_status:         { type: string, enum: [resolved, hardware_unresolved] }
+        sessions_count:              { type: integer, format: int64 }
+        avg_output_fps:              { type: number, format: double }
+        total_minutes:               { type: number, format: double }
+        known_sessions_count:        { type: integer, format: int64 }
+        requested_sessions:          { type: integer, format: int64 }
+        startup_success_sessions:    { type: integer, format: int64 }
+        no_orch_sessions:            { type: integer, format: int64 }
+        startup_excused_sessions:    { type: integer, format: int64 }
+        startup_failed_sessions:     { type: integer, format: int64 }
+        loading_only_sessions:       { type: integer, format: int64 }
+        zero_output_fps_sessions:    { type: integer, format: int64 }
+        effective_failed_sessions:   { type: integer, format: int64 }
+        confirmed_swapped_sessions:  { type: integer, format: int64 }
+        inferred_swap_sessions:      { type: integer, format: int64 }
+        total_swapped_sessions:      { type: integer, format: int64 }
+        sessions_ending_in_error:    { type: integer, format: int64 }
+        error_status_samples:        { type: integer, format: int64 }
+        health_signal_count:         { type: integer, format: int64 }
+        health_expected_signal_count: { type: integer, format: int64 }
+        health_signal_coverage_ratio: { type: number, format: double }
+        startup_success_rate:        { type: number, format: double }
+        excused_failure_rate:        { type: number, format: double }
+        effective_success_rate:      { type: number, format: double }
+        ticket_face_value_eth:       { type: number, format: double }
+
+    GPUNetworkDemandResponse:
+      type: object
+      properties:
+        demand:
+          type: array
+          items: { $ref: "#/components/schemas/GPUNetworkDemandRow" }
         pagination: { $ref: "#/components/schemas/Pagination" }
 
     GPUMetric:
@@ -1248,12 +1308,12 @@ components:
         gpu_memory_bytes_total:         { type: integer, format: int64, nullable: true }
         runner_version:                 { type: string, nullable: true, description: "Always null." }
         cuda_version:                   { type: string, nullable: true, description: "Always null." }
-        avg_prompt_to_first_frame_ms:   { type: number, format: double, nullable: true, description: "Always null." }
-        avg_startup_latency_ms:         { type: number, format: double, nullable: true }
-        avg_e2e_latency_ms:             { type: number, format: double, nullable: true }
-        p95_prompt_to_first_frame_latency_ms: { type: number, format: double, nullable: true, description: "Always null." }
-        p95_startup_latency_ms:         { type: number, format: double, nullable: true }
-        p95_e2e_latency_ms:             { type: number, format: double, nullable: true }
+        avg_prompt_to_first_frame_ms:   { type: number, format: double, nullable: true, description: "Mean prompt-to-playable proxy in milliseconds (`ai_stream_status.start_time` -> `gateway_receive_few_processed_segments`)." }
+        avg_startup_latency_ms:         { type: number, format: double, nullable: true, description: "Mean startup proxy in milliseconds (`gateway_receive_stream_request` -> `gateway_receive_first_processed_segment`)." }
+        avg_e2e_latency_ms:             { type: number, format: double, nullable: true, description: "Mean E2E proxy in milliseconds (`gateway_send_first_ingest_segment` -> `runner_send_first_processed_segment`)." }
+        p95_prompt_to_first_frame_latency_ms: { type: number, format: double, nullable: true, description: "P95 prompt-to-playable proxy in milliseconds (`ai_stream_status.start_time` -> `gateway_receive_few_processed_segments`)." }
+        p95_startup_latency_ms:         { type: number, format: double, nullable: true, description: "P95 startup proxy in milliseconds (`gateway_receive_stream_request` -> `gateway_receive_first_processed_segment`)." }
+        p95_e2e_latency_ms:             { type: number, format: double, nullable: true, description: "P95 E2E proxy in milliseconds (`gateway_send_first_ingest_segment` -> `runner_send_first_processed_segment`)." }
         prompt_to_first_frame_sample_count: { type: integer, format: int64 }
         startup_latency_sample_count:   { type: integer, format: int64 }
         e2e_latency_sample_count:       { type: integer, format: int64 }
@@ -2020,7 +2080,7 @@ paths:
   /v1/perf/e2e-latency:
     get:
       summary: E2E latency summary
-      description: Returns end-to-end latency percentiles from stream status samples.
+      description: Returns percentiles for the canonical session-edge E2E proxy (`gateway_send_first_ingest_segment` -> `runner_send_first_processed_segment`), surfaced on stream status samples after canonical refresh.
       operationId: getE2ELatencySummary
       tags: [Performance]
       parameters:
@@ -2039,7 +2099,7 @@ paths:
   /v1/perf/e2e-latency/history:
     get:
       summary: E2E latency history
-      description: Returns hourly E2E latency buckets (p50, p95, avg).
+      description: Returns hourly buckets for the canonical session-edge E2E proxy (`gateway_send_first_ingest_segment` -> `runner_send_first_processed_segment`).
       operationId: listE2ELatencyHistory
       tags: [Performance]
       parameters:
@@ -2308,11 +2368,7 @@ paths:
 
         **Window:** default 24h, min 1h, max 30d.
 
-        **Approximations vs. source schema:**
-        - `region` is always null (not captured in event data)
-        - `confirmed_swapped_sessions` is always 0
-        - `sla_score` = 0.6×startup_success_rate + 0.4×no_swap_rate
-        - Fields with < 5 sessions return null for rate fields
+        `region` is currently always null and confirmed swap counters remain 0.
       operationId: listSLACompliance
       tags: [SLA]
       parameters:
@@ -2337,13 +2393,13 @@ paths:
     get:
       summary: Network demand metrics
       description: |
-        Returns session demand metrics aggregated into hourly buckets per gateway.
+        Returns gateway demand metrics aggregated into hourly buckets.
         Grouped by (gateway, pipeline_id, model_id).
 
         **Window:** default 3h, min 1m, max 30d.
 
-        **Approximations:** `region` always null, `ticket_face_value_eth` is a
-        proportional estimate from pipeline-level payment data.
+        This surface unions perf-backed hourly keys with session-demand keys so
+        demand-only and perf-only rows both remain visible.
       operationId: listNetworkDemand
       tags: [Demand]
       parameters:
@@ -2363,6 +2419,37 @@ paths:
               schema: { $ref: "#/components/schemas/NetworkDemandResponse" }
         "500": { $ref: "#/components/responses/500" }
 
+  /v1/gpu/network-demand:
+    get:
+      summary: GPU-sliced network demand metrics
+      description: |
+        Returns GPU-sliced gateway demand metrics aggregated into hourly buckets.
+        Grouped by (gateway, orchestrator_address, pipeline_id, model_id, gpu_id).
+
+        **Window:** default 3h, min 1m, max 30d.
+
+        Hardware-unresolved rows remain visible with `gpu_identity_status = hardware_unresolved`.
+      operationId: listGPUNetworkDemand
+      tags: [Demand]
+      parameters:
+        - $ref: "#/components/parameters/org"
+        - $ref: "#/components/parameters/window"
+        - $ref: "#/components/parameters/gateway_filter"
+        - $ref: "#/components/parameters/orchestrator_address"
+        - $ref: "#/components/parameters/pipeline_id"
+        - $ref: "#/components/parameters/model_id"
+        - $ref: "#/components/parameters/gpu_id"
+        - $ref: "#/components/parameters/region"
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/page_size"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GPUNetworkDemandResponse" }
+        "500": { $ref: "#/components/responses/500" }
+
   /v1/gpu/metrics:
     get:
       summary: GPU performance metrics
@@ -2374,8 +2461,9 @@ paths:
 
         **Window:** default 24h, min 1m, max 72h.
 
-        **Approximations:** `region`, `runner_version`, `cuda_version`,
-        `avg_prompt_to_first_frame_ms`, and `fps_jitter_coefficient` are always null.
+        **Approximations:** `region`, `runner_version`, `cuda_version`, and
+        `fps_jitter_coefficient` are currently null. Latency fields use canonical
+        session-edge proxies rather than raw producer-reported status latency.
       operationId: listGPUMetrics
       tags: [GPUMetrics]
       parameters:
