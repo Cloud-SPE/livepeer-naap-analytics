@@ -129,3 +129,75 @@ func TestDirtyScanStateKeySortsExcludedPrefixes(t *testing.T) {
 		t.Fatalf("dirty scan state keys differ for same prefixes: %q vs %q", left, right)
 	}
 }
+
+func TestDirtyPartitionReadyHonorsQuietPeriod(t *testing.T) {
+	now := time.Date(2026, 3, 30, 16, 45, 0, 0, time.UTC)
+	part := dirtyPartition{LastDirtyAt: now.Add(-90 * time.Second)}
+	if dirtyPartitionReady(part, now, 2*time.Minute) {
+		t.Fatal("dirty partition should not be ready before quiet period elapses")
+	}
+	part.LastDirtyAt = now.Add(-3 * time.Minute)
+	if !dirtyPartitionReady(part, now, 2*time.Minute) {
+		t.Fatal("dirty partition should be ready after quiet period elapses")
+	}
+	if !dirtyPartitionReady(part, now, 0) {
+		t.Fatal("dirty partition should be ready immediately when quiet period is disabled")
+	}
+}
+
+func TestNextDirtyPartitionStateCoalescesClaimedPartition(t *testing.T) {
+	now := time.Date(2026, 3, 30, 16, 45, 0, 0, time.UTC)
+	lease := now.Add(2 * time.Minute)
+	current := &dirtyPartition{
+		Org:            "daydream",
+		EventDate:      time.Date(2026, 3, 27, 0, 0, 0, 0, time.UTC),
+		Status:         "claimed",
+		ClaimOwner:     "resolver-1234",
+		LeaseExpiresAt: &lease,
+		AttemptCount:   7,
+		FirstDirtyAt:   now.Add(-10 * time.Minute),
+		LastDirtyAt:    now.Add(-time.Minute),
+		UpdatedAt:      now.Add(-time.Minute),
+	}
+	part := backfillPartition{Org: "daydream", EventDate: current.EventDate}
+	state := nextDirtyPartitionState(current, part, now)
+	if state.Status != "claimed" {
+		t.Fatalf("status = %q, want claimed", state.Status)
+	}
+	if state.ClaimOwner != current.ClaimOwner {
+		t.Fatalf("claim owner = %q, want %q", state.ClaimOwner, current.ClaimOwner)
+	}
+	if state.LeaseExpiresAt == nil || !state.LeaseExpiresAt.Equal(lease) {
+		t.Fatalf("lease expiry = %v, want %v", state.LeaseExpiresAt, lease)
+	}
+	if state.AttemptCount != current.AttemptCount {
+		t.Fatalf("attempt_count = %d, want %d", state.AttemptCount, current.AttemptCount)
+	}
+	if !state.LastDirtyAt.Equal(now) {
+		t.Fatalf("last_dirty_at = %s, want %s", state.LastDirtyAt, now)
+	}
+}
+
+func TestNextDirtyPartitionStateRequeuesSuccessfulPartitionAsPending(t *testing.T) {
+	now := time.Date(2026, 3, 30, 16, 45, 0, 0, time.UTC)
+	current := &dirtyPartition{
+		Org:          "daydream",
+		EventDate:    time.Date(2026, 3, 27, 0, 0, 0, 0, time.UTC),
+		Status:       "success",
+		AttemptCount: 3,
+		FirstDirtyAt: now.Add(-10 * time.Minute),
+		LastDirtyAt:  now.Add(-5 * time.Minute),
+		UpdatedAt:    now.Add(-5 * time.Minute),
+	}
+	part := backfillPartition{Org: "daydream", EventDate: current.EventDate}
+	state := nextDirtyPartitionState(current, part, now)
+	if state.Status != "pending" {
+		t.Fatalf("status = %q, want pending", state.Status)
+	}
+	if state.AttemptCount != current.AttemptCount {
+		t.Fatalf("attempt_count = %d, want %d", state.AttemptCount, current.AttemptCount)
+	}
+	if state.ClaimOwner != "" || state.LeaseExpiresAt != nil {
+		t.Fatalf("pending state should not retain claim ownership")
+	}
+}

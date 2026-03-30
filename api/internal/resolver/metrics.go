@@ -59,7 +59,7 @@ var (
 )
 
 func setResolverSchedulerPhase(active string) {
-	for _, phase := range []string{"bootstrap_backlog", "historical_repair", "tail", "idle"} {
+	for _, phase := range []string{"bootstrap_backlog", "historical_repair", "historical_repair_wait", "tail", "idle"} {
 		value := 0.0
 		if phase == active {
 			value = 1

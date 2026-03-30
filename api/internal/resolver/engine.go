@@ -287,6 +287,10 @@ func (e *Engine) executeAutoCycle(ctx context.Context, req RunRequest, nextTailA
 		if listErr != nil {
 			return RunStats{}, nextTailAt, listErr
 		}
+		if ok && !dirtyPartitionReady(part, time.Now().UTC(), e.cfg.ResolverDirtyQuietPeriod) {
+			e.setPhase(ModeAuto, "historical_repair_wait")
+			ok = false
+		}
 		if ok {
 			phase = "historical_repair"
 			e.setPhase(ModeAuto, phase)
@@ -328,6 +332,13 @@ func (e *Engine) executeAutoCycle(ctx context.Context, req RunRequest, nextTailA
 	case <-timer.C:
 	}
 	return RunStats{}, time.Now().UTC(), nil
+}
+
+func dirtyPartitionReady(part dirtyPartition, now time.Time, quietPeriod time.Duration) bool {
+	if quietPeriod <= 0 {
+		return true
+	}
+	return !part.LastDirtyAt.UTC().After(now.UTC().Add(-quietPeriod))
 }
 
 func (e *Engine) Close(ctx context.Context) error {

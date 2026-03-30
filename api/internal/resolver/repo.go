@@ -1406,25 +1406,45 @@ func (r *repo) enqueueDirtyPartitions(ctx context.Context, parts []backfillParti
 		if err != nil {
 			return enqueued, err
 		}
-		state := dirtyPartition{
-			Org:          part.Org,
-			EventDate:    truncateUTCDate(part.EventDate),
-			Status:       "pending",
-			Reason:       "late_accepted_raw",
-			FirstDirtyAt: dirtyAt.UTC(),
-			LastDirtyAt:  dirtyAt.UTC(),
-			UpdatedAt:    dirtyAt.UTC(),
-		}
-		if current != nil {
-			state.FirstDirtyAt = current.FirstDirtyAt.UTC()
-			state.AttemptCount = current.AttemptCount
-		}
+		state := nextDirtyPartitionState(current, part, dirtyAt)
 		if err := r.insertDirtyPartitionState(ctx, state); err != nil {
 			return enqueued, fmt.Errorf("insert dirty partition pending state: %w", err)
 		}
 		enqueued++
 	}
 	return enqueued, nil
+}
+
+func nextDirtyPartitionState(current *dirtyPartition, part backfillPartition, dirtyAt time.Time) dirtyPartition {
+	state := dirtyPartition{
+		Org:          part.Org,
+		EventDate:    truncateUTCDate(part.EventDate),
+		Status:       "pending",
+		Reason:       "late_accepted_raw",
+		FirstDirtyAt: dirtyAt.UTC(),
+		LastDirtyAt:  dirtyAt.UTC(),
+		UpdatedAt:    dirtyAt.UTC(),
+	}
+	if current == nil {
+		return state
+	}
+	state.FirstDirtyAt = current.FirstDirtyAt.UTC()
+	state.AttemptCount = current.AttemptCount
+	state.LastErrorSummary = ""
+	switch current.Status {
+	case "claimed":
+		// Coalesce newly arrived late rows onto the in-flight claim instead of
+		// immediately flipping the same day back to pending.
+		state.Status = "claimed"
+		state.ClaimOwner = current.ClaimOwner
+		state.LeaseExpiresAt = current.LeaseExpiresAt
+		state.LastErrorSummary = current.LastErrorSummary
+	case "pending":
+		state.Status = "pending"
+	case "failed", "success":
+		state.Status = "pending"
+	}
+	return state
 }
 
 func (r *repo) claimDirtyPartition(ctx context.Context, org string, eventDate time.Time, ownerID string, ttl time.Duration) (bool, error) {

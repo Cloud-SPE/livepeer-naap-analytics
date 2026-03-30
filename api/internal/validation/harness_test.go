@@ -97,6 +97,7 @@ func newHarness(t *testing.T) *harness {
 		ResolverMode:             string(resolver.ModeRepairWindow),
 		ResolverInterval:         time.Minute,
 		ResolverLatenessWindow:   10 * time.Minute,
+		ResolverDirtyQuietPeriod: 0,
 		ResolverClaimTTL:         2 * time.Minute,
 		ResolverPort:             "0",
 		ResolverVersion:          "validation-selection-centered-v1",

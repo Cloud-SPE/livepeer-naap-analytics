@@ -62,6 +62,18 @@ Dirty historical repair is driven by:
 - `naap.resolver_dirty_partitions` as the durable queue of closed historical
   `(org, event_date)` repairs
 
+Automatic repair is intentionally stabilized during active replay:
+
+- newly accepted late rows for a closed historical day update that day's dirty
+  state rather than creating duplicate work
+- if a dirty day is already `claimed`, new late arrivals are coalesced onto the
+  in-flight claim instead of flipping the day back to `pending`
+- a pending dirty day is only eligible for automatic replay once it has been
+  quiet for `RESOLVER_DIRTY_QUIET_PERIOD`
+
+This avoids repeatedly replaying the same historical day while accepted raw
+backfill is still actively delivering more rows for that day.
+
 Only resolver-relevant accepted raw families enqueue dirty historical work:
 
 - `stream_trace`
@@ -207,6 +219,9 @@ Resolver `/healthz` on the metrics port now includes:
 - `accepted_raw_scan_watermark`
 - `tail_watermark`
 - `active_claim`
+
+Resolver scheduler phase may temporarily report `historical_repair_wait` when a
+closed dirty day exists but has not yet satisfied the quiet-period gate.
 
 Use heavy attribution-gap views only on bounded slices. Broad all-org runs can
 be expensive enough to restart a local ClickHouse. For wide investigations,
