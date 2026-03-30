@@ -7,18 +7,19 @@ import (
 	"github.com/livepeer/naap-analytics/internal/types"
 )
 
-// GetE2ELatencySummary returns end-to-end latency stats from stream status samples (E2E-001).
+// GetE2ELatencySummary returns session-edge E2E latency stats from canonical
+// session rollups (E2E-001).
 func (r *Repo) GetE2ELatencySummary(ctx context.Context, p types.QueryParams) (*types.E2ELatencySummary, error) {
 	start, end := effectiveWindow(p)
 
-	where := "WHERE sample_ts >= ? AND sample_ts < ? AND e2e_latency_ms > 0"
+	where := "WHERE last_seen >= ? AND coalesce(started_at, last_seen) < ? AND requested_seen = 1 AND e2e_latency_ms > 0"
 	args := []any{start, end}
 	if p.Org != "" {
 		where += " AND org = ?"
 		args = append(args, p.Org)
 	}
 	if p.Pipeline != "" {
-		where += " AND pipeline = ?"
+		where += " AND canonical_pipeline = ?"
 		args = append(args, p.Pipeline)
 	}
 
@@ -30,7 +31,7 @@ func (r *Repo) GetE2ELatencySummary(ctx context.Context, p types.QueryParams) (*
 			quantile(0.95)(e2e_latency_ms)   AS p95_ms,
 			quantile(0.99)(e2e_latency_ms)   AS p99_ms,
 			count()                          AS n
-		FROM naap.api_status_samples
+		FROM naap.canonical_session_current
 		`+where, args...)
 
 	var overall types.E2ELatencyStats
@@ -43,15 +44,15 @@ func (r *Repo) GetE2ELatencySummary(ctx context.Context, p types.QueryParams) (*
 	// By pipeline
 	pipeRows, err := r.conn.Query(ctx, `
 		SELECT
-			pipeline,
+			canonical_pipeline AS pipeline,
 			avg(e2e_latency_ms),
 			quantile(0.5)(e2e_latency_ms),
 			quantile(0.95)(e2e_latency_ms),
 			quantile(0.99)(e2e_latency_ms),
 			count()
-		FROM naap.api_status_samples
+		FROM naap.canonical_session_current
 		`+where+`
-		GROUP BY pipeline
+		GROUP BY canonical_pipeline
 		ORDER BY count() DESC
 		LIMIT 50
 	`, args...)
@@ -77,17 +78,17 @@ func (r *Repo) GetE2ELatencySummary(ctx context.Context, p types.QueryParams) (*
 	// By orchestrator (top 50 by sample count)
 	orchRows, err := r.conn.Query(ctx, `
 		SELECT
-			orch_address,
-			pipeline,
+			attributed_orch_address AS orch_address,
+			canonical_pipeline AS pipeline,
 			avg(e2e_latency_ms),
 			quantile(0.5)(e2e_latency_ms),
 			quantile(0.95)(e2e_latency_ms),
 			quantile(0.99)(e2e_latency_ms),
 			count()
-		FROM naap.api_status_samples
+		FROM naap.canonical_session_current
 		`+where+`
-		  AND orch_address != ''
-		GROUP BY orch_address, pipeline
+		  AND ifNull(attributed_orch_address, '') != ''
+		GROUP BY attributed_orch_address, canonical_pipeline
 		ORDER BY count() DESC
 		LIMIT 50
 	`, args...)
@@ -126,31 +127,32 @@ func (r *Repo) GetE2ELatencySummary(ctx context.Context, p types.QueryParams) (*
 	}, nil
 }
 
-// ListE2ELatencyHistory returns hourly E2E latency buckets (E2E-002).
+// ListE2ELatencyHistory returns hourly session-edge E2E latency buckets from
+// canonical status-hour rollups (E2E-002).
 func (r *Repo) ListE2ELatencyHistory(ctx context.Context, p types.QueryParams) ([]types.E2ELatencyBucket, error) {
 	start, end := effectiveWindow(p)
 	limit := effectiveLimit(p)
 
-	where := "WHERE sample_ts >= ? AND sample_ts < ? AND e2e_latency_ms > 0"
+	where := "WHERE hour >= ? AND hour < ? AND is_terminal_tail_artifact = 0 AND avg_e2e_latency_ms > 0"
 	args := []any{start, end}
 	if p.Org != "" {
 		where += " AND org = ?"
 		args = append(args, p.Org)
 	}
 	if p.Pipeline != "" {
-		where += " AND pipeline = ?"
+		where += " AND canonical_pipeline = ?"
 		args = append(args, p.Pipeline)
 	}
 	args = append(args, limit)
 
 	rows, err := r.conn.Query(ctx, `
 		SELECT
-			toStartOfHour(sample_ts)       AS hour,
-			avg(e2e_latency_ms)            AS avg_ms,
-			quantile(0.5)(e2e_latency_ms)  AS p50_ms,
-			quantile(0.95)(e2e_latency_ms) AS p95_ms,
+			hour,
+			avg(avg_e2e_latency_ms)            AS avg_ms,
+			quantile(0.5)(avg_e2e_latency_ms)  AS p50_ms,
+			quantile(0.95)(avg_e2e_latency_ms) AS p95_ms,
 			count()                        AS n
-		FROM naap.api_status_samples
+		FROM naap.canonical_status_hours
 		`+where+`
 		GROUP BY hour
 		ORDER BY hour ASC

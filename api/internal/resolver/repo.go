@@ -1898,6 +1898,9 @@ func (r *repo) publishServingRollups(ctx context.Context, runID string, slices [
 	if err := r.insertCanonicalActiveStreamState(ctx, runID, queryID); err != nil {
 		return err
 	}
+	if err := r.insertPaymentHourlyRollups(ctx, runID, queryID); err != nil {
+		return err
+	}
 	if err := r.insertNetworkDemandRollups(ctx, runID, queryID); err != nil {
 		return err
 	}
@@ -2048,6 +2051,39 @@ func (r *repo) insertCanonicalActiveStreamState(ctx context.Context, runID, quer
 		ORDER BY canonical_session_key, sample_ts DESC, event_id DESC
 		LIMIT 1 BY canonical_session_key
 	`, queryID, runID, r.cfg.ResolverVersion)
+}
+
+func (r *repo) insertPaymentHourlyRollups(ctx context.Context, runID, queryID string) error {
+	return r.conn.Exec(ctx, `
+		INSERT INTO naap.api_payment_hourly_store
+		(
+			hour, org, pipeline, orch_address, total_wei, event_count,
+			avg_price_wei_per_pixel, refresh_run_id, artifact_checksum, refreshed_at
+		)
+		SELECT
+			rs.window_start AS hour,
+			p.org AS org,
+			coalesce(fs.canonical_pipeline, p.pipeline_hint) AS pipeline,
+			p.recipient_address AS orch_address,
+			sum(p.face_value_wei) AS total_wei,
+			count() AS event_count,
+			avg(p.price_wei_per_pixel) AS avg_price_wei_per_pixel,
+			?,
+			?,
+			now64()
+		FROM naap.canonical_payment_links p
+		INNER JOIN naap.resolver_query_window_slices rs
+			ON rs.query_id = ?
+		   AND p.org = rs.org
+		   AND toStartOfHour(p.event_ts) = rs.window_start
+		LEFT JOIN naap.canonical_session_current fs
+			ON p.canonical_session_key = fs.canonical_session_key
+		GROUP BY
+			hour,
+			org,
+			pipeline,
+			orch_address
+	`, runID, r.cfg.ResolverVersion, queryID)
 }
 
 func (r *repo) insertNetworkDemandRollups(ctx context.Context, runID, queryID string) error {

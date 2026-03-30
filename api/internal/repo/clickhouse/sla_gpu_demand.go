@@ -294,10 +294,9 @@ func buildGPUDemandWhere(p types.GPUNetworkDemandParams) (string, []any) {
 // use canonical_* instead.
 //
 // Field approximations:
-//   - region, runner_version, cuda_version → always NULL
-//   - avg_prompt_to_first_frame_ms, p95 variant → NULL (not in event data)
-//   - fps_jitter_coefficient → NULL
-//   - confirmed/inferred swapped → 0
+//   - region, runner_version, cuda_version may be NULL when inventory is absent
+//   - fps_jitter_coefficient may be NULL when no jitter rollup is available
+//   - confirmed/inferred swapped may be 0 when no swap evidence exists
 func (r *Repo) ListGPUMetrics(ctx context.Context, p types.GPUMetricsParams) ([]types.GPUMetric, int, error) {
 	view := "naap.api_gpu_metrics"
 	if p.Org != "" {
@@ -319,7 +318,7 @@ func (r *Repo) ListGPUMetrics(ctx context.Context, p types.GPUMetricsParams) ([]
 			window_start, org, orchestrator_address, pipeline_id, model_id, gpu_id, region,
 			avg_output_fps, p95_output_fps, fps_jitter_coefficient,
 			status_samples, error_status_samples, health_signal_coverage_ratio,
-			gpu_model, memory_bytes, runner_version, cuda_version,
+			gpu_model_name, gpu_memory_bytes_total, runner_version, cuda_version,
 			avg_prompt_to_first_frame_ms, avg_startup_latency_ms, avg_e2e_latency_ms,
 			p95_prompt_to_first_frame_latency_ms, p95_startup_latency_ms, p95_e2e_latency_ms,
 			prompt_to_first_frame_sample_count, startup_latency_sample_count, e2e_latency_sample_count,
@@ -339,7 +338,8 @@ func (r *Repo) ListGPUMetrics(ctx context.Context, p types.GPUMetricsParams) ([]
 	var result []types.GPUMetric
 	for rows.Next() {
 		var m types.GPUMetric
-		// gpu_model and memory_bytes come from the join and may be NULL
+		// GPU inventory columns may be NULL when the serving rollup has no
+		// matching inventory snapshot for the GPU slice.
 		var gpuModel *string
 		var memBytes *uint64
 		if err := rows.Scan(
@@ -394,7 +394,7 @@ func buildGPUWhere(p types.GPUMetricsParams) (string, []any) {
 		args = append(args, p.GPUID)
 	}
 	if p.GPUModelName != "" {
-		conds = append(conds, "gpu_model = ?")
+		conds = append(conds, "gpu_model_name = ?")
 		args = append(args, p.GPUModelName)
 	}
 	return "WHERE " + strings.Join(conds, " AND "), args
