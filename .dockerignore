@@ -1,0 +1,10 @@
+# dbt generated artifacts — never bake into images
+warehouse/logs
+warehouse/target
+
+# Go build artifacts
+api/vendor
+
+# Dev / editor noise
+.git
+**/.DS_Store

@@ -11,6 +11,9 @@ FROM clickhouse/clickhouse-server:24.3
 # Server config overrides (kafka auto_offset_reset via from_env, listen addr, format settings)
 COPY infra/clickhouse/config/ /etc/clickhouse-server/config.d/
 
+# Bootstrap SQL — applied once on first container start before migrations
+COPY infra/clickhouse/bootstrap/ /bootstrap/
+
 # SQL migrations — applied in sort order on first container start by the init script
 COPY infra/clickhouse/migrations/ /migrations/
 

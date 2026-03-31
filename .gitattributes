@@ -1,0 +1,16 @@
+# Enforce LF line endings for all text files in this repo.
+# This overrides core.autocrlf and prevents CRLF from being checked out
+# on Windows/misconfigured machines — critical for shell scripts and SQL
+# that run inside Linux containers.
+
+* text=auto eol=lf
+
+# Explicitly mark binary files so git never touches their line endings
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.gz binary
+*.zip binary
+*.tar binary
