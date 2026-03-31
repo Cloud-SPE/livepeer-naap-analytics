@@ -1,0 +1,44 @@
+services:
+  traefik:
+    image: traefik:v3.6.8
+    container_name: traefik
+    restart: unless-stopped
+    environment:
+      - CLOUDFLARE_EMAIL=${CLOUDFLARE_EMAIL}
+      - CF_API_KEY=${CF_API_KEY}
+    networks:
+      - lpc-tester
+      - ingress
+    ports:
+      - "443:443"
+      - "8443:8443"
+    volumes:
+      - traefik_config:/etc/traefik
+      - traefik_certs:/ssl-certs/
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik_logs:/var/log/traefik/
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=lpc-tester"
+      - "traefik.http.routers.traefik-metrics.entrypoints=websecure"
+      - "traefik.http.routers.traefik-metrics.service=prometheus@internal"
+      - "traefik.http.services.traefik-metrics.loadbalancer.server.port=8080"
+      - "traefik.http.routers.traefik-metrics.tls.certresolver=cloudflare"
+      - "traefik.http.routers.traefik-metrics.rule=( Host(`${TRAEFIK_METRICS_DOMAIN}`) && PathPrefix(`/traefik/metrics`))"
+      - "traefik.http.middlewares.traefik-metrics-stripprefix.stripprefix.prefixes=/traefik/"
+      - "traefik.http.routers.traefik-metrics.middlewares=traefik-metrics-stripprefix@docker"
+
+
+volumes:
+  traefik_logs:
+    external: true
+  traefik_certs:
+    external: true
+  traefik_config:
+    external: true
+
+networks:
+  lpc-tester:
+    external: true
+  ingress:
+    external: true

@@ -37,8 +37,9 @@ services:
       - naap_grafana_data:/var/lib/grafana
     labels:
       - "traefik.enable=true"
+      - "traefik.docker.network=ingress"
       - "traefik.http.routers.naap-grafana.entrypoints=websecure"
-      - "traefik.http.routers.naap-grafana.rule=Host(`grafana.cloudspe.com`)"
+      - "traefik.http.routers.naap-grafana.rule=Host(`${NAAP_GRAFANA_DOMAIN}`)"
       - "traefik.http.routers.naap-grafana.tls.certresolver=cloudflare"
       - "traefik.http.routers.naap-grafana.service=naap-grafana"
       - "traefik.http.services.naap-grafana.loadbalancer.server.port=3000"
@@ -51,6 +52,7 @@ services:
 
 volumes:
   naap_grafana_data:
+      external: true
 
 networks:
   default:

@@ -1,0 +1,46 @@
+global:
+  checkNewVersion: true
+  sendAnonymousUsage: false
+serversTransport:
+  insecureSkipVerify: true
+  maxIdleConnsPerHost: 50
+metrics:
+  prometheus:
+    addRoutersLabels: true
+    entryPoint: metrics
+    buckets:
+      - 0.1
+      - 0.3
+      - 1.2
+      - 5.0
+log:
+  level: INFO  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  format: common  # common, json, logfmt
+  filePath: /var/log/traefik/traefik.log
+
+accesslog:
+  format: common  # common, json, logfmt
+  filePath: /var/log/traefik/access.log
+
+api:
+  dashboard: true
+  insecure: true
+entryPoints:
+  websecure:
+    address: :443
+  metrics:
+    address: :8443
+certificatesResolvers:
+  cloudflare:
+    acme:
+      email: PUT_CLOUDFLARE_EMAIL_HERE
+      storage: /ssl-certs/acme-cloudflare.json
+      dnschallenge:
+        resolvers: 1.1.1.1
+        provider: cloudflare
+providers:
+  docker:
+    exposedByDefault: false
+  file:
+    directory: /etc/traefik
+    watch: true

@@ -22,7 +22,6 @@
 #   LIVEPEER_API_URL       — Livepeer public API base URL
 
 services:
-
   api:
     image: tztcloud/naap-api:${IMAGE_TAG:-latest}
     container_name: naap-analytics-api
@@ -50,8 +49,9 @@ services:
       LIVEPEER_API_URL: ${LIVEPEER_API_URL:-https://livepeer-api.livepeer.cloud}
     labels:
       - "traefik.enable=true"
+      - "traefik.docker.network=ingress"
       - "traefik.http.routers.naap-api.entrypoints=websecure"
-      - "traefik.http.routers.naap-api.rule=Host(`naap-api.cloudspe.com`)"
+      - "traefik.http.routers.naap-api.rule=Host(`${NAAP_API_DOMAIN}`)"
       - "traefik.http.routers.naap-api.tls.certresolver=cloudflare"
       - "traefik.http.routers.naap-api.service=naap-api"
       - "traefik.http.routers.naap-api.middlewares=naap-api-ratelimit"

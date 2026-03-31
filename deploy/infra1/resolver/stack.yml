@@ -1,0 +1,32 @@
+services:
+  resolver:
+    image: tztcloud/naap-resolver:${IMAGE_TAG:-latest}
+    container_name: naap-analytics-resolver
+    environment:
+      ENV: production
+      LOG_LEVEL: debug
+      CLICKHOUSE_ADDR: naap-analytics-clickhouse:9000
+      CLICKHOUSE_DB: naap
+      CLICKHOUSE_WRITER_USER: naap_writer
+      CLICKHOUSE_WRITER_PASSWORD: ${CLICKHOUSE_WRITER_PASSWORD}
+      RESOLVER_ENABLED: "true"
+      # auto = single-service production mode:
+      #   bootstrap visible closed backlog,
+      #   repair dirty historical partitions from late accepted raw arrivals,
+      #   then keep tail current continuously
+      # bootstrap = bounded backlog catch-up only, then enter tail automatically
+      # tail = steady-state tail only
+      RESOLVER_MODE: ${RESOLVER_MODE:-auto}
+      RESOLVER_INTERVAL: 1m
+      RESOLVER_LATENESS_WINDOW: 10m
+      RESOLVER_DIRTY_QUIET_PERIOD: 2m
+      RESOLVER_CLAIM_TTL: 2m
+      RESOLVER_VERSION: selection-centered-v1
+      RESOLVER_BATCH_SIZE: "500"
+      RESOLVER_PORT: "9102"
+    restart: unless-stopped
+
+networks:
+  default:
+    name: ingress
+    external: true

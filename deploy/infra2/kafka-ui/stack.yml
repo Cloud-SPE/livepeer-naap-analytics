@@ -41,7 +41,7 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.naap-kafka-ui.entrypoints=websecure"
-      - "traefik.http.routers.naap-kafka-ui.rule=Host(`kafka-ui.cloudspe.com`)"
+      - "traefik.http.routers.naap-kafka-ui.rule=Host(`${NAAP_KAFKA_UI_DOMAIN}`)"
       - "traefik.http.routers.naap-kafka-ui.tls.certresolver=cloudflare"
       - "traefik.http.routers.naap-kafka-ui.service=naap-kafka-ui"
       - "traefik.http.services.naap-kafka-ui.loadbalancer.server.port=8080"

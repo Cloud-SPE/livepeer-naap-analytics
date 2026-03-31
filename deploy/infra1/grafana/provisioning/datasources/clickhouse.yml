@@ -7,7 +7,7 @@ datasources:
     access: proxy
     editable: false
     jsonData:
-      server: naap-analytics-clickhouse
+      server: clickhouse
       port: 8123
       protocol: http
       username: naap_reader

@@ -47,12 +47,12 @@ services:
       KAFKA_STREAMING_GROUP: ${KAFKA_STREAMING_GROUP:-clickhouse-naap-streaming}
 
       # Kafka Engine — SASL/SCRAM-SHA-512 (baked into DDL at migration time)
-      KAFKA_SECURITY_PROTOCOL: SASL_PLAINTEXT
+      KAFKA_SECURITY_PROTOCOL: SASL_SSL
       KAFKA_SASL_MECHANISM: SCRAM-SHA-512
       KAFKA_SASL_USERNAME: naap-consumer
       KAFKA_SASL_PASSWORD: ${NAAP_CONSUMER_PASSWORD}
     volumes:
-      - naap_v3_clickhouse_data:/var/lib/clickhouse
+      - naap_clickhouse_data:/var/lib/clickhouse
     ulimits:
       nofile:
         soft: 262144
@@ -62,14 +62,9 @@ services:
       interval: 10s
       timeout: 5s
       retries: 15
-    # ClickHouse ports are intentionally not exposed externally.
-    # Access via: docker exec or an SSH tunnel to localhost:8123 / localhost:9000.
-    # ports:
-    #   - "8123:8123"
-    #   - "9000:9000"
 
 volumes:
-  naap_v3_clickhouse_data:
+  naap_clickhouse_data:
     external: true
 
 networks:

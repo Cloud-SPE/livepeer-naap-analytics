@@ -1,21 +1,23 @@
-# NAAP Analytics — Warehouse Stack (infra2)
+# NAAP Analytics — Warehouse Stack
 #
 # Runs the dbt project that owns canonical analytics models downstream of the
-# ClickHouse typed layer. Intended for scheduled invocations via Portainer Cron
-# or an external scheduler.
+# ClickHouse typed layer.
 
 services:
   warehouse:
     image: tztcloud/naap-dbt:${IMAGE_TAG:-latest}
     container_name: naap-analytics-warehouse
-    restart: "no"
     environment:
       CLICKHOUSE_HOST: naap-analytics-clickhouse
       CLICKHOUSE_PORT: "8123"
       CLICKHOUSE_DB: naap
-      CLICKHOUSE_USER: naap_reader
-      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_READER_PASSWORD}
-    command: ["run", "--profiles-dir", "/app/warehouse", "--project-dir", "/app/warehouse"]
+      CLICKHOUSE_USER: naap_writer
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_WRITER_PASSWORD}
+      DBT_AUTO_RUN_ON_START: "false"
+      DBT_PROFILES_DIR: /app/warehouse
+    working_dir: /app/warehouse
+    command: ["run"]
+    restart: "no"
 
 networks:
   default:
