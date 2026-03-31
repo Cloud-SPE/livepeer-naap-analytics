@@ -30,17 +30,30 @@ The hot read path is no longer built around `naap.events` or compatibility `v_ap
 
 ```
 api/                    Go REST API (port 8000)
-  cmd/server/           Entrypoint
+  cmd/server/           API server entrypoint
+  cmd/resolver/         Resolver service entrypoint (separate binary)
   internal/
     config/             Environment config (envconfig)
     enrichment/         Livepeer API polling worker (ENS names, stake, gateway data, GPU inventory)
     providers/          Cross-cutting: logger, telemetry, Kafka client
-    repo/clickhouse/    ClickHouse query layer (R1–R6)
+    repo/clickhouse/    ClickHouse query layer (R1–R15)
     service/            Business logic (leaderboard scoring, etc.)
     types/              Domain types shared across layers
     runtime/            HTTP handlers, middleware, Prometheus metrics, server wiring
       static/           Embedded assets (openapi.yaml)
     validation/         Scenario-based data-quality test harness (31 tests)
+    resolver/           Resolver service logic
+
+warehouse/              dbt semantic analytics layer
+  dbt_project.yml       dbt project config
+  profiles.yml          ClickHouse connection profile
+  models/
+    staging/            Thin views over normalized tables
+    canonical/          Authoritative semantic derivations
+    api/                Presentation/read-model layer
+  macros/               dbt macros
+  tests/                dbt data tests
+  README.md             Ownership boundaries and tier contracts
 
 infra/
   clickhouse/
@@ -48,17 +61,45 @@ infra/
     bootstrap/          Generated fresh-volume bootstrap schema
     init/               Docker entrypoint schema runner (bootstrap or migrations)
     migrations/         Forward migrations only after the v1 bootstrap baseline
-  docker/               Dockerfiles for api
+  docker/               Dockerfiles for api, clickhouse, dbt, resolver
   grafana/
     dashboards/         Grafana dashboard JSON files (auto-loaded on startup)
-                          naap-overview.json, naap-live-operations.json,
-                          naap-economics.json, naap-performance-drilldown.json,
-                          naap-supply-inventory.json
+                          naap-overview.json        — system health overview
+                          naap-live-operations.json — real-time stream activity
+                          naap-economics.json       — payments and revenue metrics
+                          naap-performance-drilldown.json — FPS, latency, WebRTC
+                          naap-supply-inventory.json — GPU supply and capacity
     provisioning/       Grafana datasource and dashboard provider config
                           datasources/clickhouse.yml  — grafana-clickhouse-datasource
                           datasources/prometheus.yml  — Prometheus datasource
   kafka/                Kafka topic definitions
   prometheus/           Prometheus scrape configuration
+
+deploy/
+  infra1/               Production deployment stacks for infra1 (consumes infra2 Kafka)
+    app/                API service stack
+    resolver/           Resolver service stack
+    clickhouse/         ClickHouse stack (SASL_SSL to infra2 Kafka)
+    grafana/            Grafana stack
+    prometheus/         Prometheus stack (180-day retention)
+    traefik/            Traefik reverse proxy (Cloudflare DNS challenge TLS)
+    warehouse/          dbt warehouse stack
+  infra2/               Production deployment stacks for infra2 (hosts Kafka broker)
+    app/                API service stack
+    clickhouse/         ClickHouse stack (local Kafka, SASL_PLAINTEXT)
+    grafana/            Grafana stack
+    prometheus/         Prometheus stack (90-day retention)
+    traefik/            Traefik reverse proxy (Cloudflare DNS challenge TLS)
+    kafka/              Kafka KRaft stack (SCRAM-SHA-512 auth, external port 9092)
+    kafka-ui/           Kafka UI stack (kafka-ui.cloudspe.com)
+    mirrormaker2/       Kafka MirrorMaker2 — replicates network_events from Confluent Cloud
+    warehouse/          dbt warehouse stack
+    .env.example        Production env template for infra2
+    README.md           infra2 deployment guide
+  stack.yml             Legacy monolithic stack reference
+  README.md             Production deployment guide (Portainer / Docker Swarm)
+
+scripts/                Utility scripts (setup, backfill SQL, performance measurement)
 
 docs/
   DESIGN.md             Architecture overview and layer rules
@@ -68,7 +109,7 @@ docs/
   operations/           Supported run modes and recovery guides
   generated/            Generated schema and baseline references
   exec-plans/           Per-phase execution plans (active + completed)
-  product-specs/        Feature requirements (R1–R6)
+  product-specs/        Feature requirements (R1–R15)
 
 tests/load/             k6 load test script
 tools/inspector/        Event inspection utility
@@ -109,15 +150,49 @@ make down
 service so fresh volumes get the semantic `canonical_*` and `api_*` views
 without keeping a warehouse container idling in the default stack.
 
-**Useful make targets:**
+**Make targets reference:**
 
 ```bash
-make logs             # Follow all service logs
-make up-tooling       # Start the optional dbt tooling container
-make warehouse-run    # Publish dbt semantic views once
-make ch-query         # Interactive ClickHouse shell
-make ch-smoke         # Quick smoke test (event counts, agg table rows)
-make inspect          # Run event inspector against production broker
+# Stack
+make up                       # Start full local stack
+make down                     # Stop and remove containers
+make logs                     # Follow all service logs
+make up-tooling               # Start the optional dbt tooling container
+
+# Build
+make build                    # Build all Go binaries (go build ./...)
+make push                     # Build and push all Docker images to registry
+make push-api                 # Build and push API image only
+make push-resolver            # Build and push resolver image only
+
+# Testing
+make test                     # Go unit tests with race detector
+make test-integration         # Integration tests (requires running ClickHouse)
+make test-validation          # Data-quality validation tests (isolated environment)
+make bench                    # Benchmarks
+make load-test                # k6 load test (requires API on localhost:8000)
+
+# ClickHouse
+make ch-query                 # Interactive ClickHouse shell
+make ch-smoke                 # Quick smoke test (event counts, agg table rows)
+make migrate-status           # Show migration state
+make migrate-up               # Run pending migrations
+
+# Warehouse (dbt)
+make warehouse-run            # Publish dbt semantic views once
+make warehouse-test           # Run dbt tests
+make warehouse-compile        # Compile dbt project (dry-run)
+
+# Resolver
+make resolver-logs            # Follow resolver logs
+make resolver-auto            # Run resolver in auto mode (bootstrap + tail)
+make resolver-bootstrap       # Run resolver in bootstrap-only mode
+make resolver-tail            # Run resolver in tail-only mode
+make resolver-repair-window   # Repair a specific time window (requires FROM= and TO=)
+
+# Inspect
+make inspect                  # Run event inspector against production broker
+make inspect-json             # Run event inspector with JSON output
 ```
 
 **Service ports (local):**
@@ -131,20 +206,30 @@ make inspect          # Run event inspector against production broker
 | 9308 | Kafka exporter metrics |
 | 8123 | ClickHouse HTTP |
 | 9000 | ClickHouse native |
+| 9363 | ClickHouse Prometheus metrics |
+| 9102 | Resolver Prometheus metrics |
 | 9100 | node-exporter host metrics (internal) |
 
 ## Building
 
 ```bash
-make build            # Build all Docker images
-make build-api        # Build API image only
-make build-pipeline   # Build pipeline image only
+make build            # Build all Go binaries (no Docker)
+make push             # Build and push all Docker images (api, clickhouse, dbt, resolver)
+make push-api         # Build and push API image only
+make push-resolver    # Build and push resolver image only
 ```
 
-To build the API binary directly (without Docker):
+To build Go binaries directly:
 
 ```bash
 cd api && go build -o bin/server ./cmd/server
+cd api && go build -o bin/resolver ./cmd/resolver
+```
+
+Production images require registry access (`docker login tztcloud`). Set `IMAGE_TAG` to tag a specific version:
+
+```bash
+IMAGE_TAG=v1.2.3 make push
 ```
 
 ## Testing
@@ -247,6 +332,30 @@ Common query parameters: `org`, `start`, `end`, `limit`, `offset`, `active_only`
 |--------|------|-------------|
 | GET | `/v1/net/capacity` | GPU supply (warm orchs, VRAM) vs. active stream demand |
 
+## Resolver service
+
+The resolver is an always-on background service that publishes corrected current and serving
+state into the `canonical_*_store` and `api_*_store` tables. It runs alongside the API in the
+local stack and has its own Prometheus metrics endpoint on port `9102`.
+
+**Run modes** (controlled by `RESOLVER_MODE`):
+
+| Mode | Description |
+|---|---|
+| `auto` | Bootstrap backlog then switch to continuous tail (production default) |
+| `bootstrap` | One-shot: process the full closed historical backlog and exit |
+| `tail` | Continuous: keep the live lateness window current only |
+| `repair` | Repair a specific time window; use with `make resolver-repair-window FROM= TO=` |
+
+**Useful targets:**
+
+```bash
+make resolver-auto                                              # auto mode (bootstrap + tail)
+make resolver-bootstrap                                         # bootstrap only
+make resolver-tail                                              # tail only
+make resolver-repair-window FROM=2026-01-01T00:00:00Z TO=2026-01-02T00:00:00Z
+```
+
 Prometheus metrics exposed on `/metrics`:
 
 | Metric | Type | Labels |
@@ -277,6 +386,20 @@ All configuration is via environment variables. Copy `.env.example` to `.env`.
 | `RATE_LIMIT_BURST` | `60` | Burst allowance |
 | `OTLP_ENDPOINT` | *(empty)* | OTLP trace endpoint; empty disables telemetry |
 
+### Resolver service
+
+| Variable | Default | Description |
+|---|---|---|
+| `RESOLVER_ENABLED` | `true` | Enable/disable the resolver service |
+| `RESOLVER_MODE` | `auto` | Run mode: `auto`, `bootstrap`, `tail`, or `repair` |
+| `RESOLVER_INTERVAL` | `1m` | How often the resolver polls for new work in tail mode |
+| `RESOLVER_LATENESS_WINDOW` | `10m` | Look-back window for late-arriving events |
+| `RESOLVER_DIRTY_QUIET_PERIOD` | `2m` | Wait after last write before re-resolving a dirty stream |
+| `RESOLVER_CLAIM_TTL` | `2m` | Lock TTL for in-flight resolution claims |
+| `RESOLVER_VERSION` | `selection-centered-v1` | Attribution logic version |
+| `RESOLVER_BATCH_SIZE` | `500` | Records processed per resolver batch |
+| `RESOLVER_PORT` | `9102` | Prometheus metrics port for the resolver |
+
 ### Enrichment worker
 
 | Variable | Default | Description |
@@ -294,9 +417,20 @@ passes them to the ClickHouse container at startup).
 |---|---|---|
 | `KAFKA_BROKER_LIST` | `infra2.cloudspe.com:9092` | Broker for ClickHouse Kafka Engine tables |
 | `KAFKA_AUTO_OFFSET_RESET` | `earliest` | `earliest` = full history; `latest` = new data only |
+| `KAFKA_SECURITY_PROTOCOL` | *(empty)* | Leave empty for local plaintext; `SASL_SSL` for production |
+| `KAFKA_SASL_MECHANISM` | *(empty)* | e.g. `SCRAM-SHA-512` for production |
+| `KAFKA_SASL_USERNAME` | *(empty)* | SASL username for ClickHouse Kafka Engine |
+| `KAFKA_SASL_PASSWORD` | *(empty)* | SASL password for ClickHouse Kafka Engine |
 | `CLICKHOUSE_ADMIN_PASSWORD` | `changeme` | Admin user password |
 | `CLICKHOUSE_WRITER_PASSWORD` | `naap_writer_changeme` | Writer user password |
 | `CLICKHOUSE_READER_PASSWORD` | `naap_reader_changeme` | Reader user password |
+| `CLICKHOUSE_SCHEMA_MODE` | `bootstrap` | `bootstrap` = apply full schema on fresh volume; `verify` = check-only on existing volume |
+
+### Build / Deploy
+
+| Variable | Default | Description |
+|---|---|---|
+| `IMAGE_TAG` | `latest` | Docker image tag used by `make push` and production stack files |
 
 > **Important:** `KAFKA_BROKER_LIST` is baked into the Kafka Engine table DDL at
 > migration time. To change the broker on an already-running instance, set the new
@@ -305,60 +439,78 @@ passes them to the ClickHouse container at startup).
 
 ## Deploying to production
 
-The stack is fully Dockerised. For a single-host deployment:
+Production deployments run as **Docker Swarm stacks**, with each service in its own stack file under `deploy/infra1/` and `deploy/infra2/`. See [`deploy/README.md`](deploy/README.md) and [`deploy/infra2/README.md`](deploy/infra2/README.md) for full Portainer/Swarm deployment instructions.
+
+### Environments
+
+**infra2** — hosts the Kafka broker, ClickHouse, API, Grafana, Kafka UI, and MirrorMaker2.
+
+**infra1** — hosts a second ClickHouse instance (consuming from infra2 Kafka via SASL_SSL), API, Resolver, and Grafana.
+
+Both environments use **Traefik** as the reverse proxy with Cloudflare DNS challenge for automatic TLS.
+
+### Quick start (infra2)
 
 ```bash
-# 1. Clone and configure
 git clone <repo-url>
-cd livepeer-naap-analytics-simplified
-cp .env.example .env
+cd livepeer-naap-analytics
+cp deploy/infra2/.env.example deploy/infra2/.env
+# Edit .env — set all passwords and domain names
 ```
 
 Edit `.env` for production:
 
 ```bash
-ENV=production
-LOG_LEVEL=info
-
-# Strong passwords
+# Strong passwords (avoid | character — used as delimiter in ClickHouse SQL)
 CLICKHOUSE_ADMIN_PASSWORD=<strong-password>
 CLICKHOUSE_WRITER_PASSWORD=<strong-password>
 CLICKHOUSE_READER_PASSWORD=<strong-password>
+NAAP_CONSUMER_PASSWORD=<strong-password>
 
-# Point at the production Kafka broker
-KAFKA_BROKER_LIST=infra2.cloudspe.com:9092
-KAFKA_AUTO_OFFSET_RESET=latest   # new data only; use 'earliest' for initial backfill
+# Kafka
+KAFKA_LOG_RETENTION_HOURS=168
 
-# Rate limiting (tune to traffic expectations)
+# Grafana
+GF_ADMIN_USER=admin
+GF_ADMIN_PASSWORD=<strong-password>
+
+# Traefik (Cloudflare DNS challenge)
+CLOUDFLARE_EMAIL=<your-cf-email>
+CF_API_KEY=<your-cf-global-api-key>
+
+# Domains
+NAAP_API_DOMAIN=naap-api.cloudspe.com
+NAAP_GRAFANA_DOMAIN=grafana.cloudspe.com
+
+# Rate limiting
 RATE_LIMIT_RPS=100
 RATE_LIMIT_BURST=200
 
-# Optional: send traces to Grafana / Honeycomb / Jaeger
-OTLP_ENDPOINT=https://your-otlp-endpoint
+KAFKA_AUTO_OFFSET_RESET=latest   # use 'earliest' for initial backfill
 ```
 
+Deploy each stack via Portainer or `docker stack deploy`:
+
 ```bash
-# 2. Start in detached mode
-docker compose up -d
-
-# 3. Verify
-curl https://your-domain/healthz
-
-# 4. Expose via a reverse proxy (nginx / Caddy) for TLS
-# The API listens on port 8000; proxy HTTPS → http://localhost:8000
+docker stack deploy -c deploy/infra2/kafka/stack.yml naap-kafka
+docker stack deploy -c deploy/infra2/clickhouse/stack.yml naap-clickhouse
+docker stack deploy -c deploy/infra2/app/stack.yml naap-app
+# etc.
 ```
 
 ### Production checklist
 
-- [ ] All default passwords changed in `.env` (admin, reader, writer)
-- [ ] `ENV=production` and `LOG_LEVEL=info`
-- [ ] TLS terminated at reverse proxy (Caddy or nginx)
+- [ ] All default passwords changed (admin, reader, writer, consumer, Grafana, Kafka UI)
+- [ ] `LOG_LEVEL=info`
+- [ ] Traefik Cloudflare credentials set (`CLOUDFLARE_EMAIL`, `CF_API_KEY`)
+- [ ] Domain labels set for each service
 - [ ] `KAFKA_AUTO_OFFSET_RESET=latest` (after initial backfill is complete)
 - [ ] Rate limits tuned (`RATE_LIMIT_RPS`, `RATE_LIMIT_BURST`)
-- [ ] ClickHouse data volume backed up or on persistent block storage
+- [ ] ClickHouse data volume on persistent block storage
 - [ ] `OTLP_ENDPOINT` set for OTLP tracing (optional; Prometheus metrics are always on)
-- [ ] Firewall: only ports 80/443 exposed externally; 8123/9000/9363 internal only
+- [ ] Firewall: only ports 80/443/9092 exposed externally; 8123/9000/9363 internal only
 - [ ] Enrichment worker: `ENRICHMENT_ENABLED=true`, `LIVEPEER_API_URL` reachable from host
+- [ ] MirrorMaker2 credentials set if replicating from Confluent Cloud (`DAYDREAM_SASL_USERNAME`, `DAYDREAM_SASL_PASSWORD`)
 
 ### Initial backfill
 
@@ -398,10 +550,10 @@ docker compose exec clickhouse clickhouse-client \
   --user naap_admin --password changeme \
   --query "SELECT table, sum(num_messages_read) FROM system.kafka_consumers GROUP BY table"
 
-# Change data TTL (default 365 days)
+# Change data TTL on a table (example: accepted_raw_events, default 365 days)
 docker compose exec clickhouse clickhouse-client \
   --user naap_admin --password changeme \
-  --query "ALTER TABLE naap.events MODIFY TTL toDateTime(event_ts) + INTERVAL 180 DAY"
+  --query "ALTER TABLE naap.accepted_raw_events MODIFY TTL toDateTime(event_ts) + INTERVAL 180 DAY"
 ```
 
 See `infra/clickhouse/README.md` for the full ClickHouse operations guide.
@@ -410,8 +562,17 @@ See `infra/clickhouse/README.md` for the full ClickHouse operations guide.
 
 - **Layer rule:** dependencies flow forward only — `Types → Config → Repo → Service → Runtime`. No layer imports from a layer ahead of it.
 - **Orch address resolution:** `ai_stream_status` events carry a node-local keypair address, not the on-chain ETH address. Migration 011 resolves this via `orchestrator_info.url → agg_orch_state.uri → orch_address`.
-- **Deduplication:** `naap.events` is `ReplacingMergeTree` keyed on `event_id`. Kafka at-least-once duplicates are collapsed in background merges. Queries on raw `naap.events` without `FINAL` may transiently over-count until a merge runs; aggregate tables are not affected.
+- **Deduplication:** `accepted_raw_events` and `normalized_*` tables use `ReplacingMergeTree` keyed on `event_id`. Kafka at-least-once duplicates are collapsed in background merges. The legacy `naap.events` table also uses this pattern but is no longer the primary read path.
 - **Ingest path:** ClickHouse consumes from Kafka directly via the Kafka Engine — there is no application-layer consumer between Kafka and ClickHouse.
+- **MirrorMaker2:** `network_events` (gateway-originated) are replicated from Confluent Cloud into infra2 Kafka via MirrorMaker2. `streaming_events` are produced directly by Cloud SPE gateways.
+
+### Kafka topics
+
+| Topic | Partitions | Retention | Purpose |
+|---|---|---|---|
+| `naap.events.raw` | 6 | 7 days | Raw inbound events from gateways |
+| `naap.analytics.aggregated` | 3 | 30 days | Pre-aggregated analytics |
+| `naap.alerts` | 1 | 7 days | Alert signals |
 
 ## Documentation
 
@@ -421,9 +582,11 @@ See `infra/clickhouse/README.md` for the full ClickHouse operations guide.
 | `docs/PRODUCT_SENSE.md` | Product goals and success criteria |
 | `docs/design-docs/` | Architecture decision records and behavioral contracts |
 | `docs/design-docs/data-validation-rules.md` | Data validation behavioral contract (17 rules, 31 tests) |
-| `docs/product-specs/` | Per-feature requirements (R1–R6) |
+| `docs/product-specs/` | Per-feature requirements (R1–R15) |
 | `docs/exec-plans/` | Phase execution plans and history |
 | `infra/clickhouse/README.md` | ClickHouse operations guide |
-| `deploy/README.md` | Production deployment guide (Portainer) |
+| `warehouse/README.md` | dbt ownership boundaries and tier contracts |
+| `deploy/README.md` | Production deployment guide (Portainer / Docker Swarm) |
+| `deploy/infra2/README.md` | infra2-specific deployment guide |
 | `GET /docs` | Interactive API documentation (Swagger UI) |
 | `GET /docs/openapi.yaml` | OpenAPI 3.0.3 spec |
