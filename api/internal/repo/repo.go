@@ -88,6 +88,15 @@ type AnalyticsRepo interface {
 	ListGPUNetworkDemand(ctx context.Context, p types.GPUNetworkDemandParams) ([]types.GPUNetworkDemandRow, int, error)
 	ListGPUMetrics(ctx context.Context, p types.GPUMetricsParams) ([]types.GPUMetric, int, error)
 
+	// Dashboard — pre-aggregated UI endpoints (R16)
+	GetDashboardKPI(ctx context.Context, windowHours int) (*types.DashboardKPI, error)
+	GetDashboardPipelines(ctx context.Context, limit int) ([]types.DashboardPipelineUsage, error)
+	GetDashboardOrchestrators(ctx context.Context, windowHours int) ([]types.DashboardOrchestrator, error)
+	GetDashboardGPUCapacity(ctx context.Context) (*types.DashboardGPUCapacity, error)
+	GetDashboardPipelineCatalog(ctx context.Context) ([]types.DashboardPipelineCatalogEntry, error)
+	GetDashboardPricing(ctx context.Context) ([]types.DashboardPipelinePricing, error)
+	GetDashboardJobFeed(ctx context.Context, limit int) ([]types.DashboardJobFeedItem, error)
+
 	// Healthcheck
 	Ping(ctx context.Context) error
 }
@@ -226,5 +235,26 @@ func (n *NoopAnalyticsRepo) ListGPUNetworkDemand(_ context.Context, _ types.GPUN
 }
 func (n *NoopAnalyticsRepo) ListGPUMetrics(_ context.Context, _ types.GPUMetricsParams) ([]types.GPUMetric, int, error) {
 	return nil, 0, nil
+}
+func (n *NoopAnalyticsRepo) GetDashboardKPI(_ context.Context, _ int) (*types.DashboardKPI, error) {
+	return &types.DashboardKPI{HourlySessions: []types.DashboardHourlyBucket{}, HourlyUsage: []types.DashboardHourlyBucket{}}, nil
+}
+func (n *NoopAnalyticsRepo) GetDashboardPipelines(_ context.Context, _ int) ([]types.DashboardPipelineUsage, error) {
+	return []types.DashboardPipelineUsage{}, nil
+}
+func (n *NoopAnalyticsRepo) GetDashboardOrchestrators(_ context.Context, _ int) ([]types.DashboardOrchestrator, error) {
+	return []types.DashboardOrchestrator{}, nil
+}
+func (n *NoopAnalyticsRepo) GetDashboardGPUCapacity(_ context.Context) (*types.DashboardGPUCapacity, error) {
+	return &types.DashboardGPUCapacity{Models: []types.DashboardGPUModelCapacity{}, PipelineGPUs: []types.DashboardGPUCapacityPipeline{}}, nil
+}
+func (n *NoopAnalyticsRepo) GetDashboardPipelineCatalog(_ context.Context) ([]types.DashboardPipelineCatalogEntry, error) {
+	return []types.DashboardPipelineCatalogEntry{}, nil
+}
+func (n *NoopAnalyticsRepo) GetDashboardPricing(_ context.Context) ([]types.DashboardPipelinePricing, error) {
+	return []types.DashboardPipelinePricing{}, nil
+}
+func (n *NoopAnalyticsRepo) GetDashboardJobFeed(_ context.Context, _ int) ([]types.DashboardJobFeedItem, error) {
+	return []types.DashboardJobFeedItem{}, nil
 }
 func (n *NoopAnalyticsRepo) Ping(_ context.Context) error { return nil }

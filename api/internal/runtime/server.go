@@ -173,6 +173,15 @@ func (s *Server) buildRouter() chi.Router {
 		r.Get("/network/demand", s.handleListNetworkDemand)
 		r.Get("/gpu/network-demand", s.handleListGPUNetworkDemand)
 		r.Get("/gpu/metrics", s.handleListGPUMetrics)
+
+		// Dashboard — pre-aggregated UI endpoints (R16)
+		r.Get("/dashboard/kpi", s.handleGetDashboardKPI)
+		r.Get("/dashboard/pipelines", s.handleGetDashboardPipelines)
+		r.Get("/dashboard/orchestrators", s.handleGetDashboardOrchestrators)
+		r.Get("/dashboard/gpu-capacity", s.handleGetDashboardGPUCapacity)
+		r.Get("/dashboard/pipeline-catalog", s.handleGetDashboardPipelineCatalog)
+		r.Get("/dashboard/pricing", s.handleGetDashboardPricing)
+		r.Get("/dashboard/job-feed", s.handleGetDashboardJobFeed)
 	})
 
 	return r

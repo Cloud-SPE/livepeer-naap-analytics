@@ -91,6 +91,15 @@ type AnalyticsService interface {
 	ListGPUNetworkDemand(ctx context.Context, p types.GPUNetworkDemandParams) ([]types.GPUNetworkDemandRow, int, error)
 	ListGPUMetrics(ctx context.Context, p types.GPUMetricsParams) ([]types.GPUMetric, int, error)
 
+	// Dashboard — pre-aggregated UI endpoints (R16)
+	GetDashboardKPI(ctx context.Context, windowHours int) (*types.DashboardKPI, error)
+	GetDashboardPipelines(ctx context.Context, limit int) ([]types.DashboardPipelineUsage, error)
+	GetDashboardOrchestrators(ctx context.Context, windowHours int) ([]types.DashboardOrchestrator, error)
+	GetDashboardGPUCapacity(ctx context.Context) (*types.DashboardGPUCapacity, error)
+	GetDashboardPipelineCatalog(ctx context.Context) ([]types.DashboardPipelineCatalogEntry, error)
+	GetDashboardPricing(ctx context.Context) ([]types.DashboardPipelinePricing, error)
+	GetDashboardJobFeed(ctx context.Context, limit int) ([]types.DashboardJobFeedItem, error)
+
 	// Health
 	Ping(ctx context.Context) error
 }
@@ -512,6 +521,62 @@ func (s *analyticsService) ListGPUMetrics(ctx context.Context, p types.GPUMetric
 		return nil, 0, fmt.Errorf("list gpu metrics: %w", err)
 	}
 	return rows, total, nil
+}
+
+func (s *analyticsService) GetDashboardKPI(ctx context.Context, windowHours int) (*types.DashboardKPI, error) {
+	v, err := s.repo.GetDashboardKPI(ctx, windowHours)
+	if err != nil {
+		return nil, fmt.Errorf("get dashboard kpi: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) GetDashboardPipelines(ctx context.Context, limit int) ([]types.DashboardPipelineUsage, error) {
+	v, err := s.repo.GetDashboardPipelines(ctx, limit)
+	if err != nil {
+		return nil, fmt.Errorf("get dashboard pipelines: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) GetDashboardOrchestrators(ctx context.Context, windowHours int) ([]types.DashboardOrchestrator, error) {
+	v, err := s.repo.GetDashboardOrchestrators(ctx, windowHours)
+	if err != nil {
+		return nil, fmt.Errorf("get dashboard orchestrators: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) GetDashboardGPUCapacity(ctx context.Context) (*types.DashboardGPUCapacity, error) {
+	v, err := s.repo.GetDashboardGPUCapacity(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get dashboard gpu capacity: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) GetDashboardPipelineCatalog(ctx context.Context) ([]types.DashboardPipelineCatalogEntry, error) {
+	v, err := s.repo.GetDashboardPipelineCatalog(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get dashboard pipeline catalog: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) GetDashboardPricing(ctx context.Context) ([]types.DashboardPipelinePricing, error) {
+	v, err := s.repo.GetDashboardPricing(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get dashboard pricing: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) GetDashboardJobFeed(ctx context.Context, limit int) ([]types.DashboardJobFeedItem, error) {
+	v, err := s.repo.GetDashboardJobFeed(ctx, limit)
+	if err != nil {
+		return nil, fmt.Errorf("get dashboard job feed: %w", err)
+	}
+	return v, nil
 }
 
 func (s *analyticsService) Ping(ctx context.Context) error {
