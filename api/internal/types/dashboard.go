@@ -55,6 +55,8 @@ type DashboardPipelineModelOffer struct {
 // (matches plugin-sdk DashboardOrchestrator).
 type DashboardOrchestrator struct {
 	Address              string                        `json:"address"`
+	EnsName              string                        `json:"ensName,omitempty"`
+	ServiceURI           string                        `json:"serviceUri,omitempty"`
 	KnownSessions        int64                         `json:"knownSessions"`
 	SuccessSessions      int64                         `json:"successSessions"`
 	SuccessRatio         float64                       `json:"successRatio"`
@@ -121,6 +123,7 @@ type DashboardPipelinePricing struct {
 type DashboardJobFeedItem struct {
 	ID              string   `json:"id"`
 	Pipeline        string   `json:"pipeline"`
+	Model           string   `json:"model,omitempty"`
 	Gateway         string   `json:"gateway"`
 	OrchestratorURL string   `json:"orchestratorUrl"`
 	State           string   `json:"state"`

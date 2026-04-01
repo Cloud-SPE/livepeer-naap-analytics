@@ -16,12 +16,10 @@ info:
     float64 precision loss (e.g. `"1234500000000000000"`).
 
 servers:
-  - url: https://naap-api.cloudspe.com
+  - url: https://naap-api.livepeer.cloud
     description: Production
   - url: http://localhost:8000
     description: Local development
-  - url: https://naap-api.livepeer.cloud
-    description: Production
 
 tags:
   - name: Health
@@ -51,6 +49,8 @@ tags:
     description: Network demand metrics per gateway/pipeline (ported from leaderboard-serverless)
   - name: GPUMetrics
     description: GPU performance metrics per orchestrator/pipeline (ported from leaderboard-serverless)
+  - name: Dashboard
+    description: Pre-aggregated, UI-ready endpoints for the NAAP dashboard widgets (R16)
 
 # ── Common parameter definitions ──────────────────────────────────────────────
 
@@ -62,7 +62,7 @@ components:
       description: Filter to a single organisation. Omit for all orgs.
       schema:
         type: string
-        enum: [daydream, cloudspe]
+        enum: [daydream]
     start:
       name: start
       in: query
@@ -220,6 +220,146 @@ components:
         type: string
 
   schemas:
+
+    # ── Dashboard (R16) ──────────────────────────────────────────────────────
+
+    DashboardMetricDelta:
+      type: object
+      properties:
+        value: { type: number, format: double }
+        delta: { type: number, format: double, description: "Period-over-period % change" }
+      required: [value, delta]
+
+    DashboardHourlyBucket:
+      type: object
+      properties:
+        hour: { type: string, format: date-time }
+        value: { type: number, format: double }
+      required: [hour, value]
+
+    DashboardKPI:
+      type: object
+      properties:
+        successRate:          { $ref: "#/components/schemas/DashboardMetricDelta" }
+        orchestratorsOnline:  { $ref: "#/components/schemas/DashboardMetricDelta" }
+        dailyUsageMins:       { $ref: "#/components/schemas/DashboardMetricDelta", description: "Total stream-minutes from api_network_demand" }
+        dailySessionCount:    { $ref: "#/components/schemas/DashboardMetricDelta" }
+        dailyNetworkFeesEth:  { $ref: "#/components/schemas/DashboardMetricDelta" }
+        timeframeHours:       { type: integer }
+        hourlySessions:
+          type: array
+          items: { $ref: "#/components/schemas/DashboardHourlyBucket" }
+        hourlyUsage:
+          type: array
+          items: { $ref: "#/components/schemas/DashboardHourlyBucket" }
+
+    DashboardPipelineUsage:
+      type: object
+      properties:
+        name:     { type: string }
+        sessions: { type: integer, format: int64 }
+        mins:     { type: number, format: double }
+        avgFps:   { type: number, format: double }
+
+    DashboardPipelineModelOffer:
+      type: object
+      properties:
+        pipelineId: { type: string }
+        modelIds:
+          type: array
+          items: { type: string }
+
+    DashboardOrchestrator:
+      type: object
+      properties:
+        address:              { type: string }
+        ensName:              { type: string, description: "ENS name if registered, empty otherwise" }
+        serviceUri:           { type: string, description: "Orchestrator service URI (e.g. https://host:8935)" }
+        knownSessions:        { type: integer, format: int64 }
+        successSessions:      { type: integer, format: int64 }
+        successRatio:         { type: number, format: double }
+        effectiveSuccessRate: { type: number, format: double, nullable: true }
+        noSwapRatio:          { type: number, format: double, nullable: true }
+        slaScore:             { type: number, format: double, nullable: true }
+        pipelines:
+          type: array
+          items: { type: string }
+        pipelineModels:
+          type: array
+          items: { $ref: "#/components/schemas/DashboardPipelineModelOffer" }
+        gpuCount: { type: integer, format: int64 }
+
+    DashboardGPUModelCapacity:
+      type: object
+      properties:
+        model: { type: string }
+        count: { type: integer, format: int64 }
+
+    DashboardGPUCapacityPipelineModel:
+      type: object
+      properties:
+        model: { type: string }
+        gpus:  { type: integer, format: int64 }
+
+    DashboardGPUCapacityPipeline:
+      type: object
+      properties:
+        name: { type: string }
+        gpus: { type: integer, format: int64 }
+        models:
+          type: array
+          items: { $ref: "#/components/schemas/DashboardGPUCapacityPipelineModel" }
+
+    DashboardGPUCapacity:
+      type: object
+      properties:
+        totalGPUs:         { type: integer, format: int64 }
+        activeGPUs:        { type: integer, format: int64 }
+        availableCapacity: { type: number, format: double, description: "Fraction 0–1" }
+        models:
+          type: array
+          items: { $ref: "#/components/schemas/DashboardGPUModelCapacity" }
+        pipelineGPUs:
+          type: array
+          items: { $ref: "#/components/schemas/DashboardGPUCapacityPipeline" }
+
+    DashboardPipelineCatalogEntry:
+      type: object
+      properties:
+        id:      { type: string }
+        name:    { type: string }
+        models:
+          type: array
+          items: { type: string }
+        regions:
+          type: array
+          items: { type: string }
+
+    DashboardPipelinePricing:
+      type: object
+      properties:
+        pipeline:           { type: string }
+        model:              { type: string }
+        orchCount:          { type: integer, format: int64 }
+        priceMinWeiPerUnit: { type: integer, format: int64 }
+        priceMaxWeiPerUnit: { type: integer, format: int64 }
+        priceAvgWeiPerUnit: { type: number, format: double }
+        pixelsPerUnit:      { type: integer, format: int64 }
+
+    DashboardJobFeedItem:
+      type: object
+      properties:
+        id:              { type: string }
+        pipeline:        { type: string }
+        model:           { type: string }
+        gateway:         { type: string }
+        orchestratorUrl: { type: string }
+        state:           { type: string }
+        inputFps:        { type: number, format: double }
+        outputFps:       { type: number, format: double }
+        firstSeen:       { type: string, format: date-time }
+        lastSeen:        { type: string, format: date-time }
+        durationSeconds: { type: number, format: double, nullable: true }
 
     # ── Shared ──────────────────────────────────────────────────────────────
 
@@ -2485,4 +2625,171 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/GPUMetricsResponse" }
+        "500": { $ref: "#/components/responses/500" }
+
+  # ── Dashboard paths (R16) ─────────────────────────────────────────────────
+
+  /v1/dashboard/kpi:
+    get:
+      summary: Dashboard KPI metrics
+      description: |
+        Returns top-level KPI metrics for the dashboard: success rate, active
+        orchestrators, session count, and hourly time-series buckets.
+
+        Deltas are computed by splitting the window into two equal halves and
+        comparing their aggregates.
+
+        **Window:** default 24h, max 168h (7 days). Accepts `?window=24h` or `?window=7d`.
+      operationId: getDashboardKPI
+      tags: [Dashboard]
+      parameters:
+        - $ref: "#/components/parameters/window"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DashboardKPI" }
+        "500": { $ref: "#/components/responses/500" }
+
+  /v1/dashboard/pipelines:
+    get:
+      summary: Pipeline usage summary
+      description: |
+        Returns the top N pipelines by session count over the last 24 hours.
+        Suitable for the pipeline usage bar chart.
+      operationId: getDashboardPipelines
+      tags: [Dashboard]
+      parameters:
+        - name: limit
+          in: query
+          description: Maximum pipelines to return (1–20, default 5).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 20
+            default: 5
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/DashboardPipelineUsage" }
+        "500": { $ref: "#/components/responses/500" }
+
+  /v1/dashboard/orchestrators:
+    get:
+      summary: Orchestrator SLA table
+      description: |
+        Returns per-orchestrator SLA metrics aggregated over a rolling window.
+        Includes session counts, effective success rate, no-swap ratio, and
+        composite SLA score (0.7 × effectiveSuccessRate + 0.3 × noSwapRatio).
+        Also includes the pipelines and models each orchestrator currently offers,
+        and GPU count from the hardware inventory.
+
+        **Window:** default 7d (168h), max 30d (720h).
+      operationId: getDashboardOrchestrators
+      tags: [Dashboard]
+      parameters:
+        - $ref: "#/components/parameters/window"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/DashboardOrchestrator" }
+        "500": { $ref: "#/components/responses/500" }
+
+  /v1/dashboard/gpu-capacity:
+    get:
+      summary: GPU capacity inventory
+      description: |
+        Returns GPU hardware inventory grouped by pipeline, model, and GPU model.
+        Data is sourced from the latest capability snapshots (last 10 minutes).
+        Suitable for the GPU capacity widget.
+      operationId: getDashboardGPUCapacity
+      tags: [Dashboard]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DashboardGPUCapacity" }
+        "500": { $ref: "#/components/responses/500" }
+
+  /v1/dashboard/pipeline-catalog:
+    get:
+      summary: Active pipeline catalog
+      description: |
+        Returns all pipeline + model combinations currently offered by at least
+        one warm orchestrator (seen within the last 10 minutes).
+        Suitable for the pipeline catalog widget.
+      operationId: getDashboardPipelineCatalog
+      tags: [Dashboard]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/DashboardPipelineCatalogEntry" }
+        "500": { $ref: "#/components/responses/500" }
+
+  /v1/dashboard/pricing:
+    get:
+      summary: Pipeline pricing (raw wei)
+      description: |
+        Returns raw wei-per-unit pricing for each pipeline + model combination,
+        aggregated across all active orchestrators.
+
+        `priceAvgWeiPerUnit` is the unweighted mean across orchestrators that
+        advertise a price. Convert to a human scale with `price = avg / 1e12`.
+        Only orchestrators active within the last 10 minutes are included.
+        Coverage is sparse — most orchestrators do not advertise prices.
+      operationId: getDashboardPricing
+      tags: [Dashboard]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/DashboardPipelinePricing" }
+        "500": { $ref: "#/components/responses/500" }
+
+  /v1/dashboard/job-feed:
+    get:
+      summary: Live job feed
+      description: |
+        Returns currently active streams grouped by session key, ordered by most
+        recently seen. Each item represents one active stream request attributed
+        to a gateway/orchestrator pair.
+
+        Streams with no orchestrator attribution yet appear with an empty
+        `orchestratorUrl` field.
+      operationId: getDashboardJobFeed
+      tags: [Dashboard]
+      parameters:
+        - name: limit
+          in: query
+          description: Maximum items to return (1–200, default 50).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/DashboardJobFeedItem" }
         "500": { $ref: "#/components/responses/500" }
