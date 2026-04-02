@@ -1,0 +1,25 @@
+#Files that need modification
+
+vi /etc/sysctl.conf
+vi /etc/ssh/sshd_config
+vi /etc/sudoers.d/nopasswd
+vi /etc/docker/daemon.json
+
+vi /var/lib/docker/volumes/naap_clickhouse_db_config/_data/01-schema.sql
+vi /var/lib/docker/volumes/naap_clickhouse_config_d/_data/docker_related_config.xml
+vi /var/lib/docker/volumes/naap_clickhouse_config_d/_data/logger.xml
+vi /var/lib/docker/volumes/naap_clickhouse_user_config/_data/default-user.xml
+vi /var/lib/docker/volumes/naap_mediamtx_config/_data/mediamtx.yml
+vi /var/lib/docker/volumes/naap_gateway-lpData/_data/eth-secret.txt
+vi /var/lib/docker/volumes/naap_gateway-lpData/_data/key.json
+vi /var/lib/docker/volumes/traefik_config/_data/traefik.yml
+vi /var/lib/docker/volumes/naap_grafana_config/_data/datasources/clickhouse.yml
+vi /var/lib/docker/volumes/naap_grafana_config/_data/datasources/infinity.yml
+
+vi /var/lib/docker/volumes/naap_grafana_config/_data/dashboards/dashboard.yml
+vi /var/lib/docker/volumes/naap_grafana_config/_data/dashboards/naap-live-operations.json
+vi /var/lib/docker/volumes/naap_grafana_config/_data/dashboards/naap-performance-drilldown.json
+vi /var/lib/docker/volumes/naap_grafana_config/_data/dashboards/quality-gate.json
+vi /var/lib/docker/volumes/naap_grafana_config/_data/dashboards/naap-economics.json
+vi /var/lib/docker/volumes/naap_grafana_config/_data/dashboards/naap-overview.json
+vi /var/lib/docker/volumes/naap_grafana_config/_data/dashboards/naap-supply-inventory.json

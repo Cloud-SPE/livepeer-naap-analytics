@@ -15,6 +15,7 @@
 | Document | Status | Last verified | Description |
 |----------|--------|--------------|-------------|
 | [`../operations/data-retention-policy.md`](../operations/data-retention-policy.md) | ✅ current | 2026-04-02 | Kafka topic retention windows, ClickHouse TTL inventory, replay strategy, and known gaps |
+| [`../operations/infra-hardening-runbook.md`](../operations/infra-hardening-runbook.md) | ✅ current | 2026-04-02 | Security posture, Kafka listener architecture, open hardening action items (ports 9001, 8443, 8123) |
 
 ## Status legend
 
