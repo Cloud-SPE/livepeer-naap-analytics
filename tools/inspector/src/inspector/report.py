@@ -199,6 +199,95 @@ def _print_topic_report(r: AnalysisResult) -> None:
     if r.capabilities_snapshot_count:
         console.print(f"[dim]Network capabilities snapshots in sample: {r.capabilities_snapshot_count}[/]")
 
+    # ── AI Batch jobs ──────────────────────────────────────────────────────
+    if r.ai_batch_by_pipeline:
+        abt = Table(title="AI Batch Jobs by Pipeline", box=box.SIMPLE_HEAD)
+        abt.add_column("Pipeline", style="cyan")
+        abt.add_column("Jobs", justify="right")
+        abt.add_column("Success%", justify="right")
+        abt.add_column("Avg duration (ms)", justify="right")
+        abt.add_column("Avg latency score", justify="right")
+        for pipeline, jobs in sorted(r.ai_batch_by_pipeline.items(), key=lambda x: -len(x[1])):
+            total = len(jobs)
+            successes = sum(1 for j in jobs if j["success"] is True)
+            durations = [j["duration_ms"] for j in jobs if j["duration_ms"] is not None]
+            latencies = [j["latency_score"] for j in jobs if j["latency_score"] is not None]
+            abt.add_row(
+                pipeline,
+                str(total),
+                _pct(successes, total),
+                _avg(durations),
+                _avg(latencies),
+            )
+        console.print(abt)
+
+    # ── AI Batch LLM metrics ───────────────────────────────────────────────
+    if r.ai_batch_llm_by_model:
+        llmt = Table(title="AI Batch — LLM Metrics by Model", box=box.SIMPLE_HEAD)
+        llmt.add_column("Model", style="cyan")
+        llmt.add_column("Requests", justify="right")
+        llmt.add_column("Success%", justify="right")
+        llmt.add_column("Avg TPS", justify="right")
+        llmt.add_column("Avg TTFT (ms)", justify="right")
+        llmt.add_column("Avg tokens", justify="right")
+        for model, reqs in sorted(r.ai_batch_llm_by_model.items(), key=lambda x: -len(x[1])):
+            total = len(reqs)
+            successes = sum(1 for req in reqs if not req["has_error"])
+            tps_vals = [req["tps"] for req in reqs if req["tps"] is not None]
+            ttft_vals = [req["ttft_ms"] for req in reqs if req["ttft_ms"] is not None]
+            token_vals = [float(req["total_tokens"]) for req in reqs if req["total_tokens"] is not None]
+            llmt.add_row(
+                model,
+                str(total),
+                _pct(successes, total),
+                _avg(tps_vals),
+                _avg(ttft_vals),
+                _avg(token_vals),
+            )
+        console.print(llmt)
+
+    # ── BYOC jobs ──────────────────────────────────────────────────────────
+    if r.byoc_jobs_by_capability:
+        bct = Table(title="BYOC Jobs by Capability", box=box.SIMPLE_HEAD)
+        bct.add_column("Capability", style="cyan")
+        bct.add_column("Jobs", justify="right")
+        bct.add_column("Success%", justify="right")
+        bct.add_column("Avg duration (ms)", justify="right")
+        for cap, jobs in sorted(r.byoc_jobs_by_capability.items(), key=lambda x: -len(x[1])):
+            total = len(jobs)
+            successes = sum(1 for j in jobs if j["success"] is True)
+            durations = [j["duration_ms"] for j in jobs if j["duration_ms"] is not None]
+            bct.add_row(cap, str(total), _pct(successes, total), _avg(durations))
+        console.print(bct)
+
+    # ── BYOC workers ───────────────────────────────────────────────────────
+    if r.byoc_workers_by_capability:
+        bwt = Table(title="BYOC Worker Inventory by Capability", box=box.SIMPLE_HEAD)
+        bwt.add_column("Capability", style="cyan")
+        bwt.add_column("Workers seen", justify="right")
+        bwt.add_column("Models")
+        bwt.add_column("Avg price/unit", justify="right")
+        for cap, w in sorted(r.byoc_workers_by_capability.items(), key=lambda x: -x[1]["worker_count"]):
+            prices = w["prices"]
+            avg_price = _avg(prices)
+            models_str = ", ".join(sorted(w["models"])) or "—"
+            bwt.add_row(cap, str(w["worker_count"]), models_str, avg_price)
+        console.print(bwt)
+
+    # ── BYOC auth ──────────────────────────────────────────────────────────
+    if r.byoc_auth_by_capability:
+        bat = Table(title="BYOC Auth Events by Capability", box=box.SIMPLE_HEAD)
+        bat.add_column("Capability", style="cyan")
+        bat.add_column("Total events", justify="right")
+        bat.add_column("Success%", justify="right")
+        bat.add_column("Failures", justify="right")
+        for cap, events in sorted(r.byoc_auth_by_capability.items(), key=lambda x: -len(x[1])):
+            total = len(events)
+            successes = sum(1 for e in events if e["success"] is True)
+            failures = sum(1 for e in events if e["success"] is False)
+            bat.add_row(cap, str(total), _pct(successes, total), str(failures))
+        console.print(bat)
+
     console.print()
 
 

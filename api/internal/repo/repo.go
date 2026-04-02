@@ -97,6 +97,17 @@ type AnalyticsRepo interface {
 	GetDashboardPricing(ctx context.Context) ([]types.DashboardPipelinePricing, error)
 	GetDashboardJobFeed(ctx context.Context, limit int) ([]types.DashboardJobFeedItem, error)
 
+	// AI Batch Jobs (R17)
+	GetAIBatchSummary(ctx context.Context, p types.QueryParams) ([]types.AIBatchJobSummary, error)
+	ListAIBatchJobs(ctx context.Context, p types.QueryParams) ([]types.AIBatchJobRecord, error)
+	GetAIBatchLLMSummary(ctx context.Context, p types.QueryParams) ([]types.AIBatchLLMSummary, error)
+
+	// BYOC Jobs (R18)
+	GetBYOCSummary(ctx context.Context, p types.QueryParams) ([]types.BYOCJobSummary, error)
+	ListBYOCJobs(ctx context.Context, p types.QueryParams) ([]types.BYOCJobRecord, error)
+	GetBYOCWorkers(ctx context.Context, p types.QueryParams) ([]types.BYOCWorkerSummary, error)
+	GetBYOCAuthSummary(ctx context.Context, p types.QueryParams) ([]types.BYOCAuthSummary, error)
+
 	// Healthcheck
 	Ping(ctx context.Context) error
 }
@@ -256,5 +267,26 @@ func (n *NoopAnalyticsRepo) GetDashboardPricing(_ context.Context) ([]types.Dash
 }
 func (n *NoopAnalyticsRepo) GetDashboardJobFeed(_ context.Context, _ int) ([]types.DashboardJobFeedItem, error) {
 	return []types.DashboardJobFeedItem{}, nil
+}
+func (n *NoopAnalyticsRepo) GetAIBatchSummary(_ context.Context, _ types.QueryParams) ([]types.AIBatchJobSummary, error) {
+	return []types.AIBatchJobSummary{}, nil
+}
+func (n *NoopAnalyticsRepo) ListAIBatchJobs(_ context.Context, _ types.QueryParams) ([]types.AIBatchJobRecord, error) {
+	return []types.AIBatchJobRecord{}, nil
+}
+func (n *NoopAnalyticsRepo) GetAIBatchLLMSummary(_ context.Context, _ types.QueryParams) ([]types.AIBatchLLMSummary, error) {
+	return []types.AIBatchLLMSummary{}, nil
+}
+func (n *NoopAnalyticsRepo) GetBYOCSummary(_ context.Context, _ types.QueryParams) ([]types.BYOCJobSummary, error) {
+	return []types.BYOCJobSummary{}, nil
+}
+func (n *NoopAnalyticsRepo) ListBYOCJobs(_ context.Context, _ types.QueryParams) ([]types.BYOCJobRecord, error) {
+	return []types.BYOCJobRecord{}, nil
+}
+func (n *NoopAnalyticsRepo) GetBYOCWorkers(_ context.Context, _ types.QueryParams) ([]types.BYOCWorkerSummary, error) {
+	return []types.BYOCWorkerSummary{}, nil
+}
+func (n *NoopAnalyticsRepo) GetBYOCAuthSummary(_ context.Context, _ types.QueryParams) ([]types.BYOCAuthSummary, error) {
+	return []types.BYOCAuthSummary{}, nil
 }
 func (n *NoopAnalyticsRepo) Ping(_ context.Context) error { return nil }
