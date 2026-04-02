@@ -23,16 +23,36 @@ scrape_configs:
 
   - job_name: kafka
     static_configs:
-      - targets: ["kafka-exporter:9308"]
-    metrics_path: /metrics
+      - targets: ["metrics-infra2.livepeer.cloud"]
+        labels:
+          host: infra2
+    metrics_path: /kafka-exporter/metrics
 
   - job_name: node
     static_configs:
       - targets: ["node-exporter:9100"]
+        labels:
+          host: infra1
+
+  - job_name: node-infra2
+    static_configs:
+      - targets: ["metrics-infra2.livepeer.cloud"]
+        labels:
+          host: infra2
+    metrics_path: /node-exporter/metrics
 
   - job_name: cadvisor
     static_configs:
       - targets: ["cadvisor:8080"]
+        labels:
+          host: infra1
+
+  - job_name: cadvisor-infra2
+    static_configs:
+      - targets: ["metrics-infra2.livepeer.cloud"]
+        labels:
+          host: infra2
+    metrics_path: /cadvisor/metrics
 
   - job_name: prometheus
     static_configs:

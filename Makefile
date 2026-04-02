@@ -1,4 +1,4 @@
-.PHONY: up up-tooling down build test test-integration bench load-test lint dev-api setup fmt ch-smoke ch-query push push-api push-clickhouse push-dbt push-resolver warehouse-run warehouse-test warehouse-compile test-validation test-validation-host test-validation-docker test-validation-clean measure-baseline measure-refactor-replay migrate-status migrate-validate migrate-up bootstrap-extract resolver-logs resolver-auto resolver-bootstrap resolver-tail resolver-backfill resolver-repair-window parity-verify backfill-rollups backfill-raw-mv-views
+.PHONY: up up-tooling down build test test-integration bench load-test lint dev-api setup fmt ch-smoke ch-query push push-api push-clickhouse push-dbt push-resolver push-mcp warehouse-run warehouse-test warehouse-compile test-validation test-validation-host test-validation-docker test-validation-clean measure-baseline measure-refactor-replay migrate-status migrate-validate migrate-up bootstrap-extract resolver-logs resolver-auto resolver-bootstrap resolver-tail resolver-backfill resolver-repair-window parity-verify backfill-rollups backfill-raw-mv-views
 
 REGISTRY  ?= tztcloud
 IMAGE_TAG ?= latest
@@ -53,6 +53,12 @@ push-resolver:
 	    -t $(REGISTRY)/naap-resolver:$(IMAGE_TAG) \
 	    .
 	docker push $(REGISTRY)/naap-resolver:$(IMAGE_TAG)
+
+push-mcp:
+	docker build \
+	    -t $(REGISTRY)/naap-mcp-clickhouse:$(IMAGE_TAG) \
+	    ../mcp-clickhouse
+	docker push $(REGISTRY)/naap-mcp-clickhouse:$(IMAGE_TAG)
 
 # ── Test ──────────────────────────────────────────────────────────────────────
 

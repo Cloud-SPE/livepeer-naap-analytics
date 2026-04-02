@@ -111,7 +111,15 @@ services:
       - "--sasl.mechanism=scram-sha512"
       - "--sasl.username=naap-monitor"
       - "--sasl.password=${KAFKA_MONITOR_PASSWORD}"
-
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=ingress"
+      - "traefik.http.routers.naap-kafka-exporter.entrypoints=websecure"
+      - "traefik.http.routers.naap-kafka-exporter.rule=Host(`${KAFKA_EXPORTER_DOMAIN}`)"
+      - "traefik.http.routers.naap-kafka-exporter.tls.certresolver=cloudflare"
+      - "traefik.http.routers.naap-kafka-exporter.service=naap-kafka-exporter"
+      - "traefik.http.services.naap-kafka-exporter.loadbalancer.server.port=9308"
+      - "traefik.http.services.naap-kafka-exporter.loadbalancer.server.scheme=http"
 volumes:
   naap_kafka_data:
     external: true

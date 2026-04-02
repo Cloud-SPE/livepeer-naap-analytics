@@ -1,0 +1,59 @@
+# NAAP Analytics — MCP ClickHouse Stack (infra1)
+#
+# Deploys the MCP server, exposing the NAAP ClickHouse database to AI agents
+# via the Model Context Protocol over SSE transport, behind Traefik TLS.
+#
+# Read-only access only — the naap_reader user has no write permissions,
+# and ALLOW_WRITE_ACCESS / ALLOW_DROP are explicitly disabled.
+#
+# Prerequisites:
+#   - naap-clickhouse stack deployed and healthy
+#   - Image built and pushed: make push-mcp
+#   - Traefik running with cloudflare cert resolver on the ingress network
+#
+# ── REQUIRED ENVIRONMENT VARIABLES ────────────────────────────────────────────
+#   CLICKHOUSE_READER_PASSWORD   — password for naap_reader ClickHouse user
+#   MCP_AUTH_TOKEN               — Bearer token required by MCP clients
+#   MCP_DOMAIN                   — public hostname (e.g. mcp.cloudspe.com)
+#
+# ── OPTIONAL ENVIRONMENT VARIABLES ────────────────────────────────────────────
+#   IMAGE_TAG                    — image tag to deploy (default: latest)
+
+services:
+
+  mcp-clickhouse:
+    image: tztcloud/naap-mcp-clickhouse:${IMAGE_TAG:-latest}
+    container_name: naap-mcp-clickhouse
+    restart: unless-stopped
+    environment:
+      # ClickHouse connection — read-only user, plain HTTP on the internal network
+      CLICKHOUSE_HOST: naap-analytics-clickhouse
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_USER: naap_reader
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_READER_PASSWORD}
+      CLICKHOUSE_DATABASE: naap
+      CLICKHOUSE_SECURE: "false"
+
+      # Security — no writes, no destructive operations
+      CLICKHOUSE_ALLOW_WRITE_ACCESS: "false"
+      CLICKHOUSE_ALLOW_DROP: "false"
+
+      # MCP transport — SSE over HTTP, bound on all interfaces inside the container
+      CLICKHOUSE_MCP_SERVER_TRANSPORT: sse
+      CLICKHOUSE_MCP_BIND_HOST: "0.0.0.0"
+      CLICKHOUSE_MCP_BIND_PORT: "8000"
+      CLICKHOUSE_MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=ingress"
+      - "traefik.http.routers.naap-mcp.entrypoints=websecure"
+      - "traefik.http.routers.naap-mcp.rule=Host(`${MCP_DOMAIN}`)"
+      - "traefik.http.routers.naap-mcp.tls.certresolver=cloudflare"
+      - "traefik.http.routers.naap-mcp.service=naap-mcp"
+      - "traefik.http.services.naap-mcp.loadbalancer.server.port=8000"
+      - "traefik.http.services.naap-mcp.loadbalancer.server.scheme=http"
+
+networks:
+  default:
+    name: ingress
+    external: true
