@@ -107,6 +107,19 @@ func (s *Server) buildRouter() chi.Router {
 		r.Get("/network/demand", s.handleListNetworkDemand)
 		r.Get("/gpu/network-demand", s.handleListGPUNetworkDemand)
 		r.Get("/gpu/metrics", s.handleListGPUMetrics)
+
+		// AI Batch Jobs (R17)
+		r.Get("/ai-batch/summary", s.handleGetAIBatchSummary)
+		r.Get("/ai-batch/jobs", s.handleListAIBatchJobs)
+		r.Get("/ai-batch/llm/summary", s.handleGetAIBatchLLMSummary)
+
+		// BYOC Jobs (R18)
+		r.Get("/byoc/summary", s.handleGetBYOCSummary)
+		r.Get("/byoc/jobs", s.handleListBYOCJobs)
+		r.Get("/byoc/workers", s.handleGetBYOCWorkers)
+		r.Get("/byoc/auth", s.handleGetBYOCAuthSummary)
+
+		// Dashboard — pre-aggregated UI endpoints (R16)
 		r.Get("/dashboard/kpi", s.handleGetDashboardKPI)
 		r.Get("/dashboard/pipelines", s.handleGetDashboardPipelines)
 		r.Get("/dashboard/orchestrators", s.handleGetDashboardOrchestrators)

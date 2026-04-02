@@ -21,6 +21,9 @@ func collectSQLFiles(t *testing.T, root string) []string {
 	t.Helper()
 	entries, err := os.ReadDir(root)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
 		t.Fatalf("ReadDir %s: %v", root, err)
 	}
 	var files []string

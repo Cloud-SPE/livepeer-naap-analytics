@@ -100,6 +100,17 @@ type AnalyticsService interface {
 	GetDashboardPricing(ctx context.Context) ([]types.DashboardPipelinePricing, error)
 	GetDashboardJobFeed(ctx context.Context, limit int) ([]types.DashboardJobFeedItem, error)
 
+	// AI Batch Jobs (R17)
+	GetAIBatchSummary(ctx context.Context, p types.QueryParams) ([]types.AIBatchJobSummary, error)
+	ListAIBatchJobs(ctx context.Context, p types.QueryParams) ([]types.AIBatchJobRecord, error)
+	GetAIBatchLLMSummary(ctx context.Context, p types.QueryParams) ([]types.AIBatchLLMSummary, error)
+
+	// BYOC Jobs (R18)
+	GetBYOCSummary(ctx context.Context, p types.QueryParams) ([]types.BYOCJobSummary, error)
+	ListBYOCJobs(ctx context.Context, p types.QueryParams) ([]types.BYOCJobRecord, error)
+	GetBYOCWorkers(ctx context.Context, p types.QueryParams) ([]types.BYOCWorkerSummary, error)
+	GetBYOCAuthSummary(ctx context.Context, p types.QueryParams) ([]types.BYOCAuthSummary, error)
+
 	// Health
 	Ping(ctx context.Context) error
 }
@@ -581,4 +592,60 @@ func (s *analyticsService) GetDashboardJobFeed(ctx context.Context, limit int) (
 
 func (s *analyticsService) Ping(ctx context.Context) error {
 	return s.repo.Ping(ctx)
+}
+
+func (s *analyticsService) GetAIBatchSummary(ctx context.Context, p types.QueryParams) ([]types.AIBatchJobSummary, error) {
+	v, err := s.repo.GetAIBatchSummary(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("get ai batch summary: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) ListAIBatchJobs(ctx context.Context, p types.QueryParams) ([]types.AIBatchJobRecord, error) {
+	v, err := s.repo.ListAIBatchJobs(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("list ai batch jobs: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) GetAIBatchLLMSummary(ctx context.Context, p types.QueryParams) ([]types.AIBatchLLMSummary, error) {
+	v, err := s.repo.GetAIBatchLLMSummary(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("get ai batch llm summary: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) GetBYOCSummary(ctx context.Context, p types.QueryParams) ([]types.BYOCJobSummary, error) {
+	v, err := s.repo.GetBYOCSummary(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("get byoc summary: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) ListBYOCJobs(ctx context.Context, p types.QueryParams) ([]types.BYOCJobRecord, error) {
+	v, err := s.repo.ListBYOCJobs(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("list byoc jobs: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) GetBYOCWorkers(ctx context.Context, p types.QueryParams) ([]types.BYOCWorkerSummary, error) {
+	v, err := s.repo.GetBYOCWorkers(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("get byoc workers: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) GetBYOCAuthSummary(ctx context.Context, p types.QueryParams) ([]types.BYOCAuthSummary, error) {
+	v, err := s.repo.GetBYOCAuthSummary(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("get byoc auth summary: %w", err)
+	}
+	return v, nil
 }

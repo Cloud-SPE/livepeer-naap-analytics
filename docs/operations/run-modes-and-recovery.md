@@ -41,7 +41,7 @@ make bootstrap-extract
 The Portainer deployment keeps stack files in [`../../deploy`](../../deploy).
 Use [`../../deploy/README.md`](../../deploy/README.md) for the general stack layout and [`../../deploy/infra2/README.md`](../../deploy/infra2/README.md) for the split-stack `infra2` deployment.
 
-Use the warehouse stack in [`../../deploy/infra2/warehouse/stack.yml`](../../deploy/infra2/warehouse/stack.yml) when you need scheduled or one-shot `dbt` publication. It is part of the supported solution, but it is not the freshness engine. Resolver state publication still belongs to the resolver service.
+Use the warehouse stack in [`../../deploy/infra1/warehouse/stack.yml`](../../deploy/infra1/warehouse/stack.yml) when you need scheduled or one-shot `dbt` publication. It is part of the supported solution, but it is not the freshness engine. Resolver state publication still belongs to the resolver service.
 
 ## Resolver Modes
 
@@ -94,7 +94,7 @@ make warehouse-compile
 make warehouse-test
 ```
 
-Use the deployment stack in [`../../deploy/infra2/warehouse/stack.yml`](../../deploy/infra2/warehouse/stack.yml) for scheduled or operator-invoked publication in `infra2`.
+Use the deployment stack in [`../../deploy/infra1/warehouse/stack.yml`](../../deploy/infra1/warehouse/stack.yml) for scheduled or operator-invoked publication in `infra2`.
 
 Run `dbt` publication when:
 

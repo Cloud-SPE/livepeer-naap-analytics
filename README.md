@@ -113,7 +113,6 @@ docs/
     system-visuals.md   Mermaid diagrams: ingest flow, resolver, deployment topology
     adr-001-storage-architecture.md   ClickHouse + Kafka engine decision
     adr-002-api-design.md             REST/JSON, auth model, org model, rate limiting
-    adr-003-tiered-serving-contract.md  Tier semantics and canonical derivation rules
     data-validation-rules.md          Behavioral contract for all 17 validation rules (31 tests)
     selection-centered-attribution.md  Attribution model specification
   operations/           Operational runbooks and reference guides
@@ -547,7 +546,6 @@ See `infra/clickhouse/README.md` for the full ClickHouse operations guide.
 | [`docs/design-docs/system-visuals.md`](docs/design-docs/system-visuals.md) | Mermaid diagrams: ingest flow, resolver, deployment topology |
 | [`docs/design-docs/adr-001-storage-architecture.md`](docs/design-docs/adr-001-storage-architecture.md) | ClickHouse + Kafka engine decision, compression, retention |
 | [`docs/design-docs/adr-002-api-design.md`](docs/design-docs/adr-002-api-design.md) | REST/JSON, auth model, org model, rate limiting |
-| [`docs/design-docs/adr-003-tiered-serving-contract.md`](docs/design-docs/adr-003-tiered-serving-contract.md) | Tier semantics and canonical derivation rules |
 | [`docs/design-docs/data-validation-rules.md`](docs/design-docs/data-validation-rules.md) | Behavioral contract for all 17 validation rules (31 tests) |
 
 ### API & metrics

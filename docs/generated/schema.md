@@ -2,7 +2,7 @@
 
 This reference is generated from the extracted bootstrap baseline in [`v1.sql`](../../infra/clickhouse/bootstrap/v1.sql).
 
-Regenerate both artifacts with [`scripts/extract_clickhouse_bootstrap.py`](../../scripts/extract_clickhouse_bootstrap.py).
+Regenerate both artifacts with `scripts/extract_clickhouse_bootstrap.py`.
 
 The documented `raw_*`, `normalized_*`, `canonical_*`, `operational_*`, and `api_*` tiers are semantic/modeling guidance. This inventory is the supported physical schema, so it also includes infrastructure/runtime objects such as `accepted_raw_events`, `ignored_raw_events`, `kafka_*`, `resolver_*`, `agg_*`, metadata tables, and change/audit tables.
 

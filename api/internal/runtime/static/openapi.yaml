@@ -33,6 +33,10 @@ tags:
     description: Network demand metrics per gateway/pipeline (ported from leaderboard-serverless)
   - name: GPUMetrics
     description: GPU performance metrics per orchestrator/pipeline (ported from leaderboard-serverless)
+  - name: AIBatch
+    description: AI batch job analytics — fixed pipelines (text-to-image, llm, etc.) (R17)
+  - name: BYOC
+    description: BYOC job analytics — dynamic capabilities (openai-*, etc.) (R18)
   - name: Dashboard
     description: Pre-aggregated, UI-ready endpoints for the NAAP dashboard widgets (R16)
 
@@ -204,6 +208,98 @@ components:
         type: string
 
   schemas:
+
+    # ── AI Batch (R17) ───────────────────────────────────────────────────────
+
+    AIBatchJobSummary:
+      type: object
+      properties:
+        pipeline:        { type: string, description: "Fixed pipeline name (e.g. text-to-image, llm)" }
+        total_jobs:      { type: integer, format: int64 }
+        success_rate:    { type: number, format: double, description: "0.0–1.0" }
+        avg_duration_ms: { type: number, format: double }
+        avg_latency_score: { type: number, format: double }
+      required: [pipeline, total_jobs, success_rate, avg_duration_ms, avg_latency_score]
+
+    AIBatchJobRecord:
+      type: object
+      properties:
+        request_id:    { type: string }
+        org:           { type: string }
+        gateway:       { type: string }
+        pipeline:      { type: string }
+        model_id:      { type: string }
+        completed_at:  { type: string, format: date-time }
+        success:       { type: boolean, nullable: true }
+        tries:         { type: integer, format: int64 }
+        duration_ms:   { type: integer, format: int64 }
+        orch_url:      { type: string }
+        latency_score: { type: number, format: double }
+        price_per_unit: { type: number, format: double }
+        error_type:    { type: string }
+        error:         { type: string }
+      required: [request_id, org, pipeline, completed_at]
+
+    AIBatchLLMSummary:
+      type: object
+      properties:
+        model:             { type: string }
+        total_requests:    { type: integer, format: int64 }
+        success_rate:      { type: number, format: double, description: "0.0–1.0" }
+        avg_tokens_per_sec: { type: number, format: double }
+        avg_ttft_ms:       { type: number, format: double }
+        avg_total_tokens:  { type: number, format: double }
+      required: [model, total_requests, success_rate, avg_tokens_per_sec, avg_ttft_ms, avg_total_tokens]
+
+    # ── BYOC (R18) ───────────────────────────────────────────────────────────
+
+    BYOCJobSummary:
+      type: object
+      description: |
+        Per-capability aggregate for BYOC jobs. Capability values are stored
+        verbatim (e.g. "openai-chat-completions") and never hardcoded.
+      properties:
+        capability:      { type: string }
+        total_jobs:      { type: integer, format: int64 }
+        success_rate:    { type: number, format: double, description: "0.0–1.0" }
+        avg_duration_ms: { type: number, format: double }
+      required: [capability, total_jobs, success_rate, avg_duration_ms]
+
+    BYOCJobRecord:
+      type: object
+      properties:
+        request_id:   { type: string }
+        org:          { type: string }
+        capability:   { type: string }
+        completed_at: { type: string, format: date-time }
+        success:      { type: boolean, nullable: true }
+        duration_ms:  { type: integer, format: int64 }
+        http_status:  { type: integer, format: int64 }
+        orch_address: { type: string }
+        orch_url:     { type: string }
+        worker_url:   { type: string }
+        error:        { type: string }
+      required: [request_id, org, capability, completed_at]
+
+    BYOCWorkerSummary:
+      type: object
+      properties:
+        capability:        { type: string }
+        worker_count:      { type: integer, format: int64 }
+        models:
+          type: array
+          items: { type: string }
+        avg_price_per_unit: { type: number, format: double }
+      required: [capability, worker_count, models, avg_price_per_unit]
+
+    BYOCAuthSummary:
+      type: object
+      properties:
+        capability:    { type: string }
+        total_events:  { type: integer, format: int64 }
+        success_rate:  { type: number, format: double, description: "0.0–1.0" }
+        failure_count: { type: integer, format: int64 }
+      required: [capability, total_events, success_rate, failure_count]
 
     # ── Dashboard (R16) ──────────────────────────────────────────────────────
 
@@ -1129,4 +1225,170 @@ paths:
               schema:
                 type: array
                 items: { $ref: "#/components/schemas/DashboardJobFeedItem" }
+        "500": { $ref: "#/components/responses/500" }
+
+  # ── AI Batch Jobs (R17) ───────────────────────────────────────────────────
+
+  /v1/ai-batch/summary:
+    get:
+      summary: AI batch job summary by pipeline
+      description: |
+        Returns per-pipeline aggregates (job count, success rate, avg duration,
+        avg latency score) for completed AI batch jobs in the time window.
+        Covers fixed pipelines: text-to-image, image-to-image, image-to-video,
+        upscale, audio-to-text, llm, segment-anything-2, image-to-text, text-to-speech.
+      operationId: getAIBatchSummary
+      tags: [AIBatch]
+      parameters:
+        - { $ref: "#/components/parameters/org" }
+        - { $ref: "#/components/parameters/start" }
+        - { $ref: "#/components/parameters/end" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AIBatchJobSummary" }
+        "500": { $ref: "#/components/responses/500" }
+
+  /v1/ai-batch/jobs:
+    get:
+      summary: Paginated AI batch job records
+      description: |
+        Returns individual completed AI batch job records ordered by completion
+        time descending.
+      operationId: listAIBatchJobs
+      tags: [AIBatch]
+      parameters:
+        - { $ref: "#/components/parameters/org" }
+        - { $ref: "#/components/parameters/start" }
+        - { $ref: "#/components/parameters/end" }
+        - { $ref: "#/components/parameters/limit" }
+        - { $ref: "#/components/parameters/offset" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AIBatchJobRecord" }
+        "500": { $ref: "#/components/responses/500" }
+
+  /v1/ai-batch/llm/summary:
+    get:
+      summary: LLM performance summary by model
+      description: |
+        Returns per-model LLM metrics (requests, success rate, avg tokens/sec,
+        avg TTFT, avg total tokens) for the llm AI batch pipeline.
+        Other pipelines have no LLM records.
+      operationId: getAIBatchLLMSummary
+      tags: [AIBatch]
+      parameters:
+        - { $ref: "#/components/parameters/org" }
+        - { $ref: "#/components/parameters/start" }
+        - { $ref: "#/components/parameters/end" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AIBatchLLMSummary" }
+        "500": { $ref: "#/components/responses/500" }
+
+  # ── BYOC Jobs (R18) ───────────────────────────────────────────────────────
+
+  /v1/byoc/summary:
+    get:
+      summary: BYOC job summary by capability
+      description: |
+        Returns per-capability aggregates for completed BYOC jobs. Capability
+        values are stored verbatim (e.g. "openai-chat-completions") — the set
+        of capabilities is dynamic and never hardcoded.
+      operationId: getBYOCSummary
+      tags: [BYOC]
+      parameters:
+        - { $ref: "#/components/parameters/org" }
+        - { $ref: "#/components/parameters/start" }
+        - { $ref: "#/components/parameters/end" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/BYOCJobSummary" }
+        "500": { $ref: "#/components/responses/500" }
+
+  /v1/byoc/jobs:
+    get:
+      summary: Paginated BYOC job records
+      description: |
+        Returns individual completed BYOC job records ordered by completion
+        time descending.
+      operationId: listBYOCJobs
+      tags: [BYOC]
+      parameters:
+        - { $ref: "#/components/parameters/org" }
+        - { $ref: "#/components/parameters/start" }
+        - { $ref: "#/components/parameters/end" }
+        - { $ref: "#/components/parameters/limit" }
+        - { $ref: "#/components/parameters/offset" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/BYOCJobRecord" }
+        "500": { $ref: "#/components/responses/500" }
+
+  /v1/byoc/workers:
+    get:
+      summary: BYOC worker inventory by capability
+      description: |
+        Returns per-capability worker counts, model lists, and average pricing
+        from worker lifecycle events in the time window.
+      operationId: getBYOCWorkers
+      tags: [BYOC]
+      parameters:
+        - { $ref: "#/components/parameters/org" }
+        - { $ref: "#/components/parameters/start" }
+        - { $ref: "#/components/parameters/end" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/BYOCWorkerSummary" }
+        "500": { $ref: "#/components/responses/500" }
+
+  /v1/byoc/auth:
+    get:
+      summary: BYOC auth event summary by capability
+      description: |
+        Returns per-capability auth event counts, success rates, and failure
+        counts from job_auth events in the time window.
+      operationId: getBYOCAuthSummary
+      tags: [BYOC]
+      parameters:
+        - { $ref: "#/components/parameters/org" }
+        - { $ref: "#/components/parameters/start" }
+        - { $ref: "#/components/parameters/end" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/BYOCAuthSummary" }
         "500": { $ref: "#/components/responses/500" }
