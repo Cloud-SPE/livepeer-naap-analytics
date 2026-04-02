@@ -19,6 +19,12 @@ All specifications are P0 / required for launch unless noted otherwise.
 | [`r5-reliability-failures.md`](r5-reliability-failures.md) | REL-001 – REL-008 | approved | Failure rates, swap rates, failure log |
 | [`r6-orch-leaderboard.md`](r6-orch-leaderboard.md) | LDR-001 – LDR-005 | approved | Public orch ranking, orch profile |
 
+## Community documentation
+
+| Document | Status | Description |
+|----------|--------|-------------|
+| [`../metrics-and-sla-reference.md`](../metrics-and-sla-reference.md) | Active | Community-facing metrics reference: formulas, SLA targets, scoring models, session taxonomy, glossary |
+
 ## Architecture decisions
 
 | ADR | Status | Summary |
