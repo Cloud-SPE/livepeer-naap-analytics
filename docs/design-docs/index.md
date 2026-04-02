@@ -10,6 +10,12 @@
 | [`adr-003-tiered-serving-contract.md`](adr-003-tiered-serving-contract.md) | ✅ current | 2026-03-27 | Explicit analytics tier semantics, canonical derivation rules, and future consumer-surface governance |
 | [`data-validation-rules.md`](data-validation-rules.md) | ✅ current | 2026-03-25 | Architecture-independent behavioral contract for all 17 data validation rules; maps 1:1 to the 31-test validation harness |
 
+## Operations docs
+
+| Document | Status | Last verified | Description |
+|----------|--------|--------------|-------------|
+| [`../operations/data-retention-policy.md`](../operations/data-retention-policy.md) | ✅ current | 2026-04-02 | Kafka topic retention windows, ClickHouse TTL inventory, replay strategy, and known gaps |
+
 ## Status legend
 
 - ✅ current — reflects real code/decisions
