@@ -17,6 +17,8 @@
 | [`../operations/data-retention-policy.md`](../operations/data-retention-policy.md) | ✅ current | 2026-04-02 | Kafka topic retention windows, ClickHouse TTL inventory, replay strategy, and known gaps |
 | [`../operations/devops-environment-guide.md`](../operations/devops-environment-guide.md) | ✅ current | 2026-04-02 | Monitoring, local and production environment setup, Kafka offset reset, ClickHouse reload and replay |
 | [`../operations/infra-hardening-runbook.md`](../operations/infra-hardening-runbook.md) | ✅ current | 2026-04-02 | Security posture, Kafka listener architecture, open hardening action items (ports 9001, 8443, 8123) |
+| [`../operations/operations-runbook.md`](../operations/operations-runbook.md) | ✅ current | 2026-04-02 | Deployment from scratch, alerting, troubleshooting, maintenance, and backups |
+| [`../operations/incident-response.md`](../operations/incident-response.md) | ✅ current | 2026-04-02 | Severity definitions (P0–P3), response times, escalation contacts, post-mortem template |
 
 ## Status legend
 
