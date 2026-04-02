@@ -102,14 +102,33 @@ deploy/
 scripts/                Utility scripts (setup, backfill SQL, performance measurement)
 
 docs/
-  DESIGN.md             Architecture overview and layer rules
-  PLANS.md              Phase planning and status
-  PRODUCT_SENSE.md      Product goals and success criteria
+  DESIGN.md             Architecture overview, layer rules, tier contract, key decisions
+  PLANS.md              Phase planning and implementation status
+  PRODUCT_SENSE.md      Product goals, success criteria, non-goals
+  metrics-and-sla-reference.md  Community-facing metrics reference: formulas, SLA targets, glossary
   design-docs/          Architecture decision records (ADRs) and behavioral contracts
-  operations/           Supported run modes and recovery guides
+    index.md            Design docs index
+    architecture.md     Layer rules and enforcement model
+    core-beliefs.md     Project tenets and agent-first principles
+    system-visuals.md   Mermaid diagrams: ingest flow, resolver, deployment topology
+    adr-001-storage-architecture.md   ClickHouse + Kafka engine decision
+    adr-002-api-design.md             REST/JSON, auth model, org model, rate limiting
+    adr-003-tiered-serving-contract.md  Tier semantics and canonical derivation rules
+    data-validation-rules.md          Behavioral contract for all 17 validation rules (31 tests)
+    selection-centered-attribution.md  Attribution model specification
+  operations/           Operational runbooks and reference guides
+    operations-runbook.md       Deployment, alerting, troubleshooting, maintenance, backups
+    devops-environment-guide.md Monitoring, local/production environment setup, Kafka/ClickHouse procedures
+    data-retention-policy.md    Kafka and ClickHouse retention windows, replay strategy
+    infra-hardening-runbook.md  Security posture, Kafka listener architecture, open hardening items
+    incident-response.md        Severity definitions (P0–P3), escalation contacts, post-mortem template
+    run-modes-and-recovery.md   Resolver run modes, failure recovery, rebuild procedures
+    compose-services.md         Docker Compose services, profiles, and responsibilities
   generated/            Generated schema and baseline references
+    schema.md           Extracted v1 bootstrap schema inventory
   exec-plans/           Per-phase execution plans (active + completed)
   product-specs/        Feature requirements (R1–R15)
+    index.md            Spec index with requirement traceability
 
 tests/load/             k6 load test script
 tools/inspector/        Event inspection utility
@@ -550,7 +569,7 @@ docker compose exec clickhouse clickhouse-client \
   --user naap_admin --password changeme \
   --query "SELECT table, sum(num_messages_read) FROM system.kafka_consumers GROUP BY table"
 
-# Change data TTL on a table (example: accepted_raw_events, default 365 days)
+# Change data TTL on a table (example: accepted_raw_events, default 90 days)
 docker compose exec clickhouse clickhouse-client \
   --user naap_admin --password changeme \
   --query "ALTER TABLE naap.accepted_raw_events MODIFY TTL toDateTime(event_ts) + INTERVAL 180 DAY"
@@ -576,17 +595,46 @@ See `infra/clickhouse/README.md` for the full ClickHouse operations guide.
 
 ## Documentation
 
+### Architecture & design
+
 | Document | Purpose |
 |---|---|
-| `docs/DESIGN.md` | System architecture and layer rules |
-| `docs/PRODUCT_SENSE.md` | Product goals and success criteria |
-| `docs/design-docs/` | Architecture decision records and behavioral contracts |
-| `docs/design-docs/data-validation-rules.md` | Data validation behavioral contract (17 rules, 31 tests) |
-| `docs/product-specs/` | Per-feature requirements (R1–R15) |
-| `docs/exec-plans/` | Phase execution plans and history |
-| `infra/clickhouse/README.md` | ClickHouse operations guide |
-| `warehouse/README.md` | dbt ownership boundaries and tier contracts |
-| `deploy/README.md` | Production deployment guide (Portainer / Docker Swarm) |
-| `deploy/infra2/README.md` | infra2-specific deployment guide |
+| [`docs/DESIGN.md`](docs/DESIGN.md) | System architecture overview, layer rules, tier contract, key decisions |
+| [`docs/PRODUCT_SENSE.md`](docs/PRODUCT_SENSE.md) | Product goals, success criteria, non-goals |
+| [`docs/design-docs/index.md`](docs/design-docs/index.md) | Design docs index (ADRs, behavioral contracts) |
+| [`docs/design-docs/architecture.md`](docs/design-docs/architecture.md) | Layer rules and enforcement model |
+| [`docs/design-docs/system-visuals.md`](docs/design-docs/system-visuals.md) | Mermaid diagrams: ingest flow, resolver, deployment topology |
+| [`docs/design-docs/adr-001-storage-architecture.md`](docs/design-docs/adr-001-storage-architecture.md) | ClickHouse + Kafka engine decision, compression, retention |
+| [`docs/design-docs/adr-002-api-design.md`](docs/design-docs/adr-002-api-design.md) | REST/JSON, auth model, org model, rate limiting |
+| [`docs/design-docs/adr-003-tiered-serving-contract.md`](docs/design-docs/adr-003-tiered-serving-contract.md) | Tier semantics and canonical derivation rules |
+| [`docs/design-docs/data-validation-rules.md`](docs/design-docs/data-validation-rules.md) | Behavioral contract for all 17 validation rules (31 tests) |
+
+### API & metrics
+
+| Document | Purpose |
+|---|---|
+| [`docs/product-specs/index.md`](docs/product-specs/index.md) | Feature requirements index (R1–R15) with traceability |
+| [`docs/metrics-and-sla-reference.md`](docs/metrics-and-sla-reference.md) | Community-facing metrics reference: formulas, SLA targets, scoring models, glossary |
 | `GET /docs` | Interactive API documentation (Swagger UI) |
 | `GET /docs/openapi.yaml` | OpenAPI 3.0.3 spec |
+
+### Operations
+
+| Document | Purpose |
+|---|---|
+| [`docs/operations/operations-runbook.md`](docs/operations/operations-runbook.md) | Deployment from scratch, alerting, troubleshooting, maintenance, backups |
+| [`docs/operations/devops-environment-guide.md`](docs/operations/devops-environment-guide.md) | Monitoring, local/production environment setup, Kafka offset reset, ClickHouse reload/replay |
+| [`docs/operations/data-retention-policy.md`](docs/operations/data-retention-policy.md) | Kafka and ClickHouse retention windows, replay strategy, known gaps |
+| [`docs/operations/infra-hardening-runbook.md`](docs/operations/infra-hardening-runbook.md) | Security posture, Kafka listener architecture, open hardening action items |
+| [`docs/operations/incident-response.md`](docs/operations/incident-response.md) | Severity definitions (P0–P3), response times, escalation contacts, post-mortem template |
+| [`docs/operations/run-modes-and-recovery.md`](docs/operations/run-modes-and-recovery.md) | Resolver run modes, failure recovery, rebuild procedures |
+| [`docs/operations/compose-services.md`](docs/operations/compose-services.md) | Docker Compose services, profiles, and responsibilities |
+
+### Component READMEs
+
+| Document | Purpose |
+|---|---|
+| [`infra/clickhouse/README.md`](infra/clickhouse/README.md) | ClickHouse schema, migrations, Kafka Engine config |
+| [`warehouse/README.md`](warehouse/README.md) | dbt ownership boundaries and tier contracts |
+| [`deploy/README.md`](deploy/README.md) | Production deployment guide (Portainer / Docker Swarm) |
+| [`deploy/infra2/README.md`](deploy/infra2/README.md) | infra2-specific deployment guide |
