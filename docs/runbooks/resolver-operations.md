@@ -116,6 +116,7 @@ Continuously processes the live lateness window and republishes:
 - `canonical_session_current_store`
 - `canonical_status_hours_store`
 - `canonical_session_demand_input_current`
+- `canonical_payment_links_store`
 
 If `DRY_RUN=1` is set, `tail` executes one bounded lateness-window pass without
 writing current-state, selection-state, or serving rows.

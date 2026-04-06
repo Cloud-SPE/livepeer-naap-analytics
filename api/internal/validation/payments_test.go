@@ -3,8 +3,8 @@
 package validation
 
 // ── RULE-PAYMENT-LINKAGE-001 ─────────────────────────────────────────────────
-// Payments must link to canonical sessions safely: request_id first, then only
-// anchored session_id continuation, otherwise unresolved. manifest_id must
+// Payments must link to canonical sessions safely: request_id only.
+// Payments without a request_id are left unlinked (unresolved). manifest_id must
 // never act as a standalone session join key.
 
 import (
@@ -12,7 +12,7 @@ import (
 	"testing"
 )
 
-func TestRulePaymentLinkage001_RequestAndAnchoredSessionLinksRemainCanonical(t *testing.T) {
+func TestRulePaymentLinkage001_RequestLinksRemainCanonical(t *testing.T) {
 	h := newHarness(t)
 	ts := anchor()
 	streamID := uid("stream")
@@ -49,11 +49,14 @@ func TestRulePaymentLinkage001_RequestAndAnchoredSessionLinksRemainCanonical(t *
 	if got := h.queryString(t, `SELECT link_method FROM naap.canonical_payment_links WHERE org = ? AND event_id = 'pay_request'`, h.org); got != "request_id" {
 		t.Errorf("RULE-PAYMENT-LINKAGE-001: request-linked payment method = %q, want request_id", got)
 	}
-	if got := h.queryString(t, `SELECT canonical_session_key FROM naap.canonical_payment_links WHERE org = ? AND event_id = 'pay_session'`, h.org); got != key {
-		t.Errorf("RULE-PAYMENT-LINKAGE-001: anchored session payment key = %q, want %q", got, key)
+	// pay_session has requestID="" so it is not linkable via request_id.
+	// Session-id anchoring was dropped from the resolver (see canonical_payment_links_store).
+	// Expect the payment to be left unlinked and unresolved.
+	if got := h.queryString(t, `SELECT link_method FROM naap.canonical_payment_links WHERE org = ? AND event_id = 'pay_session'`, h.org); got != "unlinked" {
+		t.Errorf("RULE-PAYMENT-LINKAGE-001: no-request_id payment method = %q, want unlinked", got)
 	}
-	if got := h.queryString(t, `SELECT link_method FROM naap.canonical_payment_links WHERE org = ? AND event_id = 'pay_session'`, h.org); got != "session_id" {
-		t.Errorf("RULE-PAYMENT-LINKAGE-001: anchored session payment method = %q, want session_id", got)
+	if got := h.queryString(t, `SELECT link_status FROM naap.canonical_payment_links WHERE org = ? AND event_id = 'pay_session'`, h.org); got != "unresolved" {
+		t.Errorf("RULE-PAYMENT-LINKAGE-001: no-request_id payment status = %q, want unresolved", got)
 	}
 	if got := h.queryString(t, `SELECT link_status FROM naap.canonical_payment_links WHERE org = ? AND event_id = 'pay_unresolved'`, h.org); got != "unresolved" {
 		t.Errorf("RULE-PAYMENT-LINKAGE-001: unresolved payment status = %q, want unresolved", got)

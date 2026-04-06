@@ -1,88 +1,39 @@
-with request_linked as (
-    select
-        p.event_id as event_id,
-        p.event_ts as event_ts,
-        p.org as org,
-        p.gateway as gateway,
-        p.session_id as session_id,
-        p.request_id as request_id,
-        p.manifest_id as manifest_id,
-        p.pipeline_hint as pipeline_hint,
-        p.sender_address as sender_address,
-        p.recipient_address as recipient_address,
-        p.orchestrator_url as orchestrator_url,
-        p.face_value_wei as face_value_wei,
-        p.price_wei_per_pixel as price_wei_per_pixel,
-        p.win_prob as win_prob,
-        p.num_tickets as num_tickets,
-        fs.canonical_session_key as canonical_session_key,
-        'request_id' as link_method,
-        'resolved' as link_status
-    from {{ ref('stg_payments') }} p
-    inner join {{ ref('canonical_session_current') }} fs
-        on p.org = fs.org
-       and p.request_id != ''
-       and p.request_id = fs.request_id
-),
-session_linked as (
-    select
-        p.event_id as event_id,
-        any(p.event_ts) as event_ts,
-        p.org as org,
-        any(p.gateway) as gateway,
-        p.session_id as session_id,
-        any(p.request_id) as request_id,
-        any(p.manifest_id) as manifest_id,
-        any(p.pipeline_hint) as pipeline_hint,
-        any(p.sender_address) as sender_address,
-        any(p.recipient_address) as recipient_address,
-        any(p.orchestrator_url) as orchestrator_url,
-        any(p.face_value_wei) as face_value_wei,
-        any(p.price_wei_per_pixel) as price_wei_per_pixel,
-        any(p.win_prob) as win_prob,
-        any(p.num_tickets) as num_tickets,
-        any(fs.canonical_session_key) as canonical_session_key,
-        'session_id' as link_method,
-        'resolved' as link_status
-    from {{ ref('stg_payments') }} p
-    inner join {{ ref('stg_payments') }} anchor
-        on p.org = anchor.org
-       and p.request_id = ''
-       and p.session_id != ''
-       and p.session_id = anchor.session_id
-       and anchor.request_id != ''
-    inner join {{ ref('canonical_session_current') }} fs
-        on anchor.org = fs.org
-       and anchor.request_id = fs.request_id
-    where p.event_id not in (select event_id from request_linked)
-    group by p.event_id, p.org, p.session_id
-),
-unresolved as (
-    select
-        p.event_id as event_id,
-        p.event_ts as event_ts,
-        p.org as org,
-        p.gateway as gateway,
-        p.session_id as session_id,
-        p.request_id as request_id,
-        p.manifest_id as manifest_id,
-        p.pipeline_hint as pipeline_hint,
-        p.sender_address as sender_address,
-        p.recipient_address as recipient_address,
-        p.orchestrator_url as orchestrator_url,
-        p.face_value_wei as face_value_wei,
-        p.price_wei_per_pixel as price_wei_per_pixel,
-        p.win_prob as win_prob,
-        p.num_tickets as num_tickets,
-        cast(null as Nullable(String)) as canonical_session_key,
-        'unlinked' as link_method,
-        'unresolved' as link_status
-    from {{ ref('stg_payments') }} p
-    where p.event_id not in (select event_id from request_linked)
-      and p.event_id not in (select event_id from session_linked)
-)
-select * from request_linked
-union all
-select * from session_linked
-union all
-select * from unresolved
+-- canonical_payment_links
+--
+-- DEPLOYMENT NOTE: this model reads from canonical_payment_links_store, which is
+-- populated incrementally by the resolver (insertPaymentLinkRows) and by the
+-- one-time backfill in scripts/backfill_payment_links.sql.
+--
+-- DO NOT re-deploy this view until the backfill for all historical months has
+-- completed.  Verify with:
+--   SELECT toYYYYMM(event_ts) AS month, count() AS rows
+--   FROM naap.canonical_payment_links_store
+--   GROUP BY month ORDER BY month;
+-- Row counts should match accepted_raw_events WHERE event_type = 'create_new_payment'.
+--
+-- Previous implementation full-scanned stg_payments (4 M+ rows) via NOT-IN
+-- anti-joins on every query.  The store-backed version is an O(window) read.
+with {{ latest_value_cte('latest_links', 'naap.canonical_payment_links_store', ['org', 'event_id'], 'refresh_run_id') }}
+select
+    s.event_id,
+    s.event_ts,
+    s.org,
+    s.gateway,
+    s.session_id,
+    s.request_id,
+    s.manifest_id,
+    s.pipeline_hint,
+    s.sender_address,
+    s.recipient_address,
+    s.orchestrator_url,
+    s.face_value_wei,
+    s.price_wei_per_pixel,
+    s.win_prob,
+    s.num_tickets,
+    s.canonical_session_key,
+    s.link_method,
+    s.link_status
+from naap.canonical_payment_links_store s
+inner join latest_links l
+    on {{ join_on_columns('s', 'l', ['org', 'event_id']) }}
+   and s.refresh_run_id = l.refresh_run_id

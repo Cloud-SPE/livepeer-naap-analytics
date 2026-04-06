@@ -1898,6 +1898,12 @@ func (r *repo) publishServingRollups(ctx context.Context, runID string, slices [
 	if err := r.insertCanonicalActiveStreamState(ctx, runID, queryID); err != nil {
 		return err
 	}
+	// insertPaymentLinkRows must run before insertPaymentHourlyRollups so the
+	// store is populated with current-window rows before the hourly aggregation
+	// reads from it.
+	if err := r.insertPaymentLinkRows(ctx, runID, queryID); err != nil {
+		return err
+	}
 	if err := r.insertPaymentHourlyRollups(ctx, runID, queryID); err != nil {
 		return err
 	}
@@ -2053,6 +2059,68 @@ func (r *repo) insertCanonicalActiveStreamState(ctx context.Context, runID, quer
 	`, queryID, runID, r.cfg.ResolverVersion)
 }
 
+// insertPaymentLinkRows writes one row per payment event into
+// canonical_payment_links_store for every (org, window_start) slice in the
+// current resolver run.  It reads directly from accepted_raw_events filtered to
+// the active windows — avoiding the slow canonical_payment_links view — and
+// LEFT JOINs canonical_session_current_store for the request_id → session link.
+// ReplacingMergeTree(refreshed_at) on the store means re-runs overwrite stale
+// rows, so re-linking as sessions resolve is free.
+func (r *repo) insertPaymentLinkRows(ctx context.Context, runID, queryID string) error {
+	return r.conn.Exec(ctx, `
+		INSERT INTO naap.canonical_payment_links_store
+		(
+			event_id, event_ts, org, gateway,
+			session_id, request_id, manifest_id, pipeline_hint,
+			sender_address, recipient_address, orchestrator_url,
+			face_value_wei, price_wei_per_pixel, win_prob, num_tickets,
+			canonical_session_key, link_method, link_status,
+			refresh_run_id, artifact_checksum, refreshed_at
+		)
+		SELECT
+			p.event_id,
+			p.event_ts,
+			p.org,
+			p.gateway,
+			JSONExtractString(p.data, 'sessionID')                                                          AS session_id,
+			JSONExtractString(p.data, 'requestID')                                                          AS request_id,
+			JSONExtractString(p.data, 'manifestID')                                                         AS manifest_id,
+			replaceRegexpOne(JSONExtractString(p.data, 'manifestID'), '^[0-9]+_', '')                       AS pipeline_hint,
+			lower(JSONExtractString(p.data, 'sender'))                                                      AS sender_address,
+			lower(JSONExtractString(p.data, 'recipient'))                                                   AS recipient_address,
+			JSONExtractString(p.data, 'orchestrator')                                                       AS orchestrator_url,
+			toUInt64OrDefault(trimRight(replaceAll(JSONExtractString(p.data, 'faceValue'), ' WEI', '')))    AS face_value_wei,
+			toFloat64OrDefault(replaceRegexpOne(JSONExtractString(p.data, 'price'), ' wei/pixel$', ''))     AS price_wei_per_pixel,
+			toFloat64OrDefault(JSONExtractString(p.data, 'winProb'))                                        AS win_prob,
+			toUInt64OrDefault(JSONExtractString(p.data, 'numTickets'))                                      AS num_tickets,
+			fs.canonical_session_key,
+			if(
+				JSONExtractString(p.data, 'requestID') != '' AND isNotNull(fs.canonical_session_key),
+				'request_id',
+				'unlinked'
+			)                                                                                               AS link_method,
+			if(isNotNull(fs.canonical_session_key), 'resolved', 'unresolved')                              AS link_status,
+			?,
+			?,
+			now64()
+		FROM naap.accepted_raw_events p
+		INNER JOIN naap.resolver_query_window_slices w
+			ON  w.query_id = ?
+			AND p.org = w.org
+			AND toStartOfHour(p.event_ts) = w.window_start
+		LEFT JOIN naap.canonical_session_current_store fs FINAL
+			ON  fs.org = p.org
+			AND fs.request_id = JSONExtractString(p.data, 'requestID')
+			AND JSONExtractString(p.data, 'requestID') != ''
+		WHERE p.event_type = 'create_new_payment'
+		  AND p.event_id   != ''
+	`, runID, r.cfg.ResolverVersion, queryID)
+}
+
+// insertPaymentHourlyRollups aggregates canonical_payment_links_store rows for
+// the active window slices into api_payment_hourly_store.  Reads from the store
+// (bounded, indexed) rather than the canonical_payment_links view (unbounded
+// full-scan with NOT-IN anti-joins) so it completes in milliseconds.
 func (r *repo) insertPaymentHourlyRollups(ctx context.Context, runID, queryID string) error {
 	return r.conn.Exec(ctx, `
 		INSERT INTO naap.api_payment_hourly_store
@@ -2061,28 +2129,29 @@ func (r *repo) insertPaymentHourlyRollups(ctx context.Context, runID, queryID st
 			avg_price_wei_per_pixel, refresh_run_id, artifact_checksum, refreshed_at
 		)
 		SELECT
-			rs.window_start AS hour,
-			p.org AS org,
-			coalesce(fs.canonical_pipeline, p.pipeline_hint) AS pipeline,
-			p.recipient_address AS orch_address,
-			sum(p.face_value_wei) AS total_wei,
-			count() AS event_count,
-			avg(p.price_wei_per_pixel) AS avg_price_wei_per_pixel,
+			toStartOfHour(p.event_ts)                                              AS hour,
+			p.org                                                                  AS org,
+			coalesce(nullIf(fs.canonical_pipeline, ''), p.pipeline_hint)          AS pipeline,
+			p.recipient_address                                                    AS orch_address,
+			sum(p.face_value_wei)                                                  AS total_wei,
+			count()                                                                AS event_count,
+			avg(p.price_wei_per_pixel)                                             AS avg_price_wei_per_pixel,
 			?,
 			?,
 			now64()
-		FROM naap.canonical_payment_links p
+		FROM naap.canonical_payment_links_store p FINAL
 		INNER JOIN naap.resolver_query_window_slices rs
-			ON rs.query_id = ?
-		   AND p.org = rs.org
-		   AND toStartOfHour(p.event_ts) = rs.window_start
-		LEFT JOIN naap.canonical_session_current fs
-			ON p.canonical_session_key = fs.canonical_session_key
+			ON  rs.query_id = ?
+			AND p.org = rs.org
+			AND toStartOfHour(p.event_ts) = rs.window_start
+		LEFT JOIN naap.canonical_session_current_store fs FINAL
+			ON  fs.canonical_session_key = p.canonical_session_key
+			AND isNotNull(p.canonical_session_key)
 		GROUP BY
 			hour,
-			org,
+			p.org,
 			pipeline,
-			orch_address
+			p.recipient_address
 	`, runID, r.cfg.ResolverVersion, queryID)
 }
 
