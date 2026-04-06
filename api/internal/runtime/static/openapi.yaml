@@ -2640,10 +2640,15 @@ paths:
         comparing their aggregates.
 
         **Window:** default 24h, max 168h (7 days). Accepts `?window=24h` or `?window=7d`.
+
+        **Filters:** `pipeline` narrows session counts and usage minutes; `model_id` narrows
+        usage minutes only (session counts are not tracked at model granularity).
       operationId: getDashboardKPI
       tags: [Dashboard]
       parameters:
         - $ref: "#/components/parameters/window"
+        - $ref: "#/components/parameters/pipeline"
+        - $ref: "#/components/parameters/model_id"
       responses:
         "200":
           description: OK

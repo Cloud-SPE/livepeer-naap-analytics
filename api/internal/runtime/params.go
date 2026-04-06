@@ -47,6 +47,7 @@ func parseQueryParams(r *http.Request) types.QueryParams {
 	return types.QueryParams{
 		Org:         q.Get("org"),
 		Pipeline:    q.Get("pipeline"),
+		ModelID:     q.Get("model_id"),
 		OrchAddress: strings.ToLower(q.Get("orch_address")),
 		StreamID:    q.Get("stream_id"),
 		FailureType: q.Get("failure_type"),

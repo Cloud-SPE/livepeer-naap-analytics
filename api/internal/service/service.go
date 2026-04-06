@@ -92,7 +92,7 @@ type AnalyticsService interface {
 	ListGPUMetrics(ctx context.Context, p types.GPUMetricsParams) ([]types.GPUMetric, int, error)
 
 	// Dashboard — pre-aggregated UI endpoints (R16)
-	GetDashboardKPI(ctx context.Context, windowHours int) (*types.DashboardKPI, error)
+	GetDashboardKPI(ctx context.Context, windowHours int, pipeline, modelID string) (*types.DashboardKPI, error)
 	GetDashboardPipelines(ctx context.Context, limit int) ([]types.DashboardPipelineUsage, error)
 	GetDashboardOrchestrators(ctx context.Context, windowHours int) ([]types.DashboardOrchestrator, error)
 	GetDashboardGPUCapacity(ctx context.Context) (*types.DashboardGPUCapacity, error)
@@ -523,8 +523,8 @@ func (s *analyticsService) ListGPUMetrics(ctx context.Context, p types.GPUMetric
 	return rows, total, nil
 }
 
-func (s *analyticsService) GetDashboardKPI(ctx context.Context, windowHours int) (*types.DashboardKPI, error) {
-	v, err := s.repo.GetDashboardKPI(ctx, windowHours)
+func (s *analyticsService) GetDashboardKPI(ctx context.Context, windowHours int, pipeline, modelID string) (*types.DashboardKPI, error) {
+	v, err := s.repo.GetDashboardKPI(ctx, windowHours, pipeline, modelID)
 	if err != nil {
 		return nil, fmt.Errorf("get dashboard kpi: %w", err)
 	}

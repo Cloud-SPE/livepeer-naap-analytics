@@ -10,8 +10,9 @@ import (
 // Query params: window=24h (default) or window=7d — capped at 168 h.
 func (s *Server) handleGetDashboardKPI(w http.ResponseWriter, r *http.Request) {
 	hours := parseDashboardWindow(r, 24, 168)
+	p := parseQueryParams(r)
 
-	result, err := s.svc.GetDashboardKPI(r.Context(), hours)
+	result, err := s.svc.GetDashboardKPI(r.Context(), hours, p.Pipeline, p.ModelID)
 	if err != nil {
 		s.providers.Logger.Sugar().Errorw("get dashboard kpi failed", "error", err)
 		writeError(w, http.StatusInternalServerError, "Internal Server Error", "")

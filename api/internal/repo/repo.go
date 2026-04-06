@@ -89,7 +89,7 @@ type AnalyticsRepo interface {
 	ListGPUMetrics(ctx context.Context, p types.GPUMetricsParams) ([]types.GPUMetric, int, error)
 
 	// Dashboard — pre-aggregated UI endpoints (R16)
-	GetDashboardKPI(ctx context.Context, windowHours int) (*types.DashboardKPI, error)
+	GetDashboardKPI(ctx context.Context, windowHours int, pipeline, modelID string) (*types.DashboardKPI, error)
 	GetDashboardPipelines(ctx context.Context, limit int) ([]types.DashboardPipelineUsage, error)
 	GetDashboardOrchestrators(ctx context.Context, windowHours int) ([]types.DashboardOrchestrator, error)
 	GetDashboardGPUCapacity(ctx context.Context) (*types.DashboardGPUCapacity, error)
@@ -236,7 +236,7 @@ func (n *NoopAnalyticsRepo) ListGPUNetworkDemand(_ context.Context, _ types.GPUN
 func (n *NoopAnalyticsRepo) ListGPUMetrics(_ context.Context, _ types.GPUMetricsParams) ([]types.GPUMetric, int, error) {
 	return nil, 0, nil
 }
-func (n *NoopAnalyticsRepo) GetDashboardKPI(_ context.Context, _ int) (*types.DashboardKPI, error) {
+func (n *NoopAnalyticsRepo) GetDashboardKPI(_ context.Context, _ int, _, _ string) (*types.DashboardKPI, error) {
 	return &types.DashboardKPI{HourlySessions: []types.DashboardHourlyBucket{}, HourlyUsage: []types.DashboardHourlyBucket{}}, nil
 }
 func (n *NoopAnalyticsRepo) GetDashboardPipelines(_ context.Context, _ int) ([]types.DashboardPipelineUsage, error) {

@@ -22,7 +22,7 @@ type kpiBucket struct {
 // Sources: naap.api_latest_orchestrator_state, naap.api_stream_hourly,
 //
 //	naap.api_network_demand.
-func (r *Repo) GetDashboardKPI(ctx context.Context, windowHours int) (*types.DashboardKPI, error) {
+func (r *Repo) GetDashboardKPI(ctx context.Context, windowHours int, pipeline, modelID string) (*types.DashboardKPI, error) {
 	if windowHours <= 0 {
 		windowHours = 24
 	}
@@ -42,16 +42,25 @@ func (r *Repo) GetDashboardKPI(ctx context.Context, windowHours int) (*types.Das
 
 	// --- Hourly stream + usage-minutes buckets (joined in Go by hour) ---
 	// Query 1: session counts from api_stream_hourly
+	// api_stream_hourly has a `pipeline` column but no model_id; model_id filter
+	// is applied only to the usage-minutes query below.
+	streamWhere := "WHERE hour >= now() - INTERVAL ? HOUR"
+	streamArgs := []any{windowHours}
+	if pipeline != "" {
+		streamWhere += " AND pipeline = ?"
+		streamArgs = append(streamArgs, pipeline)
+	}
+
 	streamRows, err := r.conn.Query(ctx, `
 		SELECT
 			toStartOfHour(hour)           AS ts,
 			sum(requested_sessions)       AS sessions,
 			sum(startup_success_sessions) AS successes
 		FROM naap.api_stream_hourly
-		WHERE hour >= now() - INTERVAL ? HOUR
+		`+streamWhere+`
 		GROUP BY ts
 		ORDER BY ts ASC
-	`, windowHours)
+	`, streamArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("clickhouse get dashboard kpi history: %w", err)
 	}
@@ -76,15 +85,27 @@ func (r *Repo) GetDashboardKPI(ctx context.Context, windowHours int) (*types.Das
 	}
 
 	// Query 2: usage minutes from api_network_demand
+	// api_network_demand has pipeline_id and model_id columns.
+	minsWhere := "WHERE window_start >= now() - INTERVAL ? HOUR"
+	minsArgs := []any{windowHours}
+	if pipeline != "" {
+		minsWhere += " AND pipeline_id = ?"
+		minsArgs = append(minsArgs, pipeline)
+	}
+	if modelID != "" {
+		minsWhere += " AND model_id = ?"
+		minsArgs = append(minsArgs, modelID)
+	}
+
 	minsRows, err := r.conn.Query(ctx, `
 		SELECT
 			toStartOfHour(window_start) AS ts,
 			sum(total_minutes)          AS mins
 		FROM naap.api_network_demand
-		WHERE window_start >= now() - INTERVAL ? HOUR
+		`+minsWhere+`
 		GROUP BY ts
 		ORDER BY ts ASC
-	`, windowHours)
+	`, minsArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("clickhouse get dashboard kpi mins: %w", err)
 	}
