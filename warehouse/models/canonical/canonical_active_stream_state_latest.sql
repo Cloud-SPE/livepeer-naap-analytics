@@ -1,4 +1,11 @@
-with {{ latest_value_cte('latest_sessions', 'naap.canonical_active_stream_state_latest_store', ['canonical_session_key'], 'refreshed_at') }}
+with latest_sessions as (
+    select
+        canonical_session_key,
+        argMax(refreshed_at, refreshed_at) as refreshed_at
+    from naap.canonical_active_stream_state_latest_store
+    where completed = 0
+    group by canonical_session_key
+)
 select
     s.canonical_session_key,
     s.event_id,
