@@ -51,6 +51,9 @@ func (r *Repo) ListPipelines(ctx context.Context, p types.QueryParams) ([]types.
 		if err := streamRows.Scan(&pipeline, &requested, &completed); err != nil {
 			return nil, fmt.Errorf("clickhouse list pipelines stream scan: %w", err)
 		}
+		if pipeline == "" {
+			continue // skip sessions where pipeline could not be resolved
+		}
 		ps := pmap[pipeline]
 		if ps == nil {
 			ps = &pipeStats{}
@@ -85,6 +88,9 @@ func (r *Repo) ListPipelines(ctx context.Context, p types.QueryParams) ([]types.
 		if err := fpsRows.Scan(&pipeline, &fpsSum, &samp); err != nil {
 			return nil, fmt.Errorf("clickhouse list pipelines fps scan: %w", err)
 		}
+		if pipeline == "" {
+			continue
+		}
 		ps := pmap[pipeline]
 		if ps == nil {
 			ps = &pipeStats{}
@@ -117,8 +123,7 @@ func (r *Repo) ListPipelines(ctx context.Context, p types.QueryParams) ([]types.
 		}
 		ps := pmap[pipeline]
 		if ps == nil {
-			ps = &pipeStats{}
-			pmap[pipeline] = ps
+			continue // payment references a pipeline not seen in stream data (e.g. hash manifest IDs from orch swaps)
 		}
 		ps.payWEI += wei
 		ps.payCount += int64(cnt)
@@ -184,8 +189,7 @@ func (r *Repo) ListPipelines(ctx context.Context, p types.QueryParams) ([]types.
 		}
 		ps := pmap[pipeline]
 		if ps == nil {
-			ps = &pipeStats{}
-			pmap[pipeline] = ps
+			continue // GPU inventory references a pipeline not seen in stream data
 		}
 		ps.warmOrchs = int64(warm)
 		ps.topOrch = topOrch
