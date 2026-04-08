@@ -8,7 +8,7 @@ type OrgPaymentTotal struct {
 	Count    int64
 }
 
-// PaymentSummary is the response payload for GET /v1/payments/summary (PAY-001).
+// PaymentSummary holds aggregate payment totals for a time window (PAY-001).
 type PaymentSummary struct {
 	StartTime           time.Time
 	EndTime             time.Time
@@ -18,7 +18,7 @@ type PaymentSummary struct {
 	ByOrg               map[string]OrgPaymentTotal
 }
 
-// PaymentBucket is one time-bucket for GET /v1/payments/history (PAY-002).
+// PaymentBucket is one time-bucket in the payment history time-series (PAY-002).
 type PaymentBucket struct {
 	Timestamp   time.Time
 	TotalWEI    WEI
@@ -26,7 +26,7 @@ type PaymentBucket struct {
 	UniqueOrchs int64
 }
 
-// PipelinePayment is one pipeline row for GET /v1/payments/by-pipeline (PAY-003).
+// PipelinePayment holds payment totals aggregated by pipeline (PAY-003).
 type PipelinePayment struct {
 	Pipeline            string
 	TotalWEI            WEI
@@ -34,7 +34,7 @@ type PipelinePayment struct {
 	AvgPriceWeiPerPixel float64
 }
 
-// OrchPayment is one orch row for GET /v1/payments/by-orchestrator (PAY-004).
+// OrchPayment holds payment totals aggregated by orchestrator (PAY-004).
 type OrchPayment struct {
 	Address          string
 	TotalReceivedWEI WEI

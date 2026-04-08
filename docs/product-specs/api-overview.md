@@ -38,25 +38,23 @@ https://analytics.livepeer.cloud/v1/
 | API-009 | Error responses use RFC 7807 Problem Details format | All 4xx/5xx responses validated against schema |
 | API-010 | Rate limit config (req/min, req/hour) is env-var driven, no code change required | Verified by changing env var and re-running rate limit test |
 
-## Endpoint map (all P0 / launch)
+## Endpoint map (active endpoints)
 
 | Domain | Endpoint | Spec |
 |--------|---------|------|
-| Network state | `GET /v1/network/summary` | `r1-network-state.md` |
-| Network state | `GET /v1/network/orchestrators` | `r1-network-state.md` |
-| Network state | `GET /v1/network/gpus` | `r1-network-state.md` |
-| Network state | `GET /v1/network/models` | `r1-network-state.md` |
-| Stream activity | `GET /v1/streams/active` | `r2-stream-activity.md` |
-| Stream activity | `GET /v1/streams/summary` | `r2-stream-activity.md` |
-| Stream activity | `GET /v1/streams/history` | `r2-stream-activity.md` |
-| Performance | `GET /v1/performance/fps` | `r3-performance-quality.md` |
-| Performance | `GET /v1/performance/latency` | `r3-performance-quality.md` |
-| Performance | `GET /v1/performance/quality` | `r3-performance-quality.md` |
-| Payments | `GET /v1/payments/summary` | `r4-payments-economics.md` |
-| Payments | `GET /v1/payments/history` | `r4-payments-economics.md` |
-| Payments | `GET /v1/payments/by-pipeline` | `r4-payments-economics.md` |
-| Reliability | `GET /v1/reliability/summary` | `r5-reliability-failures.md` |
-| Reliability | `GET /v1/reliability/orchestrators` | `r5-reliability-failures.md` |
-| Reliability | `GET /v1/reliability/failures` | `r5-reliability-failures.md` |
-| Leaderboard | `GET /v1/leaderboard/orchestrators` | `r6-orch-leaderboard.md` |
+| Network state | `GET /v1/net/orchestrators` | `r1-network-state.md` |
+| Network state | `GET /v1/net/models` | `r1-network-state.md` |
+| Network state | `GET /v1/net/capacity` | `r1-network-state.md` |
+| Performance | `GET /v1/perf/by-model` | `r3-performance-quality.md` |
+| SLA | `GET /v1/sla/compliance` | Built-in |
+| Network demand | `GET /v1/network/demand` | Built-in |
+| GPU | `GET /v1/gpu/network-demand` | Built-in |
+| GPU | `GET /v1/gpu/metrics` | Built-in |
+| Dashboard | `GET /v1/dashboard/kpi` | Built-in |
+| Dashboard | `GET /v1/dashboard/pipelines` | Built-in |
+| Dashboard | `GET /v1/dashboard/orchestrators` | Built-in |
+| Dashboard | `GET /v1/dashboard/gpu-capacity` | Built-in |
+| Dashboard | `GET /v1/dashboard/pipeline-catalog` | Built-in |
+| Dashboard | `GET /v1/dashboard/pricing` | Built-in |
+| Dashboard | `GET /v1/dashboard/job-feed` | Built-in |
 | Health | `GET /healthz` | Built-in, no spec needed |

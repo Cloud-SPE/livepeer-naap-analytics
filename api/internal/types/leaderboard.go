@@ -2,8 +2,7 @@ package types
 
 import "time"
 
-// LeaderboardEntry is one row for GET /v1/leaderboard/orchestrators (LDR-001).
-// Score is 0.0 in Phase 3; computed in Phase 6.
+// LeaderboardEntry holds competitive ranking data for one orchestrator (LDR-001).
 type LeaderboardEntry struct {
 	Address         string
 	Name            string
@@ -16,8 +15,7 @@ type LeaderboardEntry struct {
 	IsActive        bool
 }
 
-// OrchProfile is the response payload for
-// GET /v1/leaderboard/orchestrators/{address} (LDR-002).
+// OrchProfile holds the detailed profile for one orchestrator (LDR-002).
 type OrchProfile struct {
 	Address         string
 	Name            string

@@ -20,7 +20,7 @@ Two distinct scoring models are used:
 | Model | Purpose | Range | API endpoint |
 |---|---|---|---|
 | **SLA Score** | Per-orchestrator reliability score for a given time window. Used for compliance reporting and alerting. | 0–100 | `GET /v1/sla/compliance` |
-| **Leaderboard Score** | Competitive ranking across all orchestrators. Used for the public leaderboard. | 0–100 | `GET /v1/leaderboard` |
+| **Leaderboard Score** | Competitive ranking across all orchestrators. Used for the public leaderboard. | 0–100 | _(endpoint removed; score data available via `/v1/sla/compliance`)_ |
 
 These two scores use different formulas and different inputs — a high leaderboard score does not imply SLA compliance, and vice versa. See §3 for both formulas.
 
@@ -28,14 +28,14 @@ These two scores use different formulas and different inputs — a high leaderbo
 
 | Metric | Primary API endpoint |
 |---|---|
-| Output FPS | `GET /v1/perf/fps` |
-| Jitter Coefficient | `GET /v1/perf/webrtc` |
-| E2E Latency | `GET /v1/perf/e2e-latency` |
-| Failure Rate / Output Viability | `GET /v1/reliability/summary` |
-| Swap Rate | `GET /v1/reliability/summary` |
+| Output FPS | `GET /v1/perf/by-model` |
+| Jitter Coefficient | _(endpoint removed; metric tracked internally)_ |
+| E2E Latency | _(endpoint removed; metric tracked internally)_ |
+| Failure Rate / Output Viability | `GET /v1/sla/compliance` |
+| Swap Rate | `GET /v1/sla/compliance` |
 | Prompt-to-First-Frame (PTFF) | `GET /v1/gpu/metrics` |
 | SLA Score | `GET /v1/sla/compliance` |
-| Leaderboard Score | `GET /v1/leaderboard` |
+| Leaderboard Score | _(endpoint removed; score data available via `/v1/sla/compliance`)_ |
 
 ---
 
@@ -57,9 +57,7 @@ Samples where `fps = 0` are excluded (they indicate the stream has not yet start
 
 **Degradation flag:** If the average FPS for a window drops ≥ 20% relative to the prior hour bucket for the same orchestrator/pipeline combination, the window is flagged as degraded.
 
-**API endpoints:**
-- `GET /v1/perf/fps` — current summary
-- `GET /v1/perf/fps/history` — time-series
+**API endpoint:** `GET /v1/perf/by-model` — FPS broken down by model
 
 ---
 
@@ -79,7 +77,7 @@ This is a dimensionless ratio (coefficient of variation). Lower is better.
 
 **Status: not yet active.** The underlying jitter signal is collected, but `fps_jitter_coefficient` currently returns `null`. Computed values will be populated in a future release.
 
-**API endpoint:** `GET /v1/perf/webrtc`
+**API endpoint:** _(endpoint removed; metric tracked internally)_
 
 ---
 
@@ -100,9 +98,7 @@ p95_e2e_latency_ms = p95(e2e_latency_ms) per orchestrator/pipeline/window
 
 **Related metric:** `avg_startup_latency_ms` measures only the selection-to-first-output portion and is tracked separately. E2E latency includes all phases from prompt receipt.
 
-**API endpoints:**
-- `GET /v1/perf/e2e-latency` — current summary
-- `GET /v1/perf/e2e-latency/history` — time-series
+**API endpoint:** _(endpoint removed; metric tracked internally)_
 
 ---
 
@@ -128,9 +124,7 @@ Session classification (see §6 for full taxonomy):
 
 **Data source:** `canonical_session_current` session outcome fields
 
-**API endpoints:**
-- `GET /v1/reliability/summary`
-- `GET /v1/sla/compliance`
+**API endpoint:** `GET /v1/sla/compliance`
 
 ---
 
@@ -154,9 +148,7 @@ Where:
 
 **Data source:** `stream_trace` events with `data.type = "orchestrator_swap"`
 
-**API endpoints:**
-- `GET /v1/reliability/summary`
-- `GET /v1/sla/compliance`
+**API endpoint:** `GET /v1/sla/compliance`
 
 ---
 
@@ -248,9 +240,7 @@ All four inputs are **min-max normalised** across all orchestrators competing in
 
 **Source:** `api/internal/service/service.go` (`scoreLeaderboard`)
 
-**API endpoints:**
-- `GET /v1/leaderboard` — full ranked list
-- `GET /v1/leaderboard/{address}` — individual orchestrator profile
+**API endpoint:** _(leaderboard endpoints removed; score data available via `GET /v1/sla/compliance`)_
 
 ---
 
@@ -357,7 +347,7 @@ These event types appear in `stream_trace` records and identify specific failure
 | **Health Signal** | A periodic telemetry event indicating the orchestrator is alive and processing. Used to compute `health_signal_coverage_ratio`. |
 | **Health Signal Coverage Ratio** | `health_signal_count / health_expected_signal_count`. Measures telemetry completeness for a window. Defaults to 1.0 when no signals expected. Applied as a multiplier in the SLA Score. |
 | **SLA Score** | A 0–100 reliability score per orchestrator per hourly window. Weighted combination of startup success, swap avoidance, and output viability, scaled by data completeness. |
-| **Leaderboard Score** | A 0–100 competitive score per orchestrator. Min-max normalised across all active orchestrators in the window; rewards high FPS, low degradation, high volume, and low latency. |
+| **Leaderboard Score** | A 0–100 competitive score per orchestrator. Min-max normalised across all active orchestrators in the window; rewards high FPS, low degradation, high volume, and low latency. Leaderboard endpoints have been removed; the score formula is preserved here for reference. |
 | **Output Viability Rate** | `1 − failure_rate`. Fraction of sessions that produced usable output. |
 | **Startup Success Rate** | Fraction of requested sessions where an orchestrator was successfully selected and first inference output was received. |
 | **No-Swap Rate** | Fraction of sessions completed without mid-stream orchestrator replacement. |

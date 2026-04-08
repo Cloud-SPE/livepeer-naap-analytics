@@ -2,7 +2,7 @@ package types
 
 import "time"
 
-// Gateway is one entry for GET /v1/net/gateways (GAT-001).
+// Gateway is one gateway entry (GAT-001).
 type Gateway struct {
 	Address      string
 	Name         string
@@ -13,7 +13,7 @@ type Gateway struct {
 	ActiveStreams int64
 }
 
-// GatewayProfile is the response for GET /v1/net/gateways/{address} (GAT-002).
+// GatewayProfile is the gateway detail profile (GAT-002).
 type GatewayProfile struct {
 	Address          string
 	Name             string
@@ -27,7 +27,7 @@ type GatewayProfile struct {
 	OrchsUsed        []string
 }
 
-// GatewayOrch is one orch row for GET /v1/net/gateways/{address}/orchs (GAT-003).
+// GatewayOrch is one orchestrator row associated with a gateway (GAT-003).
 type GatewayOrch struct {
 	OrchAddress string
 	Name        string

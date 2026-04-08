@@ -24,7 +24,7 @@ type OrchE2ELatency struct {
 	E2ELatencyStats
 }
 
-// E2ELatencySummary is the response for GET /v1/perf/e2e-latency (E2E-001).
+// E2ELatencySummary holds E2E latency p50/p95/p99 by pipeline and orchestrator (E2E-001).
 type E2ELatencySummary struct {
 	StartTime      time.Time
 	EndTime        time.Time
@@ -33,7 +33,7 @@ type E2ELatencySummary struct {
 	ByOrchestrator []OrchE2ELatency
 }
 
-// E2ELatencyBucket is one hourly bucket for GET /v1/perf/e2e-latency/history (E2E-002).
+// E2ELatencyBucket is one hourly bucket in the E2E latency time-series (E2E-002).
 type E2ELatencyBucket struct {
 	Timestamp   time.Time
 	AvgMS       float64

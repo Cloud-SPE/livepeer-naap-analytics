@@ -1,6 +1,6 @@
 package types
 
-// GatewayPayment is one row for GET /v1/payments/by-gateway (GPAY-001).
+// GatewayPayment holds payment totals aggregated by gateway address (GPAY-001).
 type GatewayPayment struct {
 	GatewayAddress string
 	Name           string
@@ -9,7 +9,7 @@ type GatewayPayment struct {
 	UniqueOrchs    int64
 }
 
-// StreamPayment is one row for GET /v1/payments/by-stream (GPAY-002).
+// StreamPayment holds payment totals per stream session (GPAY-002).
 type StreamPayment struct {
 	StreamID   string
 	Org        string

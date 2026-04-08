@@ -2,7 +2,7 @@ package types
 
 import "time"
 
-// PipelineSummary is one row for GET /v1/pipelines (PIPE-001).
+// PipelineSummary holds cross-cutting summary data per pipeline (PIPE-001).
 type PipelineSummary struct {
 	Pipeline         string
 	ActiveStreams    int64
@@ -21,7 +21,7 @@ type ModelPipelineStats struct {
 	AvgFPS        float64
 }
 
-// PipelineDetail is the response for GET /v1/pipelines/{pipeline} (PIPE-002).
+// PipelineDetail holds detailed pipeline stats with model breakdown (PIPE-002).
 type PipelineDetail struct {
 	Pipeline         string
 	StartTime        time.Time

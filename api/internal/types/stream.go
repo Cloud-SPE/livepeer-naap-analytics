@@ -2,7 +2,7 @@ package types
 
 import "time"
 
-// ActiveStreamsSummary is the response payload for GET /v1/streams/active (STR-001).
+// ActiveStreamsSummary holds a summary of currently active streams (STR-001).
 type ActiveStreamsSummary struct {
 	TotalActive            int64
 	ActiveThresholdSeconds int
@@ -11,7 +11,7 @@ type ActiveStreamsSummary struct {
 	ByState                map[string]int64
 }
 
-// StreamSummary is the response payload for GET /v1/streams/summary (STR-002).
+// StreamSummary holds aggregate stream session statistics for a time window (STR-002).
 type StreamSummary struct {
 	StartTime          time.Time
 	EndTime            time.Time
@@ -23,7 +23,7 @@ type StreamSummary struct {
 	OrchSwapCount      int64
 }
 
-// StreamBucket is one time-bucket entry for GET /v1/streams/history (STR-003).
+// StreamBucket is one time-bucket entry in the stream history time-series (STR-003).
 type StreamBucket struct {
 	Timestamp              time.Time
 	RequestedSessions      int64
