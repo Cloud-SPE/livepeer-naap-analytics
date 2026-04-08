@@ -50,7 +50,7 @@ components:
       description: Filter to a single organisation. Omit for all orgs.
       schema:
         type: string
-        enum: [daydream]
+        enum: [daydream, cloudspe]
     start:
       name: start
       in: query
@@ -300,6 +300,54 @@ components:
         success_rate:  { type: number, format: double, description: "0.0–1.0" }
         failure_count: { type: integer, format: int64 }
       required: [capability, total_events, success_rate, failure_count]
+
+    # ── Jobs — request/response (R19) ───────────────────────────────────────
+
+    JobsDemandRow:
+      type: object
+      properties:
+        window_start:    { type: string, format: date-time }
+        org:             { type: string, nullable: true }
+        gateway:         { type: string }
+        pipeline_id:     { type: string }
+        model_id:        { type: string, nullable: true }
+        job_type:        { type: string, enum: [ai-batch, byoc] }
+        job_count:       { type: integer, format: int64 }
+        success_count:   { type: integer, format: int64 }
+        success_rate:    { type: number, format: double }
+        avg_duration_ms: { type: number, format: double }
+        total_minutes:   { type: number, format: double }
+      required: [window_start, gateway, pipeline_id, job_type, job_count, success_count, success_rate, avg_duration_ms, total_minutes]
+
+    JobsSLARow:
+      type: object
+      properties:
+        window_start:         { type: string, format: date-time }
+        org:                  { type: string, nullable: true }
+        orchestrator_address: { type: string }
+        pipeline_id:          { type: string }
+        model_id:             { type: string, nullable: true }
+        gpu_id:               { type: string, nullable: true }
+        job_type:             { type: string, enum: [ai-batch, byoc] }
+        job_count:            { type: integer, format: int64 }
+        success_count:        { type: integer, format: int64 }
+        success_rate:         { type: number, format: double }
+        avg_duration_ms:      { type: number, format: double }
+        sla_score:            { type: number, format: double, nullable: true }
+      required: [window_start, orchestrator_address, pipeline_id, job_type, job_count, success_count, success_rate, avg_duration_ms]
+
+    JobModelPerformance:
+      type: object
+      properties:
+        model_id:        { type: string }
+        pipeline:        { type: string }
+        job_type:        { type: string, enum: [ai-batch, byoc] }
+        job_count:       { type: integer, format: int64 }
+        warm_orch_count: { type: integer, format: int64 }
+        avg_duration_ms: { type: number, format: double, nullable: true }
+        p50_duration_ms: { type: number, format: double, nullable: true }
+        p99_duration_ms: { type: number, format: double, nullable: true }
+      required: [model_id, pipeline, job_type, job_count, warm_orch_count]
 
     # ── Dashboard (R16) ──────────────────────────────────────────────────────
 
@@ -891,10 +939,10 @@ paths:
 
   # ── Model Performance (R12) ──────────────────────────────────────────────
 
-  /v1/perf/by-model:
+  /v1/perf/stream/by-model:
     get:
-      summary: Performance by AI model
-      description: Returns FPS performance broken down by AI model, joined from GPU inventory.
+      summary: Streaming performance by AI model
+      description: Returns FPS performance broken down by AI model for streaming pipelines only, joined from GPU inventory.
       operationId: listModelPerformance
       tags: [Network]
       parameters:
@@ -1391,4 +1439,123 @@ paths:
               schema:
                 type: array
                 items: { $ref: "#/components/schemas/BYOCAuthSummary" }
+        "500": { $ref: "#/components/responses/500" }
+
+  # ── Jobs — request/response job types (R19) ──────────────────────────────
+
+  /v1/jobs/demand:
+    get:
+      summary: Hourly demand for request/response jobs
+      description: |
+        Returns hourly job counts, success rates, and duration stats for
+        AI-batch and BYOC pipelines. Use `?job_type=ai-batch` or
+        `?job_type=byoc` to filter to one type.
+      operationId: listJobsDemand
+      tags: [Jobs]
+      parameters:
+        - { $ref: "#/components/parameters/org" }
+        - { $ref: "#/components/parameters/window" }
+        - { $ref: "#/components/parameters/page" }
+        - { $ref: "#/components/parameters/page_size" }
+        - name: pipeline_id
+          in: query
+          schema: { type: string }
+        - name: model_id
+          in: query
+          schema: { type: string }
+        - name: gateway
+          in: query
+          schema: { type: string }
+        - name: job_type
+          in: query
+          description: Filter to one job type. One of "ai-batch" or "byoc".
+          schema:
+            type: string
+            enum: [ai-batch, byoc]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  demand:
+                    type: array
+                    items: { $ref: "#/components/schemas/JobsDemandRow" }
+                  pagination: { $ref: "#/components/schemas/Pagination" }
+        "500": { $ref: "#/components/responses/500" }
+
+  /v1/jobs/sla:
+    get:
+      summary: SLA compliance for request/response jobs
+      description: |
+        Returns hourly per-orchestrator success rates and SLA scores for
+        AI-batch and BYOC pipelines. Streaming SLA is at /v1/sla/compliance.
+      operationId: listJobsSLA
+      tags: [Jobs]
+      parameters:
+        - { $ref: "#/components/parameters/org" }
+        - { $ref: "#/components/parameters/window" }
+        - { $ref: "#/components/parameters/page" }
+        - { $ref: "#/components/parameters/page_size" }
+        - name: pipeline_id
+          in: query
+          schema: { type: string }
+        - name: model_id
+          in: query
+          schema: { type: string }
+        - name: orchestrator_address
+          in: query
+          schema: { type: string }
+        - name: job_type
+          in: query
+          schema:
+            type: string
+            enum: [ai-batch, byoc]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  compliance:
+                    type: array
+                    items: { $ref: "#/components/schemas/JobsSLARow" }
+                  pagination: { $ref: "#/components/schemas/Pagination" }
+        "500": { $ref: "#/components/responses/500" }
+
+  /v1/jobs/by-model:
+    get:
+      summary: Request/response job performance by model
+      description: |
+        Returns p50/p99 duration, job count, and warm orch count per
+        (pipeline, model) for AI-batch and BYOC jobs. Streaming FPS
+        performance is at /v1/perf/stream/by-model.
+      operationId: listJobsByModel
+      tags: [Jobs]
+      parameters:
+        - { $ref: "#/components/parameters/org" }
+        - { $ref: "#/components/parameters/window" }
+        - name: pipeline_id
+          in: query
+          schema: { type: string }
+        - name: model_id
+          in: query
+          schema: { type: string }
+        - name: job_type
+          in: query
+          schema:
+            type: string
+            enum: [ai-batch, byoc]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/JobModelPerformance" }
         "500": { $ref: "#/components/responses/500" }

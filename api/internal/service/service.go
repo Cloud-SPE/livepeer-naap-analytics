@@ -100,6 +100,11 @@ type AnalyticsService interface {
 	GetDashboardPricing(ctx context.Context) ([]types.DashboardPipelinePricing, error)
 	GetDashboardJobFeed(ctx context.Context, limit int) ([]types.DashboardJobFeedItem, error)
 
+	// Jobs — request/response job types (R19)
+	ListJobsDemand(ctx context.Context, p types.JobsParams) ([]types.JobsDemandRow, int, error)
+	ListJobsSLA(ctx context.Context, p types.JobsParams) ([]types.JobsSLARow, int, error)
+	ListJobsByModel(ctx context.Context, p types.JobsParams) ([]types.JobModelPerformance, error)
+
 	// AI Batch Jobs (R17)
 	GetAIBatchSummary(ctx context.Context, p types.QueryParams) ([]types.AIBatchJobSummary, error)
 	ListAIBatchJobs(ctx context.Context, p types.QueryParams) ([]types.AIBatchJobRecord, error)
@@ -592,6 +597,30 @@ func (s *analyticsService) GetDashboardJobFeed(ctx context.Context, limit int) (
 
 func (s *analyticsService) Ping(ctx context.Context) error {
 	return s.repo.Ping(ctx)
+}
+
+func (s *analyticsService) ListJobsDemand(ctx context.Context, p types.JobsParams) ([]types.JobsDemandRow, int, error) {
+	rows, total, err := s.repo.ListJobsDemand(ctx, p)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list jobs demand: %w", err)
+	}
+	return rows, total, nil
+}
+
+func (s *analyticsService) ListJobsSLA(ctx context.Context, p types.JobsParams) ([]types.JobsSLARow, int, error) {
+	rows, total, err := s.repo.ListJobsSLA(ctx, p)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list jobs sla: %w", err)
+	}
+	return rows, total, nil
+}
+
+func (s *analyticsService) ListJobsByModel(ctx context.Context, p types.JobsParams) ([]types.JobModelPerformance, error) {
+	v, err := s.repo.ListJobsByModel(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("list jobs by model: %w", err)
+	}
+	return v, nil
 }
 
 func (s *analyticsService) GetAIBatchSummary(ctx context.Context, p types.QueryParams) ([]types.AIBatchJobSummary, error) {

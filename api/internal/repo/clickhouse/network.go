@@ -209,6 +209,16 @@ func (r *Repo) ListModels(ctx context.Context, p types.QueryParams) ([]types.Mod
 		}
 		result = append(result, ma)
 	}
+
+	// Merge BYOC and AI-batch model availability (see network_ext.go)
+	result, err = appendBYOCModels(ctx, r, result, p.Org)
+	if err != nil {
+		return nil, err
+	}
+	result, err = appendAIBatchModels(ctx, r, result, p.Org)
+	if err != nil {
+		return nil, err
+	}
 	return result, nil
 }
 

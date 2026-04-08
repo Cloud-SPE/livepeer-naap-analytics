@@ -69,6 +69,18 @@
       "title": "Economics",
       "type": "link",
       "url": "/d/naap-economics"
+    },
+    {
+      "asDropdown": false,
+      "icon": "apps",
+      "includeVars": true,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
+      "title": "Jobs",
+      "tooltip": "",
+      "type": "link",
+      "url": "/d/naap-jobs"
     }
   ],
   "panels": [
@@ -532,7 +544,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "sql",
-          "rawSql": "SELECT toFloat64(sum(greatest(requested_sessions - no_orch_sessions, 0))) AS value\nFROM naap.api_network_demand_by_org\nWHERE window_start >= now() - INTERVAL 1 HOUR\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))",
+          "rawSql": "SELECT toFloat64(sum(greatest(requested_sessions - no_orch_sessions, 0))) AS value\nFROM naap.api_network_demand_by_org\nWHERE window_start >= now() - INTERVAL 1 HOUR\nAND pipeline_id != ''\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))",
           "refId": "A"
         }
       ],
@@ -642,7 +654,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT toStartOfInterval(window_start, INTERVAL 1 HOUR) AS time,\n    sum(greatest(requested_sessions - no_orch_sessions, 0)) AS served_sessions,\n    sum(no_orch_sessions) AS unserved_sessions\nFROM naap.api_network_demand_by_org\nWHERE $__timeFilter(window_start)\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY time ORDER BY time",
+          "rawSql": "SELECT toStartOfInterval(window_start, INTERVAL 1 HOUR) AS time,\n    sum(greatest(requested_sessions - no_orch_sessions, 0)) AS served_sessions,\n    sum(no_orch_sessions) AS unserved_sessions\nFROM naap.api_network_demand_by_org\nWHERE $__timeFilter(window_start)\nAND pipeline_id != ''\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY time ORDER BY time",
           "refId": "A"
         }
       ],
@@ -705,7 +717,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT if(gateway = '', 'unattributed_gateway', gateway) AS \"Gateway\",\n    sum(requested_sessions) AS \"Requested Sessions\",\n    sum(no_orch_sessions) AS \"No Orch Sessions\",\n    sum(total_swapped_sessions) AS \"Swapped Sessions\",\n    sum(startup_failed_sessions) AS \"Startup Failed Sessions\",\n    if(sum(requested_sessions) > 0,\n        toFloat64(sum(no_orch_sessions)) / toFloat64(sum(requested_sessions)), 0.0) AS \"Unmet Demand Rate\"\nFROM naap.api_network_demand_by_org\nWHERE $__timeFilter(window_start)\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY if(gateway = '', 'unattributed_gateway', gateway)\nORDER BY sum(no_orch_sessions) DESC, sum(requested_sessions) DESC",
+          "rawSql": "SELECT if(gateway = '', 'unattributed_gateway', gateway) AS \"Gateway\",\n    sum(requested_sessions) AS \"Requested Sessions\",\n    sum(no_orch_sessions) AS \"No Orch Sessions\",\n    sum(total_swapped_sessions) AS \"Swapped Sessions\",\n    sum(startup_failed_sessions) AS \"Startup Failed Sessions\",\n    if(sum(requested_sessions) > 0,\n        toFloat64(sum(no_orch_sessions)) / toFloat64(sum(requested_sessions)), 0.0) AS \"Unmet Demand Rate\"\nFROM naap.api_network_demand_by_org\nWHERE $__timeFilter(window_start)\nAND pipeline_id != ''\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY if(gateway = '', 'unattributed_gateway', gateway)\nORDER BY sum(no_orch_sessions) DESC, sum(requested_sessions) DESC",
           "refId": "A"
         }
       ],

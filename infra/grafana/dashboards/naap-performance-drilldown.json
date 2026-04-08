@@ -69,6 +69,18 @@
       "title": "Economics",
       "type": "link",
       "url": "/d/naap-economics"
+    },
+    {
+      "asDropdown": false,
+      "icon": "apps",
+      "includeVars": true,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
+      "title": "Jobs",
+      "tooltip": "",
+      "type": "link",
+      "url": "/d/naap-jobs"
     }
   ],
   "panels": [
@@ -454,7 +466,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT toStartOfInterval(hour, INTERVAL 1 HOUR) AS time,\n    pipeline,\n    sum(inference_fps_sum) / nullIf(sum(sample_count), 0) AS avg_fps\nFROM naap.api_fps_hourly\nWHERE $__timeFilter(hour)\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nAND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address))\nGROUP BY time, pipeline ORDER BY time",
+          "rawSql": "SELECT toStartOfInterval(hour, INTERVAL 1 HOUR) AS time,\n    pipeline,\n    sum(inference_fps_sum) / nullIf(sum(sample_count), 0) AS avg_fps\nFROM naap.api_fps_hourly\nWHERE $__timeFilter(hour)\nAND pipeline != ''\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nAND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address))\nGROUP BY time, pipeline ORDER BY time",
           "refId": "A"
         }
       ],

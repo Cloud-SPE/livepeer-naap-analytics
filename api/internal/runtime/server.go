@@ -102,11 +102,16 @@ func (s *Server) buildRouter() chi.Router {
 		r.Get("/net/orchestrators", s.handleListOrchestrators)
 		r.Get("/net/models", s.handleListModels)
 		r.Get("/net/capacity", s.handleGetCapacitySummary)
-		r.Get("/perf/by-model", s.handleListModelPerformance)
+		r.Get("/perf/stream/by-model", s.handleListModelPerformance)
 		r.Get("/sla/compliance", s.handleListSLACompliance)
 		r.Get("/network/demand", s.handleListNetworkDemand)
 		r.Get("/gpu/network-demand", s.handleListGPUNetworkDemand)
 		r.Get("/gpu/metrics", s.handleListGPUMetrics)
+
+		// Jobs — request/response job types (R19)
+		r.Get("/jobs/demand", s.handleListJobsDemand)
+		r.Get("/jobs/sla", s.handleListJobsSLA)
+		r.Get("/jobs/by-model", s.handleListJobsByModel)
 
 		// AI Batch Jobs (R17)
 		r.Get("/ai-batch/summary", s.handleGetAIBatchSummary)

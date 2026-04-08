@@ -97,6 +97,11 @@ type AnalyticsRepo interface {
 	GetDashboardPricing(ctx context.Context) ([]types.DashboardPipelinePricing, error)
 	GetDashboardJobFeed(ctx context.Context, limit int) ([]types.DashboardJobFeedItem, error)
 
+	// Jobs — request/response job types (R19)
+	ListJobsDemand(ctx context.Context, p types.JobsParams) ([]types.JobsDemandRow, int, error)
+	ListJobsSLA(ctx context.Context, p types.JobsParams) ([]types.JobsSLARow, int, error)
+	ListJobsByModel(ctx context.Context, p types.JobsParams) ([]types.JobModelPerformance, error)
+
 	// AI Batch Jobs (R17)
 	GetAIBatchSummary(ctx context.Context, p types.QueryParams) ([]types.AIBatchJobSummary, error)
 	ListAIBatchJobs(ctx context.Context, p types.QueryParams) ([]types.AIBatchJobRecord, error)
@@ -267,6 +272,15 @@ func (n *NoopAnalyticsRepo) GetDashboardPricing(_ context.Context) ([]types.Dash
 }
 func (n *NoopAnalyticsRepo) GetDashboardJobFeed(_ context.Context, _ int) ([]types.DashboardJobFeedItem, error) {
 	return []types.DashboardJobFeedItem{}, nil
+}
+func (n *NoopAnalyticsRepo) ListJobsDemand(_ context.Context, _ types.JobsParams) ([]types.JobsDemandRow, int, error) {
+	return []types.JobsDemandRow{}, 0, nil
+}
+func (n *NoopAnalyticsRepo) ListJobsSLA(_ context.Context, _ types.JobsParams) ([]types.JobsSLARow, int, error) {
+	return []types.JobsSLARow{}, 0, nil
+}
+func (n *NoopAnalyticsRepo) ListJobsByModel(_ context.Context, _ types.JobsParams) ([]types.JobModelPerformance, error) {
+	return []types.JobModelPerformance{}, nil
 }
 func (n *NoopAnalyticsRepo) GetAIBatchSummary(_ context.Context, _ types.QueryParams) ([]types.AIBatchJobSummary, error) {
 	return []types.AIBatchJobSummary{}, nil

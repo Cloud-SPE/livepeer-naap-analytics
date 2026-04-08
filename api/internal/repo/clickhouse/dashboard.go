@@ -110,6 +110,45 @@ func (r *Repo) GetDashboardKPI(ctx context.Context, windowHours int) (*types.Das
 		return nil, fmt.Errorf("clickhouse get dashboard kpi mins rows: %w", err)
 	}
 
+	// Query 3: non-streaming job counts and minutes from api_unified_demand
+	unifiedRows, err := r.conn.Query(ctx, `
+		SELECT
+			toStartOfHour(window_start) AS ts,
+			sum(job_count)              AS jobs,
+			sum(success_count)          AS successes,
+			sum(total_minutes)          AS mins
+		FROM naap.api_unified_demand
+		WHERE window_start >= now() - INTERVAL ? HOUR
+		GROUP BY ts
+		ORDER BY ts ASC
+	`, windowHours)
+	if err != nil {
+		return nil, fmt.Errorf("clickhouse get dashboard kpi unified: %w", err)
+	}
+	defer unifiedRows.Close()
+
+	for unifiedRows.Next() {
+		var ts time.Time
+		var jobs, successes uint64
+		var mins float64
+		if err := unifiedRows.Scan(&ts, &jobs, &successes, &mins); err != nil {
+			return nil, fmt.Errorf("clickhouse get dashboard kpi unified scan: %w", err)
+		}
+		ts = ts.UTC().Truncate(time.Hour)
+		if b, ok := bucketMap[ts]; ok {
+			b.sessions += jobs
+			b.successes += successes
+			b.mins += mins
+		} else {
+			nb := &kpiBucket{ts: ts, sessions: jobs, successes: successes, mins: mins}
+			bucketMap[ts] = nb
+			orderedTS = append(orderedTS, ts)
+		}
+	}
+	if err := unifiedRows.Err(); err != nil {
+		return nil, fmt.Errorf("clickhouse get dashboard kpi unified rows: %w", err)
+	}
+
 	// Sort by timestamp
 	sortTimeSlice(orderedTS)
 
@@ -239,561 +278,71 @@ func (r *Repo) GetDashboardPipelines(ctx context.Context, limit int) ([]types.Da
 		return nil, fmt.Errorf("clickhouse get dashboard pipelines rows: %w", err)
 	}
 
+	// Second query: non-streaming pipelines from api_unified_demand (last 24h)
+	uRows, err := r.conn.Query(ctx, `
+		SELECT
+			pipeline_id,
+			job_type,
+			sum(job_count)    AS jobs,
+			sum(total_minutes) AS total_mins
+		FROM naap.api_unified_demand
+		WHERE window_start >= now() - INTERVAL 24 HOUR
+		  AND pipeline_id != ''
+		GROUP BY pipeline_id, job_type
+		ORDER BY jobs DESC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("clickhouse get dashboard pipelines unified: %w", err)
+	}
+	defer uRows.Close()
+
+	// Build a map keyed by pipeline+job_type to merge or append
+	type pipelineJobKey struct{ pipeline, jobType string }
+	pipelineMap := map[pipelineJobKey]*types.DashboardPipelineUsage{}
+	for _, entry := range result {
+		key := pipelineJobKey{entry.Name, "stream"}
+		pipelineMap[key] = &result[len(result)-1]
+	}
+	// Rebuild pipelineMap properly
+	pipelineMap = map[pipelineJobKey]*types.DashboardPipelineUsage{}
+	resultPtrs := make([]*types.DashboardPipelineUsage, len(result))
+	for i := range result {
+		resultPtrs[i] = &result[i]
+		pipelineMap[pipelineJobKey{result[i].Name, "stream"}] = resultPtrs[i]
+	}
+
+	var nonStreamEntries []types.DashboardPipelineUsage
+	for uRows.Next() {
+		var pipeline, jobType string
+		var jobs uint64
+		var mins float64
+		if err := uRows.Scan(&pipeline, &jobType, &jobs, &mins); err != nil {
+			return nil, fmt.Errorf("clickhouse get dashboard pipelines unified scan: %w", err)
+		}
+		nonStreamEntries = append(nonStreamEntries, types.DashboardPipelineUsage{
+			Name:     pipeline,
+			Sessions: int64(jobs),
+			Mins:     math.Round(mins*10) / 10,
+			AvgFps:   0,
+			JobType:  jobType,
+		})
+	}
+	if err := uRows.Err(); err != nil {
+		return nil, fmt.Errorf("clickhouse get dashboard pipelines unified rows: %w", err)
+	}
+	result = append(result, nonStreamEntries...)
+
+	// Sort all by sessions DESC and apply limit
+	sort.Slice(result, func(i, j int) bool { return result[i].Sessions > result[j].Sessions })
+	if len(result) > limit {
+		result = result[:limit]
+	}
+
 	if result == nil {
 		result = []types.DashboardPipelineUsage{}
 	}
 	return result, nil
 }
 
-// GetDashboardOrchestrators returns per-orchestrator SLA metrics (R16-3).
-// Sources: naap.api_sla_compliance, naap.api_latest_orchestrator_state,
-//
-//	naap.api_latest_orchestrator_pipeline_models,
-//	naap.canonical_capability_hardware_inventory.
-func (r *Repo) GetDashboardOrchestrators(ctx context.Context, windowHours int) ([]types.DashboardOrchestrator, error) {
-	if windowHours <= 0 {
-		windowHours = 168 // 7 days
-	}
-
-	// --- Query 1: SLA aggregates per orchestrator ---
-	type slaRow struct {
-		address      string
-		known        uint64
-		successes    uint64
-		unexcused    int64
-		swaps        uint64
-	}
-
-	slaRows, err := r.conn.Query(ctx, `
-		SELECT
-			orchestrator_address,
-			sum(known_sessions_count)  AS known,
-			sum(startup_success_sessions) AS successes,
-			greatest(
-				toInt64(sum(startup_failed_sessions)) - toInt64(sum(startup_excused_sessions)),
-				0
-			) AS unexcused,
-			sum(total_swapped_sessions) AS swaps
-		FROM naap.api_sla_compliance
-		WHERE window_start >= now() - INTERVAL ? HOUR
-		  AND orchestrator_address != ''
-		GROUP BY orchestrator_address
-		HAVING known > 0
-		ORDER BY known DESC
-	`, windowHours)
-	if err != nil {
-		return nil, fmt.Errorf("clickhouse get dashboard orchestrators sla: %w", err)
-	}
-	defer slaRows.Close()
-
-	var slaData []slaRow
-	for slaRows.Next() {
-		var s slaRow
-		if err := slaRows.Scan(&s.address, &s.known, &s.successes, &s.unexcused, &s.swaps); err != nil {
-			return nil, fmt.Errorf("clickhouse get dashboard orchestrators sla scan: %w", err)
-		}
-		slaData = append(slaData, s)
-	}
-	if err := slaRows.Err(); err != nil {
-		return nil, fmt.Errorf("clickhouse get dashboard orchestrators sla rows: %w", err)
-	}
-
-	if len(slaData) == 0 {
-		return []types.DashboardOrchestrator{}, nil
-	}
-
-	// --- Query 2: Orch names and URIs ---
-	nameRows, err := r.conn.Query(ctx, `
-		SELECT orch_address, name, uri FROM naap.api_latest_orchestrator_state
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("clickhouse get dashboard orchestrators names: %w", err)
-	}
-	defer nameRows.Close()
-
-	type orchState struct{ name, uri string }
-	orchStates := map[string]orchState{}
-	for nameRows.Next() {
-		var addr, name, uri string
-		if err := nameRows.Scan(&addr, &name, &uri); err != nil {
-			return nil, fmt.Errorf("clickhouse get dashboard orchestrators names scan: %w", err)
-		}
-		orchStates[addr] = orchState{name: name, uri: uri}
-	}
-	if err := nameRows.Err(); err != nil {
-		return nil, fmt.Errorf("clickhouse get dashboard orchestrators names rows: %w", err)
-	}
-
-	// --- Query 3: Pipeline/model offerings per orch ---
-	pmRows, err := r.conn.Query(ctx, `
-		SELECT DISTINCT orch_address, pipeline_id, model_id
-		FROM naap.api_latest_orchestrator_pipeline_models
-		WHERE last_seen > now() - INTERVAL ? MINUTE
-		  AND pipeline_id != ''
-		ORDER BY orch_address, pipeline_id, model_id
-	`, activeOrchMinutes)
-	if err != nil {
-		return nil, fmt.Errorf("clickhouse get dashboard orchestrators pipelines: %w", err)
-	}
-	defer pmRows.Close()
-
-	type orchPipelines struct {
-		pipelineSet map[string]struct{}
-		modelMap    map[string]map[string]struct{} // pipelineId -> set of modelIds
-	}
-	orchPM := map[string]*orchPipelines{}
-	for pmRows.Next() {
-		var addr, pipeline, model string
-		if err := pmRows.Scan(&addr, &pipeline, &model); err != nil {
-			return nil, fmt.Errorf("clickhouse get dashboard orchestrators pipelines scan: %w", err)
-		}
-		op := orchPM[addr]
-		if op == nil {
-			op = &orchPipelines{
-				pipelineSet: map[string]struct{}{},
-				modelMap:    map[string]map[string]struct{}{},
-			}
-			orchPM[addr] = op
-		}
-		op.pipelineSet[pipeline] = struct{}{}
-		if model != "" {
-			if op.modelMap[pipeline] == nil {
-				op.modelMap[pipeline] = map[string]struct{}{}
-			}
-			op.modelMap[pipeline][model] = struct{}{}
-		}
-	}
-	if err := pmRows.Err(); err != nil {
-		return nil, fmt.Errorf("clickhouse get dashboard orchestrators pipelines rows: %w", err)
-	}
-
-	// --- Query 4: GPU counts per orch ---
-	gpuRows, err := r.conn.Query(ctx, `
-		SELECT orch_address, countDistinct(gpu_id) AS gpu_count
-		FROM naap.canonical_capability_hardware_inventory
-		WHERE snapshot_ts > now() - INTERVAL ? MINUTE
-		  AND gpu_id != ''
-		GROUP BY orch_address
-	`, activeOrchMinutes)
-	if err != nil {
-		return nil, fmt.Errorf("clickhouse get dashboard orchestrators gpus: %w", err)
-	}
-	defer gpuRows.Close()
-
-	gpuCounts := map[string]uint64{}
-	for gpuRows.Next() {
-		var addr string
-		var count uint64
-		if err := gpuRows.Scan(&addr, &count); err != nil {
-			return nil, fmt.Errorf("clickhouse get dashboard orchestrators gpus scan: %w", err)
-		}
-		gpuCounts[addr] = count
-	}
-	if err := gpuRows.Err(); err != nil {
-		return nil, fmt.Errorf("clickhouse get dashboard orchestrators gpus rows: %w", err)
-	}
-
-	// --- Assemble results ---
-	result := make([]types.DashboardOrchestrator, 0, len(slaData))
-	for _, s := range slaData {
-		known := float64(s.known)
-		successRatio := divSafe(float64(s.successes), known)
-		effectiveRate := divSafe(known-float64(s.unexcused), known)
-		noSwapRatio := divSafe(known-float64(s.swaps), known)
-		slaScore := 0.7*effectiveRate + 0.3*noSwapRatio
-
-		// Clamp to [0, 1]
-		if effectiveRate < 0 {
-			effectiveRate = 0
-		}
-		if noSwapRatio < 0 {
-			noSwapRatio = 0
-		}
-		if slaScore < 0 {
-			slaScore = 0
-		}
-
-		var pipelines []string
-		var pipelineModels []types.DashboardPipelineModelOffer
-		if op := orchPM[s.address]; op != nil {
-			for p := range op.pipelineSet {
-				pipelines = append(pipelines, p)
-			}
-			sort.Strings(pipelines)
-			for _, p := range pipelines {
-				var models []string
-				for m := range op.modelMap[p] {
-					models = append(models, m)
-				}
-				sort.Strings(models)
-				pipelineModels = append(pipelineModels, types.DashboardPipelineModelOffer{
-					PipelineID: p,
-					ModelIDs:   models,
-				})
-			}
-		}
-		if pipelines == nil {
-			pipelines = []string{}
-		}
-		if pipelineModels == nil {
-			pipelineModels = []types.DashboardPipelineModelOffer{}
-		}
-
-		state := orchStates[s.address]
-		result = append(result, types.DashboardOrchestrator{
-			Address:              s.address,
-			EnsName:              state.name,
-			ServiceURI:           state.uri,
-			KnownSessions:        int64(s.known),
-			SuccessSessions:      int64(s.successes),
-			SuccessRatio:         successRatio,
-			EffectiveSuccessRate: &effectiveRate,
-			NoSwapRatio:          &noSwapRatio,
-			SLAScore:             &slaScore,
-			Pipelines:            pipelines,
-			PipelineModels:       pipelineModels,
-			GPUCount:             int64(gpuCounts[s.address]),
-		})
-	}
-
-	return result, nil
-}
-
-// GetDashboardGPUCapacity returns GPU inventory grouped by pipeline/model/GPU-model (R16-4).
-// Source: naap.canonical_capability_hardware_inventory.
-func (r *Repo) GetDashboardGPUCapacity(ctx context.Context) (*types.DashboardGPUCapacity, error) {
-	// --- Total unique GPUs ---
-	totalRow := r.conn.QueryRow(ctx, `
-		SELECT countDistinct(gpu_id) AS total
-		FROM naap.canonical_capability_hardware_inventory
-		WHERE snapshot_ts > now() - INTERVAL ? MINUTE
-		  AND gpu_id != ''
-	`, activeOrchMinutes)
-
-	var totalGPUs uint64
-	if err := totalRow.Scan(&totalGPUs); err != nil {
-		return nil, fmt.Errorf("clickhouse get dashboard gpu capacity total: %w", err)
-	}
-
-	// --- Per pipeline/model/gpu_model breakdown ---
-	rows, err := r.conn.Query(ctx, `
-		SELECT
-			pipeline_id,
-			model_id,
-			coalesce(gpu_model_name, 'Unknown') AS gpu_model,
-			countDistinct(gpu_id)               AS gpu_count
-		FROM naap.canonical_capability_hardware_inventory
-		WHERE snapshot_ts > now() - INTERVAL ? MINUTE
-		  AND gpu_id != ''
-		GROUP BY pipeline_id, model_id, gpu_model
-		ORDER BY gpu_count DESC
-	`, activeOrchMinutes)
-	if err != nil {
-		return nil, fmt.Errorf("clickhouse get dashboard gpu capacity rows: %w", err)
-	}
-	defer rows.Close()
-
-	// Accumulate into pipeline → model → gpu_model structure
-	type pipelineModelKey struct{ pipeline, model string }
-	type modelGPUEntry struct{ gpuModel string; count uint64 }
-
-	// pipelineGPUs: pipeline → total GPU count
-	// pipelineModelGPUs: pipeline → model → []gpu entries
-	pipelineGPUs := map[string]uint64{}
-	pipelineModelGPUs := map[pipelineModelKey][]modelGPUEntry{}
-
-	// modelCounts: gpu_model_name → total count
-	modelCounts := map[string]uint64{}
-
-	for rows.Next() {
-		var pipeline, model, gpuModel string
-		var count uint64
-		if err := rows.Scan(&pipeline, &model, &gpuModel, &count); err != nil {
-			return nil, fmt.Errorf("clickhouse get dashboard gpu capacity scan: %w", err)
-		}
-		pipelineGPUs[pipeline] += count
-		key := pipelineModelKey{pipeline, model}
-		pipelineModelGPUs[key] = append(pipelineModelGPUs[key], modelGPUEntry{gpuModel, count})
-		modelCounts[gpuModel] += count
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("clickhouse get dashboard gpu capacity rows err: %w", err)
-	}
-
-	// Build pipelineGPUs output sorted by gpu count desc
-	pipelineList := make([]types.DashboardGPUCapacityPipeline, 0, len(pipelineGPUs))
-	for pipeline, totalCount := range pipelineGPUs {
-		// Collect all (model, gpu_model, count) for this pipeline and build per-model totals
-		modelTotals := map[string]int64{}
-		for key, entries := range pipelineModelGPUs {
-			if key.pipeline != pipeline {
-				continue
-			}
-			for _, e := range entries {
-				modelTotals[key.model+"::"+e.gpuModel] += int64(e.count)
-			}
-		}
-		var modelEntries []types.DashboardGPUCapacityPipelineModel
-		// Aggregate per model_id across GPU models
-		perModel := map[string]int64{}
-		for key, entries := range pipelineModelGPUs {
-			if key.pipeline != pipeline {
-				continue
-			}
-			for _, e := range entries {
-				_ = e
-				perModel[key.model] += int64(e.count)
-			}
-		}
-		for model, cnt := range perModel {
-			modelEntries = append(modelEntries, types.DashboardGPUCapacityPipelineModel{
-				Model: model,
-				GPUs:  cnt,
-			})
-		}
-		sort.Slice(modelEntries, func(i, j int) bool { return modelEntries[i].GPUs > modelEntries[j].GPUs })
-		_ = modelTotals
-
-		pipelineList = append(pipelineList, types.DashboardGPUCapacityPipeline{
-			Name:   pipeline,
-			GPUs:   int64(totalCount),
-			Models: modelEntries,
-		})
-	}
-	sort.Slice(pipelineList, func(i, j int) bool { return pipelineList[i].GPUs > pipelineList[j].GPUs })
-
-	// Build overall GPU model counts
-	modelList := make([]types.DashboardGPUModelCapacity, 0, len(modelCounts))
-	for model, count := range modelCounts {
-		modelList = append(modelList, types.DashboardGPUModelCapacity{Model: model, Count: int64(count)})
-	}
-	sort.Slice(modelList, func(i, j int) bool { return modelList[i].Count > modelList[j].Count })
-
-	cap := float64(0)
-	if totalGPUs > 0 {
-		cap = 1.0
-	}
-
-	return &types.DashboardGPUCapacity{
-		TotalGPUs:         int64(totalGPUs),
-		ActiveGPUs:        int64(totalGPUs),
-		AvailableCapacity: cap,
-		Models:            modelList,
-		PipelineGPUs:      pipelineList,
-	}, nil
-}
-
-// GetDashboardPipelineCatalog returns the set of pipeline+model combinations
-// currently offered by at least one warm orchestrator (R16-5).
-// Source: naap.api_latest_orchestrator_pipeline_models.
-func (r *Repo) GetDashboardPipelineCatalog(ctx context.Context) ([]types.DashboardPipelineCatalogEntry, error) {
-	rows, err := r.conn.Query(ctx, `
-		SELECT DISTINCT pipeline_id, model_id
-		FROM naap.api_latest_orchestrator_pipeline_models
-		WHERE last_seen > now() - INTERVAL ? MINUTE
-		  AND pipeline_id != ''
-		  AND model_id    != ''
-		ORDER BY pipeline_id, model_id
-	`, activeOrchMinutes)
-	if err != nil {
-		return nil, fmt.Errorf("clickhouse get dashboard pipeline catalog: %w", err)
-	}
-	defer rows.Close()
-
-	catalogMap := map[string][]string{}
-	for rows.Next() {
-		var pipeline, model string
-		if err := rows.Scan(&pipeline, &model); err != nil {
-			return nil, fmt.Errorf("clickhouse get dashboard pipeline catalog scan: %w", err)
-		}
-		catalogMap[pipeline] = append(catalogMap[pipeline], model)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("clickhouse get dashboard pipeline catalog rows: %w", err)
-	}
-
-	result := make([]types.DashboardPipelineCatalogEntry, 0, len(catalogMap))
-	for pipeline, models := range catalogMap {
-		result = append(result, types.DashboardPipelineCatalogEntry{
-			ID:      pipeline,
-			Name:    pipeline,  // display name mapping stays in the UI
-			Models:  models,
-			Regions: []string{},
-		})
-	}
-	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
-	return result, nil
-}
-
-// GetDashboardPricing returns raw wei pricing per pipeline+model (R16-6).
-// Reuses the JSON-parsing approach from ListModels (network.go).
-// Source: naap.api_latest_orchestrator_state.
-func (r *Repo) GetDashboardPricing(ctx context.Context) ([]types.DashboardPipelinePricing, error) {
-	rows, err := r.conn.Query(ctx,
-		"SELECT raw_capabilities FROM naap.api_latest_orchestrator_state WHERE last_seen > now() - INTERVAL ? MINUTE",
-		activeOrchMinutes)
-	if err != nil {
-		return nil, fmt.Errorf("clickhouse get dashboard pricing: %w", err)
-	}
-	defer rows.Close()
-
-	agg := map[modelKey]*modelAgg{}
-	for rows.Next() {
-		var raw string
-		if err := rows.Scan(&raw); err != nil {
-			return nil, fmt.Errorf("clickhouse get dashboard pricing scan: %w", err)
-		}
-		parseModelsFromCapabilities(raw, agg)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("clickhouse get dashboard pricing rows: %w", err)
-	}
-
-	result := make([]types.DashboardPipelinePricing, 0, len(agg))
-	for k, a := range agg {
-		if len(a.prices) == 0 {
-			continue
-		}
-		var sum int64
-		mn, mx := a.prices[0], a.prices[0]
-		for _, p := range a.prices {
-			sum += p
-			if p < mn {
-				mn = p
-			}
-			if p > mx {
-				mx = p
-			}
-		}
-		result = append(result, types.DashboardPipelinePricing{
-			Pipeline:           k.pipeline,
-			Model:              k.model,
-			OrchCount:          a.warmCount,
-			PriceMinWeiPerUnit: mn,
-			PriceMaxWeiPerUnit: mx,
-			PriceAvgWeiPerUnit: float64(sum) / float64(len(a.prices)),
-			PixelsPerUnit:      1,
-		})
-	}
-	sort.Slice(result, func(i, j int) bool { return result[i].OrchCount > result[j].OrchCount })
-	return result, nil
-}
-
-// GetDashboardJobFeed returns currently active streams for the live job feed (R16-7).
-// Sources: naap.api_status_samples, naap.api_latest_orchestrator_state.
-func (r *Repo) GetDashboardJobFeed(ctx context.Context, limit int) ([]types.DashboardJobFeedItem, error) {
-	if limit <= 0 {
-		limit = 50
-	}
-
-	// --- Active stream samples ---
-	rows, err := r.conn.Query(ctx, `
-		SELECT
-			canonical_session_key,
-			stream_id,
-			pipeline,
-			coalesce(anyLast(model_id), '')     AS model,
-			gateway,
-			coalesce(anyLast(orch_address), '') AS orch_address,
-			anyLast(state)                       AS state,
-			round(avg(output_fps), 2)            AS avg_output_fps,
-			round(avg(input_fps),  2)            AS avg_input_fps,
-			min(sample_ts)                       AS first_seen,
-			max(sample_ts)                       AS last_seen,
-			toFloat64(dateDiff('second', min(sample_ts), max(sample_ts))) AS duration_secs
-		FROM naap.api_status_samples
-		WHERE sample_ts > now() - INTERVAL ? SECOND
-		GROUP BY canonical_session_key, stream_id, pipeline, gateway
-		ORDER BY last_seen DESC
-		LIMIT ?
-	`, activeStreamSecs, limit)
-	if err != nil {
-		return nil, fmt.Errorf("clickhouse get dashboard job feed: %w", err)
-	}
-	defer rows.Close()
-
-	type rawItem struct {
-		sessionKey  string
-		streamID    string
-		pipeline    string
-		model       string
-		gateway     string
-		orchAddress string
-		state       string
-		outputFPS   float64
-		inputFPS    float64
-		firstSeen   time.Time
-		lastSeen    time.Time
-		durationSec float64
-	}
-
-	var items []rawItem
-	orchAddrs := map[string]struct{}{}
-	for rows.Next() {
-		var it rawItem
-		if err := rows.Scan(
-			&it.sessionKey, &it.streamID, &it.pipeline, &it.model,
-			&it.gateway, &it.orchAddress, &it.state,
-			&it.outputFPS, &it.inputFPS,
-			&it.firstSeen, &it.lastSeen, &it.durationSec,
-		); err != nil {
-			return nil, fmt.Errorf("clickhouse get dashboard job feed scan: %w", err)
-		}
-		items = append(items, it)
-		if it.orchAddress != "" {
-			orchAddrs[it.orchAddress] = struct{}{}
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("clickhouse get dashboard job feed rows: %w", err)
-	}
-
-	// --- Orch URIs for orchestratorUrl field ---
-	orchURIs := map[string]string{}
-	if len(orchAddrs) > 0 {
-		uriRows, err := r.conn.Query(ctx, `
-			SELECT orch_address, uri FROM naap.api_latest_orchestrator_state
-		`)
-		if err != nil {
-			return nil, fmt.Errorf("clickhouse get dashboard job feed uris: %w", err)
-		}
-		defer uriRows.Close()
-		for uriRows.Next() {
-			var addr, uri string
-			if err := uriRows.Scan(&addr, &uri); err != nil {
-				return nil, fmt.Errorf("clickhouse get dashboard job feed uris scan: %w", err)
-			}
-			orchURIs[addr] = uri
-		}
-		if err := uriRows.Err(); err != nil {
-			return nil, fmt.Errorf("clickhouse get dashboard job feed uris rows: %w", err)
-		}
-	}
-
-	result := make([]types.DashboardJobFeedItem, 0, len(items))
-	for _, it := range items {
-		dur := it.durationSec
-		var durPtr *float64
-		if dur > 0 {
-			durPtr = &dur
-		}
-		result = append(result, types.DashboardJobFeedItem{
-			ID:              it.sessionKey,
-			Pipeline:        it.pipeline,
-			Model:           it.model,
-			Gateway:         hostnameFromURI("https://" + it.gateway),
-			OrchestratorURL: orchURIs[it.orchAddress],
-			State:           it.state,
-			InputFPS:        it.inputFPS,
-			OutputFPS:       it.outputFPS,
-			FirstSeen:       it.firstSeen.UTC().Format(time.RFC3339),
-			LastSeen:        it.lastSeen.UTC().Format(time.RFC3339),
-			DurationSeconds: durPtr,
-		})
-	}
-
-	if result == nil {
-		result = []types.DashboardJobFeedItem{}
-	}
-	return result, nil
-}
+// GetDashboardOrchestrators, GetDashboardGPUCapacity are implemented in dashboard_orch.go.
+// GetDashboardPipelineCatalog, GetDashboardPricing, GetDashboardJobFeed are in dashboard_ext.go.

@@ -28,7 +28,7 @@ These two scores use different formulas and different inputs — a high leaderbo
 
 | Metric | Primary API endpoint |
 |---|---|
-| Output FPS | `GET /v1/perf/by-model` |
+| Output FPS | `GET /v1/perf/stream/by-model` |
 | Jitter Coefficient | _(endpoint removed; metric tracked internally)_ |
 | E2E Latency | _(endpoint removed; metric tracked internally)_ |
 | Failure Rate / Output Viability | `GET /v1/sla/compliance` |
@@ -57,7 +57,7 @@ Samples where `fps = 0` are excluded (they indicate the stream has not yet start
 
 **Degradation flag:** If the average FPS for a window drops ≥ 20% relative to the prior hour bucket for the same orchestrator/pipeline combination, the window is flagged as degraded.
 
-**API endpoint:** `GET /v1/perf/by-model` — FPS broken down by model
+**API endpoint:** `GET /v1/perf/stream/by-model` — FPS broken down by model
 
 ---
 

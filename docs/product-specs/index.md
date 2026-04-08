@@ -35,4 +35,4 @@ All specifications are P0 / required for launch unless noted otherwise.
 | NET-001 | `GET /v1/net/orchestrators` | r1-network-state.md |
 | NET-002 | `GET /v1/net/models` | r1-network-state.md |
 | NET-003 | `GET /v1/net/capacity` | r1-network-state.md |
-| PERF-001 | `GET /v1/perf/by-model` | r3-performance-quality.md |
+| PERF-001 | `GET /v1/perf/stream/by-model` | r3-performance-quality.md |

@@ -45,7 +45,7 @@ https://analytics.livepeer.cloud/v1/
 | Network state | `GET /v1/net/orchestrators` | `r1-network-state.md` |
 | Network state | `GET /v1/net/models` | `r1-network-state.md` |
 | Network state | `GET /v1/net/capacity` | `r1-network-state.md` |
-| Performance | `GET /v1/perf/by-model` | `r3-performance-quality.md` |
+| Performance | `GET /v1/perf/stream/by-model` | `r3-performance-quality.md` |
 | SLA | `GET /v1/sla/compliance` | Built-in |
 | Network demand | `GET /v1/network/demand` | Built-in |
 | GPU | `GET /v1/gpu/network-demand` | Built-in |
@@ -57,4 +57,14 @@ https://analytics.livepeer.cloud/v1/
 | Dashboard | `GET /v1/dashboard/pipeline-catalog` | Built-in |
 | Dashboard | `GET /v1/dashboard/pricing` | Built-in |
 | Dashboard | `GET /v1/dashboard/job-feed` | Built-in |
+| Jobs (request/response) | `GET /v1/jobs/demand` | Built-in |
+| Jobs (request/response) | `GET /v1/jobs/sla` | Built-in |
+| Jobs (request/response) | `GET /v1/jobs/by-model` | Built-in |
+| AI Batch | `GET /v1/ai-batch/summary` | Built-in |
+| AI Batch | `GET /v1/ai-batch/jobs` | Built-in |
+| AI Batch | `GET /v1/ai-batch/llm/summary` | Built-in |
+| BYOC | `GET /v1/byoc/summary` | Built-in |
+| BYOC | `GET /v1/byoc/jobs` | Built-in |
+| BYOC | `GET /v1/byoc/workers` | Built-in |
+| BYOC | `GET /v1/byoc/auth` | Built-in |
 | Health | `GET /healthz` | Built-in, no spec needed |
