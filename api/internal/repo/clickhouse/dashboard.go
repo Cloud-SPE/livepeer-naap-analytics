@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/livepeer/naap-analytics/internal/types"
@@ -22,7 +23,7 @@ type kpiBucket struct {
 // Sources: naap.api_latest_orchestrator_state, naap.api_stream_hourly,
 //
 //	naap.api_network_demand.
-func (r *Repo) GetDashboardKPI(ctx context.Context, windowHours int) (*types.DashboardKPI, error) {
+func (r *Repo) GetDashboardKPI(ctx context.Context, windowHours int, pipeline, modelID string) (*types.DashboardKPI, error) {
 	if windowHours <= 0 {
 		windowHours = 24
 	}
@@ -42,16 +43,25 @@ func (r *Repo) GetDashboardKPI(ctx context.Context, windowHours int) (*types.Das
 
 	// --- Hourly stream + usage-minutes buckets (joined in Go by hour) ---
 	// Query 1: session counts from api_stream_hourly
+	// api_stream_hourly has a `pipeline` column but no model_id; model_id filter
+	// is applied only to the usage-minutes query below.
+	streamWhere := "WHERE hour >= now() - INTERVAL ? HOUR"
+	streamArgs := []any{windowHours}
+	if pipeline != "" {
+		streamWhere += " AND pipeline = ?"
+		streamArgs = append(streamArgs, pipeline)
+	}
+
 	streamRows, err := r.conn.Query(ctx, `
 		SELECT
 			toStartOfHour(hour)           AS ts,
 			sum(requested_sessions)       AS sessions,
 			sum(startup_success_sessions) AS successes
 		FROM naap.api_stream_hourly
-		WHERE hour >= now() - INTERVAL ? HOUR
+		`+streamWhere+`
 		GROUP BY ts
 		ORDER BY ts ASC
-	`, windowHours)
+	`, streamArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("clickhouse get dashboard kpi history: %w", err)
 	}
@@ -76,15 +86,27 @@ func (r *Repo) GetDashboardKPI(ctx context.Context, windowHours int) (*types.Das
 	}
 
 	// Query 2: usage minutes from api_network_demand
+	// api_network_demand has pipeline_id and model_id columns.
+	minsWhere := "WHERE window_start >= now() - INTERVAL ? HOUR"
+	minsArgs := []any{windowHours}
+	if pipeline != "" {
+		minsWhere += " AND pipeline_id = ?"
+		minsArgs = append(minsArgs, pipeline)
+	}
+	if modelID != "" {
+		minsWhere += " AND model_id = ?"
+		minsArgs = append(minsArgs, modelID)
+	}
+
 	minsRows, err := r.conn.Query(ctx, `
 		SELECT
 			toStartOfHour(window_start) AS ts,
 			sum(total_minutes)          AS mins
 		FROM naap.api_network_demand
-		WHERE window_start >= now() - INTERVAL ? HOUR
+		`+minsWhere+`
 		GROUP BY ts
 		ORDER BY ts ASC
-	`, windowHours)
+	`, minsArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("clickhouse get dashboard kpi mins: %w", err)
 	}
@@ -680,33 +702,46 @@ func (r *Repo) GetDashboardPricing(ctx context.Context) ([]types.DashboardPipeli
 }
 
 // GetDashboardJobFeed returns currently active streams for the live job feed (R16-7).
-// Sources: naap.api_status_samples, naap.api_latest_orchestrator_state.
+// Sources: naap.canonical_status_samples_recent_store, naap.api_latest_orchestrator_state.
+//
+// Reads the underlying store directly (bypassing the api_status_samples view) so the
+// dedup CTE only processes events in the active window (~200 rows) instead of the full
+// 5 M+ event history the view scans on every call.
 func (r *Repo) GetDashboardJobFeed(ctx context.Context, limit int) ([]types.DashboardJobFeedItem, error) {
 	if limit <= 0 {
 		limit = 50
 	}
 
 	// --- Active stream samples ---
+	// Push the time filter into the dedup CTE so it deduplicates only the ~200
+	// events in the active window rather than the full 5 M+ event history.
 	rows, err := r.conn.Query(ctx, `
+		WITH recent_events AS (
+			SELECT event_id, argMax(refreshed_at, refreshed_at) AS refreshed_at
+			FROM naap.canonical_status_samples_recent_store
+			WHERE sample_ts > now() - INTERVAL ? SECOND
+			GROUP BY event_id
+		)
 		SELECT
-			canonical_session_key,
-			stream_id,
-			pipeline,
-			coalesce(anyLast(model_id), '')     AS model,
-			gateway,
-			coalesce(anyLast(orch_address), '') AS orch_address,
-			anyLast(state)                       AS state,
-			round(avg(output_fps), 2)            AS avg_output_fps,
-			round(avg(input_fps),  2)            AS avg_input_fps,
-			min(sample_ts)                       AS first_seen,
-			max(sample_ts)                       AS last_seen,
-			toFloat64(dateDiff('second', min(sample_ts), max(sample_ts))) AS duration_secs
-		FROM naap.api_status_samples
-		WHERE sample_ts > now() - INTERVAL ? SECOND
-		GROUP BY canonical_session_key, stream_id, pipeline, gateway
+			s.canonical_session_key,
+			s.stream_id,
+			s.pipeline,
+			coalesce(anyLast(s.model_id), '')     AS model,
+			s.gateway,
+			coalesce(anyLast(s.orch_address), '') AS orch_address,
+			anyLast(s.state)                       AS state,
+			round(avg(s.output_fps), 2)            AS avg_output_fps,
+			round(avg(s.input_fps),  2)            AS avg_input_fps,
+			min(s.sample_ts)                       AS first_seen,
+			max(s.sample_ts)                       AS last_seen,
+			toFloat64(dateDiff('second', min(s.sample_ts), max(s.sample_ts))) AS duration_secs
+		FROM naap.canonical_status_samples_recent_store AS s
+		INNER JOIN recent_events AS r ON s.event_id = r.event_id AND s.refreshed_at = r.refreshed_at
+		WHERE s.sample_ts > now() - INTERVAL ? SECOND
+		GROUP BY s.canonical_session_key, s.stream_id, s.pipeline, s.gateway
 		ORDER BY last_seen DESC
 		LIMIT ?
-	`, activeStreamSecs, limit)
+	`, activeStreamSecs, activeStreamSecs, limit)
 	if err != nil {
 		return nil, fmt.Errorf("clickhouse get dashboard job feed: %w", err)
 	}
@@ -751,9 +786,15 @@ func (r *Repo) GetDashboardJobFeed(ctx context.Context, limit int) ([]types.Dash
 	// --- Orch URIs for orchestratorUrl field ---
 	orchURIs := map[string]string{}
 	if len(orchAddrs) > 0 {
-		uriRows, err := r.conn.Query(ctx, `
-			SELECT orch_address, uri FROM naap.api_latest_orchestrator_state
-		`)
+		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(orchAddrs)), ",")
+		args := make([]any, 0, len(orchAddrs))
+		for addr := range orchAddrs {
+			args = append(args, addr)
+		}
+		uriRows, err := r.conn.Query(ctx,
+			`SELECT orch_address, uri FROM naap.api_latest_orchestrator_state WHERE orch_address IN (`+placeholders+`)`,
+			args...,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("clickhouse get dashboard job feed uris: %w", err)
 		}

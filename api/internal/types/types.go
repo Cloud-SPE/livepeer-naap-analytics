@@ -13,6 +13,7 @@ import (
 type QueryParams struct {
 	Org          string    // "daydream" | "cloudspe" | "" for all
 	Pipeline     string    // filter by pipeline name
+	ModelID      string    // filter by model ID (e.g. "streamdiffusion-sdxl")
 	OrchAddress  string    // filter by orch ETH address (normalised lowercase)
 	StreamID     string    // filter by stream ID
 	FailureType  string    // "no_orch_available" | "orch_swap" | "inference_restart" | "inference_error"

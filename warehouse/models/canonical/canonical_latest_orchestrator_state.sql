@@ -5,22 +5,22 @@ with ens as (
 ),
 caps as (
     select
+        org,
         orch_address,
         argMaxIfMerge(orch_name) as orch_name,
         argMaxIfMerge(orch_uri) as uri,
         argMaxIfMerge(version) as version,
-        any(org)              as org,
         maxMerge(snapshot_ts) as last_seen,
         argMaxIfMerge(raw_capabilities) as raw_capabilities
     from naap.canonical_capability_snapshot_latest
-    group by orch_address
+    group by org, orch_address
 )
 select
     c.orch_address,
     coalesce(nullIf(e.ens_name, ''), c.orch_name) as name,
     c.uri,
     c.version,
-    c.org,
+    toString(c.org)                               as org,
     c.last_seen,
     c.raw_capabilities
 from caps c
