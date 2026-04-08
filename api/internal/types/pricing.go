@@ -14,7 +14,7 @@ type PipelinePricing struct {
 	Models   []ModelPricing
 }
 
-// OrchPricingEntry is one flat row for GET /v1/net/pricing (PRICE-001).
+// OrchPricingEntry is one flat pricing row for an orchestrator (PRICE-001).
 type OrchPricingEntry struct {
 	OrchAddress   string
 	Name          string
@@ -25,7 +25,7 @@ type OrchPricingEntry struct {
 	IsWarm        bool
 }
 
-// OrchPricingProfile is the response for GET /v1/net/pricing/{address} (PRICE-002).
+// OrchPricingProfile is the structured pricing profile for one orchestrator (PRICE-002).
 type OrchPricingProfile struct {
 	OrchAddress string
 	Name        string

@@ -12,7 +12,7 @@ type FailureBreakdown struct {
 	DegradedInput     int64
 }
 
-// ReliabilitySummary is the response payload for GET /v1/reliability/summary (REL-001).
+// ReliabilitySummary holds aggregate reliability metrics for a time window (REL-001).
 type ReliabilitySummary struct {
 	StartTime            time.Time
 	EndTime              time.Time
@@ -25,7 +25,7 @@ type ReliabilitySummary struct {
 	FailureBreakdown     FailureBreakdown
 }
 
-// ReliabilityBucket is one time-bucket for GET /v1/reliability/history (REL-002).
+// ReliabilityBucket is one time-bucket in the reliability history time-series (REL-002).
 // Rates are nil when the sample count is below the minimum threshold (5 streams).
 type ReliabilityBucket struct {
 	Timestamp          time.Time
@@ -35,7 +35,7 @@ type ReliabilityBucket struct {
 	DegradedRate       *float64
 }
 
-// OrchReliability is one orch row for GET /v1/reliability/orchestrators (REL-003).
+// OrchReliability holds reliability metrics for one orchestrator (REL-003).
 type OrchReliability struct {
 	Address        string
 	StreamsHandled int64
@@ -44,7 +44,7 @@ type OrchReliability struct {
 	ErrorRate      float64
 }
 
-// FailureEvent is one row for GET /v1/reliability/failures (REL-004).
+// FailureEvent is one failure event record (REL-004).
 type FailureEvent struct {
 	Timestamp   time.Time
 	FailureType string

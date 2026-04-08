@@ -2,8 +2,7 @@ package types
 
 import "time"
 
-// StreamStatusSample is one telemetry sample from agg_stream_status_samples.
-// Used in GET /v1/streams/samples (STR-EXT-001) and GET /v1/streams/{stream_id} (STR-EXT-002).
+// StreamStatusSample is one telemetry sample from agg_stream_status_samples (STR-EXT-001, STR-EXT-002).
 type StreamStatusSample struct {
 	SampleTS     time.Time
 	Org          string
@@ -18,7 +17,7 @@ type StreamStatusSample struct {
 	IsAttributed bool
 }
 
-// StreamDetail is the response for GET /v1/streams/{stream_id} (STR-EXT-002).
+// StreamDetail holds the full timeline and state for a specific stream (STR-EXT-002).
 type StreamDetail struct {
 	StreamID    string
 	Org         string
@@ -33,7 +32,7 @@ type StreamDetail struct {
 	Samples     []StreamStatusSample
 }
 
-// AttributionSummary is the response for GET /v1/streams/attribution (STR-EXT-003).
+// AttributionSummary holds the attribution rate: fraction of samples with resolved orch (STR-EXT-003).
 type AttributionSummary struct {
 	StartTime         time.Time
 	EndTime           time.Time

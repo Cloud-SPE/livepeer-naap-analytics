@@ -99,82 +99,14 @@ func (s *Server) buildRouter() chi.Router {
 	r.Get("/docs/openapi.yaml", handleOpenAPISpec)
 
 	r.Route("/v1", func(r chi.Router) {
-		// Network state (R1)
-		r.Get("/net/summary", s.handleGetNetworkSummary)
 		r.Get("/net/orchestrators", s.handleListOrchestrators)
-		r.Get("/net/orchestrators/{address}", s.handleGetOrchProfile)
-		r.Get("/net/gpu", s.handleGetGPUSummary)
 		r.Get("/net/models", s.handleListModels)
-
-		// Stream activity (R2)
-		r.Get("/streams/active", s.handleGetActiveStreams)
-		r.Get("/streams/summary", s.handleGetStreamSummary)
-		r.Get("/streams/history", s.handleListStreamHistory)
-
-		// Performance (R3)
-		r.Get("/perf/fps", s.handleGetFPSSummary)
-		r.Get("/perf/fps/history", s.handleListFPSHistory)
-		r.Get("/perf/latency", s.handleGetLatencySummary)
-		r.Get("/perf/webrtc", s.handleGetWebRTCQuality)
-
-		// Payments (R4)
-		r.Get("/payments/summary", s.handleGetPaymentSummary)
-		r.Get("/payments/history", s.handleListPaymentHistory)
-		r.Get("/payments/by-pipeline", s.handleListPaymentsByPipeline)
-		r.Get("/payments/by-orch", s.handleListPaymentsByOrch)
-
-		// Reliability (R5)
-		r.Get("/reliability/summary", s.handleGetReliabilitySummary)
-		r.Get("/reliability/history", s.handleListReliabilityHistory)
-		r.Get("/reliability/orchs", s.handleListOrchReliability)
-		r.Get("/failures", s.handleListFailures)
-
-		// Leaderboard (R6)
-		r.Get("/leaderboard", s.handleGetLeaderboard)
-		r.Get("/leaderboard/{address}", s.handleGetLeaderboardProfile)
-
-		// Gateways (R7)
-		r.Get("/net/gateways", s.handleListGateways)
-		r.Get("/net/gateways/{address}/orchs", s.handleListGatewayOrchestrators)
-		r.Get("/net/gateways/{address}", s.handleGetGatewayProfile)
-
-		// Network capacity & pricing (R11, R12, R15)
-		r.Get("/net/pricing", s.handleListPricing)
-		r.Get("/net/pricing/{address}", s.handleGetOrchPricingProfile)
-		r.Get("/net/model", s.handleGetModelDetail)
 		r.Get("/net/capacity", s.handleGetCapacitySummary)
-
-		// Stream extensions (R8)
-		r.Get("/streams/samples", s.handleListStreamSamples)
-		r.Get("/streams/attribution", s.handleGetAttributionSummary)
-		r.Get("/streams/{stream_id}", s.handleGetStreamDetail)
-
-		// E2E latency (R9)
-		r.Get("/perf/e2e-latency/history", s.handleListE2ELatencyHistory)
-		r.Get("/perf/e2e-latency", s.handleGetE2ELatencySummary)
-
-		// Model performance (R12)
 		r.Get("/perf/by-model", s.handleListModelPerformance)
-
-		// Pipelines (R10)
-		r.Get("/pipelines", s.handleListPipelines)
-		r.Get("/pipelines/{pipeline}", s.handleGetPipelineDetail)
-
-		// Extended payments (R13)
-		r.Get("/payments/by-gateway", s.handleListPaymentsByGateway)
-		r.Get("/payments/by-stream", s.handleListPaymentsByStream)
-
-		// Failure analysis (R14)
-		r.Get("/failures/by-pipeline", s.handleListFailuresByPipeline)
-		r.Get("/failures/by-orch", s.handleListFailuresByOrch)
-
-		// SLA / GPU / Network Demand (ported from leaderboard-serverless)
 		r.Get("/sla/compliance", s.handleListSLACompliance)
 		r.Get("/network/demand", s.handleListNetworkDemand)
 		r.Get("/gpu/network-demand", s.handleListGPUNetworkDemand)
 		r.Get("/gpu/metrics", s.handleListGPUMetrics)
-
-		// Dashboard — pre-aggregated UI endpoints (R16)
 		r.Get("/dashboard/kpi", s.handleGetDashboardKPI)
 		r.Get("/dashboard/pipelines", s.handleGetDashboardPipelines)
 		r.Get("/dashboard/orchestrators", s.handleGetDashboardOrchestrators)

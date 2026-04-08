@@ -8,7 +8,7 @@ type OrchModelStats struct {
 	IsWarm  bool
 }
 
-// ModelPerformance is one row for GET /v1/perf/by-model (MPERF-001).
+// ModelPerformance is one row for GET /v1/perf/by-model (MPERF-001). FPS performance broken down by AI model.
 type ModelPerformance struct {
 	ModelID       string
 	Pipeline      string
@@ -19,7 +19,7 @@ type ModelPerformance struct {
 	TotalStreams   int64
 }
 
-// ModelDetail is the response for GET /v1/net/model (MPERF-002).
+// ModelDetail holds detail for one model including per-orchestrator stats (MPERF-002).
 type ModelDetail struct {
 	ModelID       string
 	Pipeline      string

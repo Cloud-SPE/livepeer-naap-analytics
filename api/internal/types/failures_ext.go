@@ -1,6 +1,6 @@
 package types
 
-// FailuresByPipeline is one row for GET /v1/failures/by-pipeline (FAGG-001).
+// FailuresByPipeline holds failure counts aggregated per pipeline (FAGG-001).
 type FailuresByPipeline struct {
 	Pipeline              string
 	NoOrchCount           int64
@@ -11,7 +11,7 @@ type FailuresByPipeline struct {
 	FailureRate           float64 // total failures / requested sessions
 }
 
-// FailuresByOrch is one row for GET /v1/failures/by-orch (FAGG-002).
+// FailuresByOrch holds inference errors and restarts per orchestrator (FAGG-002).
 type FailuresByOrch struct {
 	OrchAddress       string
 	Name              string
