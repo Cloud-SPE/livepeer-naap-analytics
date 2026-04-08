@@ -268,7 +268,7 @@
           "refId": "A"
         }
       ],
-      "title": "FPS Average by Orchestrator (5-min intervals)",
+      "title": "FPS Average by Orchestrator (1h intervals)",
       "type": "timeseries"
     },
     {
