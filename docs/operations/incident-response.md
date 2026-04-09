@@ -5,7 +5,7 @@
 | **Status** | Active |
 | **Effective date** | 2026-04-02 |
 | **Ticket** | TASK 7.6 / [#273](https://github.com/livepeer/livepeer-naap-analytics-deployment/issues/273) |
-| **Last reviewed** | 2026-04-02 |
+| **Last reviewed** | 2026-04-09 |
 
 Related: [`operations-runbook.md`](operations-runbook.md) — troubleshooting procedures · [`devops-environment-guide.md`](devops-environment-guide.md) — health check queries
 
@@ -95,7 +95,7 @@ Run these checks immediately when a P0 is declared. The goal is to identify the 
 
 ```bash
 # Is the API responding?
-curl -s -o /dev/null -w "%{http_code}" https://naap-api.livepeer.cloud/health
+curl -s -o /dev/null -w "%{http_code}" https://naap-api.livepeer.cloud/healthz
 # Expected: 200
 
 # Is Kafka healthy? (SSH to infra2)

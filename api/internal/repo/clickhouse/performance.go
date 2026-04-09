@@ -7,7 +7,7 @@ import (
 	"github.com/livepeer/naap-analytics/internal/types"
 )
 
-// GetFPSSummary returns inference and input FPS statistics by pipeline and orch (PERF-001).
+// GetFPSSummary returns the legacy PERF-001 lower-layer FPS summary shape.
 // Percentiles are computed from canonical serving samples.
 // PERF-001-c: samples with fps == 0 are excluded.
 func (r *Repo) GetFPSSummary(ctx context.Context, p types.QueryParams) (*types.FPSSummary, error) {
@@ -117,7 +117,7 @@ func (r *Repo) GetFPSSummary(ctx context.Context, p types.QueryParams) (*types.F
 	return &types.FPSSummary{StartTime: start, EndTime: end, ByPipeline: byPipeline, ByOrchestrator: byOrch}, nil
 }
 
-// ListFPSHistory returns hourly avg FPS for charting (PERF-002).
+// ListFPSHistory returns the legacy PERF-002 lower-layer FPS history shape.
 func (r *Repo) ListFPSHistory(ctx context.Context, p types.QueryParams) ([]types.FPSBucket, error) {
 	start, end := effectiveWindow(p)
 	where := "WHERE hour >= ? AND hour < ?"
@@ -170,7 +170,7 @@ func (r *Repo) ListFPSHistory(ctx context.Context, p types.QueryParams) ([]types
 	return result, rows.Err()
 }
 
-// GetLatencySummary returns orch discovery latency percentiles (PERF-003).
+// GetLatencySummary returns the legacy PERF-003 lower-layer latency summary shape.
 // Percentiles are computed from typed discovery candidates.
 func (r *Repo) GetLatencySummary(ctx context.Context, p types.QueryParams) (*types.LatencySummary, error) {
 	start, end := effectiveWindow(p)
@@ -222,7 +222,7 @@ func (r *Repo) GetLatencySummary(ctx context.Context, p types.QueryParams) (*typ
 	return &types.LatencySummary{ByOrchestrator: orchs, NetworkAvgMS: networkAvg}, nil
 }
 
-// GetWebRTCQuality returns aggregated WebRTC quality metrics (PERF-004).
+// GetWebRTCQuality returns the legacy PERF-004 lower-layer WebRTC-quality shape.
 func (r *Repo) GetWebRTCQuality(ctx context.Context, p types.QueryParams) (*types.WebRTCQuality, error) {
 	start, end := effectiveWindow(p)
 	where := "WHERE hour >= ? AND hour < ?"

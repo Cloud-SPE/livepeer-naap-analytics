@@ -1,137 +1,106 @@
 # Architecture
 
-Detailed per-component architecture, layer rules, and enforcement model.
+Detailed per-component architecture, layer rules, and enforcement model for the
+current Go, ClickHouse, resolver, and dbt stack.
 
-## Layered domain model
+## Layered Domain Model
 
-Each component follows a strict layered model. Within a component, code may only
-import from the **same or earlier** layer. Forward imports are forbidden.
+Within the Go service, dependencies flow forward only:
 
+```text
+Types -> Config -> Repo -> Service -> Runtime
 ```
-Types → Config → Repo → Service → Runtime
-```
 
-### Layer responsibilities
+## Layer Responsibilities
 
-| Layer | Go package | Python module | Responsibility |
-|-------|-----------|---------------|---------------|
-| **Types** | `internal/types` | `src/types` | Domain structs, enums, Kafka message schemas. No dependencies except stdlib. |
-| **Config** | `internal/config` | `src/config` | Configuration loading from env/files. Depends on Types only. |
-| **Repo** | `internal/repo` | `src/repo` | Data access interfaces and implementations. Depends on Types, Config. |
-| **Service** | `internal/service` | `src/service` | Business logic. Depends on Types, Config, Repo. |
-| **Runtime** | `internal/runtime` | `src/runtime` | Entry points: HTTP handlers (Go), Kafka consumers (Python). Wires everything together. |
-| **Providers** | `internal/providers` | `src/providers` | Cross-cutting concerns only. Injected; not imported by layers. |
+| Layer | Package | Responsibility |
+|---|---|---|
+| `Types` | `api/internal/types` | Domain types, query params, and response payloads |
+| `Config` | `api/internal/config` | Environment and runtime configuration |
+| `Repo` | `api/internal/repo` | ClickHouse access and query wiring |
+| `Service` | `api/internal/service` | Business logic over repo contracts |
+| `Runtime` | `api/internal/runtime` | HTTP handlers, middleware, metrics, and server wiring |
+| `Providers` | `api/internal/providers` | Logger, telemetry, and other cross-cutting runtime providers |
 
-### Cross-cutting concerns (Providers)
-
-Providers are the only exception to the forward-only rule.
-They are injected at the Runtime layer and passed down via interfaces.
-
-Current providers:
-- **Telemetry** — OpenTelemetry tracer and meter
-- **Kafka client** — shared producer/consumer factory
-- **Logger** — structured logger (zap / structlog)
-
-Future providers (when needed):
-- Auth (JWT validation, API key lookup)
-- Feature flags
+Providers are injected by the runtime layer. They are not a free pass to skip
+the dependency direction rules.
 
 ## Enforcement
 
-### Go (api/)
+Current repo enforcement is mechanical, not aspirational:
 
-- `go vet` catches obvious issues
-- Layer import checks: `scripts/check-layers-go.sh` (to be generated)
-  - Runs `grep` for disallowed cross-layer imports per package
-  - Exits non-zero if violations found; prints the offending import and remediation hint
+- static and contract checks in `api/internal/validation`
+- semantic-tier validation for warehouse models
+- docs and route validation for the active documentation surface
+- package structure kept aligned with the layer chain above
 
-### Python (pipeline/)
+Concretely, this means:
 
-- `ruff` for linting and formatting
-- `mypy` for type checking (strict mode)
-- Layer import checks: `scripts/check-layers-python.sh` (to be generated)
-- All Kafka message types must use Pydantic models — no `dict` at service boundaries
+- route and spec drift should fail validation rather than being noticed later in review
+- semantic-tier violations should be caught where published models are defined
+- rollup-safety rules belong in tests and serving contracts, not just prose
+- providers should be wired at runtime boundaries rather than imported as convenience globals
 
-## Kafka topic naming
+## Analytics Tier Contract
 
-```
-naap.<domain>.<event-type>
-```
+The semantic storage contract is:
 
-Examples:
-- `naap.events.raw` — raw inbound events from the Livepeer network
-- `naap.analytics.aggregated` — processed aggregation results
-- `naap.alerts` — threshold breach alerts
+- `raw_*` style accepted-event surfaces
+- `normalized_*` event-family records
+- `canonical_*` authoritative corrected facts
+- `operational_*` live-ops helper surfaces
+- `api_base_*` internal semantic helper views
+- `api_*` published API and dashboard read models
 
-Topic definitions: `infra/kafka/topics.yaml`
-Schema reference: `docs/generated/schema.md`
+Not every physical ClickHouse object uses those prefixes. The active bootstrap
+also includes supported runtime tables such as `accepted_raw_events`,
+`ignored_raw_events`, `resolver_*`, `agg_*`, metadata tables, and change tables.
 
-## Analytics tier contract
-
-The analytics storage/runtime contract uses explicit semantic tiers:
-
-- `raw_*` — accepted raw envelopes
-- `normalized_*` — normalized event-family records
-- `canonical_*` — authoritative corrected derivation source
-- `operational_*` — low-latency live ops tables only
-- `api_base_*` — internal semantic helper views for published API models
-- `api_*` — service-facing read models only
-
-Those prefixes describe semantic tiers and allowed derivation flow. They do not
-mean every physical ClickHouse table must use one of those prefixes. The
-supported bootstrap intentionally also includes infrastructure/runtime tables
-such as `accepted_raw_events`, `ignored_raw_events`, `kafka_*`, `resolver_*`,
-`agg_*`, metadata tables, and change/audit tables.
-
-Allowed data flow:
+Allowed semantic flow:
 
 ```text
-raw_* -> normalized_* -> canonical_* -> api_base_* -> api_*
-raw_* / normalized_* -> operational_*
+accepted_raw_events / raw-like inputs
+  -> normalized_*
+  -> canonical_*
+  -> api_base_*
+  -> api_*
 ```
 
-Forbidden data flow:
+Forbidden semantic flow:
 
-- `api_* -> canonical_*`
-- `api_* -> api_base_*`
-- `api_base_* -> canonical_*`
-- `operational_* -> canonical_*`
-- any downstream derivation sourcing truth from `api_base_*` or `api_*`
+- `api_*` back into `canonical_*`
+- `api_*` back into `api_base_*`
+- downstream truth derived from `api_base_*` or `api_*`
+- operational/live helper surfaces treated as long-term truth
 
-Future consumer surfaces may add new namespaces such as `dashboard_*`,
-`export_*`, `partner_*`, or `feature_*`, but they must derive from
-`canonical_*`, never from `api_base_*`, `api_*`, or `operational_*`.
+## Warehouse And Runtime Ownership
 
-## Dependency injection pattern
+- ClickHouse owns physical ingest and storage.
+- The resolver owns corrected current-state and serving-store publication.
+- dbt owns semantic read models over resolver- and ingest-owned tables.
+- The Go API reads published serving contracts; it does not synthesize truth from raw history on the hot path.
 
-### Go
+## Wiring Pattern
 
-Providers are constructed in `main.go` and passed to the Runtime.
-The Runtime passes interfaces (not concrete types) to Service and Repo layers.
+Runtime code owns construction and injection:
 
-```go
-// main.go
-providers := providers.New(cfg)
-runtime := runtime.New(cfg, providers, service.New(cfg, repo.New(cfg)))
-runtime.Start()
-```
+- providers are created at runtime boundaries
+- repo implementations depend on config and typed contracts
+- services depend on repo interfaces and types
+- handlers depend on service interfaces and runtime providers
 
-### Python
+That keeps cross-cutting concerns explicit and prevents repo or service code from
+silently acquiring runtime-only dependencies.
 
-Providers are constructed in the Runtime entry point and injected via constructor.
+## Rollup Safety
 
-```python
-# runtime/consumer.py
-telemetry = TelemetryProvider(settings)
-kafka = KafkaProvider(settings)
-processor = EventProcessor(repo=EventRepo(settings), telemetry=telemetry)
-consumer = KafkaConsumer(kafka=kafka, processor=processor)
-consumer.run()
-```
+Rollup algebra is a correctness rule:
 
-## File size and complexity limits
+- sum additive counters directly
+- recompute ratios from additive numerators and denominators
+- recompute means from sums and counts
+- keep percentile or distribution state merge-safe
+- never average averages or ratios and never recompute percentiles from scalar percentiles
 
-- No single Go file should exceed 400 lines
-- No single Python file should exceed 300 lines
-- No function should exceed 60 lines
-- Violations are caught by linters with remediation messages
+If a higher-grain consumer cannot recompute a derived metric safely from the
+published support fields, the metric contract is incomplete.

@@ -118,7 +118,7 @@ Types → Config → Repo → Service → Runtime
 Cross-cutting concerns (telemetry, logger, Kafka client) enter through
 **Providers only** and are injected into the layers that need them.
 
-Violations are caught by structural linters. See `docs/design-docs/architecture.md`.
+Violations are caught by repo validation and contract checks. See [`design-docs/architecture.md`](design-docs/architecture.md).
 
 ## Components
 
@@ -141,8 +141,8 @@ Violations are caught by structural linters. See `docs/design-docs/architecture.
 
 ## Further reading
 
-- `docs/design-docs/architecture.md` — layer rules, enforcement, dependency graph
-- `docs/design-docs/core-beliefs.md` — operating principles
-- `docs/design-docs/adr-004-quality-aware-sla.md` — rationale and evolution rules for the current `sla_score` contract
-- `docs/design-docs/data-validation-rules.md` — data validation behavioral contract (17 rules, 31 tests)
-- `docs/product-specs/index.md` — feature specifications (R1–R6)
+- [`design-docs/architecture.md`](design-docs/architecture.md) — layer rules and enforcement
+- [`design-docs/core-beliefs.md`](design-docs/core-beliefs.md) — operating principles
+- [`design-docs/adr-004-quality-aware-sla.md`](design-docs/adr-004-quality-aware-sla.md) — current `sla_score` rationale
+- [`design-docs/data-validation-rules.md`](design-docs/data-validation-rules.md) — validation behavior contract
+- [`product-specs/index.md`](product-specs/index.md) — active product specifications

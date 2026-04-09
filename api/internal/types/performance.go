@@ -10,7 +10,7 @@ type FPSStats struct {
 	P99 float64
 }
 
-// PipelineFPS aggregates FPS metrics for one pipeline (PERF-001).
+// PipelineFPS is one pipeline aggregate in the legacy PERF-001 lower-layer FPS summary shape.
 type PipelineFPS struct {
 	Pipeline     string
 	InferenceFPS FPSStats
@@ -18,7 +18,7 @@ type PipelineFPS struct {
 	SampleCount  int64
 }
 
-// OrchFPS aggregates FPS metrics for one orch+pipeline pair (PERF-001).
+// OrchFPS is one orch-plus-pipeline aggregate in the legacy PERF-001 lower-layer FPS summary shape.
 type OrchFPS struct {
 	Address      string
 	Name         string
@@ -28,7 +28,8 @@ type OrchFPS struct {
 	SampleCount  int64
 }
 
-// FPSSummary is the response payload for GET /v1/performance/fps (PERF-001).
+// FPSSummary is the legacy PERF-001 lower-layer FPS summary shape.
+// It is not a current routed API response.
 type FPSSummary struct {
 	StartTime      time.Time
 	EndTime        time.Time
@@ -36,7 +37,7 @@ type FPSSummary struct {
 	ByOrchestrator []OrchFPS
 }
 
-// FPSBucket is one time-bucket for GET /v1/performance/fps/history (PERF-002).
+// FPSBucket is one bucket in the legacy PERF-002 lower-layer FPS history shape.
 // Degraded is true when avg inference FPS drops ≥20% from the prior bucket.
 type FPSBucket struct {
 	Timestamp       time.Time
@@ -46,7 +47,7 @@ type FPSBucket struct {
 	Degraded        bool
 }
 
-// OrchLatency holds discovery latency stats for one orchestrator (PERF-003).
+// OrchLatency is one orchestrator row in the legacy PERF-003 lower-layer latency shape.
 type OrchLatency struct {
 	Address     string
 	Name        string
@@ -57,7 +58,8 @@ type OrchLatency struct {
 	SampleCount int64
 }
 
-// LatencySummary is the response payload for GET /v1/performance/latency (PERF-003).
+// LatencySummary is the legacy PERF-003 lower-layer discovery-latency summary shape.
+// It is not a current routed API response.
 type LatencySummary struct {
 	ByOrchestrator []OrchLatency
 	NetworkAvgMS   float64
@@ -82,7 +84,8 @@ type ConnQualityDist struct {
 	Poor float64
 }
 
-// WebRTCQuality is the response payload for GET /v1/performance/quality (PERF-004).
+// WebRTCQuality is the legacy PERF-004 lower-layer WebRTC-quality summary shape.
+// It is not a current routed API response.
 type WebRTCQuality struct {
 	StartTime   time.Time
 	EndTime     time.Time

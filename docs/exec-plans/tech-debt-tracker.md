@@ -4,7 +4,7 @@ Known technical debt, ordered by priority. Updated as debt is introduced or reso
 
 | ID | Description | Priority | Introduced | Owner |
 |----|-------------|----------|-----------|-------|
-| TD-001 | `naap.events` queries in `performance.go` and `reliability.go` read raw events without `FINAL`. `ReplacingMergeTree` deduplication is background/lazy, so these queries can transiently over-count in the window after a crash-restart. Aggregate MV tables are not affected. Fix: add `FINAL` to each direct `naap.events` query. | low | Phase 3 | — |
+| TD-001 | Review whether any remaining direct performance/reliability reads need stronger deduplication guarantees after crash-restart windows. Future debt should be tracked against the actual published serving sources in use, not against superseded raw-path assumptions. | low | Phase 3 | — |
 | TD-002 | `agg_orch_reliability_hourly` and `agg_stream_state` have empty `orch_address` for events processed before `agg_orch_state` was fully backfilled. Once the `network_events` Kafka backfill completes, re-run the INSERT section of migration 011 to resolve attribution. | medium | Phase (fix) | — |
 
 ## Format

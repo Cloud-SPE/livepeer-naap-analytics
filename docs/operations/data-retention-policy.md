@@ -5,7 +5,7 @@
 | **Status** | Active |
 | **Effective date** | 2026-04-02 |
 | **Ticket** | TASK-06 / [#285](https://github.com/livepeer/livepeer-naap-analytics-deployment/issues/285) |
-| **Last reviewed** | 2026-04-02 |
+| **Last reviewed** | 2026-04-09 |
 
 ---
 
@@ -31,21 +31,20 @@ For the architectural rationale behind the Kafka + ClickHouse engine choice, see
 
 | Topic | Partitions | Retention | Rationale |
 |---|---|---|---|
-| `naap.events.raw` | 6 | **7 days** (604,800,000 ms) | Primary raw event stream. 7 days covers the operational replay window for short-term re-consumption. Events are durably stored in ClickHouse for 90 days; Kafka retention is intentionally short because ClickHouse is the authoritative archive. |
-| `naap.analytics.aggregated` | 3 | **30 days** (2,592,000,000 ms) | Aggregates produced by the pipeline. Consumers (API repo layer) have a 30-day catch-up window. |
-| `naap.alerts` | 1 | **7 days** (604,800,000 ms) | Threshold breach alerts. Alerts are time-sensitive; 7 days is sufficient for incident review. |
-| Broker default | — | **7 days** (`KAFKA_LOG_RETENTION_HOURS=168`) | Applies to any auto-created topics not listed above. |
+| `network_events` | 6 | **7 days** (604,800,000 ms) | Primary raw network-event stream for the daydream org. |
+| `streaming_events` | 6 | **7 days** (604,800,000 ms) | Primary raw streaming-event stream for the cloudspe org. |
+| Broker default | — | **7 days** (`KAFKA_LOG_RETENTION_HOURS=168`) | Applies to auto-created topics that are not explicitly overridden. |
 
-Configuration source: `infra/kafka/topics.yaml`. Broker default: `deploy/infra2/kafka/stack.yml`.
+Current broker default source: `deploy/infra2/kafka/stack.yml`.
 
 ### Replay within the Kafka window
 
-With `KAFKA_AUTO_OFFSET_RESET=earliest`, ClickHouse consumer groups can re-consume from up to 30 days ago by resetting their offsets. Consumer groups:
+With `KAFKA_AUTO_OFFSET_RESET=earliest`, ClickHouse consumer groups can re-consume from up to 7 days ago by resetting their offsets. Consumer groups:
 
 | Consumer group | Topic |
 |---|---|
-| `clickhouse-naap-network` | `naap.events.raw` (network events) |
-| `clickhouse-naap-streaming` | `naap.events.raw` (streaming events) |
+| `clickhouse-naap-network` | `network_events` |
+| `clickhouse-naap-streaming` | `streaming_events` |
 
 Offset reset procedure: stop the ClickHouse Kafka engine table, reset the consumer group offset using the Kafka CLI, then restart. See `infra/clickhouse/README.md` for operational steps.
 
@@ -73,7 +72,9 @@ Queryable diagnostic view: `naap.ignored_raw_event_diagnostics`.
 | `naap.agg_stream_status_samples` | `sample_ts` | 30 days |
 | `naap.resolver_dirty_partitions` | `event_date` | 30 days |
 
-Retention matches the `naap.analytics.aggregated` Kafka topic window.
+This tier is intentionally longer-lived than Kafka replay. These tables support
+validation, debugging, and bounded forensic review after the 7-day Kafka window
+has expired but before the 90-day raw-event TTL boundary.
 
 ### Tier 3 — Entity metadata / cache (7 days)
 
@@ -126,7 +127,7 @@ The following table defines the replay path based on event age:
 
 | Event age | Replay source | Mechanism |
 |---|---|---|
-| 0 – 7 days | Kafka `naap.events.raw` | Reset ClickHouse consumer group offset to `earliest`; re-consume directly from Kafka |
+| 0 – 7 days | Kafka `network_events` / `streaming_events` | Reset ClickHouse consumer group offset to `earliest`; re-consume directly from Kafka |
 | 7 days – 90 days | ClickHouse `naap.accepted_raw_events` | Use resolver `backfill` mode: `make resolver-backfill FROM=<start> TO=<end> ORG=<org>` |
 | > 90 days | Not available (TTL expired) | Raw events have been purged from ClickHouse. Derived aggregates may still be queryable depending on their TTL. |
 
@@ -146,7 +147,7 @@ To change a topic's retention window:
    kafka-configs.sh --bootstrap-server <broker>:9092 \
      --alter \
      --entity-type topics \
-     --entity-name naap.events.raw \
+     --entity-name network_events \
      --add-config retention.ms=<new_value_ms>
    ```
 3. Verify:
@@ -154,7 +155,7 @@ To change a topic's retention window:
    kafka-configs.sh --bootstrap-server <broker>:9092 \
      --describe \
      --entity-type topics \
-     --entity-name naap.events.raw
+     --entity-name network_events
    ```
 
 Note: `topics.yaml` is the source of truth for documentation and provisioning scripts (`scripts/setup.sh`). Updating the file does not automatically alter the live topic — the CLI step is required.

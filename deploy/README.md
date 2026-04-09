@@ -199,7 +199,7 @@ topic history. Monitor progress:
 ```bash
 docker exec -it <stack>-clickhouse-1 clickhouse-client \
   --user naap_admin --password <password> \
-  --query "SELECT count(), min(event_ts), max(event_ts) FROM naap.events"
+  --query "SELECT count(), min(event_ts), max(event_ts) FROM naap.accepted_raw_events"
 ```
 
 Once backfill is complete:

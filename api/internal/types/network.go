@@ -2,7 +2,8 @@ package types
 
 import "time"
 
-// NetworkSummary is the response payload for GET /v1/network/summary (NET-001).
+// NetworkSummary is a legacy network-snapshot shape from earlier R1 draft work.
+// It is retained for internal and lower-layer use and is not a current routed API response.
 type NetworkSummary struct {
 	Org                    string
 	SnapshotTime           time.Time
@@ -11,7 +12,8 @@ type NetworkSummary struct {
 	ActiveThresholdMinutes int
 }
 
-// Orchestrator is a single orch entry for GET /v1/network/orchestrators (NET-002).
+// Orchestrator is one row for active requirement NET-001 served by
+// GET /v1/net/orchestrators.
 // RawCapabilities is the full JSON blob from the capabilities snapshot — the service
 // layer parses GPU, model, and pricing detail from it for the HTTP response.
 type Orchestrator struct {
@@ -25,7 +27,7 @@ type Orchestrator struct {
 	RawCapabilities string // raw JSON; parsed by service layer for GPU/model/pricing
 }
 
-// GPUModel is aggregated GPU stats for one hardware model (NET-003).
+// GPUModel is one aggregated hardware row used by legacy GPU inventory summary shapes.
 type GPUModel struct {
 	Model       string
 	Count       int64
@@ -33,14 +35,16 @@ type GPUModel struct {
 	VRAMPerGPUGB float64
 }
 
-// GPUSummary is the response payload for GET /v1/network/gpus (NET-003).
+// GPUSummary is a legacy GPU-inventory summary shape from earlier R1 draft work.
+// It is retained for internal and lower-layer use and is not a current routed API response.
 type GPUSummary struct {
 	TotalGPUs   int64
 	TotalVRAMGB float64
 	ByModel     []GPUModel
 }
 
-// ModelAvailability is a single model entry for GET /v1/network/models (NET-004).
+// ModelAvailability is one row for active requirement NET-002 served by
+// GET /v1/net/models.
 type ModelAvailability struct {
 	Pipeline            string
 	Model               string

@@ -7,7 +7,7 @@ import (
 	"github.com/livepeer/naap-analytics/internal/types"
 )
 
-// ListModelPerformance returns FPS performance broken down by AI model (MPERF-001).
+// ListModelPerformance returns active PERF-001 rows for GET /v1/perf/by-model.
 func (r *Repo) ListModelPerformance(ctx context.Context, p types.QueryParams) ([]types.ModelPerformance, error) {
 	start, end := effectiveWindow(p)
 
@@ -68,7 +68,8 @@ func (r *Repo) ListModelPerformance(ctx context.Context, p types.QueryParams) ([
 	return result, rows.Err()
 }
 
-// GetModelDetail returns detail for one (pipeline, model) pair (MPERF-002).
+// GetModelDetail returns a lower-layer companion detail shape for model performance.
+// It is not a current routed API surface.
 func (r *Repo) GetModelDetail(ctx context.Context, modelID string, p types.QueryParams) (*types.ModelDetail, error) {
 	start, end := effectiveWindow(p)
 

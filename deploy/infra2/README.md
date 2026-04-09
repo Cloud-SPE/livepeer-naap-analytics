@@ -140,7 +140,7 @@ Monitor backfill progress:
 ```bash
 docker exec naap-analytics-clickhouse clickhouse-client \
   --user naap_admin --password <pw> \
-  --query "SELECT count(), min(event_ts), max(event_ts) FROM naap.events"
+  --query "SELECT count(), min(event_ts), max(event_ts) FROM naap.accepted_raw_events"
 ```
 
 ## Updating

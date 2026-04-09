@@ -32,7 +32,7 @@ The maintained design references now live in:
 
 - [architecture.md](architecture.md)
 - [data-validation-rules.md](data-validation-rules.md)
-- [../DESIGN.md](../DESIGN.md)
+- [../design.md](../design.md)
 
 This ADR remains as a stable repository reference for the tier contract named in
 older docs and reviews.

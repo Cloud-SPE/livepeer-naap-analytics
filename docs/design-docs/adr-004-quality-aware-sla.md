@@ -168,4 +168,4 @@ The operational formula and field contract remain defined in:
 
 - [../metrics-and-sla-reference.md](../metrics-and-sla-reference.md)
 - [data-validation-rules.md](data-validation-rules.md)
-- [../DESIGN.md](../DESIGN.md)
+- [../design.md](../design.md)

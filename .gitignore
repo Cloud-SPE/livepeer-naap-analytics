@@ -37,6 +37,7 @@ api/vendor/
 .vscode/
 *.swp
 *.swo
+.local/
 
 # OS
 .DS_Store
@@ -48,3 +49,4 @@ docs/generated/*.md
 !docs/generated/schema.md
 warehouse/target/
 warehouse/logs/
+.codex

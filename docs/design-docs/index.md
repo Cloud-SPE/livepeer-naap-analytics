@@ -3,7 +3,7 @@
 | Document | Status | Last verified | Description |
 |----------|--------|--------------|-------------|
 | [`core-beliefs.md`](core-beliefs.md) | ✅ current | 2026-03-24 | Project tenants and agent-first principles |
-| [`architecture.md`](architecture.md) | ✅ current | 2026-03-24 | Layer rules, enforcement model, DI pattern |
+| [`architecture.md`](architecture.md) | ✅ current | 2026-04-09 | Current Go layer rules, warehouse tier contract, and rollup-safety rules |
 | [`system-visuals.md`](system-visuals.md) | ✅ current | 2026-03-30 | Mermaid diagrams for ingest, resolver publication, and deployment topology |
 | [`adr-001-storage-architecture.md`](adr-001-storage-architecture.md) | ✅ current | 2026-03-24 | ClickHouse + Kafka engine decision, compression, retention |
 | [`adr-002-api-design.md`](adr-002-api-design.md) | ✅ current | 2026-03-24 | REST/JSON, auth model, org model, rate limiting |
@@ -16,6 +16,7 @@
 | Document | Status | Last verified | Description |
 |----------|--------|--------------|-------------|
 | [`../metrics-and-sla-reference.md`](../metrics-and-sla-reference.md) | ✅ current | 2026-04-02 | Community-facing metrics reference: formulas, SLA targets, scoring models, session taxonomy, glossary |
+| [`../references/inbound-kafka-contract.md`](../references/inbound-kafka-contract.md) | ✅ current | 2026-04-09 | Repo-authoritative inbound Kafka event contract |
 
 ## Operations docs
 

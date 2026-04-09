@@ -1,182 +1,70 @@
 # Spec: R3 — Performance & Quality
 
-**Status:** approved
-**Priority:** P0 / launch
-**Requirement IDs:** PERF-001 through PERF-008
-**Source events:** `ai_stream_status`, `stream_ingest_metrics`, `webrtc_stats`, `discovery_results`
-**ADRs:** ADR-001, ADR-002
-
----
+**Status:** approved  
+**Priority:** P0 / launch  
+**Requirement IDs:** PERF-001  
+**Source events:** `ai_stream_status`, `network_capabilities`
 
 ## Problem
 
-Consumers need to understand the quality of AI inference and stream delivery:
-inference FPS per orchestrator and pipeline, WebRTC quality metrics (jitter, packet loss),
-and orch discovery latency. These metrics are key for identifying degraded orchs and
-pipeline bottlenecks.
+Consumers need a current performance surface that shows how AI models are
+performing across the network without reconstructing that view from raw status
+history.
 
----
+## Solution
+
+Serve model-level performance from the published semantic layer through:
+
+- `GET /v1/perf/by-model`
+
+The active product contract for R3 is intentionally limited to the live route
+set. Supporting semantics and lower-layer historical context are preserved in
+[`../references/performance-quality-reference.md`](../references/performance-quality-reference.md).
 
 ## Requirements
 
-### PERF-001: Inference FPS summary
+### PERF-001: Performance by model
 
-`GET /v1/performance/fps`
+`GET /v1/perf/by-model`
 
-Returns inference and input FPS statistics aggregated by orchestrator and pipeline.
-
-**Query params:**
-- `?start=` / `?end=` (default: last 1 hour)
-- `?org=`
-- `?pipeline=`
-- `?orch_address=`
-
-**Response:**
-```json
-{
-  "data": {
-    "time_window": { "start": "...", "end": "..." },
-    "by_pipeline": [
-      {
-        "pipeline": "streamdiffusion-sdxl",
-        "inference_fps": { "avg": 17.2, "p50": 17.5, "p5": 8.1, "p99": 18.9 },
-        "input_fps":     { "avg": 19.8, "p50": 20.0, "p5": 10.2, "p99": 20.5 },
-        "sample_count": 4821
-      }
-    ],
-    "by_orchestrator": [
-      {
-        "address": "0xdef1c70578b2b5e8589a42e26980687fc5153079",
-        "name": "speedybird.xyz",
-        "pipeline": "streamdiffusion-sdxl",
-        "inference_fps": { "avg": 17.8, "p50": 18.0, "p5": 9.1, "p99": 18.9 },
-        "input_fps":     { "avg": 19.9, "p50": 20.1, "p5": 11.0, "p99": 20.4 },
-        "sample_count": 312
-      }
-    ]
-  },
-  "meta": { ... }
-}
-```
-
-**Acceptance criteria:**
-- [ ] PERF-001-a: FPS values derived from `ai_stream_status.data.inference_status.fps` and `input_status.fps`
-- [ ] PERF-001-b: P5 (not P1) is used as the low-end because single-sample noise is high
-- [ ] PERF-001-c: Samples with `fps == 0` are excluded (indicate stream not yet started)
-
----
-
-### PERF-002: FPS time-series
-
-`GET /v1/performance/fps/history`
-
-Time-bucketed FPS series for charting degradation over time.
+Returns one row per `(pipeline, model)` for the requested window.
 
 **Query params:**
-- `?start=` / `?end=`
-- `?granularity=5m|1h|1d`
-- `?pipeline=`
-- `?orch_address=`
 
-**Response:** Same structure as `/streams/history` with `avg_inference_fps`, `avg_input_fps` per bucket.
+- `?org=` — optional org filter
+- `?start=` / `?end=` — optional window bounds; default window is the last 24 hours
+- `?pipeline=` — optional pipeline filter
 
-**Acceptance criteria:**
-- [ ] PERF-002-a: Detectable degradation: if avg FPS drops ≥20% from prior bucket, the bucket is flagged with `degraded: true`
+**Response fields:**
 
----
+| Field | Meaning |
+|---|---|
+| `ModelID` | Canonical model identifier |
+| `Pipeline` | Canonical pipeline identifier |
+| `AvgFPS` | Weighted average output FPS across the requested window |
+| `P50FPS` | Current schema field; currently approximated from the same hourly aggregate used for `AvgFPS` |
+| `P99FPS` | Current schema field; currently approximated from the same hourly aggregate used for `AvgFPS` |
+| `WarmOrchCount` | Distinct warm orchestrators currently advertising the model |
+| `TotalStreams` | Schema field reserved for stream-volume joins; current implementation may return `0` |
 
-### PERF-003: Discovery latency
+**Required behavior:**
 
-`GET /v1/performance/latency`
+- derives FPS from published hourly performance aggregates rather than request-time raw scans
+- joins performance rows with current warm inventory so only currently advertised model and pipeline pairs appear
+- treats warm inventory as orchestrators seen within the active warm-state threshold
+- remains aligned with the live router and OpenAPI schema
 
-Returns orch discovery latency from the gateway's perspective.
+## Data Sources
 
-**Query params:**
-- `?start=` / `?end=`
-- `?org=`
-- `?orch_address=`
+| Surface field | Source layer |
+|---|---|
+| `AvgFPS`, `P50FPS`, `P99FPS` | published hourly performance aggregate |
+| `WarmOrchCount` | published GPU inventory and warm-orchestrator state |
+| `ModelID`, `Pipeline` | canonical capability inventory and semantic serving layer |
 
-**Response:**
-```json
-{
-  "data": {
-    "by_orchestrator": [
-      {
-        "address": "0x...",
-        "name": "speedybird.xyz",
-        "latency_ms": { "avg": 77, "p50": 72, "p95": 130, "p99": 210 },
-        "sample_count": 184
-      }
-    ],
-    "network_avg_latency_ms": 89
-  }
-}
-```
+## Out of Scope
 
-**Acceptance criteria:**
-- [ ] PERF-003-a: Latency sourced from `discovery_results.data[].latency_ms`
-- [ ] PERF-003-b: Latency is parsed as numeric (stored as string `"77"` in events — convert at ingest)
-
----
-
-### PERF-004: WebRTC stream quality
-
-`GET /v1/performance/quality`
-
-Returns WebRTC ingest quality metrics aggregated across streams.
-
-**Query params:**
-- `?start=` / `?end=`
-- `?org=`
-- `?stream_id=`
-
-**Response:**
-```json
-{
-  "data": {
-    "time_window": { "start": "...", "end": "..." },
-    "video": {
-      "avg_jitter_ms": 7.2,
-      "packet_loss_rate": 0.002,
-      "avg_packets_lost_per_stream": 0.3
-    },
-    "audio": {
-      "avg_jitter_ms": 19.8,
-      "packet_loss_rate": 0.001
-    },
-    "conn_quality_distribution": {
-      "good": 0.94,
-      "fair": 0.05,
-      "poor": 0.01
-    }
-  }
-}
-```
-
-**Acceptance criteria:**
-- [ ] PERF-004-a: Data sourced from `stream_ingest_metrics.data.stats.track_stats[]`
-- [ ] PERF-004-b: `conn_quality` values from `stats.conn_quality` field
-- [ ] PERF-004-c: `packet_loss_rate` = total `packets_lost` / total `packets_received` across all samples
-
----
-
-## Data sources and mapping
-
-| API field | Source event | Source field path |
-|-----------|-------------|------------------|
-| Inference FPS | `ai_stream_status` | `data.inference_status.fps` |
-| Input FPS | `ai_stream_status` | `data.input_status.fps` |
-| Orch address | `ai_stream_status` | `data.orchestrator_info.address` |
-| Pipeline | `ai_stream_status` | `data.pipeline` |
-| Discovery latency | `discovery_results` | `data[].latency_ms` (string → numeric at ingest) |
-| Video jitter | `stream_ingest_metrics` | `data.stats.track_stats[type=video].jitter` |
-| Packet loss | `stream_ingest_metrics` | `data.stats.track_stats[].packets_lost` / `packets_received` |
-| Conn quality | `stream_ingest_metrics` | `data.stats.conn_quality` |
-
----
-
-## Out of scope
-
-- Per-stream quality detail (individual stream deep-dive)
-- Output-side WebRTC metrics (viewer-facing quality)
-- GPU utilisation percentages (not in event data)
+- per-orchestrator FPS detail as a public route
+- standalone FPS history endpoints
+- standalone discovery-latency or WebRTC-quality endpoints
+- viewer-side delivery quality metrics

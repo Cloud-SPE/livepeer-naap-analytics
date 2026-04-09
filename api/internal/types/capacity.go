@@ -2,7 +2,8 @@ package types
 
 import "time"
 
-// CapacityEntry is one (pipeline, model) row for GET /v1/net/capacity (CAP-001).
+// CapacityEntry is one row for active requirement NET-003 served by
+// GET /v1/net/capacity.
 type CapacityEntry struct {
 	Pipeline       string
 	ModelID        string
@@ -12,7 +13,8 @@ type CapacityEntry struct {
 	TotalVRAMBytes uint64
 }
 
-// CapacitySummary is the response for GET /v1/net/capacity (CAP-001).
+// CapacitySummary is the response shape for active requirement NET-003 served by
+// GET /v1/net/capacity.
 type CapacitySummary struct {
 	SnapshotTime time.Time
 	Entries      []CapacityEntry

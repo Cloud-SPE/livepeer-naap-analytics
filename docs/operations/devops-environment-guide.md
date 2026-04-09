@@ -5,7 +5,7 @@
 | **Status** | Active |
 | **Effective date** | 2026-04-02 |
 | **Ticket** | TASK-24 / [#303](https://github.com/livepeer/livepeer-naap-analytics-deployment/issues/303) |
-| **Last reviewed** | 2026-04-02 |
+| **Last reviewed** | 2026-04-09 |
 
 Related docs:
 - [`run-modes-and-recovery.md`](run-modes-and-recovery.md) — resolver modes, dbt publication, failure recovery
@@ -190,7 +190,7 @@ After `make up`, confirm the full pipeline is live:
 
 ```bash
 # 1. API is healthy
-curl -s http://localhost:8000/health
+curl -s http://localhost:8000/healthz
 
 # 2. ClickHouse has events
 make ch-smoke

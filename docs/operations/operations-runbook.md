@@ -5,7 +5,7 @@
 | **Status** | Active |
 | **Effective date** | 2026-04-02 |
 | **Ticket** | TASK 7.6 / [#273](https://github.com/livepeer/livepeer-naap-analytics-deployment/issues/273) |
-| **Last reviewed** | 2026-04-02 |
+| **Last reviewed** | 2026-04-09 |
 
 ---
 
@@ -123,7 +123,7 @@ make warehouse-run
 [ ] docker logs naap-analytics-clickhouse — "bootstrap complete" or "migrations applied"
 [ ] SELECT count() FROM system.kafka_consumers — returns 2 active consumers
 [ ] SELECT count() FROM naap.accepted_raw_events — growing over time
-[ ] curl https://naap-api.livepeer.cloud/health — 200 OK
+[ ] curl https://naap-api.livepeer.cloud/healthz — 200 OK
 [ ] Grafana dashboards loading — naap-overview shows data
 [ ] Kafka UI — naap cluster shows connected, consumer groups visible
 [ ] MM2 logs — "Successfully joined group", no SASL errors

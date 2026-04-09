@@ -10,7 +10,8 @@ import (
 	"github.com/livepeer/naap-analytics/internal/types"
 )
 
-// GetNetworkSummary returns total and active orch counts (NET-001).
+// GetNetworkSummary returns legacy R1 network-snapshot fields for internal and
+// lower-layer use. It is not a current routed API surface.
 func (r *Repo) GetNetworkSummary(ctx context.Context, p types.QueryParams) (*types.NetworkSummary, error) {
 	query := `
 		SELECT
@@ -41,7 +42,8 @@ func (r *Repo) GetNetworkSummary(ctx context.Context, p types.QueryParams) (*typ
 	}, nil
 }
 
-// ListOrchestrators returns paginated orchestrators with their capabilities (NET-002).
+// ListOrchestrators returns active NET-001 orchestrator rows for
+// GET /v1/net/orchestrators.
 func (r *Repo) ListOrchestrators(ctx context.Context, p types.QueryParams) ([]types.Orchestrator, error) {
 	where := "WHERE 1=1"
 	args := []any{}
@@ -95,7 +97,8 @@ func (r *Repo) ListOrchestrators(ctx context.Context, p types.QueryParams) ([]ty
 	return orchs, rows.Err()
 }
 
-// GetGPUSummary aggregates GPU counts and VRAM across active orchestrators (NET-003).
+// GetGPUSummary aggregates the legacy R1 GPU inventory summary shape.
+// It is retained for lower-layer use and is not a current routed API surface.
 // GPU data is extracted from raw_capabilities JSON in Go (not SQL) because
 // gpu_info uses dict keys (slot indices) that are complex to handle in ClickHouse SQL.
 func (r *Repo) GetGPUSummary(ctx context.Context, p types.QueryParams) (*types.GPUSummary, error) {
@@ -155,7 +158,8 @@ func (r *Repo) GetGPUSummary(ctx context.Context, p types.QueryParams) (*types.G
 	}, nil
 }
 
-// ListModels returns available AI models with pricing across active orchs (NET-004).
+// ListModels returns active NET-002 model-availability rows for
+// GET /v1/net/models.
 func (r *Repo) ListModels(ctx context.Context, p types.QueryParams) ([]types.ModelAvailability, error) {
 	where := fmt.Sprintf("WHERE last_seen > now() - INTERVAL %d MINUTE", activeOrchMinutes)
 	args := []any{}

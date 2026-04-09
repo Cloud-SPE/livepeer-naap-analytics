@@ -254,7 +254,7 @@ func TestTierContract_RollupSafetyRuleIsDocumented(t *testing.T) {
 		t.Skip("docs tree not mounted in this test environment")
 	}
 	docChecks := map[string][]string{
-		filepath.Join(root, "docs", "DESIGN.md"): {
+		filepath.Join(root, "docs", "design.md"): {
 			"rollup safety",
 			"do not compute aggregates from already-aggregated values unless the aggregate is mathematically merge-safe",
 		},

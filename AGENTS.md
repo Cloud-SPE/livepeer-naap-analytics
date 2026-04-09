@@ -1,98 +1,73 @@
 # AGENTS.md
 
-This file is the **table of contents** for this repository. It is short by design.
-Do not add detailed rules here — add them to the appropriate `docs/` file and link here.
+This file is the repository table of contents. Keep it short.
+Put detailed rules in `docs/` and link them here.
 
 ## What this project is
 
-Livepeer NAAP Analytics — a ClickHouse-backed analytics API for the Livepeer AI Network.
-Events flow from Kafka into ClickHouse via the Kafka Engine and are surfaced via a Go REST API.
+Livepeer NAAP Analytics is a ClickHouse-backed analytics API for the Livepeer AI
+Network. Events flow from Kafka into ClickHouse through the Kafka Engine, are
+published into semantic serving contracts by the resolver and dbt, and are
+served through a Go REST API.
 
-See `docs/PRODUCT_SENSE.md` for product principles and goals.
+Start with [`docs/start-here.md`](docs/start-here.md).
 
 ## Repository map
 
-```
-api/        — Go REST API service
-infra/      — Docker, Kafka, ClickHouse infrastructure and migrations
-scripts/    — Developer and ops utilities
-docs/       — System of record (start here for context)
+```text
+api/        Go REST API, resolver runtime, validation tests
+infra/      ClickHouse, Kafka, Grafana, Prometheus, Docker assets
+scripts/    Developer and operator utilities
+warehouse/  dbt semantic layer and serving contracts
+docs/       Human and agent documentation system of record
 ```
 
 ## Architecture
 
-Layered domain architecture enforced per component. Dependencies flow **forward only**:
+Layered dependencies flow forward only:
 
+```text
+Types -> Config -> Repo -> Service -> Runtime
 ```
-Types → Config → Repo → Service → Runtime
-```
 
-Cross-cutting concerns (auth, telemetry, feature flags) enter through **Providers only**.
-No layer may import from a layer ahead of it. This is enforced mechanically.
+Cross-cutting concerns enter through providers only.
 
-See `docs/DESIGN.md` for the full architecture map and enforcement model.
-See `docs/design-docs/architecture.md` for per-component layer rules.
+See [`docs/design.md`](docs/design.md) for the top-level architecture map and
+[`docs/design-docs/architecture.md`](docs/design-docs/architecture.md) for the
+current layer rules and enforcement model.
 
 ## Documentation index
 
 | File | Purpose |
 |------|---------|
-| [`docs/DESIGN.md`](docs/DESIGN.md) | Architecture overview and layering rules |
-| [`docs/PLANS.md`](docs/PLANS.md) | Active and completed plans index |
-| [`docs/PRODUCT_SENSE.md`](docs/PRODUCT_SENSE.md) | Product principles and goals |
-| [`docs/design-docs/index.md`](docs/design-docs/index.md) | All design documents with status |
-| [`docs/design-docs/core-beliefs.md`](docs/design-docs/core-beliefs.md) | Agent-first operating principles |
-| [`docs/design-docs/architecture.md`](docs/design-docs/architecture.md) | Detailed per-component architecture |
-| [`docs/design-docs/system-visuals.md`](docs/design-docs/system-visuals.md) | Visual data-flow and deployment diagrams |
-| [`docs/design-docs/data-validation-rules.md`](docs/design-docs/data-validation-rules.md) | Behavioral contract for all data validation rules (17 rules, 31 tests) |
-| [`docs/operations/run-modes-and-recovery.md`](docs/operations/run-modes-and-recovery.md) | Supported runtime modes, recovery, and rebuild procedures |
-| [`docs/operations/compose-services.md`](docs/operations/compose-services.md) | Docker Compose services, profiles, and runtime responsibilities |
-| [`docs/operations/runtime-validation-and-performance.md`](docs/operations/runtime-validation-and-performance.md) | Standard runtime measurement checklist for performance, attribution, SLA, and rollup safety |
-| [`docs/exec-plans/active/`](docs/exec-plans/active/) | In-progress execution plans |
-| [`docs/exec-plans/completed/`](docs/exec-plans/completed/) | Historical execution plans |
-| [`docs/exec-plans/tech-debt-tracker.md`](docs/exec-plans/tech-debt-tracker.md) | Known technical debt |
-| [`docs/generated/schema.md`](docs/generated/schema.md) | Auto-generated schema reference |
-| [`docs/product-specs/index.md`](docs/product-specs/index.md) | Feature and product specifications |
-
-## Non-negotiable tenants
-
-Five principles that govern every decision. Read them before writing any code.
-Full detail in `docs/design-docs/core-beliefs.md`.
-
-1. **Secure by default** — non-root containers, validated inputs, no secrets in code
-2. **Performance is critical** — latency targets are real; regressions are bugs
-3. **No shortcuts** — tradeoffs are deliberate and documented in `docs/exec-plans/`
-4. **Testing and docs are baked in** — every interface is documented; every behaviour is tested
-5. **Simplicity first** — add complexity only when unavoidable, and justify it
+| [`docs/start-here.md`](docs/start-here.md) | Zero-context onboarding path |
+| [`docs/index.md`](docs/index.md) | Full docs catalog |
+| [`docs/design.md`](docs/design.md) | Architecture overview and tier contract |
+| [`docs/product-sense.md`](docs/product-sense.md) | Product goals, non-goals, and success criteria |
+| [`docs/plans.md`](docs/plans.md) | Active plans, completed plans, and technical debt |
+| [`docs/backlog.md`](docs/backlog.md) | Current engineering backlog |
+| [`docs/repository-guide.md`](docs/repository-guide.md) | Detailed repo map, common tasks, and deeper setup guidance |
+| [`docs/design-docs/index.md`](docs/design-docs/index.md) | Design document index |
+| [`docs/operations/run-modes-and-recovery.md`](docs/operations/run-modes-and-recovery.md) | Resolver modes, rebuilds, and recovery |
+| [`docs/operations/compose-services.md`](docs/operations/compose-services.md) | Local Compose runtime responsibilities |
+| [`docs/operations/runtime-validation-and-performance.md`](docs/operations/runtime-validation-and-performance.md) | Runtime validation checklist |
+| [`docs/references/inbound-kafka-contract.md`](docs/references/inbound-kafka-contract.md) | Active inbound Kafka contract for this repo |
+| [`docs/generated/schema.md`](docs/generated/schema.md) | Generated bootstrap schema inventory |
+| [`docs/product-specs/index.md`](docs/product-specs/index.md) | Product and API specifications |
 
 ## Working in this repo
 
-- **All knowledge lives in the repository.** If it is not here, it does not exist.
-- **Plans are first-class artifacts.** Use `docs/exec-plans/` for complex work.
-- **Enforce boundaries mechanically.** Do not bypass linters or structural tests.
-- **Validate data at boundaries** using typed schemas (Pydantic for Python, typed structs for Go).
-- **Do not probe data shapes speculatively** — rely on typed SDKs and generated schemas.
-- **Prefer shared utilities** over hand-rolled helpers. Check `api/internal/` and `pipeline/src/` first.
-- **Linter error messages include remediation instructions.** Read them before guessing a fix.
+- All important project knowledge should live in the repository.
+- Use `docs/exec-plans/` for complex work.
+- Prefer existing utilities in `api/internal/`, `warehouse/`, and `scripts/` over ad hoc helpers.
+- Do not probe data shapes speculatively; rely on typed structs, OpenAPI, generated schema, and validation contracts.
+- Keep docs and tests aligned with behavior in the same change.
 
-## Component quick-start
+## Quick start
 
 ```bash
-# Full stack
 make up
-
-# API only (without Docker)
-make dev-api        # cd api && go run ./cmd/server
-
-# Run all tests
+curl http://localhost:8000/healthz
 make test
-
-# Run linters
 make lint
 ```
-
-## CI and quality
-
-- Linters are enforced in CI. Structural tests validate layer dependency directions.
-- A recurring doc-gardening pass scans for stale documentation.
-- See `docs/design-docs/architecture.md` for the full enforcement model.
