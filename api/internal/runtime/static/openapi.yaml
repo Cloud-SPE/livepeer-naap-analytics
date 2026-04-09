@@ -18,6 +18,8 @@ info:
 servers:
   - url: https://naap-api.livepeer.cloud
     description: Production
+  - url: https://naap-api.cloudspe.com
+    description: CloudSPE
   - url: http://localhost:8000
     description: Local development
 
@@ -381,6 +383,14 @@ components:
           type: array
           items: { $ref: "#/components/schemas/DashboardHourlyBucket" }
 
+    DashboardPipelineModelMins:
+      type: object
+      properties:
+        model:    { type: string }
+        mins:     { type: number, format: double }
+        sessions: { type: integer, format: int64 }
+        avgFps:   { type: number, format: double }
+
     DashboardPipelineUsage:
       type: object
       properties:
@@ -388,6 +398,11 @@ components:
         sessions: { type: integer, format: int64 }
         mins:     { type: number, format: double }
         avgFps:   { type: number, format: double }
+        job_type: { type: string, description: "Job type (e.g. stream, ai-batch, byoc). Omitted for streaming pipelines.", nullable: true }
+        modelMins:
+          type: array
+          items: { $ref: "#/components/schemas/DashboardPipelineModelMins" }
+          description: "Per-model breakdown. Omitted when not available."
 
     DashboardPipelineModelOffer:
       type: object
@@ -479,17 +494,65 @@ components:
       properties:
         id:              { type: string }
         pipeline:        { type: string }
-        model:           { type: string }
+        model:           { type: string, nullable: true }
         gateway:         { type: string }
         orchestratorUrl: { type: string }
         state:           { type: string }
+        job_type:        { type: string, description: "Job type (e.g. stream, ai-batch, byoc). Omitted for streaming.", nullable: true }
         inputFps:        { type: number, format: double }
         outputFps:       { type: number, format: double }
         firstSeen:       { type: string, format: date-time }
         lastSeen:        { type: string, format: date-time }
         durationSeconds: { type: number, format: double, nullable: true }
 
+    # ── Dashboard Jobs ───────────────────────────────────────────────────────
+
+    DashboardJobsStats:
+      type: object
+      description: Aggregate metrics for one job family (AI batch or BYOC).
+      properties:
+        total_jobs:     { type: integer, format: int64 }
+        success_rate:   { type: number, format: double, description: "0.0–1.0" }
+        avg_duration_ms: { type: number, format: double }
+        p99_duration_ms: { type: number, format: double }
+      required: [total_jobs, success_rate, avg_duration_ms, p99_duration_ms]
+
+    DashboardJobsOverview:
+      type: object
+      description: Top-level aggregate stats across AI batch and BYOC jobs.
+      properties:
+        ai_batch: { $ref: "#/components/schemas/DashboardJobsStats" }
+        byoc:     { $ref: "#/components/schemas/DashboardJobsStats" }
+      required: [ai_batch, byoc]
+
+    DashboardJobsByPipelineRow:
+      type: object
+      description: Per-pipeline aggregate for AI batch jobs.
+      properties:
+        pipeline:       { type: string, description: "Pipeline name (e.g. text-to-image, llm)" }
+        total_jobs:     { type: integer, format: int64 }
+        success_rate:   { type: number, format: double, description: "0.0–1.0" }
+        avg_duration_ms: { type: number, format: double }
+      required: [pipeline, total_jobs, success_rate, avg_duration_ms]
+
+    DashboardJobsByCapabilityRow:
+      type: object
+      description: Per-capability aggregate for BYOC jobs.
+      properties:
+        capability:     { type: string, description: "Capability name (e.g. openai-chat-completions)" }
+        total_jobs:     { type: integer, format: int64 }
+        success_rate:   { type: number, format: double, description: "0.0–1.0" }
+        avg_duration_ms: { type: number, format: double }
+      required: [capability, total_jobs, success_rate, avg_duration_ms]
+
     # ── Shared ──────────────────────────────────────────────────────────────
+
+    ResponseMeta:
+      type: object
+      description: Standard response envelope metadata (ADR-002).
+      properties:
+        generated_at: { type: string, format: date-time, description: "UTC timestamp when the response was generated." }
+        request_id:   { type: string, description: "Value of the X-Request-Id request header, if present." }
 
     Problem:
       description: RFC 7807 Problem Details error response.
@@ -1125,6 +1188,8 @@ paths:
       tags: [Dashboard]
       parameters:
         - $ref: "#/components/parameters/window"
+        - $ref: "#/components/parameters/pipeline"
+        - $ref: "#/components/parameters/model_id"
       responses:
         "200":
           description: OK
@@ -1273,6 +1338,96 @@ paths:
               schema:
                 type: array
                 items: { $ref: "#/components/schemas/DashboardJobFeedItem" }
+        "500": { $ref: "#/components/responses/500" }
+
+  /v1/dashboard/jobs/overview:
+    get:
+      summary: Jobs overview (AI batch + BYOC)
+      description: |
+        Returns top-level aggregate stats for AI batch and BYOC jobs in the
+        requested time window. Supports optional filtering by `pipeline` and
+        `model_id` to scope aggregates to a specific pipeline or model.
+      operationId: getDashboardJobsOverview
+      tags: [Dashboard]
+      parameters:
+        - $ref: "#/components/parameters/org"
+        - $ref: "#/components/parameters/start"
+        - $ref: "#/components/parameters/end"
+        - $ref: "#/components/parameters/pipeline"
+        - $ref: "#/components/parameters/model_id"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/DashboardJobsOverview" }
+                  meta: { $ref: "#/components/schemas/ResponseMeta" }
+        "500": { $ref: "#/components/responses/500" }
+
+  /v1/dashboard/jobs/by-pipeline:
+    get:
+      summary: AI batch jobs breakdown by pipeline
+      description: |
+        Returns per-pipeline aggregates (job count, success rate, avg duration)
+        for AI batch jobs in the requested time window. Filter by `pipeline` to
+        scope to a single pipeline, or `model_id` to scope to a specific model
+        within a pipeline.
+      operationId: getDashboardJobsByPipeline
+      tags: [Dashboard]
+      parameters:
+        - $ref: "#/components/parameters/org"
+        - $ref: "#/components/parameters/start"
+        - $ref: "#/components/parameters/end"
+        - $ref: "#/components/parameters/pipeline"
+        - $ref: "#/components/parameters/model_id"
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/offset"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/DashboardJobsByPipelineRow" }
+                  meta: { $ref: "#/components/schemas/ResponseMeta" }
+        "500": { $ref: "#/components/responses/500" }
+
+  /v1/dashboard/jobs/by-capability:
+    get:
+      summary: BYOC jobs breakdown by capability
+      description: |
+        Returns per-capability aggregates (job count, success rate, avg duration)
+        for BYOC jobs in the requested time window. Filter by `pipeline` or
+        `model_id` to narrow results to a specific capability or model.
+      operationId: getDashboardJobsByCapability
+      tags: [Dashboard]
+      parameters:
+        - $ref: "#/components/parameters/org"
+        - $ref: "#/components/parameters/start"
+        - $ref: "#/components/parameters/end"
+        - $ref: "#/components/parameters/pipeline"
+        - $ref: "#/components/parameters/model_id"
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/offset"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/DashboardJobsByCapabilityRow" }
+                  meta: { $ref: "#/components/schemas/ResponseMeta" }
         "500": { $ref: "#/components/responses/500" }
 
   # ── AI Batch Jobs (R17) ───────────────────────────────────────────────────

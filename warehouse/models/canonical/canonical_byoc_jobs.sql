@@ -44,19 +44,24 @@ with completed as (
       and capability != ''
 ),
 
--- Most recent worker for each (capability, orch_address).
--- argMax avoids a range JOIN condition (registered_at <= completed_at).
+-- Time-valid worker attribution per completed job.
+-- argMaxIf picks the most recent worker registration whose event_ts is <= the
+-- job's completed_at, matching the same time-valid pattern used for GPU attribution.
+-- This prevents a worker that re-registered after a job completes from being
+-- misattributed to that earlier job.
 worker as (
     select
-        capability,
-        orch_address,
-        argMax(worker_url, event_ts)     as worker_url,
-        argMax(model, event_ts)          as model,
-        argMax(price_per_unit, event_ts) as price_per_unit
-    from {{ ref('stg_worker_lifecycle') }}
-    where capability != ''
-      and orch_address != ''
-    group by capability, orch_address
+        c.event_id,
+        argMaxIf(wl.worker_url,     wl.event_ts, wl.event_ts <= c.completed_at) as worker_url,
+        argMaxIf(wl.model,          wl.event_ts, wl.event_ts <= c.completed_at) as model,
+        argMaxIf(wl.price_per_unit, wl.event_ts, wl.event_ts <= c.completed_at) as price_per_unit
+    from completed c
+    left join {{ ref('stg_worker_lifecycle') }} wl
+        on  wl.capability    = c.capability
+        and wl.orch_address  = c.orch_address
+    where wl.capability   != ''
+      and wl.orch_address  != ''
+    group by c.event_id
 ),
 
 -- Time-valid hardware attribution joined on orch_address (lowercase).
@@ -136,7 +141,6 @@ select
 
 from completed c
 left join worker w
-    on w.capability  = c.capability
-   and w.orch_address = c.orch_address
+    on w.event_id = c.event_id
 left join attribution a
     on a.event_id = c.event_id

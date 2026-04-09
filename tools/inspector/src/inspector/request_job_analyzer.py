@@ -54,14 +54,15 @@ def _handle_ai_llm_request(v: dict, data: dict, ts: int, result: "AnalysisResult
 def _handle_job_gateway(v: dict, data: dict, ts: int, result: "AnalysisResult") -> None:
     """BYOC job routing events — capabilities are stored verbatim, never hardcoded.
 
-    Note: event_subtype is derived from JSONExtractString(data, 'type'), which
-    for job_gateway events yields the short form ('completed', 'submitted', …),
-    NOT the composite form ('job_gateway_completed').
+    Note: data['type'] contains the full composite subtype string, e.g.
+    'job_gateway_completed' and 'job_gateway_submitted'. This matches the value
+    stored in normalized_byoc_job.subtype and used as the canonical filter in
+    canonical_byoc_jobs.sql. The short form ('completed', 'submitted') is NOT used.
     """
     subtype = data.get("type", "")
     result.byoc_job_subtypes[subtype] += 1
 
-    if subtype == "completed":
+    if subtype == "job_gateway_completed":
         capability = data.get("capability", "unknown")
         success_raw = data.get("success")
         success = bool(success_raw) if success_raw is not None else None
