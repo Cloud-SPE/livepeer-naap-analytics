@@ -1,3 +1,7 @@
+-- One row per completed LLM request within the AI batch pipeline.
+-- Links to canonical_ai_batch_jobs via (org, request_id) for per-job enrichment.
+-- Used independently for per-model token/TPS/TTFT aggregations.
+
 select
     event_id,
     event_ts,
@@ -19,5 +23,5 @@ select
     ttft_ms,
     finish_reason,
     error
-from naap.normalized_ai_llm_request final
-where event_id != ''
+from {{ ref('stg_ai_llm_requests') }}
+where request_id != ''

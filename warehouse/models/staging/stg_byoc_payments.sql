@@ -5,11 +5,9 @@ select
     gateway,
     request_id,
     capability,
-    subtype,
     orch_address,
-    orch_url,
-    orch_url_norm,
-    success,
-    error
-from naap.normalized_byoc_auth final
+    amount,
+    currency,
+    payment_type
+from naap.normalized_byoc_payment final
 where event_id != ''

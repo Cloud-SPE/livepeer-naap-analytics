@@ -630,7 +630,7 @@
           "editorType": "sql",
           "format": 2,
           "queryType": "sql",
-          "rawSql": "SELECT ifNull(model_id,'') AS model, ifNull(pipeline,'') AS pipeline, 'ai-batch' AS job_type, count() AS job_count, round(quantile(0.5)(toFloat64(duration_ms)), 1) AS p50_ms, round(quantile(0.99)(toFloat64(duration_ms)), 1) AS p99_ms, round(countIf(success=1)*100.0/count(), 1) AS success_pct FROM naap.canonical_ai_batch_jobs WHERE $__timeFilter(completed_at) AND pipeline != '' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) GROUP BY model, pipeline ORDER BY job_count DESC LIMIT 30 UNION ALL SELECT ifNull(model,'') AS model, ifNull(capability,'') AS pipeline, 'byoc' AS job_type, count() AS job_count, round(quantile(0.5)(toFloat64(duration_ms)), 1) AS p50_ms, round(quantile(0.99)(toFloat64(duration_ms)), 1) AS p99_ms, round(countIf(success=1)*100.0/count(), 1) AS success_pct FROM naap.canonical_byoc_jobs WHERE $__timeFilter(completed_at) AND capability != '' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) GROUP BY model, capability ORDER BY job_count DESC LIMIT 30",
+          "rawSql": "SELECT ifNull(model_id,'') AS model, ifNull(pipeline,'') AS pipeline, 'ai-batch' AS job_type, count() AS job_count, round(quantile(0.5)(toFloat64(duration_ms)), 1) AS p50_ms, round(quantile(0.99)(toFloat64(duration_ms)), 1) AS p99_ms, round(countIf(success=1)*100.0/count(), 1) AS success_pct FROM naap.api_ai_batch_jobs WHERE $__timeFilter(completed_at) AND pipeline != '' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) GROUP BY model, pipeline ORDER BY job_count DESC LIMIT 30 UNION ALL SELECT ifNull(model,'') AS model, ifNull(capability,'') AS pipeline, 'byoc' AS job_type, count() AS job_count, round(quantile(0.5)(toFloat64(duration_ms)), 1) AS p50_ms, round(quantile(0.99)(toFloat64(duration_ms)), 1) AS p99_ms, round(countIf(success=1)*100.0/count(), 1) AS success_pct FROM naap.api_byoc_jobs WHERE $__timeFilter(completed_at) AND capability != '' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) GROUP BY model, capability ORDER BY job_count DESC LIMIT 30",
           "refId": "A"
         }
       ]
@@ -683,6 +683,270 @@
           "refId": "A"
         }
       ]
+    },
+    {
+      "collapsed": false,
+      "id": 501,
+      "title": "Attribution Quality",
+      "type": "row",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 51
+      }
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "id": 502,
+      "type": "table",
+      "title": "AI Batch Attribution Status",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 52
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": []
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 2,
+          "queryType": "sql",
+          "rawSql": "SELECT attribution_status, count() AS jobs,\n    round(count()*100.0/sum(count()) OVER (), 1) AS pct\nFROM naap.api_ai_batch_jobs\nWHERE $__timeFilter(completed_at) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY attribution_status ORDER BY jobs DESC",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "id": 503,
+      "type": "table",
+      "title": "BYOC Attribution Status",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 52
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": []
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 2,
+          "queryType": "sql",
+          "rawSql": "SELECT attribution_status, count() AS jobs,\n    round(count()*100.0/sum(count()) OVER (), 1) AS pct\nFROM naap.api_byoc_jobs\nWHERE $__timeFilter(completed_at) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY attribution_status ORDER BY jobs DESC",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "id": 504,
+      "type": "table",
+      "title": "GPU Model Coverage (AI Batch)",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 59
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": []
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 2,
+          "queryType": "sql",
+          "rawSql": "SELECT ifNull(gpu_model_name, '') AS gpu_model, pipeline, count() AS jobs,\n    round(countIf(attribution_status = 'resolved')*100.0/count(), 1) AS resolved_pct\nFROM naap.api_ai_batch_jobs\nWHERE $__timeFilter(completed_at) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) AND pipeline != ''\nGROUP BY gpu_model, pipeline ORDER BY jobs DESC LIMIT 20",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "id": 510,
+      "title": "BYOC Workers",
+      "type": "row",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 67
+      }
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "id": 511,
+      "type": "table",
+      "title": "Worker Inventory by Capability",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 68
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": []
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 2,
+          "queryType": "sql",
+          "rawSql": "SELECT capability, uniq(orch_address) AS worker_count,\n    groupUniqArrayIf(model, model != '') AS models,\n    round(avg(price_per_unit), 6) AS avg_price_per_unit\nFROM naap.api_byoc_workers\nWHERE $__timeFilter(event_ts) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY capability ORDER BY worker_count DESC",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "id": 520,
+      "title": "BYOC Auth",
+      "type": "row",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 76
+      }
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "id": 521,
+      "type": "table",
+      "title": "Auth Events by Capability",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 77
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": []
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 2,
+          "queryType": "sql",
+          "rawSql": "SELECT capability,\n    count() AS total_events,\n    round(countIf(success=1)*100.0/count(), 1) AS success_pct,\n    countIf(success=0) AS failure_count\nFROM naap.api_byoc_auth\nWHERE $__timeFilter(event_ts) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY capability ORDER BY total_events DESC",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "id": 530,
+      "title": "BYOC Payments",
+      "type": "row",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 85
+      }
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "id": 531,
+      "type": "table",
+      "title": "Payments by Capability",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 86
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": []
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 2,
+          "queryType": "sql",
+          "rawSql": "SELECT capability, payment_type, count() AS payment_count,\n    round(sum(amount), 4) AS total_amount,\n    any(currency) AS currency,\n    uniq(orch_address) AS unique_orchs\nFROM naap.api_byoc_payments\nWHERE $__timeFilter(event_ts) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY capability, payment_type ORDER BY total_amount DESC",
+          "refId": "A"
+        }
+      ]
     }
   ],
   "refresh": "15m",
@@ -715,8 +979,8 @@
           "text": "All",
           "value": "__all"
         },
-        "definition": "SELECT DISTINCT org FROM (SELECT org FROM naap.canonical_ai_batch_jobs WHERE org != '' UNION ALL SELECT org FROM naap.canonical_byoc_jobs WHERE org != '') AS orgs WHERE org != '' ORDER BY org",
-        "query": "SELECT DISTINCT org FROM (SELECT org FROM naap.canonical_ai_batch_jobs WHERE org != '' UNION ALL SELECT org FROM naap.canonical_byoc_jobs WHERE org != '') AS orgs WHERE org != '' ORDER BY org",
+        "definition": "SELECT DISTINCT org FROM (SELECT org FROM naap.api_ai_batch_jobs WHERE org != '' UNION ALL SELECT org FROM naap.api_byoc_jobs WHERE org != '') AS orgs WHERE org != '' ORDER BY org",
+        "query": "SELECT DISTINCT org FROM (SELECT org FROM naap.api_ai_batch_jobs WHERE org != '' UNION ALL SELECT org FROM naap.api_byoc_jobs WHERE org != '') AS orgs WHERE org != '' ORDER BY org",
         "refresh": 1,
         "sort": 1,
         "datasource": {

@@ -17,7 +17,6 @@ select
     charged_compute,
     latency_ms,
     available_capacity,
-    error,
-    data
+    error
 from naap.normalized_byoc_job final
 where event_id != ''

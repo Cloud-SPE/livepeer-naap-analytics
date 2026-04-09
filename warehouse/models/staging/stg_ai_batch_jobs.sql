@@ -15,7 +15,6 @@ select
     latency_score,
     price_per_unit,
     error_type,
-    error,
-    data
+    error
 from naap.normalized_ai_batch_job final
 where event_id != ''

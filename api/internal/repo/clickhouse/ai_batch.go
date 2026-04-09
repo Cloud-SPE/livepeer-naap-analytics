@@ -7,11 +7,11 @@ import (
 	"github.com/livepeer/naap-analytics/internal/types"
 )
 
-// GetAIBatchSummary returns per-pipeline aggregates from normalized_ai_batch_job (R17).
+// GetAIBatchSummary returns per-pipeline aggregates from api_ai_batch_jobs (R17).
 func (r *Repo) GetAIBatchSummary(ctx context.Context, p types.QueryParams) ([]types.AIBatchJobSummary, error) {
 	start, end := effectiveWindow(p)
 
-	where := "WHERE subtype = 'ai_batch_request_completed' AND event_ts >= ? AND event_ts < ?"
+	where := "WHERE completed_at >= ? AND completed_at < ?"
 	args := []any{start, end}
 	if p.Org != "" {
 		where += " AND org = ?"
@@ -25,7 +25,7 @@ func (r *Repo) GetAIBatchSummary(ctx context.Context, p types.QueryParams) ([]ty
 			toFloat64(countIf(success = 1)) / toFloat64(count()) AS success_rate,
 			avg(duration_ms)                                     AS avg_duration_ms,
 			avg(latency_score)                                   AS avg_latency_score
-		FROM naap.normalized_ai_batch_job FINAL
+		FROM naap.api_ai_batch_jobs
 		`+where+`
 		GROUP BY pipeline
 		ORDER BY total_jobs DESC
@@ -54,19 +54,23 @@ func (r *Repo) GetAIBatchSummary(ctx context.Context, p types.QueryParams) ([]ty
 	return result, nil
 }
 
-// ListAIBatchJobs returns paginated completed AI batch jobs (R17).
-func (r *Repo) ListAIBatchJobs(ctx context.Context, p types.QueryParams) ([]types.AIBatchJobRecord, error) {
+// ListAIBatchJobs returns cursor-paginated completed AI batch jobs (R17).
+// Stable cursor = base64(completed_at_ns|request_id). Fetch limit+1 rows to
+// determine has_more without a separate COUNT query.
+func (r *Repo) ListAIBatchJobs(ctx context.Context, p types.QueryParams) ([]types.AIBatchJobRecord, types.CursorPageInfo, error) {
 	start, end := effectiveWindow(p)
 	limit := effectiveLimit(p)
-	offset := p.Offset
 
-	where := "WHERE subtype = 'ai_batch_request_completed' AND event_ts >= ? AND event_ts < ?"
+	where := "WHERE completed_at >= ? AND completed_at < ?"
 	args := []any{start, end}
 	if p.Org != "" {
 		where += " AND org = ?"
 		args = append(args, p.Org)
 	}
-	args = append(args, limit, offset)
+	if cursorTs, cursorID := decodeCursor(p.Cursor); !cursorTs.IsZero() {
+		where += " AND (completed_at < ? OR (completed_at = ? AND request_id < ?))"
+		args = append(args, cursorTs, cursorTs, cursorID)
+	}
 
 	rows, err := r.conn.Query(ctx, `
 		SELECT
@@ -75,7 +79,7 @@ func (r *Repo) ListAIBatchJobs(ctx context.Context, p types.QueryParams) ([]type
 			gateway,
 			pipeline,
 			model_id,
-			event_ts,
+			completed_at,
 			success,
 			tries,
 			duration_ms,
@@ -83,14 +87,16 @@ func (r *Repo) ListAIBatchJobs(ctx context.Context, p types.QueryParams) ([]type
 			latency_score,
 			price_per_unit,
 			error_type,
-			error
-		FROM naap.normalized_ai_batch_job FINAL
+			error,
+			ifNull(gpu_model_name, '')  AS gpu_model_name,
+			attribution_status
+		FROM naap.api_ai_batch_jobs
 		`+where+`
-		ORDER BY event_ts DESC
-		LIMIT ? OFFSET ?
-	`, args...)
+		ORDER BY completed_at DESC, request_id DESC
+		LIMIT ?
+	`, append(args, limit+1)...)
 	if err != nil {
-		return nil, fmt.Errorf("clickhouse list ai batch jobs: %w", err)
+		return nil, types.CursorPageInfo{}, fmt.Errorf("clickhouse list ai batch jobs: %w", err)
 	}
 	defer rows.Close()
 
@@ -115,8 +121,10 @@ func (r *Repo) ListAIBatchJobs(ctx context.Context, p types.QueryParams) ([]type
 			&rec.PricePerUnit,
 			&rec.ErrorType,
 			&rec.Error,
+			&rec.GPUModel,
+			&rec.AttributionStatus,
 		); err != nil {
-			return nil, fmt.Errorf("clickhouse list ai batch jobs scan: %w", err)
+			return nil, types.CursorPageInfo{}, fmt.Errorf("clickhouse list ai batch jobs scan: %w", err)
 		}
 		rec.Tries = int64(tries)
 		rec.DurationMs = durationMs
@@ -127,15 +135,26 @@ func (r *Repo) ListAIBatchJobs(ctx context.Context, p types.QueryParams) ([]type
 		result = append(result, rec)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("clickhouse list ai batch jobs rows: %w", err)
+		return nil, types.CursorPageInfo{}, fmt.Errorf("clickhouse list ai batch jobs rows: %w", err)
+	}
+
+	hasMore := len(result) > limit
+	if hasMore {
+		result = result[:limit]
 	}
 	if result == nil {
 		result = []types.AIBatchJobRecord{}
 	}
-	return result, nil
+
+	page := types.CursorPageInfo{HasMore: hasMore, PageSize: len(result)}
+	if hasMore {
+		last := result[len(result)-1]
+		page.NextCursor = encodeCursor(last.CompletedAt, last.RequestID)
+	}
+	return result, page, nil
 }
 
-// GetAIBatchLLMSummary returns per-model LLM aggregates from normalized_ai_llm_request (R17).
+// GetAIBatchLLMSummary returns per-model LLM aggregates from api_ai_llm_requests (R17).
 func (r *Repo) GetAIBatchLLMSummary(ctx context.Context, p types.QueryParams) ([]types.AIBatchLLMSummary, error) {
 	start, end := effectiveWindow(p)
 
@@ -154,7 +173,7 @@ func (r *Repo) GetAIBatchLLMSummary(ctx context.Context, p types.QueryParams) ([
 			avg(tokens_per_second)                              AS avg_tokens_per_sec,
 			avg(ttft_ms)                                        AS avg_ttft_ms,
 			avg(total_tokens)                                   AS avg_total_tokens
-		FROM naap.normalized_ai_llm_request FINAL
+		FROM naap.api_ai_llm_requests
 		`+where+`
 		GROUP BY model
 		ORDER BY total_requests DESC
@@ -186,223 +205,6 @@ func (r *Repo) GetAIBatchLLMSummary(ctx context.Context, p types.QueryParams) ([
 	}
 	if result == nil {
 		result = []types.AIBatchLLMSummary{}
-	}
-	return result, nil
-}
-
-// GetBYOCSummary returns per-capability aggregates from normalized_byoc_job (R18).
-func (r *Repo) GetBYOCSummary(ctx context.Context, p types.QueryParams) ([]types.BYOCJobSummary, error) {
-	start, end := effectiveWindow(p)
-
-	where := "WHERE subtype = 'job_gateway_completed' AND event_ts >= ? AND event_ts < ?"
-	args := []any{start, end}
-	if p.Org != "" {
-		where += " AND org = ?"
-		args = append(args, p.Org)
-	}
-
-	rows, err := r.conn.Query(ctx, `
-		SELECT
-			capability,
-			count()                                              AS total_jobs,
-			toFloat64(countIf(success = 1)) / toFloat64(count()) AS success_rate,
-			avg(duration_ms)                                     AS avg_duration_ms
-		FROM naap.normalized_byoc_job FINAL
-		`+where+`
-		GROUP BY capability
-		ORDER BY total_jobs DESC
-	`, args...)
-	if err != nil {
-		return nil, fmt.Errorf("clickhouse get byoc summary: %w", err)
-	}
-	defer rows.Close()
-
-	var result []types.BYOCJobSummary
-	for rows.Next() {
-		var s types.BYOCJobSummary
-		var totalJobs uint64
-		if err := rows.Scan(&s.Capability, &totalJobs, &s.SuccessRate, &s.AvgDurationMs); err != nil {
-			return nil, fmt.Errorf("clickhouse get byoc summary scan: %w", err)
-		}
-		s.TotalJobs = int64(totalJobs)
-		result = append(result, s)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("clickhouse get byoc summary rows: %w", err)
-	}
-	if result == nil {
-		result = []types.BYOCJobSummary{}
-	}
-	return result, nil
-}
-
-// ListBYOCJobs returns paginated completed BYOC jobs (R18).
-func (r *Repo) ListBYOCJobs(ctx context.Context, p types.QueryParams) ([]types.BYOCJobRecord, error) {
-	start, end := effectiveWindow(p)
-	limit := effectiveLimit(p)
-	offset := p.Offset
-
-	where := "WHERE subtype = 'job_gateway_completed' AND event_ts >= ? AND event_ts < ?"
-	args := []any{start, end}
-	if p.Org != "" {
-		where += " AND org = ?"
-		args = append(args, p.Org)
-	}
-	args = append(args, limit, offset)
-
-	rows, err := r.conn.Query(ctx, `
-		SELECT
-			request_id,
-			org,
-			capability,
-			event_ts,
-			success,
-			duration_ms,
-			http_status,
-			orch_address,
-			orch_url,
-			worker_url,
-			error
-		FROM naap.normalized_byoc_job FINAL
-		`+where+`
-		ORDER BY event_ts DESC
-		LIMIT ? OFFSET ?
-	`, args...)
-	if err != nil {
-		return nil, fmt.Errorf("clickhouse list byoc jobs: %w", err)
-	}
-	defer rows.Close()
-
-	var result []types.BYOCJobRecord
-	for rows.Next() {
-		var rec types.BYOCJobRecord
-		var successRaw *uint8
-		var durationMs int64
-		var httpStatus uint16
-		if err := rows.Scan(
-			&rec.RequestID,
-			&rec.Org,
-			&rec.Capability,
-			&rec.CompletedAt,
-			&successRaw,
-			&durationMs,
-			&httpStatus,
-			&rec.OrchAddress,
-			&rec.OrchURL,
-			&rec.WorkerURL,
-			&rec.Error,
-		); err != nil {
-			return nil, fmt.Errorf("clickhouse list byoc jobs scan: %w", err)
-		}
-		rec.DurationMs = durationMs
-		rec.HTTPStatus = int64(httpStatus)
-		if successRaw != nil {
-			v := *successRaw == 1
-			rec.Success = &v
-		}
-		result = append(result, rec)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("clickhouse list byoc jobs rows: %w", err)
-	}
-	if result == nil {
-		result = []types.BYOCJobRecord{}
-	}
-	return result, nil
-}
-
-// GetBYOCWorkers returns per-capability worker inventory (R18).
-func (r *Repo) GetBYOCWorkers(ctx context.Context, p types.QueryParams) ([]types.BYOCWorkerSummary, error) {
-	start, end := effectiveWindow(p)
-
-	where := "WHERE event_ts >= ? AND event_ts < ?"
-	args := []any{start, end}
-	if p.Org != "" {
-		where += " AND org = ?"
-		args = append(args, p.Org)
-	}
-
-	rows, err := r.conn.Query(ctx, `
-		SELECT
-			capability,
-			uniq(orch_address)                          AS worker_count,
-			groupUniqArrayIf(model, model != '')        AS models,
-			avg(price_per_unit)      AS avg_price_per_unit
-		FROM naap.normalized_worker_lifecycle FINAL
-		`+where+`
-		GROUP BY capability
-		ORDER BY worker_count DESC
-	`, args...)
-	if err != nil {
-		return nil, fmt.Errorf("clickhouse get byoc workers: %w", err)
-	}
-	defer rows.Close()
-
-	var result []types.BYOCWorkerSummary
-	for rows.Next() {
-		var s types.BYOCWorkerSummary
-		var workerCount uint64
-		if err := rows.Scan(&s.Capability, &workerCount, &s.Models, &s.AvgPricePerUnit); err != nil {
-			return nil, fmt.Errorf("clickhouse get byoc workers scan: %w", err)
-		}
-		s.WorkerCount = int64(workerCount)
-		if s.Models == nil {
-			s.Models = []string{}
-		}
-		result = append(result, s)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("clickhouse get byoc workers rows: %w", err)
-	}
-	if result == nil {
-		result = []types.BYOCWorkerSummary{}
-	}
-	return result, nil
-}
-
-// GetBYOCAuthSummary returns per-capability auth event aggregates (R18).
-func (r *Repo) GetBYOCAuthSummary(ctx context.Context, p types.QueryParams) ([]types.BYOCAuthSummary, error) {
-	start, end := effectiveWindow(p)
-
-	where := "WHERE event_ts >= ? AND event_ts < ?"
-	args := []any{start, end}
-	if p.Org != "" {
-		where += " AND org = ?"
-		args = append(args, p.Org)
-	}
-
-	rows, err := r.conn.Query(ctx, `
-		SELECT
-			capability,
-			count()                                              AS total_events,
-			toFloat64(countIf(success = 1)) / toFloat64(count()) AS success_rate,
-			countIf(success = 0)                                AS failure_count
-		FROM naap.normalized_byoc_auth FINAL
-		`+where+`
-		GROUP BY capability
-		ORDER BY total_events DESC
-	`, args...)
-	if err != nil {
-		return nil, fmt.Errorf("clickhouse get byoc auth summary: %w", err)
-	}
-	defer rows.Close()
-
-	var result []types.BYOCAuthSummary
-	for rows.Next() {
-		var s types.BYOCAuthSummary
-		var totalEvents, failureCount uint64
-		if err := rows.Scan(&s.Capability, &totalEvents, &s.SuccessRate, &failureCount); err != nil {
-			return nil, fmt.Errorf("clickhouse get byoc auth summary scan: %w", err)
-		}
-		s.TotalEvents = int64(totalEvents)
-		s.FailureCount = int64(failureCount)
-		result = append(result, s)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("clickhouse get byoc auth summary rows: %w", err)
-	}
-	if result == nil {
-		result = []types.BYOCAuthSummary{}
 	}
 	return result, nil
 }

@@ -107,14 +107,19 @@ type AnalyticsService interface {
 
 	// AI Batch Jobs (R17)
 	GetAIBatchSummary(ctx context.Context, p types.QueryParams) ([]types.AIBatchJobSummary, error)
-	ListAIBatchJobs(ctx context.Context, p types.QueryParams) ([]types.AIBatchJobRecord, error)
+	ListAIBatchJobs(ctx context.Context, p types.QueryParams) ([]types.AIBatchJobRecord, types.CursorPageInfo, error)
 	GetAIBatchLLMSummary(ctx context.Context, p types.QueryParams) ([]types.AIBatchLLMSummary, error)
 
 	// BYOC Jobs (R18)
 	GetBYOCSummary(ctx context.Context, p types.QueryParams) ([]types.BYOCJobSummary, error)
-	ListBYOCJobs(ctx context.Context, p types.QueryParams) ([]types.BYOCJobRecord, error)
+	ListBYOCJobs(ctx context.Context, p types.QueryParams) ([]types.BYOCJobRecord, types.CursorPageInfo, error)
 	GetBYOCWorkers(ctx context.Context, p types.QueryParams) ([]types.BYOCWorkerSummary, error)
 	GetBYOCAuthSummary(ctx context.Context, p types.QueryParams) ([]types.BYOCAuthSummary, error)
+
+	// Dashboard — request-job overview (R17/R18)
+	GetDashboardJobsOverview(ctx context.Context, p types.QueryParams) (*types.DashboardJobsOverview, error)
+	GetDashboardJobsByPipeline(ctx context.Context, p types.QueryParams) ([]types.DashboardJobsByPipelineRow, error)
+	GetDashboardJobsByCapability(ctx context.Context, p types.QueryParams) ([]types.DashboardJobsByCapabilityRow, error)
 
 	// Health
 	Ping(ctx context.Context) error
@@ -631,12 +636,12 @@ func (s *analyticsService) GetAIBatchSummary(ctx context.Context, p types.QueryP
 	return v, nil
 }
 
-func (s *analyticsService) ListAIBatchJobs(ctx context.Context, p types.QueryParams) ([]types.AIBatchJobRecord, error) {
-	v, err := s.repo.ListAIBatchJobs(ctx, p)
+func (s *analyticsService) ListAIBatchJobs(ctx context.Context, p types.QueryParams) ([]types.AIBatchJobRecord, types.CursorPageInfo, error) {
+	v, page, err := s.repo.ListAIBatchJobs(ctx, p)
 	if err != nil {
-		return nil, fmt.Errorf("list ai batch jobs: %w", err)
+		return nil, types.CursorPageInfo{}, fmt.Errorf("list ai batch jobs: %w", err)
 	}
-	return v, nil
+	return v, page, nil
 }
 
 func (s *analyticsService) GetAIBatchLLMSummary(ctx context.Context, p types.QueryParams) ([]types.AIBatchLLMSummary, error) {
@@ -655,12 +660,12 @@ func (s *analyticsService) GetBYOCSummary(ctx context.Context, p types.QueryPara
 	return v, nil
 }
 
-func (s *analyticsService) ListBYOCJobs(ctx context.Context, p types.QueryParams) ([]types.BYOCJobRecord, error) {
-	v, err := s.repo.ListBYOCJobs(ctx, p)
+func (s *analyticsService) ListBYOCJobs(ctx context.Context, p types.QueryParams) ([]types.BYOCJobRecord, types.CursorPageInfo, error) {
+	v, page, err := s.repo.ListBYOCJobs(ctx, p)
 	if err != nil {
-		return nil, fmt.Errorf("list byoc jobs: %w", err)
+		return nil, types.CursorPageInfo{}, fmt.Errorf("list byoc jobs: %w", err)
 	}
-	return v, nil
+	return v, page, nil
 }
 
 func (s *analyticsService) GetBYOCWorkers(ctx context.Context, p types.QueryParams) ([]types.BYOCWorkerSummary, error) {
@@ -675,6 +680,30 @@ func (s *analyticsService) GetBYOCAuthSummary(ctx context.Context, p types.Query
 	v, err := s.repo.GetBYOCAuthSummary(ctx, p)
 	if err != nil {
 		return nil, fmt.Errorf("get byoc auth summary: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) GetDashboardJobsOverview(ctx context.Context, p types.QueryParams) (*types.DashboardJobsOverview, error) {
+	v, err := s.repo.GetDashboardJobsOverview(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("get dashboard jobs overview: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) GetDashboardJobsByPipeline(ctx context.Context, p types.QueryParams) ([]types.DashboardJobsByPipelineRow, error) {
+	v, err := s.repo.GetDashboardJobsByPipeline(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("get dashboard jobs by pipeline: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) GetDashboardJobsByCapability(ctx context.Context, p types.QueryParams) ([]types.DashboardJobsByCapabilityRow, error) {
+	v, err := s.repo.GetDashboardJobsByCapability(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("get dashboard jobs by capability: %w", err)
 	}
 	return v, nil
 }

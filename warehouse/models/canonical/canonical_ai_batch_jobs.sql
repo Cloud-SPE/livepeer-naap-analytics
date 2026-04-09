@@ -5,10 +5,9 @@
 -- LLM-specific metrics (token counts, TPS, TTFT) are joined from stg_ai_llm_requests
 -- via request_id; columns are null for non-LLM pipelines.
 --
--- GPU hardware attribution is joined from canonical_orch_capability_intervals
--- via orch_url_norm. The CTE uses argMax to collapse intervals to one row per
--- orch_uri_norm (latest hardware seen), avoiding range conditions in JOIN ON
--- which ClickHouse 24.x rejects as INVALID_JOIN_ON_EXPRESSION.
+-- GPU hardware attribution uses argMaxIf to find the capability interval that was
+-- active at job completion time (valid_from_ts <= completed_at), joining on
+-- orch_uri_norm equality. attribution_status reflects whether a match was found.
 
 with received as (
     select
@@ -59,21 +58,41 @@ llm as (
     where request_id != ''
 ),
 
--- Latest hardware for each orchestrator URI.
--- argMax collapses multiple intervals to one row per orch_uri_norm so the JOIN
--- ON can be a simple equality — ClickHouse does not allow range conditions
--- (valid_from_ts <= completed_at) or OR conditions in JOIN ON expressions.
-capability_intervals as (
+-- Time-valid attribution: for each completed job, find the capability interval
+-- whose valid_from_ts is the largest value <= completed_at (i.e. was active at
+-- job time). argMaxIf avoids range conditions in JOIN ON, which ClickHouse rejects.
+attribution as (
     select
-        orch_uri_norm,
-        argMax(gpu_id, valid_from_ts)                as gpu_id,
-        argMax(gpu_model_name, valid_from_ts)         as gpu_model_name,
-        argMax(gpu_memory_bytes_total, valid_from_ts) as gpu_memory_bytes_total,
-        argMax(canonical_pipeline, valid_from_ts)     as canonical_pipeline,
-        argMax(canonical_model, valid_from_ts)        as canonical_model
-    from naap.canonical_orch_capability_intervals
-    where hardware_present = 1
-    group by orch_uri_norm
+        c.request_id,
+        argMaxIf(
+            ci.gpu_id,
+            ci.valid_from_ts,
+            ci.valid_from_ts <= c.completed_at and ci.hardware_present = 1
+        ) as gpu_id,
+        argMaxIf(
+            ci.gpu_model_name,
+            ci.valid_from_ts,
+            ci.valid_from_ts <= c.completed_at and ci.hardware_present = 1
+        ) as gpu_model_name,
+        argMaxIf(
+            ci.gpu_memory_bytes_total,
+            ci.valid_from_ts,
+            ci.valid_from_ts <= c.completed_at and ci.hardware_present = 1
+        ) as gpu_memory_bytes_total,
+        argMaxIf(
+            ci.canonical_model,
+            ci.valid_from_ts,
+            ci.valid_from_ts <= c.completed_at and ci.hardware_present = 1
+        ) as attributed_model,
+        if(
+            countIf(ci.valid_from_ts <= c.completed_at and ci.hardware_present = 1) > 0,
+            'resolved',
+            'unresolved'
+        ) as attribution_status
+    from completed c
+    left join naap.canonical_orch_capability_intervals ci
+        on ci.orch_uri_norm = c.orch_url_norm
+    group by c.request_id
 )
 
 select
@@ -111,11 +130,12 @@ select
     l.finish_reason                           as finish_reason,
     l.llm_streaming                           as llm_streaming,
 
-    -- GPU hardware attribution (latest interval for this orch URI)
-    ci.gpu_id                                 as gpu_id,
-    ci.gpu_model_name                         as gpu_model_name,
-    ci.gpu_memory_bytes_total                 as gpu_memory_bytes_total,
-    ci.canonical_model                        as attributed_model
+    -- GPU hardware attribution (interval active at job completion time)
+    a.gpu_id                                  as gpu_id,
+    a.gpu_model_name                          as gpu_model_name,
+    a.gpu_memory_bytes_total                  as gpu_memory_bytes_total,
+    a.attributed_model                        as attributed_model,
+    a.attribution_status                      as attribution_status
 
 from completed c
 left join received r
@@ -124,5 +144,5 @@ left join received r
 left join llm l
     on c.org = l.org
    and c.request_id = l.request_id
-left join capability_intervals ci
-    on c.orch_url_norm = ci.orch_uri_norm
+left join attribution a
+    on c.request_id = a.request_id

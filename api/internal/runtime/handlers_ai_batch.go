@@ -12,20 +12,27 @@ func (s *Server) handleGetAIBatchSummary(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "Internal Server Error", "")
 		return
 	}
-	respondJSON(w, http.StatusOK, result)
+	respondJSON(w, http.StatusOK, map[string]any{
+		"data": result,
+		"meta": buildMeta(r),
+	})
 }
 
-// handleListAIBatchJobs returns paginated completed AI batch job records.
+// handleListAIBatchJobs returns cursor-paginated completed AI batch job records.
 // GET /v1/ai-batch/jobs
 func (s *Server) handleListAIBatchJobs(w http.ResponseWriter, r *http.Request) {
 	p := parseQueryParams(r)
-	result, err := s.svc.ListAIBatchJobs(r.Context(), p)
+	result, page, err := s.svc.ListAIBatchJobs(r.Context(), p)
 	if err != nil {
 		s.providers.Logger.Sugar().Errorw("list ai batch jobs failed", "error", err)
 		writeError(w, http.StatusInternalServerError, "Internal Server Error", "")
 		return
 	}
-	respondJSON(w, http.StatusOK, result)
+	respondJSON(w, http.StatusOK, map[string]any{
+		"data":       result,
+		"pagination": page,
+		"meta":       buildMeta(r),
+	})
 }
 
 // handleGetAIBatchLLMSummary returns per-model LLM performance aggregates.
@@ -38,5 +45,8 @@ func (s *Server) handleGetAIBatchLLMSummary(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusInternalServerError, "Internal Server Error", "")
 		return
 	}
-	respondJSON(w, http.StatusOK, result)
+	respondJSON(w, http.StatusOK, map[string]any{
+		"data": result,
+		"meta": buildMeta(r),
+	})
 }

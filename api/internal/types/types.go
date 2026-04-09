@@ -21,7 +21,15 @@ type QueryParams struct {
 	Granularity  string    // "1m" | "5m" | "1h" | "1d"
 	ActiveOnly   bool      // for orch list: return only orchs active within threshold
 	Limit        int       // max results (0 = default 50)
-	Offset       int       // pagination offset
+	Offset       int       // pagination offset (legacy — prefer Cursor for list endpoints)
+	Cursor       string    // stable base64 cursor for keyset pagination (optional)
+}
+
+// CursorPageInfo is the pagination metadata returned by cursor-paginated list endpoints.
+type CursorPageInfo struct {
+	NextCursor string `json:"next_cursor,omitempty"`
+	HasMore    bool   `json:"has_more"`
+	PageSize   int    `json:"page_size"`
 }
 
 // WEI is a value in wei (1e-18 ETH).

@@ -104,14 +104,19 @@ type AnalyticsRepo interface {
 
 	// AI Batch Jobs (R17)
 	GetAIBatchSummary(ctx context.Context, p types.QueryParams) ([]types.AIBatchJobSummary, error)
-	ListAIBatchJobs(ctx context.Context, p types.QueryParams) ([]types.AIBatchJobRecord, error)
+	ListAIBatchJobs(ctx context.Context, p types.QueryParams) ([]types.AIBatchJobRecord, types.CursorPageInfo, error)
 	GetAIBatchLLMSummary(ctx context.Context, p types.QueryParams) ([]types.AIBatchLLMSummary, error)
 
 	// BYOC Jobs (R18)
 	GetBYOCSummary(ctx context.Context, p types.QueryParams) ([]types.BYOCJobSummary, error)
-	ListBYOCJobs(ctx context.Context, p types.QueryParams) ([]types.BYOCJobRecord, error)
+	ListBYOCJobs(ctx context.Context, p types.QueryParams) ([]types.BYOCJobRecord, types.CursorPageInfo, error)
 	GetBYOCWorkers(ctx context.Context, p types.QueryParams) ([]types.BYOCWorkerSummary, error)
 	GetBYOCAuthSummary(ctx context.Context, p types.QueryParams) ([]types.BYOCAuthSummary, error)
+
+	// Dashboard — request-job overview (R17/R18)
+	GetDashboardJobsOverview(ctx context.Context, p types.QueryParams) (*types.DashboardJobsOverview, error)
+	GetDashboardJobsByPipeline(ctx context.Context, p types.QueryParams) ([]types.DashboardJobsByPipelineRow, error)
+	GetDashboardJobsByCapability(ctx context.Context, p types.QueryParams) ([]types.DashboardJobsByCapabilityRow, error)
 
 	// Healthcheck
 	Ping(ctx context.Context) error
@@ -285,8 +290,8 @@ func (n *NoopAnalyticsRepo) ListJobsByModel(_ context.Context, _ types.JobsParam
 func (n *NoopAnalyticsRepo) GetAIBatchSummary(_ context.Context, _ types.QueryParams) ([]types.AIBatchJobSummary, error) {
 	return []types.AIBatchJobSummary{}, nil
 }
-func (n *NoopAnalyticsRepo) ListAIBatchJobs(_ context.Context, _ types.QueryParams) ([]types.AIBatchJobRecord, error) {
-	return []types.AIBatchJobRecord{}, nil
+func (n *NoopAnalyticsRepo) ListAIBatchJobs(_ context.Context, _ types.QueryParams) ([]types.AIBatchJobRecord, types.CursorPageInfo, error) {
+	return []types.AIBatchJobRecord{}, types.CursorPageInfo{}, nil
 }
 func (n *NoopAnalyticsRepo) GetAIBatchLLMSummary(_ context.Context, _ types.QueryParams) ([]types.AIBatchLLMSummary, error) {
 	return []types.AIBatchLLMSummary{}, nil
@@ -294,13 +299,22 @@ func (n *NoopAnalyticsRepo) GetAIBatchLLMSummary(_ context.Context, _ types.Quer
 func (n *NoopAnalyticsRepo) GetBYOCSummary(_ context.Context, _ types.QueryParams) ([]types.BYOCJobSummary, error) {
 	return []types.BYOCJobSummary{}, nil
 }
-func (n *NoopAnalyticsRepo) ListBYOCJobs(_ context.Context, _ types.QueryParams) ([]types.BYOCJobRecord, error) {
-	return []types.BYOCJobRecord{}, nil
+func (n *NoopAnalyticsRepo) ListBYOCJobs(_ context.Context, _ types.QueryParams) ([]types.BYOCJobRecord, types.CursorPageInfo, error) {
+	return []types.BYOCJobRecord{}, types.CursorPageInfo{}, nil
 }
 func (n *NoopAnalyticsRepo) GetBYOCWorkers(_ context.Context, _ types.QueryParams) ([]types.BYOCWorkerSummary, error) {
 	return []types.BYOCWorkerSummary{}, nil
 }
 func (n *NoopAnalyticsRepo) GetBYOCAuthSummary(_ context.Context, _ types.QueryParams) ([]types.BYOCAuthSummary, error) {
 	return []types.BYOCAuthSummary{}, nil
+}
+func (n *NoopAnalyticsRepo) GetDashboardJobsOverview(_ context.Context, _ types.QueryParams) (*types.DashboardJobsOverview, error) {
+	return &types.DashboardJobsOverview{}, nil
+}
+func (n *NoopAnalyticsRepo) GetDashboardJobsByPipeline(_ context.Context, _ types.QueryParams) ([]types.DashboardJobsByPipelineRow, error) {
+	return []types.DashboardJobsByPipelineRow{}, nil
+}
+func (n *NoopAnalyticsRepo) GetDashboardJobsByCapability(_ context.Context, _ types.QueryParams) ([]types.DashboardJobsByCapabilityRow, error) {
+	return []types.DashboardJobsByCapabilityRow{}, nil
 }
 func (n *NoopAnalyticsRepo) Ping(_ context.Context) error { return nil }

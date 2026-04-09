@@ -284,11 +284,11 @@ CREATE TABLE naap.normalized_ai_batch_job (
   `latency_score` Float64,
   `price_per_unit` Float64,
   `error_type` String,
-  `error` String,
-  `data` String
+  `error` String
 ) ENGINE = ReplacingMergeTree(event_ts)
 PARTITION BY (org, toYYYYMM(event_ts))
 ORDER BY (org, request_id, event_ts, event_id)
+TTL toDateTime(event_ts) + toIntervalDay(90)
 SETTINGS index_granularity = 8192;
 
 -- LLM-specific metrics for the 'llm' AI batch pipeline (links via request_id)
@@ -312,11 +312,11 @@ CREATE TABLE naap.normalized_ai_llm_request (
   `price_per_unit` Float64,
   `ttft_ms` Int64,
   `finish_reason` String,
-  `error` String,
-  `data` String
+  `error` String
 ) ENGINE = ReplacingMergeTree(event_ts)
 PARTITION BY (org, toYYYYMM(event_ts))
 ORDER BY (org, request_id, event_ts, event_id)
+TTL toDateTime(event_ts) + toIntervalDay(90)
 SETTINGS index_granularity = 8192;
 
 -- BYOC job lifecycle (dynamic capabilities stored verbatim)
@@ -339,11 +339,11 @@ CREATE TABLE naap.normalized_byoc_job (
   `charged_compute` UInt8,
   `latency_ms` Int64,
   `available_capacity` Int32,
-  `error` String,
-  `data` String
+  `error` String
 ) ENGINE = ReplacingMergeTree(event_ts)
 PARTITION BY (org, toYYYYMM(event_ts))
 ORDER BY (org, capability, request_id, event_ts, event_id)
+TTL toDateTime(event_ts) + toIntervalDay(90)
 SETTINGS index_granularity = 8192;
 
 -- BYOC auth events (job_auth)
@@ -359,11 +359,11 @@ CREATE TABLE naap.normalized_byoc_auth (
   `orch_url` String,
   `orch_url_norm` String,
   `success` UInt8,
-  `error` String,
-  `data` String
+  `error` String
 ) ENGINE = ReplacingMergeTree(event_ts)
 PARTITION BY (org, toYYYYMM(event_ts))
 ORDER BY (org, capability, request_id, event_ts, event_id)
+TTL toDateTime(event_ts) + toIntervalDay(90)
 SETTINGS index_granularity = 8192;
 
 -- BYOC worker/model inventory per orchestrator (worker_lifecycle)
@@ -379,11 +379,11 @@ CREATE TABLE naap.normalized_worker_lifecycle (
   `worker_url` String,
   `price_per_unit` Float64,
   `model` String,
-  `worker_options_raw` String,
-  `data` String
+  `worker_options_raw` String
 ) ENGINE = ReplacingMergeTree(event_ts)
 PARTITION BY (org, toYYYYMM(event_ts))
 ORDER BY (org, capability, orch_address, event_ts, event_id)
+TTL toDateTime(event_ts) + toIntervalDay(90)
 SETTINGS index_granularity = 8192;
 
 -- ─── Step 4: Normalization materialized views ──────────────────────────────────
@@ -395,7 +395,7 @@ TO naap.normalized_ai_batch_job (
   `model_id` String, `subtype` LowCardinality(String), `success` Nullable(UInt8),
   `tries` UInt16, `duration_ms` Int64, `orch_url` String, `orch_url_norm` String,
   `latency_score` Float64, `price_per_unit` Float64, `error_type` String,
-  `error` String, `data` String
+  `error` String
 ) AS
 SELECT
   event_id,
@@ -417,8 +417,7 @@ SELECT
   JSONExtractFloat(data, 'latency_score') AS latency_score,
   JSONExtractFloat(data, 'price_per_unit') AS price_per_unit,
   JSONExtractString(data, 'error_type') AS error_type,
-  JSONExtractString(data, 'error') AS error,
-  data
+  JSONExtractString(data, 'error') AS error
 FROM naap.accepted_raw_events
 WHERE event_type = 'ai_batch_request';
 
@@ -430,7 +429,7 @@ TO naap.normalized_ai_llm_request (
   `prompt_tokens` UInt32, `completion_tokens` UInt32, `total_tokens` UInt32,
   `total_duration_ms` Int64, `tokens_per_second` Float64, `latency_score` Float64,
   `price_per_unit` Float64, `ttft_ms` Int64, `finish_reason` String,
-  `error` String, `data` String
+  `error` String
 ) AS
 SELECT
   event_id,
@@ -452,8 +451,7 @@ SELECT
   JSONExtractFloat(data, 'price_per_unit') AS price_per_unit,
   JSONExtractInt(data, 'ttft_ms') AS ttft_ms,
   JSONExtractString(data, 'finish_reason') AS finish_reason,
-  JSONExtractString(data, 'error') AS error,
-  data
+  JSONExtractString(data, 'error') AS error
 FROM naap.accepted_raw_events
 WHERE event_type = 'ai_llm_request'
   AND event_subtype IN ('llm_request_completed', 'llm_stream_completed');
@@ -466,7 +464,7 @@ TO naap.normalized_byoc_job (
   `success` Nullable(UInt8), `duration_ms` Int64, `http_status` UInt16,
   `orch_address` String, `orch_url` String, `orch_url_norm` String,
   `worker_url` String, `charged_compute` UInt8, `latency_ms` Int64,
-  `available_capacity` Int32, `error` String, `data` String
+  `available_capacity` Int32, `error` String
 ) AS
 SELECT
   event_id,
@@ -478,7 +476,10 @@ SELECT
   event_subtype AS subtype,
   event_type AS source_event_type,
   multiIf(
-    event_subtype IN ('job_gateway_completed', 'job_orchestrator_completed'),
+    -- event_subtype = JSONExtractString(data, 'type').
+    -- For job_gateway completion events, data.type = 'job_gateway_completed'
+    -- (full composite form). Verified against live event payloads.
+    event_subtype = 'job_gateway_completed',
       toUInt8(JSONExtractBool(data, 'success')),
     CAST(NULL, 'Nullable(UInt8)')
   ) AS success,
@@ -491,8 +492,7 @@ SELECT
   toUInt8(JSONExtractBool(data, 'charged_compute')) AS charged_compute,
   JSONExtractInt(data, 'latency_ms') AS latency_ms,
   toInt32(JSONExtractInt(data, 'available_capacity')) AS available_capacity,
-  JSONExtractString(data, 'error') AS error,
-  data
+  JSONExtractString(data, 'error') AS error
 FROM naap.accepted_raw_events
 WHERE event_type IN ('job_gateway', 'job_orchestrator');
 
@@ -501,7 +501,7 @@ TO naap.normalized_byoc_auth (
   `event_id` String, `event_ts` DateTime64(3, 'UTC'), `org` LowCardinality(String),
   `gateway` String, `request_id` String, `capability` String,
   `subtype` LowCardinality(String), `orch_address` String, `orch_url` String,
-  `orch_url_norm` String, `success` UInt8, `error` String, `data` String
+  `orch_url_norm` String, `success` UInt8, `error` String
 ) AS
 SELECT
   event_id,
@@ -515,8 +515,7 @@ SELECT
   JSONExtractString(data, 'orchestrator_info', 'url') AS orch_url,
   lower(JSONExtractString(data, 'orchestrator_info', 'url')) AS orch_url_norm,
   toUInt8(JSONExtractBool(data, 'success')) AS success,
-  JSONExtractString(data, 'error') AS error,
-  data
+  JSONExtractString(data, 'error') AS error
 FROM naap.accepted_raw_events
 WHERE event_type = 'job_auth';
 
@@ -525,7 +524,7 @@ TO naap.normalized_worker_lifecycle (
   `event_id` String, `event_ts` DateTime64(3, 'UTC'), `org` LowCardinality(String),
   `gateway` String, `capability` String, `orch_address` String, `orch_url` String,
   `orch_url_norm` String, `worker_url` String, `price_per_unit` Float64,
-  `model` String, `worker_options_raw` String, `data` String
+  `model` String, `worker_options_raw` String
 ) AS
 SELECT
   event_id,
@@ -539,7 +538,46 @@ SELECT
   JSONExtractString(data, 'worker_url') AS worker_url,
   JSONExtractFloat(data, 'price_per_unit') AS price_per_unit,
   JSONExtractString(data, 'worker_options', 1, 'model') AS model,
-  JSONExtractRaw(data, 'worker_options') AS worker_options_raw,
-  data
+  JSONExtractRaw(data, 'worker_options') AS worker_options_raw
 FROM naap.accepted_raw_events
 WHERE event_type = 'worker_lifecycle';
+
+-- ─── Step 5: BYOC payment normalization ───────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS naap.normalized_byoc_payment (
+  `event_id`     String,
+  `event_ts`     DateTime64(3, 'UTC'),
+  `org`          LowCardinality(String),
+  `gateway`      String,
+  `request_id`   String,
+  `capability`   String,
+  `orch_address` String,
+  `amount`       Float64,
+  `currency`     LowCardinality(String),
+  `payment_type` LowCardinality(String)
+) ENGINE = ReplacingMergeTree(event_ts)
+PARTITION BY (org, toYYYYMM(event_ts))
+ORDER BY (org, capability, orch_address, event_ts, event_id)
+TTL toDateTime(event_ts) + toIntervalDay(90)
+SETTINGS index_granularity = 8192;
+
+CREATE MATERIALIZED VIEW naap.mv_normalized_byoc_payment
+TO naap.normalized_byoc_payment (
+  `event_id` String, `event_ts` DateTime64(3, 'UTC'), `org` LowCardinality(String),
+  `gateway` String, `request_id` String, `capability` String,
+  `orch_address` String, `amount` Float64, `currency` LowCardinality(String),
+  `payment_type` LowCardinality(String)
+) AS
+SELECT
+  event_id,
+  event_ts,
+  org,
+  gateway,
+  JSONExtractString(data, 'request_id')                        AS request_id,
+  JSONExtractString(data, 'capability')                        AS capability,
+  lower(JSONExtractString(data, 'orchestrator_info', 'address')) AS orch_address,
+  JSONExtractFloat(data, 'amount')                             AS amount,
+  JSONExtractString(data, 'currency')                          AS currency,
+  event_subtype                                                AS payment_type
+FROM naap.accepted_raw_events
+WHERE event_type = 'job_payment';

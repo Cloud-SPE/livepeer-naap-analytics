@@ -124,6 +124,11 @@ func (s *Server) buildRouter() chi.Router {
 		r.Get("/byoc/workers", s.handleGetBYOCWorkers)
 		r.Get("/byoc/auth", s.handleGetBYOCAuthSummary)
 
+		// Dashboard — request-job overview (R17/R18)
+		r.Get("/dashboard/jobs/overview", s.handleGetDashboardJobsOverview)
+		r.Get("/dashboard/jobs/by-pipeline", s.handleGetDashboardJobsByPipeline)
+		r.Get("/dashboard/jobs/by-capability", s.handleGetDashboardJobsByCapability)
+
 		// Dashboard — pre-aggregated UI endpoints (R16)
 		r.Get("/dashboard/kpi", s.handleGetDashboardKPI)
 		r.Get("/dashboard/pipelines", s.handleGetDashboardPipelines)
@@ -163,6 +168,14 @@ func notImplemented(w http.ResponseWriter, _ *http.Request) {
 		"title":  "Not Implemented",
 		"status": "501",
 	})
+}
+
+// buildMeta returns the standard ADR-002 meta envelope for a request.
+func buildMeta(r *http.Request) map[string]any {
+	return map[string]any{
+		"generated_at": time.Now().UTC(),
+		"request_id":   r.Header.Get("X-Request-Id"),
+	}
 }
 
 func respondJSON(w http.ResponseWriter, status int, v any) {

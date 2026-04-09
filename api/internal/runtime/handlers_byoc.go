@@ -13,20 +13,27 @@ func (s *Server) handleGetBYOCSummary(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Internal Server Error", "")
 		return
 	}
-	respondJSON(w, http.StatusOK, result)
+	respondJSON(w, http.StatusOK, map[string]any{
+		"data": result,
+		"meta": buildMeta(r),
+	})
 }
 
-// handleListBYOCJobs returns paginated completed BYOC job records.
+// handleListBYOCJobs returns cursor-paginated completed BYOC job records.
 // GET /v1/byoc/jobs
 func (s *Server) handleListBYOCJobs(w http.ResponseWriter, r *http.Request) {
 	p := parseQueryParams(r)
-	result, err := s.svc.ListBYOCJobs(r.Context(), p)
+	result, page, err := s.svc.ListBYOCJobs(r.Context(), p)
 	if err != nil {
 		s.providers.Logger.Sugar().Errorw("list byoc jobs failed", "error", err)
 		writeError(w, http.StatusInternalServerError, "Internal Server Error", "")
 		return
 	}
-	respondJSON(w, http.StatusOK, result)
+	respondJSON(w, http.StatusOK, map[string]any{
+		"data":       result,
+		"pagination": page,
+		"meta":       buildMeta(r),
+	})
 }
 
 // handleGetBYOCWorkers returns per-capability worker inventory.
@@ -39,7 +46,10 @@ func (s *Server) handleGetBYOCWorkers(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Internal Server Error", "")
 		return
 	}
-	respondJSON(w, http.StatusOK, result)
+	respondJSON(w, http.StatusOK, map[string]any{
+		"data": result,
+		"meta": buildMeta(r),
+	})
 }
 
 // handleGetBYOCAuthSummary returns per-capability auth event success/failure rates.
@@ -52,5 +62,8 @@ func (s *Server) handleGetBYOCAuthSummary(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, "Internal Server Error", "")
 		return
 	}
-	respondJSON(w, http.StatusOK, result)
+	respondJSON(w, http.StatusOK, map[string]any{
+		"data": result,
+		"meta": buildMeta(r),
+	})
 }

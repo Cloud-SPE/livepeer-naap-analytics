@@ -26,8 +26,10 @@ type AIBatchJobRecord struct {
 	OrchURL       string     `json:"orch_url"`
 	LatencyScore  float64    `json:"latency_score"`
 	PricePerUnit  float64    `json:"price_per_unit"`
-	ErrorType     string     `json:"error_type"`
-	Error         string     `json:"error"`
+	ErrorType         string  `json:"error_type"`
+	Error             string  `json:"error"`
+	GPUModel          string  `json:"gpu_model,omitempty"`
+	AttributionStatus string  `json:"attribution_status"`
 }
 
 // AIBatchLLMSummary is a per-model aggregate for LLM requests within AI batch (R17).
@@ -60,8 +62,10 @@ type BYOCJobRecord struct {
 	HTTPStatus  int64     `json:"http_status"`
 	OrchAddress string    `json:"orch_address"`
 	OrchURL     string    `json:"orch_url"`
-	WorkerURL   string    `json:"worker_url"`
-	Error       string    `json:"error"`
+	WorkerURL         string  `json:"worker_url"`
+	Error             string  `json:"error"`
+	GPUModel          string  `json:"gpu_model,omitempty"`
+	AttributionStatus string  `json:"attribution_status"`
 }
 
 // BYOCWorkerSummary is a per-capability worker inventory snapshot (R18).

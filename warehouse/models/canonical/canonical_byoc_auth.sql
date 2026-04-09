@@ -1,3 +1,6 @@
+-- One row per BYOC auth event (job_auth family).
+-- Canonical source for per-capability auth success/failure rates.
+
 select
     event_id,
     event_ts,
@@ -11,5 +14,5 @@ select
     orch_url_norm,
     success,
     error
-from naap.normalized_byoc_auth final
-where event_id != ''
+from {{ ref('stg_byoc_auth') }}
+where capability != ''

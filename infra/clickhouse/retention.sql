@@ -102,6 +102,31 @@ ALTER TABLE naap.resolver_query_window_slices
     MODIFY TTL created_at + toIntervalDay(2);
 
 -- ------------------------------------------------------------
+-- Tier 1b: Normalized event tables — AI Batch / BYOC (90 days)
+-- Rationale: matches accepted_raw_events retention so that canonical
+-- models can always be recomputed from normalized tables within the
+-- same audit window.
+-- ------------------------------------------------------------
+
+ALTER TABLE naap.normalized_ai_batch_job
+    MODIFY TTL toDateTime(event_ts) + toIntervalDay(90);
+
+ALTER TABLE naap.normalized_ai_llm_request
+    MODIFY TTL toDateTime(event_ts) + toIntervalDay(90);
+
+ALTER TABLE naap.normalized_byoc_job
+    MODIFY TTL toDateTime(event_ts) + toIntervalDay(90);
+
+ALTER TABLE naap.normalized_byoc_auth
+    MODIFY TTL toDateTime(event_ts) + toIntervalDay(90);
+
+ALTER TABLE naap.normalized_worker_lifecycle
+    MODIFY TTL toDateTime(event_ts) + toIntervalDay(90);
+
+ALTER TABLE naap.normalized_byoc_payment
+    MODIFY TTL toDateTime(event_ts) + toIntervalDay(90);
+
+-- ------------------------------------------------------------
 -- KNOWN GAPS — Tables with no TTL (unbounded growth)
 -- These tables grow indefinitely and require a separate
 -- decision before a TTL can be applied safely.

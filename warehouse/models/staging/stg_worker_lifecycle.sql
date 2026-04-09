@@ -10,7 +10,6 @@ select
     worker_url,
     price_per_unit,
     model,
-    worker_options_raw,
-    data
+    worker_options_raw
 from naap.normalized_worker_lifecycle final
 where event_id != ''

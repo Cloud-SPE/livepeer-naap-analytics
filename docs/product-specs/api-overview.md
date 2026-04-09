@@ -57,6 +57,9 @@ https://analytics.livepeer.cloud/v1/
 | Dashboard | `GET /v1/dashboard/pipeline-catalog` | Built-in |
 | Dashboard | `GET /v1/dashboard/pricing` | Built-in |
 | Dashboard | `GET /v1/dashboard/job-feed` | Built-in |
+| Dashboard (jobs) | `GET /v1/dashboard/jobs/overview` | Built-in |
+| Dashboard (jobs) | `GET /v1/dashboard/jobs/by-pipeline` | Built-in |
+| Dashboard (jobs) | `GET /v1/dashboard/jobs/by-capability` | Built-in |
 | Jobs (request/response) | `GET /v1/jobs/demand` | Built-in |
 | Jobs (request/response) | `GET /v1/jobs/sla` | Built-in |
 | Jobs (request/response) | `GET /v1/jobs/by-model` | Built-in |

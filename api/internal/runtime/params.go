@@ -56,5 +56,6 @@ func parseQueryParams(r *http.Request) types.QueryParams {
 		ActiveOnly:  activeOnly,
 		Limit:       limit,
 		Offset:      offset,
+		Cursor:      q.Get("cursor"),
 	}
 }

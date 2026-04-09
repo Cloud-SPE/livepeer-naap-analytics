@@ -87,12 +87,14 @@ Add to the accepted list (WHERE clause routing `accepted_raw_events` vs `ignored
 **`normalized_byoc_job`** — BYOC job lifecycle (dynamic capabilities, stored verbatim):
 ```sql
 -- Source: accepted_raw_events WHERE event_type IN ('job_gateway', 'job_orchestrator')
---   AND event_subtype IN ('job_gateway_submitted', 'job_gateway_completed',
---                         'job_orchestrator_token_fetch_result')
+-- IMPORTANT: event_subtype = JSONExtractString(data, 'type') yields the SHORT form
+--   ('completed', 'submitted', …) — NOT composite ('job_gateway_completed').
+--   Canonical records: WHERE event_subtype = 'completed' AND source_event_type = 'job_gateway'
 -- Columns: event_id, event_ts, org, gateway, request_id, capability,
 --   success (Nullable Bool), duration_ms, http_status, orch_address, orch_url,
 --   worker_url, charged_compute (Bool), latency_ms, available_capacity,
 --   error, subtype, source_event_type
+-- NOTE: no raw `data` column — typed fields only (plan deviation: "store only typed fields")
 ```
 
 **`normalized_byoc_auth`** — BYOC auth events:
@@ -100,15 +102,23 @@ Add to the accepted list (WHERE clause routing `accepted_raw_events` vs `ignored
 -- Source: accepted_raw_events WHERE event_type = 'job_auth'
 -- Columns: event_id, event_ts, org, gateway, request_id, capability,
 --   orch_address, orch_url, success (Bool), error, subtype
+-- NOTE: no raw `data` column
 ```
 
 **`normalized_worker_lifecycle`** — BYOC worker/model inventory:
 ```sql
 -- Source: accepted_raw_events WHERE event_type = 'worker_lifecycle'
 -- Columns: event_id, event_ts, org, gateway, capability, orch_address, orch_url,
---   worker_url, price_per_unit,
---   model (from worker_options[0].model via JSONExtractString or arrayJoin)
--- NOTE: capability stored verbatim
+--   worker_url, price_per_unit, model, worker_options_raw
+-- NOTE: capability stored verbatim; no raw `data` column
+```
+
+**`normalized_byoc_payment`** — BYOC payment events (added during implementation):
+```sql
+-- Source: accepted_raw_events WHERE event_type = 'job_payment'
+-- Columns: event_id, event_ts, org, gateway, request_id, capability,
+--   orch_address, amount, currency, payment_type (= event_subtype)
+-- TTL: 90 days (matches other normalized tables)
 ```
 
 ---
@@ -122,15 +132,21 @@ Add to the accepted list (WHERE clause routing `accepted_raw_events` vs `ignored
 - `stg_byoc_jobs.sql` — from `normalized_byoc_job`; one row per completed job
 - `stg_byoc_auth.sql` — from `normalized_byoc_auth`
 - `stg_worker_lifecycle.sql` — from `normalized_worker_lifecycle`
+- `stg_byoc_payments.sql` — from `normalized_byoc_payment`
 
-**Directory:** `warehouse/models/marts/`
+**Directory:** `warehouse/models/canonical/` (not `marts/` — project uses canonical layer)
 
-- `fct_ai_batch_jobs.sql` — one row per completed AI batch job:
-  - LEFT JOIN `stg_ai_llm_requests` on `request_id` → adds LLM token/TPS/TTFT columns (null for non-LLM)
-  - LEFT JOIN `canonical_orch_capability_intervals` on `orch_url` + event timestamp window → adds `gpu_id`, `gpu_model_name`, `canonical_model` columns (resolver-maintained table, no resolver changes needed)
-- `fct_byoc_jobs.sql` — one row per completed BYOC job:
-  - LEFT JOIN `normalized_worker_lifecycle` on `capability` + `orch_address` → adds `model`, `worker_url`, `price_per_unit` columns
-  - LEFT JOIN `canonical_orch_capability_intervals` on `lower(orch_address)` + `hardware_present = 1` + timestamp window → infers `gpu_id`, `gpu_model_name` (same physical machine serves both BYOC and standard endpoints; orch_address is shared even when URIs differ)
+- `canonical_ai_batch_jobs.sql` — one row per completed AI batch job:
+  - LEFT JOIN `stg_ai_llm_requests` on `request_id` → LLM token/TPS/TTFT columns (null for non-LLM)
+  - Time-valid `argMaxIf` attribution join on `orch_uri_norm` → `gpu_id`, `gpu_model_name`, `attributed_model`, `attribution_status` (`resolved`/`unresolved`)
+- `canonical_byoc_jobs.sql` — one row per completed BYOC job (job_gateway source only):
+  - `argMax` worker join on `capability + orch_address` → `model`, `price_per_unit`
+  - Time-valid `argMaxIf` hardware inference on `orch_address` → `gpu_id`, `gpu_model_name`, `attribution_status` (`resolved`/`inferred`/`unresolved`)
+- `canonical_ai_llm_requests.sql`, `canonical_byoc_auth.sql`, `canonical_byoc_workers.sql`, `canonical_byoc_payments.sql` — pass-through canonical models
+
+**Directory:** `warehouse/models/api/` (serving layer — Go repo reads only these)
+
+- `api_ai_batch_jobs.sql`, `api_byoc_jobs.sql`, `api_byoc_workers.sql`, `api_byoc_auth.sql`, `api_ai_llm_requests.sql`, `api_byoc_payments.sql`
 
 ---
 
@@ -178,35 +194,43 @@ type BYOCWorkerSummary struct {
 
 ### Phase 4: Go API — New Endpoints
 
-**New file:** `api/internal/runtime/handlers_ai_batch.go`
+**`api/internal/runtime/handlers_ai_batch.go`**
 
-- `GET /ai-batch/summary` — AI batch job stats by pipeline, org, time window → `AIBatchJobSummary[]`
-- `GET /ai-batch/jobs` — paginated individual AI batch job records
-- `GET /ai-batch/llm/summary` — LLM performance by model → `AIBatchLLMSummary[]`
+- `GET /v1/ai-batch/summary` → `{data: AIBatchJobSummary[], meta}`
+- `GET /v1/ai-batch/jobs` — cursor-paginated → `{data: AIBatchJobRecord[], pagination: CursorPageInfo, meta}`
+- `GET /v1/ai-batch/llm/summary` → `{data: AIBatchLLMSummary[], meta}`
 
-**New file:** `api/internal/runtime/handlers_byoc.go`
+**`api/internal/runtime/handlers_byoc.go`**
 
-- `GET /byoc/summary` — BYOC job stats by capability (dynamic) → `BYOCJobSummary[]`
-- `GET /byoc/jobs` — paginated BYOC job records
-- `GET /byoc/workers` — worker inventory by capability → `BYOCWorkerSummary[]`
-- `GET /byoc/auth` — auth event summary by capability (success/failure rates)
+- `GET /v1/byoc/summary` → `{data: BYOCJobSummary[], meta}`
+- `GET /v1/byoc/jobs` — cursor-paginated → `{data: BYOCJobRecord[], pagination: CursorPageInfo, meta}`
+- `GET /v1/byoc/workers` → `{data: BYOCWorkerSummary[], meta}`
+- `GET /v1/byoc/auth` → `{data: BYOCAuthSummary[], meta}`
 
-Register both in `api/cmd/` entry point.
+**`api/internal/runtime/handlers_dashboard_jobs.go`** (added during implementation)
+
+- `GET /v1/dashboard/jobs/overview` → `{data: DashboardJobsOverview, meta}`
+- `GET /v1/dashboard/jobs/by-pipeline` → `{data: DashboardJobsByPipelineRow[], meta}`
+- `GET /v1/dashboard/jobs/by-capability` → `{data: DashboardJobsByCapabilityRow[], meta}`
+
+**Response envelope:** All endpoints use `{data, meta}` per ADR-002. List endpoints add `pagination` (cursor-based, not offset). Cursor = `base64(completed_at_ns|request_id)`. Pass `?cursor=<token>` to page forward.
 
 ---
 
 ### Phase 5: Inspector Tool
 
+**`tools/inspector/src/inspector/request_job_analyzer.py`** (new module):
+- Contains the 5 request-job handlers extracted from `analyzer.py`:
+  - `_handle_ai_batch_request()` — AI batch job lifecycle by pipeline
+  - `_handle_ai_llm_request()` — LLM metrics linked via request_id
+  - `_handle_job_gateway()` — BYOC job routing; canonical records are `subtype='completed'` rows
+  - `_handle_job_auth()` — BYOC auth success/failure by capability
+  - `_handle_worker_lifecycle()` — BYOC worker inventory by capability
+- Imported and dispatched from `analyzer.analyze()`
+
 **`tools/inspector/src/inspector/analyzer.py`:**
-- Add `AIBatchJobRecord` dataclass: `request_id, pipeline, model_id, received_at, completed_at, success, duration_ms, orch_url, latency_score, price_per_unit, error`
-- Add `AIBatchLLMRecord` dataclass: `request_id, model, prompt_tokens, completion_tokens, total_tokens, tps, ttft_ms, latency_score`
-- Add `BYOCJobRecord` dataclass: `request_id, capability, submitted_at, completed_at, success, duration_ms, orch_url, worker_url, http_status, error`
-- Add `_handle_ai_batch_request()` — pair received+completed by request_id
-- Add `_handle_ai_llm_request()` — collect LLM metrics, link to AI batch record by request_id
-- Add `_handle_job_gateway()` — pair submitted+completed BYOC jobs; accumulate by capability (dynamic, not hardcoded)
-- Add `_handle_job_auth()` — track auth success/failure by capability
-- Add `_handle_worker_lifecycle()` — build worker inventory snapshot keyed by capability
-- Register all 5 handlers in dispatch table
+- `AnalysisResult` dataclass retains all AI batch + BYOC tracking fields
+- The 5 request-job handlers are imported from `request_job_analyzer` (module split)
 
 **`tools/inspector/src/inspector/report.py`:**
 - AI batch section: pipeline | jobs | success% | avg_duration_ms | avg_latency
