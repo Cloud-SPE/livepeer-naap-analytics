@@ -1412,17 +1412,34 @@ The current active formulas are:
 - `effective_failed_sessions = startup_failed_sessions OR zero_output_fps_session OR loading_only_session`
 - `effective_success_rate = 1 - effective_failed_sessions / requested_sessions`
 - `no_swap_rate = 1 - total_swapped / requested_sessions`
-- `health_signal_coverage_ratio = health_signal_count / health_expected_signal_count`, defaulting to `1.0` when the denominator is `0`
-- `output_viability_rate = 1 - (loading_only_sessions + zero_output_fps_sessions) / requested_sessions`
-- `sla_score = 100 * health_signal_coverage_ratio * ((0.4 * startup_success_rate) + (0.2 * no_swap_rate) + (0.4 * output_viability_rate))`
+- `health_signal_coverage_ratio = min(health_signal_count / health_expected_signal_count, 1.0)`, defaulting to `1.0` when the denominator is `0`
+- `output_failed_sessions = count(requested session where loading_only_session OR zero_output_fps_session)`
+- `output_viability_rate = 1 - output_failed_sessions / requested_sessions`
+- `avg_output_fps = output_fps_sum / status_samples` when `status_samples > 0`
+- `avg_prompt_to_first_frame_ms = prompt_to_first_frame_sum_ms / prompt_to_first_frame_sample_count` when `prompt_to_first_frame_sample_count > 0`
+- `avg_e2e_latency_ms = e2e_latency_sum_ms / e2e_latency_sample_count` when `e2e_latency_sample_count > 0`
+- `reliability_score = (0.4 * startup_success_rate) + (0.2 * no_swap_rate) + (0.4 * output_viability_rate)`
+- `ptff_score_raw` compares `avg_prompt_to_first_frame_ms` to the prior 7 full UTC days of the network-wide `(pipeline_id, model_id)` benchmark; rows at or below cohort `p50` score `1.0`, rows at or above `p90` score `0.0`, and values in between interpolate linearly
+- `e2e_score_raw` compares `avg_e2e_latency_ms` to the prior 7 full UTC days of the network-wide `(pipeline_id, model_id)` benchmark; rows at or below cohort `p50` score `1.0`, rows at or above `p90` score `0.0`, and values in between interpolate linearly
+- `fps_score_raw` compares `avg_output_fps` to the prior 7 full UTC days of the network-wide `(pipeline_id, model_id)` benchmark; rows at or above cohort `p50` score `1.0`, rows at or below `p10` score `0.0`, and values in between interpolate linearly
+- `ptff_score = clamp(0.5 + min(prompt_to_first_frame_sample_count / 10, 1.0) * (ptff_score_raw - 0.5), 0, 1)`
+- `e2e_score = clamp(0.5 + min(e2e_latency_sample_count / 10, 1.0) * (e2e_score_raw - 0.5), 0, 1)`
+- `fps_score = clamp(0.5 + min(status_samples / 30, 1.0) * (fps_score_raw - 0.5), 0, 1)`
+- `latency_score = (0.6 * ptff_score) + (0.4 * e2e_score)`
+- `quality_score = (0.6 * latency_score) + (0.4 * fps_score)`
+- `sla_score = clamp(100 * health_signal_coverage_ratio * ((0.7 * reliability_score) + (0.3 * quality_score)), 0, 100)`
 
 Bounds are part of the contract:
 
-- startup, effective, no-swap, and health-coverage ratios are in `[0,1]`
+- startup, effective, no-swap, output-viability, health-coverage, reliability, PTFF, E2E, latency, FPS, and quality scores are in `[0,1]`
 - `sla_score` is in `[0,100]`
 
 **Output obligations**
-- SLA rows carry both additive support fields and derived rates
+- SLA rows carry additive support fields for FPS and latency, derived averages, `gpu_model_name`, and the derived component scores
+- additive org-hour SLA facts remain the freshness source of truth
+- final public/org SLA serving rows are published from those additive inputs so
+  serving reads do not recompute the full benchmark-scoring path on every
+  request
 
 **Validator checks**
 - derived ratios and score match recomputation exactly
@@ -1453,8 +1470,11 @@ Rules:
 
 - sum additive counters directly
 - recompute ratios from summed numerators and denominators
-- recompute weighted averages from additive support counts
+- recompute means from additive sums and counts
+- weighted averages require explicit additive support counts and sums
 - do not average precomputed ratios or percentiles directly
+- percentiles require merge-safe aggregate state; scalar percentile values are not re-rollup inputs
+- overlapping classifications must expose an explicit additive union counter when higher-grain recomputation needs the union count
 - model-aware joins must include model identity or pre-aggregate away model grain first
 - null means “no valid evidence,” not zero
 

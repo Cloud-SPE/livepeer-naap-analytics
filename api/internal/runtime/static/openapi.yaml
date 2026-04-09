@@ -264,7 +264,8 @@ components:
         successRatio:         { type: number, format: double }
         effectiveSuccessRate: { type: number, format: double, nullable: true }
         noSwapRatio:          { type: number, format: double, nullable: true }
-        slaScore:             { type: number, format: double, nullable: true }
+        slaScore:             { type: number, format: double, nullable: true, description: "Latest available hourly contracted sla_score for the orchestrator within the requested dashboard window." }
+        slaWindowStart:       { type: string, format: date-time, nullable: true, description: "Hour bucket that produced slaScore." }
         pipelines:
           type: array
           items: { type: string }
@@ -497,6 +498,7 @@ components:
         pipeline_id:                 { type: string, example: "streamdiffusion-sdxl-v2v" }
         model_id:                    { type: string, nullable: true }
         gpu_id:                      { type: string, nullable: true }
+        gpu_model_name:              { type: string, nullable: true, description: "Hardware model surfaced for drilldown visibility. It is not part of cohort normalization." }
         region:                      { type: string, nullable: true, description: "Always null — not captured in event data." }
         known_sessions_count:        { type: integer, format: int64 }
         requested_sessions:          { type: integer, format: int64 }
@@ -506,6 +508,7 @@ components:
         startup_failed_sessions:     { type: integer, format: int64 }
         loading_only_sessions:       { type: integer, format: int64 }
         zero_output_fps_sessions:    { type: integer, format: int64 }
+        output_failed_sessions:      { type: integer, format: int64, description: "Union count of requested sessions that were loading-only or zero-output; one session contributes at most once." }
         effective_failed_sessions:   { type: integer, format: int64 }
         confirmed_swapped_sessions:  { type: integer, format: int64, description: "Always 0 — confirmation signal absent." }
         inferred_swap_sessions:      { type: integer, format: int64 }
@@ -514,13 +517,29 @@ components:
         error_status_samples:        { type: integer, format: int64 }
         health_signal_count:         { type: integer, format: int64 }
         health_expected_signal_count: { type: integer, format: int64 }
-        health_signal_coverage_ratio: { type: number, format: double }
+        health_signal_coverage_ratio: { type: number, format: double, description: "Bounded to the inclusive range [0,1]." }
         startup_success_rate:        { type: number, format: double, nullable: true }
         excused_failure_rate:        { type: number, format: double, nullable: true }
         effective_success_rate:      { type: number, format: double, nullable: true }
         no_swap_rate:                { type: number, format: double, nullable: true }
-        output_viability_rate:       { type: number, format: double, nullable: true }
-        sla_score:                   { type: number, format: double, nullable: true, description: "100×health_signal_coverage_ratio×((0.4×startup_success_rate)+(0.2×no_swap_rate)+(0.4×output_viability_rate))." }
+        output_viability_rate:       { type: number, format: double, nullable: true, description: "1 - output_failed_sessions / requested_sessions; bounded to [0,1]." }
+        output_fps_sum:              { type: number, format: double, description: "Additive FPS support field used for SLA quality scoring and safe higher-grain recomputation." }
+        status_samples:              { type: integer, format: int64, description: "Additive FPS support count used for SLA quality scoring and safe higher-grain recomputation." }
+        avg_output_fps:              { type: number, format: double, nullable: true, description: "Current-window mean output FPS derived from output_fps_sum / status_samples." }
+        prompt_to_first_frame_sum_ms: { type: number, format: double, description: "Additive prompt-to-first-frame support field used for SLA quality scoring." }
+        prompt_to_first_frame_sample_count: { type: integer, format: int64, description: "Current-window evidence count backing avg_prompt_to_first_frame_ms." }
+        avg_prompt_to_first_frame_ms: { type: number, format: double, nullable: true, description: "Current-window mean prompt-to-playable latency used for benchmark-relative SLA quality scoring." }
+        e2e_latency_sum_ms:          { type: number, format: double, description: "Additive E2E latency support field used for SLA quality scoring." }
+        e2e_latency_sample_count:    { type: integer, format: int64, description: "Current-window evidence count backing avg_e2e_latency_ms." }
+        avg_e2e_latency_ms:          { type: number, format: double, nullable: true, description: "Current-window mean E2E latency used for benchmark-relative SLA quality scoring." }
+        reliability_score:           { type: number, format: double, nullable: true, description: "Bounded reliability component: (0.4×startup_success_rate)+(0.2×no_swap_rate)+(0.4×output_viability_rate)." }
+        ptff_score:                  { type: number, format: double, description: "Benchmark-relative PTFF score after shrink-to-neutral. Rows at or below the 7-day cohort p50 score 1.0; rows at or above p90 score 0.0." }
+        e2e_score:                   { type: number, format: double, description: "Benchmark-relative E2E score after shrink-to-neutral. Rows at or below the 7-day cohort p50 score 1.0; rows at or above p90 score 0.0." }
+        latency_score:               { type: number, format: double, description: "0.6×ptff_score + 0.4×e2e_score." }
+        fps_score:                   { type: number, format: double, description: "Benchmark-relative output-FPS score after shrink-to-neutral. Rows at or above the 7-day cohort p50 score 1.0; rows at or below p10 score 0.0." }
+        quality_score:               { type: number, format: double, description: "0.6×latency_score + 0.4×fps_score." }
+        sla_semantics_version:       { type: string, description: "Active SLA scoring contract version. Current value: quality-benchmark-v1." }
+        sla_score:                   { type: number, format: double, nullable: true, description: "100×health_signal_coverage_ratio×((0.7×reliability_score)+(0.3×quality_score)), then clamped to [0,100]. Quality compares the current row to the prior 7 full UTC days of network-wide pipeline+model benchmarks." }
 
     SLAComplianceResponse:
       type: object
@@ -542,6 +561,8 @@ components:
         model_id:                    { type: string, nullable: true }
         sessions_count:              { type: integer, format: int64 }
         avg_output_fps:              { type: number, format: double }
+        output_fps_sum:              { type: number, format: double, description: "Additive FPS support field used for safe higher-grain recomputation." }
+        status_samples:              { type: integer, format: int64, description: "Additive FPS support count used for safe higher-grain recomputation." }
         total_minutes:               { type: number, format: double }
         known_sessions_count:        { type: integer, format: int64 }
         requested_sessions:          { type: integer, format: int64 }
@@ -559,7 +580,7 @@ components:
         error_status_samples:        { type: integer, format: int64 }
         health_signal_count:         { type: integer, format: int64 }
         health_expected_signal_count: { type: integer, format: int64 }
-        health_signal_coverage_ratio: { type: number, format: double }
+        health_signal_coverage_ratio: { type: number, format: double, description: "Bounded to the inclusive range [0,1]." }
         startup_success_rate:        { type: number, format: double }
         excused_failure_rate:        { type: number, format: double }
         effective_success_rate:      { type: number, format: double }
@@ -588,6 +609,8 @@ components:
         gpu_identity_status:         { type: string, enum: [resolved, hardware_unresolved] }
         sessions_count:              { type: integer, format: int64 }
         avg_output_fps:              { type: number, format: double }
+        output_fps_sum:              { type: number, format: double, description: "Additive FPS support field used for safe higher-grain recomputation." }
+        status_samples:              { type: integer, format: int64, description: "Additive FPS support count used for safe higher-grain recomputation." }
         total_minutes:               { type: number, format: double }
         known_sessions_count:        { type: integer, format: int64 }
         requested_sessions:          { type: integer, format: int64 }
@@ -605,7 +628,7 @@ components:
         error_status_samples:        { type: integer, format: int64 }
         health_signal_count:         { type: integer, format: int64 }
         health_expected_signal_count: { type: integer, format: int64 }
-        health_signal_coverage_ratio: { type: number, format: double }
+        health_signal_coverage_ratio: { type: number, format: double, description: "Bounded to the inclusive range [0,1]." }
         startup_success_rate:        { type: number, format: double }
         excused_failure_rate:        { type: number, format: double }
         effective_success_rate:      { type: number, format: double }
@@ -631,18 +654,24 @@ components:
         gpu_id:                         { type: string, nullable: true }
         region:                         { type: string, nullable: true, description: "Always null." }
         avg_output_fps:                 { type: number, format: double }
+        output_fps_sum:                 { type: number, format: double, description: "Additive FPS support field used for safe higher-grain recomputation." }
         p95_output_fps:                 { type: number, format: double }
         fps_jitter_coefficient:         { type: number, format: double, nullable: true, description: "Always null — not computed." }
         status_samples:                 { type: integer, format: int64 }
         error_status_samples:           { type: integer, format: int64 }
-        health_signal_coverage_ratio:   { type: number, format: double }
+        health_signal_count:            { type: integer, format: int64 }
+        health_expected_signal_count:   { type: integer, format: int64 }
+        health_signal_coverage_ratio:   { type: number, format: double, description: "Bounded to the inclusive range [0,1]." }
         gpu_model_name:                 { type: string, nullable: true }
         gpu_memory_bytes_total:         { type: integer, format: int64, nullable: true }
         runner_version:                 { type: string, nullable: true, description: "Always null." }
         cuda_version:                   { type: string, nullable: true, description: "Always null." }
         avg_prompt_to_first_frame_ms:   { type: number, format: double, nullable: true, description: "Mean prompt-to-playable proxy in milliseconds (`ai_stream_status.start_time` -> `gateway_receive_few_processed_segments`)." }
+        prompt_to_first_frame_sum_ms:   { type: number, format: double, description: "Additive latency support field used for safe higher-grain recomputation." }
         avg_startup_latency_ms:         { type: number, format: double, nullable: true, description: "Mean startup proxy in milliseconds (`gateway_receive_stream_request` -> `gateway_receive_first_processed_segment`)." }
+        startup_latency_sum_ms:         { type: number, format: double, description: "Additive latency support field used for safe higher-grain recomputation." }
         avg_e2e_latency_ms:             { type: number, format: double, nullable: true, description: "Mean E2E proxy in milliseconds (`gateway_send_first_ingest_segment` -> `runner_send_first_processed_segment`)." }
+        e2e_latency_sum_ms:             { type: number, format: double, description: "Additive latency support field used for safe higher-grain recomputation." }
         p95_prompt_to_first_frame_latency_ms: { type: number, format: double, nullable: true, description: "P95 prompt-to-playable proxy in milliseconds (`ai_stream_status.start_time` -> `gateway_receive_few_processed_segments`)." }
         p95_startup_latency_ms:         { type: number, format: double, nullable: true, description: "P95 startup proxy in milliseconds (`gateway_receive_stream_request` -> `gateway_receive_first_processed_segment`)." }
         p95_e2e_latency_ms:             { type: number, format: double, nullable: true, description: "P95 E2E proxy in milliseconds (`gateway_send_first_ingest_segment` -> `runner_send_first_processed_segment`)." }
@@ -843,9 +872,10 @@ paths:
         Returns per-orchestrator SLA compliance metrics aggregated into hourly buckets.
         Grouped by (orchestrator_address, pipeline_id, model_id, gpu_id).
 
-        **Window:** default 24h, min 1h, max 30d.
+        **Window:** default 3h, min 1m, max 30d.
 
-        `region` is currently always null and confirmed swap counters remain 0.
+        `region` filtering is applied when SLA rows carry region identity. Confirmed
+        swap counters currently remain 0.
       operationId: listSLACompliance
       tags: [SLA]
       parameters:
@@ -1026,8 +1056,9 @@ paths:
       summary: Orchestrator SLA table
       description: |
         Returns per-orchestrator SLA metrics aggregated over a rolling window.
-        Includes session counts, effective success rate, no-swap ratio, and
-        composite SLA score (0.7 × effectiveSuccessRate + 0.3 × noSwapRatio).
+        Includes session counts, effective success rate, no-swap ratio, and the
+        latest available hourly contracted `slaScore` inside the requested
+        window.
         Also includes the pipelines and models each orchestrator currently offers,
         and GPU count from the hardware inventory.
 

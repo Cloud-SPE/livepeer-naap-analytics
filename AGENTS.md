@@ -47,6 +47,7 @@ See `docs/design-docs/architecture.md` for per-component layer rules.
 | [`docs/design-docs/data-validation-rules.md`](docs/design-docs/data-validation-rules.md) | Behavioral contract for all data validation rules (17 rules, 31 tests) |
 | [`docs/operations/run-modes-and-recovery.md`](docs/operations/run-modes-and-recovery.md) | Supported runtime modes, recovery, and rebuild procedures |
 | [`docs/operations/compose-services.md`](docs/operations/compose-services.md) | Docker Compose services, profiles, and runtime responsibilities |
+| [`docs/operations/runtime-validation-and-performance.md`](docs/operations/runtime-validation-and-performance.md) | Standard runtime measurement checklist for performance, attribution, SLA, and rollup safety |
 | [`docs/exec-plans/active/`](docs/exec-plans/active/) | In-progress execution plans |
 | [`docs/exec-plans/completed/`](docs/exec-plans/completed/) | Historical execution plans |
 | [`docs/exec-plans/tech-debt-tracker.md`](docs/exec-plans/tech-debt-tracker.md) | Known technical debt |

@@ -11,6 +11,7 @@ Top-level architecture map for Livepeer NAAP Analytics.
   streaming_events  ──Engine──► tables                    │         │
                                                            │         ├──► normalized_*
                                                            │         ├──► canonical_*
+                                                           │         ├──► api_base_*
                                                            │         ├──► api_*
                                                            │         └──► ignored_raw_events
                                                            └──────────────────► HTTP :8000
@@ -44,9 +45,13 @@ aggregate query.
 - **MV-populated** (event-driven): accepted Kafka events are routed into `naap.accepted_raw_events`, then normalized/core materialized views populate the downstream event-driven tables.
 - **Worker-populated** (polled): `orch_metadata`, `gateway_metadata`, `agg_gpu_inventory` — written by the enrichment worker on a 5-minute interval. GPU inventory uses this strategy because `gpu_info` is a JSON map with dynamic integer keys that are trivial to iterate in Go but awkward in ClickHouse SQL.
 
-**Serving path:** The Go API reads `api_*` relations only. `api_*` is a
-presentation/read-model layer, not a source-of-truth layer. Downstream
-derivations must read `canonical_*`, never `api_*`.
+**Serving path:** The Go API reads published `api_*` relations only. The
+semantic serving layer may use internal `api_base_*` helper views to compute
+contracted read models, but those helpers are not public contracts.
+Downstream derivations must read `canonical_*`, never `api_base_*` or `api_*`.
+For SLA specifically, the resolver now publishes additive org-hour inputs and
+then materializes final SLA serving rows into physical `api_*_store` tables so
+the API does not score benchmark cohorts on the request hot path.
 
 **Resolver runtime path:** The long-lived resolver service is now intended to
 run in `auto` mode. One service instance:
@@ -65,6 +70,7 @@ exact write ownership and bounded padded reads.
 - `normalized_*` — normalized event-family records
 - `canonical_*` — authoritative corrected facts/latest-state tables
 - `operational_*` — low-latency live ops tables
+- `api_base_*` — internal semantic helper views for API/dashboard rollups
 - `api_*` — service/dashboard read models only
 
 This tier contract is documentation for semantic derivation flow. The physical
@@ -79,6 +85,26 @@ Medallion mapping is documentation-only:
 - silver = `normalized_*`
 - gold = `canonical_*`
 - `operational_*` remains a live-ops side branch
+
+## Rollup safety
+
+Rollup algebra is a repository-wide correctness rule, not an implementation
+detail.
+
+- Do not compute aggregates from already-aggregated values unless the aggregate is mathematically merge-safe.
+- Safe rollups sum additive counters directly.
+- Safe rollups recompute ratios from additive numerators and denominators.
+- Safe rollups recompute means from additive sums and counts.
+- Safe rollups merge explicit aggregate state for percentiles and other
+  distribution metrics.
+- Unsafe rollups include averaging averages, averaging ratios, recomputing
+  percentiles from scalar percentile values, and summing overlapping
+  classifications that are not additive.
+
+Any new gold/read-model metric must define its additive support fields or
+merge-safe state at the same time as the derived metric. If a higher-grain
+consumer cannot recompute the metric safely from those fields, the metric
+contract is incomplete.
 
 ## Layered domain architecture
 
@@ -117,5 +143,6 @@ Violations are caught by structural linters. See `docs/design-docs/architecture.
 
 - `docs/design-docs/architecture.md` — layer rules, enforcement, dependency graph
 - `docs/design-docs/core-beliefs.md` — operating principles
+- `docs/design-docs/adr-004-quality-aware-sla.md` — rationale and evolution rules for the current `sla_score` contract
 - `docs/design-docs/data-validation-rules.md` — data validation behavioral contract (17 rules, 31 tests)
 - `docs/product-specs/index.md` — feature specifications (R1–R6)

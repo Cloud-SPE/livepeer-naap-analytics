@@ -1916,6 +1916,12 @@ func (r *repo) publishServingRollups(ctx context.Context, runID string, slices [
 	if err := r.insertSLAComplianceRollups(ctx, runID, queryID); err != nil {
 		return err
 	}
+	if err := r.insertFinalSLAComplianceByOrgRollups(ctx, runID, queryID); err != nil {
+		return err
+	}
+	if err := r.insertFinalSLAComplianceRollups(ctx, runID, queryID); err != nil {
+		return err
+	}
 	if err := r.insertGPUMetricsRollups(ctx, runID, queryID); err != nil {
 		return err
 	}
@@ -2093,13 +2099,13 @@ func (r *repo) insertPaymentLinkRows(ctx context.Context, runID, queryID string)
 			toFloat64OrDefault(replaceRegexpOne(JSONExtractString(p.data, 'price'), ' wei/pixel$', ''))     AS price_wei_per_pixel,
 			toFloat64OrDefault(JSONExtractString(p.data, 'winProb'))                                        AS win_prob,
 			toUInt64OrDefault(JSONExtractString(p.data, 'numTickets'))                                      AS num_tickets,
-			fs.canonical_session_key,
+			cast(nullIf(fs.canonical_session_key, ''), 'Nullable(String)')                                  AS canonical_session_key,
 			if(
-				JSONExtractString(p.data, 'requestID') != '' AND isNotNull(fs.canonical_session_key),
+				JSONExtractString(p.data, 'requestID') != '' AND isNotNull(canonical_session_key),
 				'request_id',
 				'unlinked'
 			)                                                                                               AS link_method,
-			if(isNotNull(fs.canonical_session_key), 'resolved', 'unresolved')                              AS link_status,
+			if(isNotNull(canonical_session_key), 'resolved', 'unresolved')                                 AS link_status,
 			?,
 			?,
 			now64()
@@ -2160,7 +2166,7 @@ func (r *repo) insertNetworkDemandRollups(ctx context.Context, runID, queryID st
 		INSERT INTO naap.api_network_demand_by_org_store
 		(
 			window_start, org, gateway, region, pipeline_id, model_id, sessions_count,
-			avg_output_fps, total_minutes, known_sessions_count, requested_sessions, startup_success_sessions,
+			avg_output_fps, output_fps_sum, status_samples, total_minutes, known_sessions_count, requested_sessions, startup_success_sessions,
 			no_orch_sessions, startup_excused_sessions, startup_failed_sessions, loading_only_sessions,
 			zero_output_fps_sessions, effective_failed_sessions, confirmed_swapped_sessions,
 			inferred_swap_sessions, total_swapped_sessions, sessions_ending_in_error,
@@ -2309,8 +2315,8 @@ func (r *repo) insertNetworkDemandRollups(ctx context.Context, runID, queryID st
 				max(status_error_sample_count) AS status_error_sample_count,
 				max(total_minutes) AS total_minutes,
 				max(ticket_face_value_eth) AS ticket_face_value_eth,
-				sum(status_samples) AS status_samples,
-				sum(output_fps_sum) AS output_fps_sum
+				sum(status_samples) AS session_status_samples,
+				sum(output_fps_sum) AS session_output_fps_sum
 			FROM combined_rows
 			GROUP BY
 				canonical_session_key,
@@ -2329,7 +2335,9 @@ func (r *repo) insertNetworkDemandRollups(ctx context.Context, runID, queryID st
 			pipeline_id,
 			model_id,
 			toUInt64(count()) AS sessions_count,
-			if(sum(status_samples) > 0, sum(output_fps_sum) / toFloat64(sum(status_samples)), 0.0) AS avg_output_fps,
+			if(sum(session_status_samples) > 0, sum(session_output_fps_sum) / toFloat64(sum(session_status_samples)), 0.0) AS avg_output_fps,
+			sum(session_output_fps_sum) AS output_fps_sum,
+			toUInt64(sum(session_status_samples)) AS status_samples,
 			sum(total_minutes) AS total_minutes,
 			toUInt64(countIf(requested_seen = 1)) AS known_sessions_count,
 			toUInt64(countIf(requested_seen = 1)) AS requested_sessions,
@@ -2353,7 +2361,14 @@ func (r *repo) insertNetworkDemandRollups(ctx context.Context, runID, queryID st
 			toUInt64(sum(status_error_sample_count)) AS error_status_samples,
 			toUInt64(sum(session_health_signal_count)) AS health_signal_count,
 			toUInt64(sum(session_health_expected_signal_count)) AS health_expected_signal_count,
-			if(sum(session_health_expected_signal_count) > 0, sum(session_health_signal_count) / toFloat64(sum(session_health_expected_signal_count)), 1.0) AS health_signal_coverage_ratio,
+			least(
+				if(
+					sum(session_health_expected_signal_count) > 0,
+					sum(session_health_signal_count) / toFloat64(sum(session_health_expected_signal_count)),
+					1.0
+				),
+				1.0
+			) AS health_signal_coverage_ratio,
 			if(countIf(requested_seen = 1) > 0, countIf(requested_seen = 1 AND startup_outcome = 'success') / toFloat64(countIf(requested_seen = 1)), 0.0) AS startup_success_rate,
 			if(countIf(requested_seen = 1) > 0, countIf(requested_seen = 1 AND startup_outcome = 'failed' AND excusal_reason != 'none') / toFloat64(countIf(requested_seen = 1)), 0.0) AS excused_failure_rate,
 			if(
@@ -2383,7 +2398,7 @@ func (r *repo) insertGPUNetworkDemandRollups(ctx context.Context, runID, queryID
 		INSERT INTO naap.api_gpu_network_demand_by_org_store
 		(
 			window_start, org, gateway, orchestrator_address, region, pipeline_id, model_id, gpu_id, gpu_identity_status,
-			sessions_count, avg_output_fps, total_minutes, known_sessions_count, requested_sessions, startup_success_sessions,
+			sessions_count, avg_output_fps, output_fps_sum, status_samples, total_minutes, known_sessions_count, requested_sessions, startup_success_sessions,
 			no_orch_sessions, startup_excused_sessions, startup_failed_sessions, loading_only_sessions,
 			zero_output_fps_sessions, effective_failed_sessions, confirmed_swapped_sessions, inferred_swap_sessions,
 			total_swapped_sessions, sessions_ending_in_error, error_status_samples, health_signal_count,
@@ -2472,7 +2487,7 @@ func (r *repo) insertGPUNetworkDemandRollups(ctx context.Context, runID, queryID
 				gpu_id,
 				gpu_identity_status
 		),
-		session_union AS (
+		combined_rows AS (
 			SELECT
 				coalesce(d.canonical_session_key, p.canonical_session_key) AS canonical_session_key,
 				coalesce(d.window_start, p.window_start) AS window_start,
@@ -2509,6 +2524,45 @@ func (r *repo) insertGPUNetworkDemandRollups(ctx context.Context, runID, queryID
 			   AND d.pipeline_id = p.pipeline_id
 			   AND ifNull(d.model_id, '') = ifNull(p.model_id, '')
 			   AND ifNull(d.gpu_id, '') = ifNull(p.gpu_id, '')
+		),
+		session_union AS (
+			SELECT
+				canonical_session_key,
+				window_start,
+				org,
+				gateway,
+				orchestrator_address,
+				region,
+				pipeline_id,
+				model_id,
+				gpu_id,
+				max(gpu_identity_status) AS gpu_identity_status,
+				max(requested_seen) AS requested_seen,
+				argMax(selection_outcome, status_samples) AS selection_outcome,
+				argMax(startup_outcome, status_samples) AS startup_outcome,
+				argMax(excusal_reason, status_samples) AS excusal_reason,
+				max(loading_only_session) AS loading_only_session,
+				max(zero_output_fps_session) AS zero_output_fps_session,
+				max(session_health_signal_count) AS session_health_signal_count,
+				max(session_health_expected_signal_count) AS session_health_expected_signal_count,
+				max(swap_count) AS swap_count,
+				max(error_seen) AS error_seen,
+				max(status_error_sample_count) AS status_error_sample_count,
+				max(total_minutes) AS total_minutes,
+				max(ticket_face_value_eth) AS ticket_face_value_eth,
+				sum(status_samples) AS session_status_samples,
+				sum(output_fps_sum) AS session_output_fps_sum
+			FROM combined_rows
+			GROUP BY
+				canonical_session_key,
+				window_start,
+				org,
+				gateway,
+				orchestrator_address,
+				region,
+				pipeline_id,
+				model_id,
+				gpu_id
 		)
 		SELECT
 			window_start,
@@ -2521,7 +2575,9 @@ func (r *repo) insertGPUNetworkDemandRollups(ctx context.Context, runID, queryID
 			gpu_id,
 			gpu_identity_status,
 			toUInt64(count()) AS sessions_count,
-			if(sum(status_samples) > 0, sum(output_fps_sum) / toFloat64(sum(status_samples)), 0.0) AS avg_output_fps,
+			if(sum(session_status_samples) > 0, sum(session_output_fps_sum) / toFloat64(sum(session_status_samples)), 0.0) AS avg_output_fps,
+			sum(session_output_fps_sum) AS output_fps_sum,
+			toUInt64(sum(session_status_samples)) AS status_samples,
 			sum(total_minutes) AS total_minutes,
 			toUInt64(countIf(requested_seen = 1)) AS known_sessions_count,
 			toUInt64(countIf(requested_seen = 1)) AS requested_sessions,
@@ -2545,7 +2601,14 @@ func (r *repo) insertGPUNetworkDemandRollups(ctx context.Context, runID, queryID
 			toUInt64(sum(status_error_sample_count)) AS error_status_samples,
 			toUInt64(sum(session_health_signal_count)) AS health_signal_count,
 			toUInt64(sum(session_health_expected_signal_count)) AS health_expected_signal_count,
-			if(sum(session_health_expected_signal_count) > 0, sum(session_health_signal_count) / toFloat64(sum(session_health_expected_signal_count)), 1.0) AS health_signal_coverage_ratio,
+			least(
+				if(
+					sum(session_health_expected_signal_count) > 0,
+					sum(session_health_signal_count) / toFloat64(sum(session_health_expected_signal_count)),
+					1.0
+				),
+				1.0
+			) AS health_signal_coverage_ratio,
 			if(countIf(requested_seen = 1) > 0, countIf(requested_seen = 1 AND startup_outcome = 'success') / toFloat64(countIf(requested_seen = 1)), 0.0) AS startup_success_rate,
 			if(countIf(requested_seen = 1) > 0, countIf(requested_seen = 1 AND startup_outcome = 'failed' AND excusal_reason != 'none') / toFloat64(countIf(requested_seen = 1)), 0.0) AS excused_failure_rate,
 			if(
@@ -2580,18 +2643,37 @@ func (r *repo) insertGPUNetworkDemandRollups(ctx context.Context, runID, queryID
 }
 
 func (r *repo) insertSLAComplianceRollups(ctx context.Context, runID, queryID string) error {
+	// This input store remains the resolver-owned source of truth for additive
+	// SLA facts. Final scored serving rows are published immediately afterward
+	// from the api_base_* helper relations so the API never scores on the hot path.
 	return r.conn.Exec(ctx, `
-		INSERT INTO naap.api_sla_compliance_by_org_store
+		INSERT INTO naap.api_sla_compliance_inputs_by_org_store
 		(
-			window_start, org, orchestrator_address, pipeline_id, model_id, gpu_id, region,
+			window_start, org, orchestrator_address, pipeline_id, model_id, gpu_id, gpu_model_name, region,
 			known_sessions_count, requested_sessions, startup_success_sessions, no_orch_sessions,
-			startup_excused_sessions, startup_failed_sessions, loading_only_sessions, zero_output_fps_sessions,
+			startup_excused_sessions, startup_failed_sessions, loading_only_sessions, zero_output_fps_sessions, output_failed_sessions,
 			effective_failed_sessions, confirmed_swapped_sessions, inferred_swap_sessions, total_swapped_sessions,
 			sessions_ending_in_error, error_status_samples, health_signal_count, health_expected_signal_count,
 			health_signal_coverage_ratio, startup_success_rate, excused_failure_rate, effective_success_rate,
-			no_swap_rate, output_viability_rate, sla_score, refresh_run_id, artifact_checksum, refreshed_at
+			no_swap_rate, output_viability_rate, output_fps_sum, status_samples, prompt_to_first_frame_sum_ms,
+			prompt_to_first_frame_sample_count, e2e_latency_sum_ms, e2e_latency_sample_count,
+			refresh_run_id, artifact_checksum, refreshed_at
 		)
-		WITH base AS (
+		WITH status_hour_support AS (
+			SELECT
+				n.org AS org,
+				n.canonical_session_key AS canonical_session_key,
+				n.hour AS window_start,
+				toUInt64(sumMerge(n.status_samples_state)) AS status_samples,
+				sumMerge(n.output_fps_sum_state) AS output_fps_sum,
+				sumMerge(n.e2e_latency_sum_state) AS e2e_latency_sum_ms,
+				toUInt64(sumMerge(n.e2e_latency_count_state)) AS e2e_latency_sample_count
+			FROM naap.normalized_session_status_hour_rollup n
+			INNER JOIN naap.resolver_query_window_slices rs
+				ON rs.query_id = ? AND n.org = rs.org AND n.hour = rs.window_start
+			GROUP BY n.org, n.canonical_session_key, n.hour
+		),
+		base AS (
 			SELECT
 				h.hour AS window_start,
 				h.org AS org,
@@ -2608,12 +2690,30 @@ func (r *repo) insertSLAComplianceRollups(ctx context.Context, runID, queryID st
 				fs.error_seen AS error_seen,
 				h.error_samples AS error_status_samples,
 				fs.health_signal_count AS health_signal_count,
-				fs.health_expected_signal_count AS health_expected_signal_count
+				fs.health_expected_signal_count AS health_expected_signal_count,
+				ifNull(sh.output_fps_sum, h.avg_output_fps * toFloat64(h.status_samples)) AS output_fps_sum,
+				ifNull(sh.status_samples, h.status_samples) AS status_samples,
+				if(h.prompt_to_playable_latency_ms > 0, h.prompt_to_playable_latency_ms, 0.0) AS prompt_to_first_frame_sum_ms,
+				toUInt64(h.prompt_to_playable_latency_ms > 0) AS prompt_to_first_frame_sample_count,
+				if(
+					ifNull(sh.e2e_latency_sample_count, toUInt64(0)) > 0,
+					ifNull(sh.e2e_latency_sum_ms, 0.0),
+					if(h.avg_e2e_latency_ms > 0, h.avg_e2e_latency_ms, 0.0)
+				) AS e2e_latency_sum_ms,
+				if(
+					ifNull(sh.e2e_latency_sample_count, toUInt64(0)) > 0,
+					sh.e2e_latency_sample_count,
+					toUInt64(h.avg_e2e_latency_ms > 0)
+				) AS e2e_latency_sample_count
 			FROM naap.canonical_status_hours h
 			INNER JOIN naap.resolver_query_window_slices rs
 				ON rs.query_id = ? AND h.org = rs.org AND h.hour = rs.window_start
 			LEFT JOIN naap.canonical_session_current fs
 				ON h.canonical_session_key = fs.canonical_session_key
+			LEFT JOIN status_hour_support sh
+				ON h.org = sh.org
+			   AND h.canonical_session_key = sh.canonical_session_key
+			   AND h.hour = sh.window_start
 			WHERE h.is_terminal_tail_artifact = 0
 		),
 		inventory_keys AS (
@@ -2630,7 +2730,8 @@ func (r *repo) insertSLAComplianceRollups(ctx context.Context, runID, queryID st
 				inv.orch_address AS orchestrator_address,
 				coalesce(nullIf(inv.model_id, ''), nullIf(inv.pipeline_id, '')) AS inventory_key,
 				any(inv.model_id) AS inventory_model_id,
-				cast(nullIf(argMaxIfMerge(inv.gpu_id_state), ''), 'Nullable(String)') AS inventory_gpu_id
+				cast(nullIf(argMaxIfMerge(inv.gpu_id_state), ''), 'Nullable(String)') AS inventory_gpu_id,
+				nullIf(argMaxIfMerge(inv.gpu_model_name_state), '') AS inventory_gpu_model_name
 			FROM naap.canonical_latest_orchestrator_pipeline_inventory_agg inv
 			INNER JOIN inventory_keys k
 				ON inv.org = k.org
@@ -2645,6 +2746,7 @@ func (r *repo) insertSLAComplianceRollups(ctx context.Context, runID, queryID st
 			b.pipeline_id,
 			coalesce(b.model_id, i.inventory_model_id) AS model_id,
 			i.inventory_gpu_id AS gpu_id,
+			any(i.inventory_gpu_model_name) AS gpu_model_name,
 			cast(null AS Nullable(String)) AS region,
 			toUInt64(countIf(b.requested_seen = 1)) AS known_sessions_count,
 			toUInt64(countIf(b.requested_seen = 1)) AS requested_sessions,
@@ -2654,6 +2756,12 @@ func (r *repo) insertSLAComplianceRollups(ctx context.Context, runID, queryID st
 			toUInt64(countIf(b.requested_seen = 1 AND b.startup_outcome = 'failed' AND b.excusal_reason = 'none')) AS startup_failed_sessions,
 			toUInt64(countIf(b.requested_seen = 1 AND b.loading_only_session = 1)) AS loading_only_sessions,
 			toUInt64(countIf(b.requested_seen = 1 AND b.zero_output_fps_session = 1)) AS zero_output_fps_sessions,
+			toUInt64(countIf(
+				b.requested_seen = 1 AND (
+					b.loading_only_session = 1 OR
+					b.zero_output_fps_session = 1
+				)
+			)) AS output_failed_sessions,
 			toUInt64(countIf(
 				b.requested_seen = 1 AND (
 					(b.startup_outcome = 'failed' AND b.excusal_reason = 'none') OR
@@ -2668,9 +2776,12 @@ func (r *repo) insertSLAComplianceRollups(ctx context.Context, runID, queryID st
 			toUInt64(sum(b.error_status_samples)) AS error_status_samples,
 			toUInt64(sum(b.health_signal_count)) AS health_signal_count,
 			toUInt64(sum(b.health_expected_signal_count)) AS health_expected_signal_count,
-			if(
-				sum(b.health_expected_signal_count) > 0,
-				sum(b.health_signal_count) / toFloat64(sum(b.health_expected_signal_count)),
+			least(
+				if(
+					sum(b.health_expected_signal_count) > 0,
+					sum(b.health_signal_count) / toFloat64(sum(b.health_expected_signal_count)),
+					1.0
+				),
 				1.0
 			) AS health_signal_coverage_ratio,
 			if(
@@ -2704,32 +2815,21 @@ func (r *repo) insertSLAComplianceRollups(ctx context.Context, runID, queryID st
 			if(
 				countIf(b.requested_seen = 1) > 0,
 				1.0 - (
-					toFloat64(countIf(b.requested_seen = 1 AND b.loading_only_session = 1)) +
-					toFloat64(countIf(b.requested_seen = 1 AND b.zero_output_fps_session = 1))
+					toFloat64(countIf(
+						b.requested_seen = 1 AND (
+							b.loading_only_session = 1 OR
+							b.zero_output_fps_session = 1
+						)
+					))
 				) / toFloat64(countIf(b.requested_seen = 1)),
 				cast(null AS Nullable(Float64))
 			) AS output_viability_rate,
-			if(
-				countIf(b.requested_seen = 1) > 0,
-				100.0 *
-				if(
-					sum(b.health_expected_signal_count) > 0,
-					sum(b.health_signal_count) / toFloat64(sum(b.health_expected_signal_count)),
-					1.0
-				) * (
-					(0.4 * (toFloat64(countIf(b.requested_seen = 1 AND b.startup_outcome = 'success')) / toFloat64(countIf(b.requested_seen = 1)))) +
-					(0.2 * (1.0 - toFloat64(countIf(b.requested_seen = 1 AND b.swap_count > 0)) / toFloat64(countIf(b.requested_seen = 1)))) +
-					(0.4 * (
-						1.0 - (
-							(
-								toFloat64(countIf(b.requested_seen = 1 AND b.loading_only_session = 1)) +
-								toFloat64(countIf(b.requested_seen = 1 AND b.zero_output_fps_session = 1))
-							) / toFloat64(countIf(b.requested_seen = 1))
-						)
-					))
-				),
-				cast(null AS Nullable(Float64))
-			) AS sla_score,
+			sum(b.output_fps_sum) AS output_fps_sum,
+			toUInt64(sum(b.status_samples)) AS status_samples,
+			sum(b.prompt_to_first_frame_sum_ms) AS prompt_to_first_frame_sum_ms,
+			toUInt64(sum(b.prompt_to_first_frame_sample_count)) AS prompt_to_first_frame_sample_count,
+			sum(b.e2e_latency_sum_ms) AS e2e_latency_sum_ms,
+			toUInt64(sum(b.e2e_latency_sample_count)) AS e2e_latency_sample_count,
 			?,
 			?,
 			now64()
@@ -2745,6 +2845,79 @@ func (r *repo) insertSLAComplianceRollups(ctx context.Context, runID, queryID st
 			b.pipeline_id,
 			coalesce(b.model_id, i.inventory_model_id),
 			i.inventory_gpu_id
+	`, queryID, queryID, runID, r.cfg.ResolverVersion)
+}
+
+func (r *repo) insertFinalSLAComplianceByOrgRollups(ctx context.Context, runID, queryID string) error {
+	return r.conn.Exec(ctx, `
+		INSERT INTO naap.api_sla_compliance_by_org_store
+		(
+			window_start, org, orchestrator_address, pipeline_id, model_id, gpu_id, gpu_model_name, region,
+			known_sessions_count, requested_sessions, startup_success_sessions, no_orch_sessions,
+			startup_excused_sessions, startup_failed_sessions, loading_only_sessions, zero_output_fps_sessions,
+			output_failed_sessions, effective_failed_sessions, confirmed_swapped_sessions, inferred_swap_sessions,
+			total_swapped_sessions, sessions_ending_in_error, error_status_samples, health_signal_count,
+			health_expected_signal_count, health_signal_coverage_ratio, startup_success_rate, excused_failure_rate,
+			effective_success_rate, no_swap_rate, output_viability_rate, output_fps_sum, status_samples,
+			avg_output_fps, prompt_to_first_frame_sum_ms, prompt_to_first_frame_sample_count,
+			avg_prompt_to_first_frame_ms, e2e_latency_sum_ms, e2e_latency_sample_count, avg_e2e_latency_ms,
+			reliability_score, ptff_score, e2e_score, latency_score, fps_score, quality_score,
+			sla_semantics_version, sla_score, refresh_run_id, artifact_checksum, refreshed_at
+		)
+		SELECT
+			s.window_start, s.org, s.orchestrator_address, s.pipeline_id, s.model_id, s.gpu_id, s.gpu_model_name, s.region,
+			s.known_sessions_count, s.requested_sessions, s.startup_success_sessions, s.no_orch_sessions,
+			s.startup_excused_sessions, s.startup_failed_sessions, s.loading_only_sessions, s.zero_output_fps_sessions,
+			s.output_failed_sessions, s.effective_failed_sessions, s.confirmed_swapped_sessions, s.inferred_swap_sessions,
+			s.total_swapped_sessions, s.sessions_ending_in_error, s.error_status_samples, s.health_signal_count,
+			s.health_expected_signal_count, s.health_signal_coverage_ratio, s.startup_success_rate, s.excused_failure_rate,
+			s.effective_success_rate, s.no_swap_rate, s.output_viability_rate, s.output_fps_sum, s.status_samples,
+			s.avg_output_fps, s.prompt_to_first_frame_sum_ms, s.prompt_to_first_frame_sample_count,
+			s.avg_prompt_to_first_frame_ms, s.e2e_latency_sum_ms, s.e2e_latency_sample_count, s.avg_e2e_latency_ms,
+			s.reliability_score, s.ptff_score, s.e2e_score, s.latency_score, s.fps_score, s.quality_score,
+			s.sla_semantics_version, s.sla_score, ?, ?, now64()
+		FROM naap.api_base_sla_compliance_scored_by_org s
+		INNER JOIN naap.resolver_query_window_slices w
+			ON w.query_id = ? AND s.org = w.org AND s.window_start = w.window_start
+	`, runID, r.cfg.ResolverVersion, queryID)
+}
+
+func (r *repo) insertFinalSLAComplianceRollups(ctx context.Context, runID, queryID string) error {
+	return r.conn.Exec(ctx, `
+		INSERT INTO naap.api_sla_compliance_store
+		(
+			window_start, org, orchestrator_address, pipeline_id, model_id, gpu_id, gpu_model_name, region,
+			known_sessions_count, requested_sessions, startup_success_sessions, no_orch_sessions,
+			startup_excused_sessions, startup_failed_sessions, loading_only_sessions, zero_output_fps_sessions,
+			output_failed_sessions, effective_failed_sessions, confirmed_swapped_sessions, inferred_swap_sessions,
+			total_swapped_sessions, sessions_ending_in_error, error_status_samples, health_signal_count,
+			health_expected_signal_count, health_signal_coverage_ratio, startup_success_rate, excused_failure_rate,
+			effective_success_rate, no_swap_rate, output_viability_rate, output_fps_sum, status_samples,
+			avg_output_fps, prompt_to_first_frame_sum_ms, prompt_to_first_frame_sample_count,
+			avg_prompt_to_first_frame_ms, e2e_latency_sum_ms, e2e_latency_sample_count, avg_e2e_latency_ms,
+			reliability_score, ptff_score, e2e_score, latency_score, fps_score, quality_score,
+			sla_semantics_version, sla_score, refresh_run_id, artifact_checksum, refreshed_at
+		)
+		WITH owned_windows AS (
+			SELECT DISTINCT window_start
+			FROM naap.resolver_query_window_slices
+			WHERE query_id = ?
+		)
+		SELECT
+			s.window_start, s.org, s.orchestrator_address, s.pipeline_id, s.model_id, s.gpu_id, s.gpu_model_name, s.region,
+			s.known_sessions_count, s.requested_sessions, s.startup_success_sessions, s.no_orch_sessions,
+			s.startup_excused_sessions, s.startup_failed_sessions, s.loading_only_sessions, s.zero_output_fps_sessions,
+			s.output_failed_sessions, s.effective_failed_sessions, s.confirmed_swapped_sessions, s.inferred_swap_sessions,
+			s.total_swapped_sessions, s.sessions_ending_in_error, s.error_status_samples, s.health_signal_count,
+			s.health_expected_signal_count, s.health_signal_coverage_ratio, s.startup_success_rate, s.excused_failure_rate,
+			s.effective_success_rate, s.no_swap_rate, s.output_viability_rate, s.output_fps_sum, s.status_samples,
+			s.avg_output_fps, s.prompt_to_first_frame_sum_ms, s.prompt_to_first_frame_sample_count,
+			s.avg_prompt_to_first_frame_ms, s.e2e_latency_sum_ms, s.e2e_latency_sample_count, s.avg_e2e_latency_ms,
+			s.reliability_score, s.ptff_score, s.e2e_score, s.latency_score, s.fps_score, s.quality_score,
+			s.sla_semantics_version, s.sla_score, ?, ?, now64()
+		FROM naap.api_base_sla_compliance_scored s
+		INNER JOIN owned_windows w
+			ON s.window_start = w.window_start
 	`, queryID, runID, r.cfg.ResolverVersion)
 }
 
@@ -2753,18 +2926,32 @@ func (r *repo) insertGPUMetricsRollups(ctx context.Context, runID, queryID strin
 		INSERT INTO naap.api_gpu_metrics_by_org_store
 		(
 			window_start, org, orchestrator_address, pipeline_id, model_id, gpu_id, region,
-			avg_output_fps, p95_output_fps, fps_jitter_coefficient, status_samples,
-			error_status_samples, health_signal_coverage_ratio, gpu_model_name,
-			gpu_memory_bytes_total, runner_version, cuda_version, avg_prompt_to_first_frame_ms,
-			avg_startup_latency_ms, avg_e2e_latency_ms, p95_prompt_to_first_frame_latency_ms,
-			p95_startup_latency_ms, p95_e2e_latency_ms, prompt_to_first_frame_sample_count,
+			avg_output_fps, output_fps_sum, p95_output_fps, output_fps_p95_state, fps_jitter_coefficient, status_samples,
+			error_status_samples, health_signal_count, health_expected_signal_count, health_signal_coverage_ratio, gpu_model_name,
+			gpu_memory_bytes_total, runner_version, cuda_version, avg_prompt_to_first_frame_ms, prompt_to_first_frame_sum_ms,
+			avg_startup_latency_ms, startup_latency_sum_ms, avg_e2e_latency_ms, e2e_latency_sum_ms, p95_prompt_to_first_frame_latency_ms,
+			prompt_to_first_frame_p95_state, p95_startup_latency_ms, startup_latency_p95_state, p95_e2e_latency_ms, e2e_latency_p95_state, prompt_to_first_frame_sample_count,
 			startup_latency_sample_count, e2e_latency_sample_count, known_sessions_count,
 			startup_success_sessions, no_orch_sessions, startup_excused_sessions, startup_failed_sessions,
 			confirmed_swapped_sessions, inferred_swap_sessions, total_swapped_sessions,
 			sessions_ending_in_error, startup_failed_rate, swap_rate, refresh_run_id,
 			artifact_checksum, refreshed_at
 		)
-		WITH base AS (
+		WITH status_hour_support AS (
+			SELECT
+				n.org AS org,
+				n.canonical_session_key AS canonical_session_key,
+				n.hour AS window_start,
+				toUInt64(sumMerge(n.status_samples_state)) AS status_samples,
+				sumMerge(n.output_fps_sum_state) AS output_fps_sum,
+				sumMerge(n.e2e_latency_sum_state) AS e2e_latency_sum_ms,
+				toUInt64(sumMerge(n.e2e_latency_count_state)) AS e2e_latency_sample_count
+			FROM naap.normalized_session_status_hour_rollup n
+			INNER JOIN naap.resolver_query_window_slices rs
+				ON rs.query_id = ? AND n.org = rs.org AND n.hour = rs.window_start
+			GROUP BY n.org, n.canonical_session_key, n.hour
+		),
+		base AS (
 			SELECT
 				h.hour AS window_start,
 				h.org AS org,
@@ -2773,13 +2960,29 @@ func (r *repo) insertGPUMetricsRollups(ctx context.Context, runID, queryID strin
 				h.canonical_model AS model_id,
 				cast(nullIf(fs.gpu_id, ''), 'Nullable(String)') AS session_gpu_id,
 				fs.requested_seen AS requested_seen,
-				h.status_samples AS status_samples,
+				ifNull(sh.status_samples, h.status_samples) AS status_samples,
 				h.error_samples AS error_status_samples,
-				h.avg_output_fps AS avg_output_fps,
+				ifNull(sh.output_fps_sum, h.avg_output_fps * toFloat64(h.status_samples)) AS output_fps_sum,
+				h.avg_output_fps AS session_hour_avg_output_fps,
+				fs.health_signal_count AS health_signal_count,
+				fs.health_expected_signal_count AS health_expected_signal_count,
 				h.prompt_to_playable_latency_ms AS prompt_to_playable_latency_ms,
+				if(h.prompt_to_playable_latency_ms > 0, h.prompt_to_playable_latency_ms, 0.0) AS prompt_to_first_frame_sum_ms,
+				toUInt64(h.prompt_to_playable_latency_ms > 0) AS prompt_to_first_frame_sample_count,
 				h.startup_latency_ms AS startup_latency_ms,
-				h.avg_e2e_latency_ms AS avg_e2e_latency_ms,
-				fs.health_signal_coverage_ratio AS health_signal_coverage_ratio,
+				if(h.startup_latency_ms > 0, h.startup_latency_ms, 0.0) AS startup_latency_sum_ms,
+				toUInt64(h.startup_latency_ms > 0) AS startup_latency_sample_count,
+				if(
+					ifNull(sh.e2e_latency_sample_count, toUInt64(0)) > 0,
+					ifNull(sh.e2e_latency_sum_ms, 0.0),
+					if(h.avg_e2e_latency_ms > 0, h.avg_e2e_latency_ms, 0.0)
+				) AS e2e_latency_sum_ms,
+				if(
+					ifNull(sh.e2e_latency_sample_count, toUInt64(0)) > 0,
+					sh.e2e_latency_sample_count,
+					toUInt64(h.avg_e2e_latency_ms > 0)
+				) AS e2e_latency_sample_count,
+				h.avg_e2e_latency_ms AS session_hour_avg_e2e_latency_ms,
 				fs.resolver_startup_outcome AS startup_outcome,
 				fs.excusal_reason AS excusal_reason,
 				fs.selection_outcome AS selection_outcome,
@@ -2790,6 +2993,8 @@ func (r *repo) insertGPUMetricsRollups(ctx context.Context, runID, queryID strin
 				ON rs.query_id = ? AND h.org = rs.org AND h.hour = rs.window_start
 			LEFT JOIN naap.canonical_session_current fs
 				ON h.canonical_session_key = fs.canonical_session_key
+			LEFT JOIN status_hour_support sh
+				ON h.org = sh.org AND h.canonical_session_key = sh.canonical_session_key AND h.hour = sh.window_start
 			WHERE h.is_terminal_tail_artifact = 0
 		),
 		inventory_keys AS (
@@ -2826,25 +3031,54 @@ func (r *repo) insertGPUMetricsRollups(ctx context.Context, runID, queryID strin
 				coalesce(b.model_id, i.inventory_model_id) AS model_id,
 				coalesce(b.session_gpu_id, i.inventory_gpu_id) AS gpu_id,
 				cast(null AS Nullable(String)) AS region,
-			avg(b.avg_output_fps) AS avg_output_fps,
-			quantile(0.95)(b.avg_output_fps) AS p95_output_fps,
+			if(sum(b.status_samples) > 0, sum(b.output_fps_sum) / toFloat64(sum(b.status_samples)), 0.0) AS avg_output_fps,
+			sum(b.output_fps_sum) AS output_fps_sum,
+			quantileTDigest(0.95)(b.session_hour_avg_output_fps) AS p95_output_fps,
+			quantileTDigestState(0.95)(b.session_hour_avg_output_fps) AS output_fps_p95_state,
 			cast(null AS Nullable(Float64)) AS fps_jitter_coefficient,
 			toUInt64(sum(b.status_samples)) AS status_samples,
 			toUInt64(sum(b.error_status_samples)) AS error_status_samples,
-			avg(b.health_signal_coverage_ratio) AS health_signal_coverage_ratio,
+			toUInt64(sum(b.health_signal_count)) AS health_signal_count,
+			toUInt64(sum(b.health_expected_signal_count)) AS health_expected_signal_count,
+			least(
+				if(
+					sum(b.health_expected_signal_count) > 0,
+					sum(b.health_signal_count) / toFloat64(sum(b.health_expected_signal_count)),
+					1.0
+				),
+				1.0
+			) AS health_signal_coverage_ratio,
 			i.inventory_gpu_model_name AS gpu_model_name,
 			i.inventory_gpu_memory_bytes_total AS gpu_memory_bytes_total,
 			i.inventory_runner_version AS runner_version,
 			i.inventory_cuda_version AS cuda_version,
-			if(countIf(b.prompt_to_playable_latency_ms > 0) > 0, avgIf(b.prompt_to_playable_latency_ms, b.prompt_to_playable_latency_ms > 0), cast(null AS Nullable(Float64))) AS avg_prompt_to_first_frame_ms,
-			if(countIf(b.startup_latency_ms > 0) > 0, avgIf(b.startup_latency_ms, b.startup_latency_ms > 0), cast(null AS Nullable(Float64))) AS avg_startup_latency_ms,
-			if(countIf(b.avg_e2e_latency_ms > 0) > 0, avgIf(b.avg_e2e_latency_ms, b.avg_e2e_latency_ms > 0), cast(null AS Nullable(Float64))) AS avg_e2e_latency_ms,
-			if(countIf(b.prompt_to_playable_latency_ms > 0) > 0, quantileIf(0.95)(b.prompt_to_playable_latency_ms, b.prompt_to_playable_latency_ms > 0), cast(null AS Nullable(Float64))) AS p95_prompt_to_first_frame_latency_ms,
-			if(countIf(b.startup_latency_ms > 0) > 0, quantileIf(0.95)(b.startup_latency_ms, b.startup_latency_ms > 0), cast(null AS Nullable(Float64))) AS p95_startup_latency_ms,
-			if(countIf(b.avg_e2e_latency_ms > 0) > 0, quantileIf(0.95)(b.avg_e2e_latency_ms, b.avg_e2e_latency_ms > 0), cast(null AS Nullable(Float64))) AS p95_e2e_latency_ms,
-			toUInt64(countIf(b.prompt_to_playable_latency_ms > 0)) AS prompt_to_first_frame_sample_count,
-			toUInt64(countIf(b.startup_latency_ms > 0)) AS startup_latency_sample_count,
-			toUInt64(countIf(b.avg_e2e_latency_ms > 0)) AS e2e_latency_sample_count,
+			if(sum(b.prompt_to_first_frame_sample_count) > 0, sum(b.prompt_to_first_frame_sum_ms) / toFloat64(sum(b.prompt_to_first_frame_sample_count)), cast(null AS Nullable(Float64))) AS avg_prompt_to_first_frame_ms,
+			sum(b.prompt_to_first_frame_sum_ms) AS prompt_to_first_frame_sum_ms,
+			if(sum(b.startup_latency_sample_count) > 0, sum(b.startup_latency_sum_ms) / toFloat64(sum(b.startup_latency_sample_count)), cast(null AS Nullable(Float64))) AS avg_startup_latency_ms,
+			sum(b.startup_latency_sum_ms) AS startup_latency_sum_ms,
+			if(sum(b.e2e_latency_sample_count) > 0, sum(b.e2e_latency_sum_ms) / toFloat64(sum(b.e2e_latency_sample_count)), cast(null AS Nullable(Float64))) AS avg_e2e_latency_ms,
+			sum(b.e2e_latency_sum_ms) AS e2e_latency_sum_ms,
+			if(
+				countIf(ifNull(b.prompt_to_playable_latency_ms, 0.0) > 0) > 0,
+				quantileTDigestIf(0.95)(ifNull(b.prompt_to_playable_latency_ms, 0.0), toUInt8(ifNull(b.prompt_to_playable_latency_ms, 0.0) > 0)),
+				cast(null AS Nullable(Float64))
+			) AS p95_prompt_to_first_frame_latency_ms,
+			quantileTDigestIfState(0.95)(ifNull(b.prompt_to_playable_latency_ms, 0.0), toUInt8(ifNull(b.prompt_to_playable_latency_ms, 0.0) > 0)) AS prompt_to_first_frame_p95_state,
+			if(
+				countIf(ifNull(b.startup_latency_ms, 0.0) > 0) > 0,
+				quantileTDigestIf(0.95)(ifNull(b.startup_latency_ms, 0.0), toUInt8(ifNull(b.startup_latency_ms, 0.0) > 0)),
+				cast(null AS Nullable(Float64))
+			) AS p95_startup_latency_ms,
+			quantileTDigestIfState(0.95)(ifNull(b.startup_latency_ms, 0.0), toUInt8(ifNull(b.startup_latency_ms, 0.0) > 0)) AS startup_latency_p95_state,
+			if(
+				countIf(ifNull(b.session_hour_avg_e2e_latency_ms, 0.0) > 0) > 0,
+				quantileTDigestIf(0.95)(ifNull(b.session_hour_avg_e2e_latency_ms, 0.0), toUInt8(ifNull(b.session_hour_avg_e2e_latency_ms, 0.0) > 0)),
+				cast(null AS Nullable(Float64))
+			) AS p95_e2e_latency_ms,
+			quantileTDigestIfState(0.95)(ifNull(b.session_hour_avg_e2e_latency_ms, 0.0), toUInt8(ifNull(b.session_hour_avg_e2e_latency_ms, 0.0) > 0)) AS e2e_latency_p95_state,
+			toUInt64(sum(b.prompt_to_first_frame_sample_count)) AS prompt_to_first_frame_sample_count,
+			toUInt64(sum(b.startup_latency_sample_count)) AS startup_latency_sample_count,
+			toUInt64(sum(b.e2e_latency_sample_count)) AS e2e_latency_sample_count,
 			toUInt64(countIf(b.requested_seen = 1)) AS known_sessions_count,
 			toUInt64(countIf(b.requested_seen = 1 AND b.startup_outcome = 'success')) AS startup_success_sessions,
 			toUInt64(countIf(b.requested_seen = 1 AND b.selection_outcome = 'no_orch')) AS no_orch_sessions,
@@ -2876,7 +3110,7 @@ func (r *repo) insertGPUMetricsRollups(ctx context.Context, runID, queryID strin
 			i.inventory_gpu_memory_bytes_total,
 			i.inventory_runner_version,
 			i.inventory_cuda_version
-	`, queryID, runID, r.cfg.ResolverVersion)
+	`, queryID, queryID, runID, r.cfg.ResolverVersion)
 }
 
 func (r *repo) ownerID() string {

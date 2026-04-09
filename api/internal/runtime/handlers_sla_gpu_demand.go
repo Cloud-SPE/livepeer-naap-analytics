@@ -100,8 +100,8 @@ func (s *Server) handleListSLACompliance(w http.ResponseWriter, r *http.Request)
 }
 
 func parseSLAComplianceParams(r *http.Request) types.SLAComplianceParams {
-	// window: default 24h, min 1h, max 30d
-	start, end, _ := parseWindowParam(r, 24*time.Hour, time.Hour, 30*24*time.Hour)
+	// window: default 3h, min 1m, max 30d
+	start, end, _ := parseWindowParam(r, 3*time.Hour, time.Minute, 30*24*time.Hour)
 	page, pageSize := parsePageParams(r, 50)
 	q := r.URL.Query()
 	return types.SLAComplianceParams{

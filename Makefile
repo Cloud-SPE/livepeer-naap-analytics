@@ -86,14 +86,14 @@ test-validation-host:
 
 test-validation-docker:
 	@set -e; \
-	trap 'docker compose --profile validation rm -sf validation-clickhouse warehouse-validation validation-go >/dev/null 2>&1 || true; docker volume rm $$(docker volume ls -q | grep livepeer-naap-analytics-v3_validation_clickhouse_data) >/dev/null 2>&1 || true' EXIT; \
+	trap 'docker compose --profile validation rm -sf validation-clickhouse warehouse-validation validation-go >/dev/null 2>&1 || true; docker volume rm $$(docker volume ls -q | grep "validation_clickhouse_data$$") >/dev/null 2>&1 || true' EXIT; \
 	docker compose --profile validation run --rm validation-go
 
 test-validation-clean:
 	@set -e; \
 	docker compose --profile validation rm -sf validation-clickhouse warehouse-validation validation-go >/dev/null 2>&1 || true; \
-	docker volume rm $$(docker volume ls -q | grep livepeer-naap-analytics-v3_validation_clickhouse_data) >/dev/null 2>&1 || true; \
-	trap 'docker compose --profile validation rm -sf validation-clickhouse warehouse-validation validation-go >/dev/null 2>&1 || true; docker volume rm $$(docker volume ls -q | grep livepeer-naap-analytics-v3_validation_clickhouse_data) >/dev/null 2>&1 || true' EXIT; \
+	docker volume rm $$(docker volume ls -q | grep "validation_clickhouse_data$$") >/dev/null 2>&1 || true; \
+	trap 'docker compose --profile validation rm -sf validation-clickhouse warehouse-validation validation-go >/dev/null 2>&1 || true; docker volume rm $$(docker volume ls -q | grep "validation_clickhouse_data$$") >/dev/null 2>&1 || true' EXIT; \
 	docker compose --profile validation run --rm validation-go
 
 warehouse-run:

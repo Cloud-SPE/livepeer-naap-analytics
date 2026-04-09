@@ -12,9 +12,9 @@ import (
 // SLA Compliance  —  GET /v1/sla/compliance
 // ---------------------------------------------------------------------------
 
-// ListSLACompliance returns paginated SLA compliance rows from api_* read
-// models. These are service-facing relations only; downstream derivations must
-// use canonical_* instead.
+// ListSLACompliance returns paginated SLA compliance rows from thin api_* read
+// models backed by resolver-published final SLA stores. These are service-facing
+// relations only; downstream derivations must use canonical_* instead.
 func (r *Repo) ListSLACompliance(ctx context.Context, p types.SLAComplianceParams) ([]types.SLAComplianceRow, int, error) {
 	view := "naap.api_sla_compliance"
 	if p.Org != "" {
@@ -36,13 +36,18 @@ func (r *Repo) ListSLACompliance(ctx context.Context, p types.SLAComplianceParam
 	rows, err := r.conn.Query(ctx, `
 		SELECT
 			window_start, org, orchestrator_address, pipeline_id,
-			model_id, gpu_id, region,
+			model_id, gpu_id, gpu_model_name, region,
 			known_sessions_count, requested_sessions, startup_success_sessions, no_orch_sessions, startup_excused_sessions,
-			startup_failed_sessions, loading_only_sessions, zero_output_fps_sessions, effective_failed_sessions,
+			startup_failed_sessions, loading_only_sessions, zero_output_fps_sessions, output_failed_sessions, effective_failed_sessions,
 			confirmed_swapped_sessions, inferred_swap_sessions, total_swapped_sessions, sessions_ending_in_error, error_status_samples,
 			health_signal_count, health_expected_signal_count,
 			health_signal_coverage_ratio,
-			startup_success_rate, excused_failure_rate, effective_success_rate, no_swap_rate, output_viability_rate, sla_score
+			startup_success_rate, excused_failure_rate, effective_success_rate, no_swap_rate, output_viability_rate,
+			output_fps_sum, status_samples, avg_output_fps,
+			prompt_to_first_frame_sum_ms, prompt_to_first_frame_sample_count, avg_prompt_to_first_frame_ms,
+			e2e_latency_sum_ms, e2e_latency_sample_count, avg_e2e_latency_ms,
+			reliability_score, ptff_score, e2e_score, latency_score, fps_score, quality_score,
+			sla_semantics_version, sla_score
 		FROM `+view+` `+where+`
 		ORDER BY window_start DESC
 		LIMIT ? OFFSET ?
@@ -57,13 +62,18 @@ func (r *Repo) ListSLACompliance(ctx context.Context, p types.SLAComplianceParam
 		var row types.SLAComplianceRow
 		if err := rows.Scan(
 			&row.WindowStart, &row.Org, &row.OrchestratorAddress, &row.PipelineID,
-			&row.ModelID, &row.GPUID, &row.Region,
+			&row.ModelID, &row.GPUID, &row.GPUModelName, &row.Region,
 			&row.KnownSessionsCount, &row.RequestedSessions, &row.StartupSuccessSessions, &row.NoOrchSessions, &row.StartupExcusedSessions,
-			&row.StartupFailedSessions, &row.LoadingOnlySessions, &row.ZeroOutputFPSSessions, &row.EffectiveFailedSessions,
+			&row.StartupFailedSessions, &row.LoadingOnlySessions, &row.ZeroOutputFPSSessions, &row.OutputFailedSessions, &row.EffectiveFailedSessions,
 			&row.ConfirmedSwappedSessions, &row.InferredSwapSessions, &row.TotalSwappedSessions, &row.SessionsEndingInError, &row.ErrorStatusSamples,
 			&row.HealthSignalCount, &row.HealthExpectedSignalCount,
 			&row.HealthSignalCoverageRatio,
-			&row.StartupSuccessRate, &row.ExcusedFailureRate, &row.EffectiveSuccessRate, &row.NoSwapRate, &row.OutputViabilityRate, &row.SLAScore,
+			&row.StartupSuccessRate, &row.ExcusedFailureRate, &row.EffectiveSuccessRate, &row.NoSwapRate, &row.OutputViabilityRate,
+			&row.OutputFPSSum, &row.StatusSamples, &row.AvgOutputFPS,
+			&row.PromptToFirstFrameSumMS, &row.PromptToFirstFrameSamples, &row.AvgPromptToFirstFrameMS,
+			&row.E2ELatencySumMS, &row.E2ELatencySamples, &row.AvgE2ELatencyMS,
+			&row.ReliabilityScore, &row.PTFFScore, &row.E2EScore, &row.LatencyScore, &row.FPSScore, &row.QualityScore,
+			&row.SLASemanticsVersion, &row.SLAScore,
 		); err != nil {
 			return nil, 0, fmt.Errorf("clickhouse sla compliance scan: %w", err)
 		}
@@ -88,6 +98,10 @@ func buildSLAWhere(p types.SLAComplianceParams) (string, []any) {
 	if p.OrchestratorAddress != "" {
 		conds = append(conds, "orchestrator_address = ?")
 		args = append(args, strings.ToLower(p.OrchestratorAddress))
+	}
+	if p.Region != "" {
+		conds = append(conds, "region = ?")
+		args = append(args, p.Region)
 	}
 	if p.PipelineID != "" {
 		conds = append(conds, "pipeline_id = ?")
@@ -130,7 +144,7 @@ func (r *Repo) ListNetworkDemand(ctx context.Context, p types.NetworkDemandParam
 	rows, err := r.conn.Query(ctx, `
 		SELECT
 			window_start, org, gateway, region, pipeline_id, model_id,
-			sessions_count, avg_output_fps, total_minutes,
+			sessions_count, avg_output_fps, output_fps_sum, status_samples, total_minutes,
 			known_sessions_count, requested_sessions, startup_success_sessions, no_orch_sessions,
 			startup_excused_sessions, startup_failed_sessions, loading_only_sessions, zero_output_fps_sessions,
 			effective_failed_sessions, confirmed_swapped_sessions, inferred_swap_sessions, total_swapped_sessions,
@@ -151,7 +165,7 @@ func (r *Repo) ListNetworkDemand(ctx context.Context, p types.NetworkDemandParam
 		var row types.NetworkDemandRow
 		if err := rows.Scan(
 			&row.WindowStart, &row.Org, &row.Gateway, &row.Region, &row.PipelineID, &row.ModelID,
-			&row.SessionsCount, &row.AvgOutputFPS, &row.TotalMinutes,
+			&row.SessionsCount, &row.AvgOutputFPS, &row.OutputFPSSum, &row.StatusSamples, &row.TotalMinutes,
 			&row.KnownSessionsCount, &row.RequestedSessions, &row.StartupSuccessSessions, &row.NoOrchSessions,
 			&row.StartupExcusedSessions, &row.StartupFailedSessions, &row.LoadingOnlySessions, &row.ZeroOutputFPSSessions,
 			&row.EffectiveFailedSessions, &row.ConfirmedSwappedSessions, &row.InferredSwapSessions, &row.TotalSwappedSessions,
@@ -217,7 +231,7 @@ func (r *Repo) ListGPUNetworkDemand(ctx context.Context, p types.GPUNetworkDeman
 	rows, err := r.conn.Query(ctx, `
 		SELECT
 			window_start, org, gateway, orchestrator_address, region, pipeline_id, model_id, gpu_id, gpu_identity_status,
-			sessions_count, avg_output_fps, total_minutes, known_sessions_count, requested_sessions, startup_success_sessions,
+			sessions_count, avg_output_fps, output_fps_sum, status_samples, total_minutes, known_sessions_count, requested_sessions, startup_success_sessions,
 			no_orch_sessions, startup_excused_sessions, startup_failed_sessions, loading_only_sessions, zero_output_fps_sessions,
 			effective_failed_sessions, confirmed_swapped_sessions, inferred_swap_sessions, total_swapped_sessions,
 			sessions_ending_in_error, error_status_samples, health_signal_count, health_expected_signal_count,
@@ -236,7 +250,7 @@ func (r *Repo) ListGPUNetworkDemand(ctx context.Context, p types.GPUNetworkDeman
 		var row types.GPUNetworkDemandRow
 		if err := rows.Scan(
 			&row.WindowStart, &row.Org, &row.Gateway, &row.OrchestratorAddress, &row.Region, &row.PipelineID, &row.ModelID, &row.GPUID, &row.GPUIdentityStatus,
-			&row.SessionsCount, &row.AvgOutputFPS, &row.TotalMinutes, &row.KnownSessionsCount, &row.RequestedSessions, &row.StartupSuccessSessions,
+			&row.SessionsCount, &row.AvgOutputFPS, &row.OutputFPSSum, &row.StatusSamples, &row.TotalMinutes, &row.KnownSessionsCount, &row.RequestedSessions, &row.StartupSuccessSessions,
 			&row.NoOrchSessions, &row.StartupExcusedSessions, &row.StartupFailedSessions, &row.LoadingOnlySessions, &row.ZeroOutputFPSSessions,
 			&row.EffectiveFailedSessions, &row.ConfirmedSwappedSessions, &row.InferredSwapSessions, &row.TotalSwappedSessions,
 			&row.SessionsEndingInError, &row.ErrorStatusSamples, &row.HealthSignalCount, &row.HealthExpectedSignalCount,
@@ -313,14 +327,32 @@ func (r *Repo) ListGPUMetrics(ctx context.Context, p types.GPUMetricsParams) ([]
 	}
 
 	args = append(args, p.PageSize, offset)
+	// Public gpu metrics views can surface NaN from quantile merges when a
+	// slice has no eligible latency samples. Normalize those to NULL here so
+	// the API contract remains JSON-encodable and consistent with nullable
+	// latency percentiles.
 	rows, err := r.conn.Query(ctx, `
 		SELECT
 			window_start, org, orchestrator_address, pipeline_id, model_id, gpu_id, region,
-			avg_output_fps, p95_output_fps, fps_jitter_coefficient,
-			status_samples, error_status_samples, health_signal_coverage_ratio,
+			avg_output_fps, output_fps_sum, toFloat64(p95_output_fps) AS p95_output_fps, fps_jitter_coefficient,
+			status_samples, error_status_samples, health_signal_count, health_expected_signal_count, health_signal_coverage_ratio,
 			gpu_model_name, gpu_memory_bytes_total, runner_version, cuda_version,
-			avg_prompt_to_first_frame_ms, avg_startup_latency_ms, avg_e2e_latency_ms,
-			p95_prompt_to_first_frame_latency_ms, p95_startup_latency_ms, p95_e2e_latency_ms,
+			avg_prompt_to_first_frame_ms, prompt_to_first_frame_sum_ms, avg_startup_latency_ms, startup_latency_sum_ms, avg_e2e_latency_ms, e2e_latency_sum_ms,
+			if(
+				p95_prompt_to_first_frame_latency_ms IS NULL OR isNaN(p95_prompt_to_first_frame_latency_ms),
+				cast(null, 'Nullable(Float64)'),
+				cast(p95_prompt_to_first_frame_latency_ms, 'Nullable(Float64)')
+			) AS p95_prompt_to_first_frame_latency_ms,
+			if(
+				p95_startup_latency_ms IS NULL OR isNaN(p95_startup_latency_ms),
+				cast(null, 'Nullable(Float64)'),
+				cast(p95_startup_latency_ms, 'Nullable(Float64)')
+			) AS p95_startup_latency_ms,
+			if(
+				p95_e2e_latency_ms IS NULL OR isNaN(p95_e2e_latency_ms),
+				cast(null, 'Nullable(Float64)'),
+				cast(p95_e2e_latency_ms, 'Nullable(Float64)')
+			) AS p95_e2e_latency_ms,
 			prompt_to_first_frame_sample_count, startup_latency_sample_count, e2e_latency_sample_count,
 			known_sessions_count, startup_success_sessions, no_orch_sessions, startup_excused_sessions,
 			startup_failed_sessions, confirmed_swapped_sessions, inferred_swap_sessions,
@@ -344,10 +376,10 @@ func (r *Repo) ListGPUMetrics(ctx context.Context, p types.GPUMetricsParams) ([]
 		var memBytes *uint64
 		if err := rows.Scan(
 			&m.WindowStart, &m.Org, &m.OrchestratorAddress, &m.PipelineID, &m.ModelID, &m.GPUID, &m.Region,
-			&m.AvgOutputFPS, &m.P95OutputFPS, &m.FPSJitterCoefficient,
-			&m.StatusSamples, &m.ErrorStatusSamples, &m.HealthSignalCoverageRatio,
+			&m.AvgOutputFPS, &m.OutputFPSSum, &m.P95OutputFPS, &m.FPSJitterCoefficient,
+			&m.StatusSamples, &m.ErrorStatusSamples, &m.HealthSignalCount, &m.HealthExpectedSignalCount, &m.HealthSignalCoverageRatio,
 			&gpuModel, &memBytes, &m.RunnerVersion, &m.CudaVersion,
-			&m.AvgPromptToFirstFrameMS, &m.AvgStartupLatencyMS, &m.AvgE2ELatencyMS,
+			&m.AvgPromptToFirstFrameMS, &m.PromptToFirstFrameSumMS, &m.AvgStartupLatencyMS, &m.StartupLatencySumMS, &m.AvgE2ELatencyMS, &m.E2ELatencySumMS,
 			&m.P95PromptToFirstFrameLatencyMS, &m.P95StartupLatencyMS, &m.P95E2ELatencyMS,
 			&m.PromptToFirstFrameSampleCount, &m.StartupLatencySampleCount, &m.E2ELatencySampleCount,
 			&m.KnownSessionsCount, &m.StartupSuccessSessions, &m.NoOrchSessions, &m.StartupExcusedSessions,

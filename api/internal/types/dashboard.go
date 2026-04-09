@@ -11,7 +11,7 @@ type DashboardMetricDelta struct {
 
 // DashboardHourlyBucket is one hour of a time-series KPI chart.
 type DashboardHourlyBucket struct {
-	Hour  string  `json:"hour"`  // RFC 3339
+	Hour  string  `json:"hour"` // RFC 3339
 	Value float64 `json:"value"`
 }
 
@@ -19,7 +19,7 @@ type DashboardHourlyBucket struct {
 type DashboardKPI struct {
 	SuccessRate         DashboardMetricDelta    `json:"successRate"`
 	OrchestratorsOnline DashboardMetricDelta    `json:"orchestratorsOnline"`
-	DailyUsageMins      DashboardMetricDelta    `json:"dailyUsageMins"`      // Phase 2
+	DailyUsageMins      DashboardMetricDelta    `json:"dailyUsageMins"` // Phase 2
 	DailySessionCount   DashboardMetricDelta    `json:"dailySessionCount"`
 	DailyNetworkFeesEth DashboardMetricDelta    `json:"dailyNetworkFeesEth"` // Phase 4
 	TimeframeHours      int                     `json:"timeframeHours"`
@@ -39,9 +39,9 @@ type DashboardPipelineModelMins struct {
 // (matches plugin-sdk DashboardPipelineUsage).
 type DashboardPipelineUsage struct {
 	Name      string                       `json:"name"`
-	Mins      float64                      `json:"mins"`     // Phase 2: from network demand
+	Mins      float64                      `json:"mins"` // Phase 2: from network demand
 	Sessions  int64                        `json:"sessions"`
-	AvgFps    float64                      `json:"avgFps"`   // Phase 2
+	AvgFps    float64                      `json:"avgFps"` // Phase 2
 	ModelMins []DashboardPipelineModelMins `json:"modelMins,omitempty"`
 }
 
@@ -63,6 +63,7 @@ type DashboardOrchestrator struct {
 	EffectiveSuccessRate *float64                      `json:"effectiveSuccessRate"`
 	NoSwapRatio          *float64                      `json:"noSwapRatio"`
 	SLAScore             *float64                      `json:"slaScore"`
+	SLAWindowStart       *string                       `json:"slaWindowStart,omitempty"`
 	Pipelines            []string                      `json:"pipelines"`
 	PipelineModels       []DashboardPipelineModelOffer `json:"pipelineModels"`
 	GPUCount             int64                         `json:"gpuCount"`

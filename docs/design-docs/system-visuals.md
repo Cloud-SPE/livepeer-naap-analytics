@@ -17,6 +17,7 @@ flowchart LR
     CSTORE[canonical_*_store tables]
     DBT[dbt semantic publish]
     CVIEW[canonical_* views]
+    ABASE[api_base_* views]
     AVIEW[api_* views]
     API[Go API]
     GRAF[Grafana]
@@ -29,7 +30,8 @@ flowchart LR
     RES --> CSTORE
     CSTORE --> DBT
     DBT --> CVIEW
-    CVIEW --> AVIEW
+    DBT --> ABASE
+    ABASE --> AVIEW
     AVIEW --> API
     AVIEW --> GRAF
 ```
@@ -46,13 +48,15 @@ flowchart TB
     subgraph Warehouse
         DBT[dbt models]
         CAN[canonical_* semantic views]
+        APIB[api_base_* semantic helper views]
         APIV[api_* semantic views]
     end
 
     INGEST --> PHYS
     PHYS --> DBT
     DBT --> CAN
-    DBT --> APIV
+    DBT --> APIB
+    APIB --> APIV
 ```
 
 ## Resolver Publication Spine

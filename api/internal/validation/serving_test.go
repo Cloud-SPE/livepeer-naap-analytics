@@ -30,15 +30,20 @@ func TestRuleServing001_APIOutputsExposeStableRequiredFields(t *testing.T) {
 			table: "api_sla_compliance_by_org",
 			fields: []string{
 				"window_start", "org", "orchestrator_address", "pipeline_id", "model_id", "gpu_id",
-				"requested_sessions", "effective_failed_sessions", "health_signal_count",
-				"startup_success_sessions", "startup_failed_sessions", "effective_success_rate", "output_viability_rate", "sla_score",
+				"gpu_model_name",
+				"requested_sessions", "output_failed_sessions", "effective_failed_sessions", "health_signal_count",
+				"startup_success_sessions", "startup_failed_sessions", "effective_success_rate", "output_viability_rate",
+				"output_fps_sum", "status_samples", "prompt_to_first_frame_sum_ms", "prompt_to_first_frame_sample_count",
+				"e2e_latency_sum_ms", "e2e_latency_sample_count", "avg_output_fps", "avg_prompt_to_first_frame_ms",
+				"avg_e2e_latency_ms", "reliability_score", "ptff_score", "e2e_score", "latency_score", "fps_score",
+				"quality_score", "sla_semantics_version", "sla_score",
 			},
 		},
 		{
 			table: "api_network_demand_by_org",
 			fields: []string{
 				"window_start", "org", "gateway", "pipeline_id", "model_id", "sessions_count",
-				"requested_sessions", "effective_failed_sessions", "health_signal_count",
+				"output_fps_sum", "status_samples", "requested_sessions", "effective_failed_sessions", "health_signal_count",
 				"startup_success_sessions", "startup_failed_sessions", "startup_success_rate", "effective_success_rate", "ticket_face_value_eth",
 			},
 		},
@@ -46,14 +51,15 @@ func TestRuleServing001_APIOutputsExposeStableRequiredFields(t *testing.T) {
 			table: "api_gpu_network_demand_by_org",
 			fields: []string{
 				"window_start", "org", "gateway", "orchestrator_address", "pipeline_id", "model_id", "gpu_id",
-				"gpu_identity_status", "requested_sessions", "effective_failed_sessions", "effective_success_rate",
+				"gpu_identity_status", "output_fps_sum", "status_samples", "requested_sessions", "effective_failed_sessions", "effective_success_rate",
 			},
 		},
 		{
 			table: "api_gpu_metrics_by_org",
 			fields: []string{
 				"window_start", "org", "orchestrator_address", "pipeline_id", "model_id", "gpu_id",
-				"status_samples", "error_status_samples", "known_sessions_count", "swap_rate",
+				"output_fps_sum", "status_samples", "error_status_samples", "health_signal_count", "health_expected_signal_count",
+				"prompt_to_first_frame_sum_ms", "startup_latency_sum_ms", "e2e_latency_sum_ms", "known_sessions_count", "swap_rate",
 			},
 		},
 	}

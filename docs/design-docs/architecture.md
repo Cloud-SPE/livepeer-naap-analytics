@@ -74,6 +74,7 @@ The analytics storage/runtime contract uses explicit semantic tiers:
 - `normalized_*` — normalized event-family records
 - `canonical_*` — authoritative corrected derivation source
 - `operational_*` — low-latency live ops tables only
+- `api_base_*` — internal semantic helper views for published API models
 - `api_*` — service-facing read models only
 
 Those prefixes describe semantic tiers and allowed derivation flow. They do not
@@ -85,19 +86,21 @@ such as `accepted_raw_events`, `ignored_raw_events`, `kafka_*`, `resolver_*`,
 Allowed data flow:
 
 ```text
-raw_* -> normalized_* -> canonical_* -> api_*
+raw_* -> normalized_* -> canonical_* -> api_base_* -> api_*
 raw_* / normalized_* -> operational_*
 ```
 
 Forbidden data flow:
 
 - `api_* -> canonical_*`
+- `api_* -> api_base_*`
+- `api_base_* -> canonical_*`
 - `operational_* -> canonical_*`
-- any downstream derivation sourcing truth from `api_*`
+- any downstream derivation sourcing truth from `api_base_*` or `api_*`
 
 Future consumer surfaces may add new namespaces such as `dashboard_*`,
 `export_*`, `partner_*`, or `feature_*`, but they must derive from
-`canonical_*`, never from `api_*` or `operational_*`.
+`canonical_*`, never from `api_base_*`, `api_*`, or `operational_*`.
 
 ## Dependency injection pattern
 

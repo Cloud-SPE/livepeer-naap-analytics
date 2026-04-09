@@ -173,6 +173,18 @@ func TestIntegration_GetWebRTCQuality(t *testing.T) {
 	}
 }
 
+func TestIntegration_ListGPUMetrics(t *testing.T) {
+	r := newIntegrationRepo(t)
+	if _, _, err := r.ListGPUMetrics(context.Background(), types.GPUMetricsParams{
+		Start:    time.Now().Add(-3 * time.Hour).UTC(),
+		End:      time.Now().UTC(),
+		Page:     1,
+		PageSize: 10,
+	}); err != nil {
+		t.Fatalf("ListGPUMetrics: %v", err)
+	}
+}
+
 // ── Payments ──────────────────────────────────────────────────────────────────
 
 func TestIntegration_GetPaymentSummary(t *testing.T) {

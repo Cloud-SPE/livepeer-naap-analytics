@@ -1372,17 +1372,24 @@ Freeze the exact meaning of SLA and related reliability ratios.
 **Requirement**
 The current active formulas are:
 
-- `startup_success_rate = 1 - startup_unexcused / known`
-- `effective_failed_sessions = startup_unexcused OR zero_output_fps_session OR loading_only_session`
-- `effective_success_rate = 1 - effective_failed_sessions / known`
-- `no_swap_rate = 1 - total_swapped / known`
-- `health_signal_coverage_ratio = health_signal_count / health_expected_signal_count`, defaulting to `1.0` when the denominator is `0`
-- `output_viability_rate = 1 - sessions_with(loading_only_session OR zero_output_fps_session) / known`
-- `sla_score = 100 * health_signal_coverage_ratio * ((0.4 * startup_success_rate) + (0.2 * no_swap_rate) + (0.4 * output_viability_rate))`
+- `startup_success_rate = startup_success_sessions / requested_sessions`
+- `effective_failed_sessions = startup_failed_sessions OR zero_output_fps_session OR loading_only_session`
+- `effective_success_rate = 1 - effective_failed_sessions / requested_sessions`
+- `no_swap_rate = 1 - total_swapped / requested_sessions`
+- `health_signal_coverage_ratio = min(health_signal_count / health_expected_signal_count, 1.0)`, defaulting to `1.0` when the denominator is `0`
+- `output_viability_rate = 1 - sessions_with(loading_only_session OR zero_output_fps_session) / requested_sessions`
+- `avg_output_fps = output_fps_sum / status_samples` when `status_samples > 0`
+- `avg_prompt_to_first_frame_ms = prompt_to_first_frame_sum_ms / prompt_to_first_frame_sample_count` when `prompt_to_first_frame_sample_count > 0`
+- `avg_e2e_latency_ms = e2e_latency_sum_ms / e2e_latency_sample_count` when `e2e_latency_sample_count > 0`
+- `reliability_score = (0.4 * startup_success_rate) + (0.2 * no_swap_rate) + (0.4 * output_viability_rate)`
+- `ptff_score`, `e2e_score`, and `fps_score` are benchmark-relative bounded scores computed from the prior 7 full UTC days of network-wide `pipeline_id + model_id` cohort state, then shrunk toward neutral on sparse evidence
+- `latency_score = (0.6 * ptff_score) + (0.4 * e2e_score)`
+- `quality_score = (0.6 * latency_score) + (0.4 * fps_score)`
+- `sla_score = 100 * health_signal_coverage_ratio * ((0.7 * reliability_score) + (0.3 * quality_score))`
 
 Bounds are part of the contract:
 
-- startup, effective, no-swap, and health-coverage ratios are in `[0,1]`
+- startup, effective, no-swap, health-coverage, reliability, PTFF, E2E, latency, FPS, and quality scores are in `[0,1]`
 - `sla_score` is in `[0,100]`
 
 **Output obligations**

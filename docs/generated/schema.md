@@ -2,9 +2,9 @@
 
 This reference is generated from the extracted bootstrap baseline in [`v1.sql`](../../infra/clickhouse/bootstrap/v1.sql).
 
-Regenerate both artifacts with [`scripts/extract_clickhouse_bootstrap.py`](../../scripts/extract_clickhouse_bootstrap.py).
+Regenerate both artifacts with the ClickHouse bootstrap extraction workflow and update [`v1.sql`](../../infra/clickhouse/bootstrap/v1.sql) in the same change.
 
-The documented `raw_*`, `normalized_*`, `canonical_*`, `operational_*`, and `api_*` tiers are semantic/modeling guidance. This inventory is the supported physical schema, so it also includes infrastructure/runtime objects such as `accepted_raw_events`, `ignored_raw_events`, `kafka_*`, `resolver_*`, `agg_*`, metadata tables, and change/audit tables.
+The documented `raw_*`, `normalized_*`, `canonical_*`, `operational_*`, `api_base_*`, and `api_*` tiers are semantic/modeling guidance. This inventory is the supported physical schema, so it also includes infrastructure/runtime objects such as `accepted_raw_events`, `ignored_raw_events`, `kafka_*`, `resolver_*`, `agg_*`, metadata tables, and change/audit tables.
 
 ## Included Objects
 
@@ -27,7 +27,9 @@ The documented `raw_*`, `normalized_*`, `canonical_*`, `operational_*`, and `api
 | `api_gpu_network_demand_by_org_store` | `MergeTree` |
 | `api_network_demand_by_org_store` | `MergeTree` |
 | `api_payment_hourly_store` | `MergeTree` |
+| `api_sla_compliance_inputs_by_org_store` | `MergeTree` |
 | `api_sla_compliance_by_org_store` | `MergeTree` |
+| `api_sla_compliance_store` | `MergeTree` |
 | `canonical_active_stream_state_latest_store` | `MergeTree` |
 | `canonical_capability_hardware_inventory` | `ReplacingMergeTree` |
 | `canonical_capability_hardware_inventory_by_snapshot` | `ReplacingMergeTree` |

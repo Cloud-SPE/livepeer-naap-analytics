@@ -8,7 +8,7 @@ See [`../docs/design-docs/system-visuals.md`](../docs/design-docs/system-visuals
 Ownership boundary:
 
 - ClickHouse: physical schema and `raw_* -> normalized_*`
-- dbt: canonical semantic SQL and `normalized_* -> canonical_* -> api_*`
+- dbt: canonical semantic SQL and `normalized_* -> canonical_* -> api_base_* -> api_*`
 - Go API: reads `api_*` only
 - resolver: owns selection extraction, attribution, current-store materialization,
   and bounded serving publication; dbt does not own runtime orchestration
@@ -18,6 +18,8 @@ Model split:
 - `warehouse/models/staging/` exposes thin views over normalized physical tables
 - `warehouse/models/canonical/` exposes current canonical contracts over
   physical `canonical_*_store` tables
+- `warehouse/models/api_base/` exposes internal helper views used to build
+  published API/dashboard models safely from additive or merge-safe inputs
 - `warehouse/models/api/` exposes serving contracts over bounded resolver-fed
   store tables
 - `api_status_samples` and `api_active_stream_state` remain store-backed so
@@ -31,6 +33,7 @@ Tier contract:
 - `normalized_*` — normalized event-family records
 - `canonical_*` — authoritative corrected derivation source
 - `operational_*` — live ops tables only
+- `api_base_*` — internal semantic helper views for published API models
 - `api_*` — serving/read models only
 
 This contract is semantic, not a promise that every physical ClickHouse object
@@ -43,7 +46,7 @@ renamed just to force prefix uniformity.
 Important rule:
 
 - downstream derivations must use `canonical_*`
-- `api_*` is presentation-oriented and must not be treated as truth
+- `api_base_*` and `api_*` are presentation-oriented and must not be treated as truth
 
 The project intentionally stays small. New canonical or serving layers are
 added only when they close a named defect or validation gap.

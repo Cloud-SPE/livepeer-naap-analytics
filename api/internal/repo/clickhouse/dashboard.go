@@ -229,7 +229,7 @@ func (r *Repo) GetDashboardPipelines(ctx context.Context, limit int) ([]types.Da
 			pipeline_id,
 			sum(sessions_count)           AS sessions,
 			sum(total_minutes)            AS total_mins,
-			sum(avg_output_fps * sessions_count) / nullIf(sum(sessions_count), 0) AS avg_fps
+			sum(output_fps_sum) / nullIf(sum(status_samples), 0) AS avg_fps
 		FROM naap.api_network_demand
 		WHERE window_start >= now() - INTERVAL 24 HOUR
 		  AND pipeline_id != ''
@@ -278,28 +278,65 @@ func (r *Repo) GetDashboardOrchestrators(ctx context.Context, windowHours int) (
 	}
 
 	// --- Query 1: SLA aggregates per orchestrator ---
+	// Dashboard `slaScore` is the latest available contracted hourly score
+	// within the requested window. It now comes from the precomputed final SLA
+	// serving rows, while supporting counts and reliability ratios still
+	// aggregate across the full dashboard window.
 	type slaRow struct {
-		address      string
-		known        uint64
-		successes    uint64
-		unexcused    int64
-		swaps        uint64
+		address        string
+		known          uint64
+		successes      uint64
+		unexcused      int64
+		swaps          uint64
+		slaScore       *float64
+		slaWindowStart *time.Time
 	}
 
 	slaRows, err := r.conn.Query(ctx, `
+		WITH windowed AS (
+			SELECT
+				orchestrator_address,
+				window_start,
+				known_sessions_count,
+				startup_success_sessions,
+				startup_failed_sessions,
+				startup_excused_sessions,
+				total_swapped_sessions,
+				sla_score,
+				requested_sessions,
+				pipeline_id,
+				ifNull(model_id, '') AS model_id,
+				ifNull(gpu_id, '') AS gpu_id
+			FROM naap.api_sla_compliance
+			WHERE window_start >= now() - INTERVAL ? HOUR
+			  AND orchestrator_address != ''
+		),
+		latest_hour AS (
+			SELECT
+				orchestrator_address,
+				max(window_start) AS latest_window_start
+			FROM windowed
+			GROUP BY orchestrator_address
+		)
 		SELECT
-			orchestrator_address,
-			sum(known_sessions_count)  AS known,
-			sum(startup_success_sessions) AS successes,
+			w.orchestrator_address,
+			sum(w.known_sessions_count) AS known,
+			sum(w.startup_success_sessions) AS successes,
 			greatest(
-				toInt64(sum(startup_failed_sessions)) - toInt64(sum(startup_excused_sessions)),
+				toInt64(sum(w.startup_failed_sessions)) - toInt64(sum(w.startup_excused_sessions)),
 				0
 			) AS unexcused,
-			sum(total_swapped_sessions) AS swaps
-		FROM naap.api_sla_compliance
-		WHERE window_start >= now() - INTERVAL ? HOUR
-		  AND orchestrator_address != ''
-		GROUP BY orchestrator_address
+			sum(w.total_swapped_sessions) AS swaps,
+			argMaxIf(
+				w.sla_score,
+				tuple(w.window_start, w.requested_sessions, w.pipeline_id, w.model_id, w.gpu_id),
+				w.window_start = h.latest_window_start
+			) AS sla_score,
+			max(h.latest_window_start) AS sla_window_start
+		FROM windowed w
+		INNER JOIN latest_hour h
+			ON w.orchestrator_address = h.orchestrator_address
+		GROUP BY w.orchestrator_address
 		HAVING known > 0
 		ORDER BY known DESC
 	`, windowHours)
@@ -311,7 +348,7 @@ func (r *Repo) GetDashboardOrchestrators(ctx context.Context, windowHours int) (
 	var slaData []slaRow
 	for slaRows.Next() {
 		var s slaRow
-		if err := slaRows.Scan(&s.address, &s.known, &s.successes, &s.unexcused, &s.swaps); err != nil {
+		if err := slaRows.Scan(&s.address, &s.known, &s.successes, &s.unexcused, &s.swaps, &s.slaScore, &s.slaWindowStart); err != nil {
 			return nil, fmt.Errorf("clickhouse get dashboard orchestrators sla scan: %w", err)
 		}
 		slaData = append(slaData, s)
@@ -422,7 +459,6 @@ func (r *Repo) GetDashboardOrchestrators(ctx context.Context, windowHours int) (
 		successRatio := divSafe(float64(s.successes), known)
 		effectiveRate := divSafe(known-float64(s.unexcused), known)
 		noSwapRatio := divSafe(known-float64(s.swaps), known)
-		slaScore := 0.7*effectiveRate + 0.3*noSwapRatio
 
 		// Clamp to [0, 1]
 		if effectiveRate < 0 {
@@ -431,8 +467,11 @@ func (r *Repo) GetDashboardOrchestrators(ctx context.Context, windowHours int) (
 		if noSwapRatio < 0 {
 			noSwapRatio = 0
 		}
-		if slaScore < 0 {
-			slaScore = 0
+		if effectiveRate > 1 {
+			effectiveRate = 1
+		}
+		if noSwapRatio > 1 {
+			noSwapRatio = 1
 		}
 
 		var pipelines []string
@@ -462,6 +501,11 @@ func (r *Repo) GetDashboardOrchestrators(ctx context.Context, windowHours int) (
 		}
 
 		state := orchStates[s.address]
+		var slaWindowStart *string
+		if s.slaWindowStart != nil {
+			formatted := s.slaWindowStart.UTC().Format(time.RFC3339)
+			slaWindowStart = &formatted
+		}
 		result = append(result, types.DashboardOrchestrator{
 			Address:              s.address,
 			EnsName:              state.name,
@@ -471,7 +515,8 @@ func (r *Repo) GetDashboardOrchestrators(ctx context.Context, windowHours int) (
 			SuccessRatio:         successRatio,
 			EffectiveSuccessRate: &effectiveRate,
 			NoSwapRatio:          &noSwapRatio,
-			SLAScore:             &slaScore,
+			SLAScore:             s.slaScore,
+			SLAWindowStart:       slaWindowStart,
 			Pipelines:            pipelines,
 			PipelineModels:       pipelineModels,
 			GPUCount:             int64(gpuCounts[s.address]),
@@ -517,7 +562,10 @@ func (r *Repo) GetDashboardGPUCapacity(ctx context.Context) (*types.DashboardGPU
 
 	// Accumulate into pipeline → model → gpu_model structure
 	type pipelineModelKey struct{ pipeline, model string }
-	type modelGPUEntry struct{ gpuModel string; count uint64 }
+	type modelGPUEntry struct {
+		gpuModel string
+		count    uint64
+	}
 
 	// pipelineGPUs: pipeline → total GPU count
 	// pipelineModelGPUs: pipeline → model → []gpu entries
@@ -638,7 +686,7 @@ func (r *Repo) GetDashboardPipelineCatalog(ctx context.Context) ([]types.Dashboa
 	for pipeline, models := range catalogMap {
 		result = append(result, types.DashboardPipelineCatalogEntry{
 			ID:      pipeline,
-			Name:    pipeline,  // display name mapping stays in the UI
+			Name:    pipeline, // display name mapping stays in the UI
 			Models:  models,
 			Regions: []string{},
 		})

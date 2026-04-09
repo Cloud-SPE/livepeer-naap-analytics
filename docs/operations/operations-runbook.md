@@ -14,6 +14,7 @@
 | Topic | Document |
 |---|---|
 | Monitoring, local setup, offset reset, ClickHouse reload | [`devops-environment-guide.md`](devops-environment-guide.md) |
+| Runtime validation and performance checklist | [`runtime-validation-and-performance.md`](runtime-validation-and-performance.md) |
 | Resolver modes, failure recovery, full rebuild | [`run-modes-and-recovery.md`](run-modes-and-recovery.md) |
 | Security posture, credential rotation, UFW rules | [`infra-hardening-runbook.md`](infra-hardening-runbook.md) |
 | Kafka and ClickHouse retention windows | [`data-retention-policy.md`](data-retention-policy.md) |

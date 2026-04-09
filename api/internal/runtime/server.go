@@ -148,9 +148,14 @@ func notImplemented(w http.ResponseWriter, _ *http.Request) {
 }
 
 func respondJSON(w http.ResponseWriter, status int, v any) {
+	body, err := json.Marshal(v)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Internal Server Error", fmt.Sprintf("encode response: %v", err))
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	_, _ = w.Write(append(body, '\n'))
 }
 
 // problemDetail is the RFC 7807 error response body.

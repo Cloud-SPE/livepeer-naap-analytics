@@ -16,7 +16,7 @@ These services are started by [`make up`](../../Makefile).
 | `zookeeper` | long-running | Kafka coordination for the local single-broker stack. |
 | `kafka` | long-running | Local event source for `network_events` and `streaming_events`. |
 | `clickhouse` | long-running | Physical ingest, storage, materialized views, resolver state, and serving-store tables. |
-| `warehouse-init` | one-shot init | Publishes dbt semantic `canonical_*` and `api_*` views into ClickHouse after startup. This is the Compose equivalent of an init container. |
+| `warehouse-init` | one-shot init | Publishes dbt semantic `canonical_*`, internal `api_base_*`, and public `api_*` views into ClickHouse after startup. This is the Compose equivalent of an init container. |
 | `resolver` | long-running | Repairs dirty windows, publishes current state, and maintains serving stores. |
 | `api` | long-running | Read-only REST API plus enrichment worker. Starts after `warehouse-init` succeeds so semantic views exist on fresh volumes. |
 | `prometheus` | long-running | Scrapes API, resolver, ClickHouse, Kafka exporter, cAdvisor, and node-exporter metrics. |

@@ -13,7 +13,7 @@ The supported pipeline is:
 2. Ingest materialized views route rows into `accepted_raw_events` and `ignored_raw_events`.
 3. `normalized_*` tables capture event-family facts and rollups.
 4. The resolver publishes corrected current and serving state into `canonical_*_store` and `api_*_store` tables.
-5. `dbt` publishes semantic `canonical_*` and `api_*` views.
+5. `dbt` publishes semantic `canonical_*`, internal `api_base_*`, and public `api_*` views.
 6. The Go API and Grafana read those published serving contracts.
 
 The hot read path is no longer built around `naap.events` or compatibility `v_api_*` views. The supported serving spine is the accepted-raw -> normalized -> resolver current/store -> dbt semantic-view path.
@@ -113,7 +113,7 @@ docs/
     system-visuals.md   Mermaid diagrams: ingest flow, resolver, deployment topology
     adr-001-storage-architecture.md   ClickHouse + Kafka engine decision
     adr-002-api-design.md             REST/JSON, auth model, org model, rate limiting
-    adr-003-tiered-serving-contract.md  Tier semantics and canonical derivation rules
+    architecture.md                     Layering, serving contracts, and semantic tier rules
     data-validation-rules.md          Behavioral contract for all 17 validation rules (31 tests)
     selection-centered-attribution.md  Attribution model specification
   operations/           Operational runbooks and reference guides

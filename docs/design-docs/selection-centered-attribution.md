@@ -71,6 +71,17 @@ Fact-surface obligations:
 - GPU-oriented rollups must not treat unresolved URI/local-alias cases as
   hardware-less matches
 
+Operational measurement rule:
+
+- the primary recent-window attribution success metric is
+  `resolved + hardware_less` on `selection_outcome = selected`
+- this combined rate shows that orchestrator identity and canonical
+  pipeline/model attribution succeeded
+- `hardware_less` is separated only to show missing hardware metadata; it is
+  not a canonicalization failure class
+- the remaining selected-session buckets are `stale`, `ambiguous`, and
+  `unresolved`
+
 ## Operational seam
 
 - `auto` owns the production scheduler:

@@ -10,6 +10,7 @@
 Related docs:
 - [`run-modes-and-recovery.md`](run-modes-and-recovery.md) — resolver modes, dbt publication, failure recovery
 - [`compose-services.md`](compose-services.md) — per-service Compose responsibilities
+- [`runtime-validation-and-performance.md`](runtime-validation-and-performance.md) — standard performance and data-quality measurement checklist
 - [`data-retention-policy.md`](data-retention-policy.md) — Kafka and ClickHouse retention windows
 - [`infra-hardening-runbook.md`](infra-hardening-runbook.md) — security posture and open action items
 

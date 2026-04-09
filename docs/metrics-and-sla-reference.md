@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | **Status** | Active |
-| **Effective date** | 2026-04-02 |
+| **Effective date** | 2026-04-09 |
 | **Ticket** | TASK 7.7 / [#274](https://github.com/livepeer/livepeer-naap-analytics-deployment/issues/274) |
 | **Audience** | External developers, partners, integrators |
 
@@ -19,7 +19,7 @@ Two distinct scoring models are used:
 
 | Model | Purpose | Range | API endpoint |
 |---|---|---|---|
-| **SLA Score** | Per-orchestrator reliability score for a given time window. Used for compliance reporting and alerting. | 0–100 | `GET /v1/sla/compliance` |
+| **SLA Score** | Per-orchestrator composite reliability and quality score for a given time window. Used for compliance reporting and alerting. | 0–100 | `GET /v1/sla/compliance` |
 | **Leaderboard Score** | Competitive ranking across all orchestrators. Used for the public leaderboard. | 0–100 | _(endpoint removed; score data available via `/v1/sla/compliance`)_ |
 
 These two scores use different formulas and different inputs — a high leaderboard score does not imply SLA compliance, and vice versa. See §3 for both formulas.
@@ -108,7 +108,7 @@ p95_e2e_latency_ms = p95(e2e_latency_ms) per orchestrator/pipeline/window
 
 **Formula:**
 ```
-failure_rate = (loading_only_sessions + zero_output_fps_sessions) / requested_sessions
+failure_rate = output_failed_sessions / requested_sessions
 
 output_viability_rate = 1 − failure_rate
 ```
@@ -116,6 +116,7 @@ output_viability_rate = 1 − failure_rate
 Session classification (see §6 for full taxonomy):
 - `loading_only_sessions` — inference ran but zero output frames were produced
 - `zero_output_fps_sessions` — frames were received but at 0 FPS (unplayable)
+- `output_failed_sessions` — union count of sessions that were loading-only or zero-output; one session contributes at most once
 - `requested_sessions` — all sessions attempted against this orchestrator
 
 **SLA target: failure_rate < 0.01 (i.e. output_viability_rate > 0.99).** Less than 1% failure rate is the production-grade availability standard for inference services, ensuring > 99% of stream requests produce usable output.
@@ -183,31 +184,52 @@ p95_prompt_to_first_frame_ms = p95(prompt_to_playable_latency_ms) per window
 
 ### 3.1 SLA Score
 
-**Purpose:** A single 0–100 reliability score per orchestrator per hourly window. Used for compliance reporting and alerting. Null when `requested_sessions = 0`.
+**Purpose:** A single 0–100 composite reliability and quality score per orchestrator per hourly window. Used for compliance reporting and alerting. Null when `requested_sessions = 0`.
 
 **Formula:**
 ```
 sla_score = 100
           × health_signal_coverage_ratio
-          × (  0.4 × startup_success_rate
-             + 0.2 × no_swap_rate
-             + 0.4 × output_viability_rate  )
+          × (  0.7 × reliability_score
+             + 0.3 × quality_score )
+
+reliability_score = (0.4 × startup_success_rate)
+                  + (0.2 × no_swap_rate)
+                  + (0.4 × output_viability_rate)
+
+latency_score = (0.6 × ptff_score) + (0.4 × e2e_score)
+
+quality_score = (0.6 × latency_score) + (0.4 × fps_score)
 ```
 
 **Component breakdown:**
 
 | Component | Weight | Formula | What it measures |
 |---|---|---|---|
-| `startup_success_rate` | 40% | `startup_success_sessions / requested_sessions` | Sessions that started successfully (orch selected, first output received) |
-| `no_swap_rate` | 20% | `1 − total_swapped_sessions / requested_sessions` | Sessions completed without mid-stream orchestrator swap |
-| `output_viability_rate` | 40% | `1 − (loading_only + zero_fps) / requested_sessions` | Sessions that produced usable output |
-| `health_signal_coverage_ratio` | multiplier | `health_signal_count / health_expected_signal_count` | Data completeness; defaults to 1.0 when no health signals expected |
+| `reliability_score` | 70% | `0.4×startup_success_rate + 0.2×no_swap_rate + 0.4×output_viability_rate` | Startup reliability, stability, and output viability |
+| `quality_score` | 30% | `0.6×latency_score + 0.4×fps_score` | Relative user-visible quality inside the active benchmark cohort |
+| `health_signal_coverage_ratio` | multiplier | `min(health_signal_count / health_expected_signal_count, 1.0)` | Data completeness; defaults to 1.0 when no health signals expected and is capped at 1.0 |
 
-The coverage ratio multiplier penalises scores where telemetry data was sparse or missing. A ratio of 1.0 means all expected health signals were received.
+**Quality scoring details**
+
+- `ptff_score` compares `avg_prompt_to_first_frame_ms` to the prior 7 full UTC days of the network-wide `(pipeline_id, model_id)` benchmark; lower latency scores higher
+- `e2e_score` compares `avg_e2e_latency_ms` to the prior 7 full UTC days of the network-wide `(pipeline_id, model_id)` benchmark; lower latency scores higher
+- `fps_score` compares `avg_output_fps` to the prior 7 full UTC days of the network-wide `(pipeline_id, model_id)` benchmark; higher FPS scores higher
+- benchmark thresholds use PTFF/E2E `p50 → p90` and FPS `p10 → p50`
+- rows at or better than the favorable benchmark edge score `1.0`; rows at or beyond the unfavorable edge score `0.0`; values in between interpolate linearly
+- quality components shrink toward neutral `0.5` on sparse current-window evidence
+- if the prior 7 full UTC days do not have enough benchmark rows, quality components default to neutral `0.5`
+- hardware is intentionally not part of cohort normalization; `gpu_model_name` is exposed separately for drilldown
+- the contracted API field remains `sla_score`; there is no parallel legacy or `v2` score surface
+
+The coverage ratio multiplier penalises scores where telemetry data was sparse or missing. A ratio of `1.0` means all expected health signals were received.
 
 **Recommended threshold: ≥ 95.** A score below 95 indicates meaningful reliability gaps in one or more components that warrant investigation.
 
-**Source:** `warehouse/models/api/api_sla_compliance.sql`
+**Source:** final SLA serving rows are published from the resolver-owned
+additive SLA input surface via the `api_base_*` scoring helpers, then exposed
+through `warehouse/models/api/api_sla_compliance.sql` as a thin contracted
+read model.
 
 **API endpoint:** `GET /v1/sla/compliance`
 
