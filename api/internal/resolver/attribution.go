@@ -391,12 +391,23 @@ func compatibleMatches(selection SelectionEvent, matches []matchedInterval) []ma
 func isCompatible(selection SelectionEvent, interval CapabilityInterval) bool {
 	// BYOC path: bypass the canonical pipeline allow-list and match verbatim.
 	// The capability string from the job (e.g. "openai-chat-completions") must
-	// equal the interval pipeline exactly (case-insensitive).
+	// equal the interval pipeline exactly (case-insensitive). When a worker-
+	// lifecycle model hint is present, it also participates in compatibility
+	// filtering so same-capability candidates can be disambiguated before the
+	// final BYOC row is materialized.
 	if selection.PipelineHintVerbatim {
 		if selection.ObservedPipeline == "" || interval.Pipeline == "" {
 			return false
 		}
-		return strings.EqualFold(selection.ObservedPipeline, interval.Pipeline)
+		if !strings.EqualFold(selection.ObservedPipeline, interval.Pipeline) {
+			return false
+		}
+		if selection.ObservedModelHint != "" {
+			if interval.Model == "" || !strings.EqualFold(selection.ObservedModelHint, interval.Model) {
+				return false
+			}
+		}
+		return true
 	}
 	// Standard path: use the canonical pipeline allow-list.
 	if pipelineHint := compatiblePipelineHint(selection.ObservedPipeline); pipelineHint != "" {

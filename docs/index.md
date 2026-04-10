@@ -23,6 +23,7 @@
 | Document | Purpose |
 |---|---|
 | [`design-docs/index.md`](design-docs/index.md) | Detailed design docs and ADRs |
+| [`design-docs/attribution-rollup-coding-rules.md`](design-docs/attribution-rollup-coding-rules.md) | Merge-blocking rules for attribution, dedupe, inflation safety, and dashboard math |
 | [`product-specs/index.md`](product-specs/index.md) | Product and API specifications |
 | [`generated/schema.md`](generated/schema.md) | Generated ClickHouse bootstrap schema inventory |
 | [`metrics-and-sla-reference.md`](metrics-and-sla-reference.md) | Community-facing metrics and SLA reference |

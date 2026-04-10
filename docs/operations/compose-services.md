@@ -66,6 +66,10 @@ docker compose --profile validation run --rm warehouse-validation
 make bootstrap-extract
 ```
 
+`make bootstrap-extract` refreshes the generated schema inventory from the
+checked-in bootstrap SQL. It does not recreate `v1.sql` from the validation
+database.
+
 ## What Is Not Always-On
 
 - `warehouse-init` is required on startup, but it is not a steady-state service.

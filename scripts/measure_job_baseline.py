@@ -403,6 +403,13 @@ def fetch_recent_attribution_summary(
     selected_total = int(overall["selected_sessions"])
     resolved = int(overall["resolved_sessions"])
     hardware_less = int(overall["hardware_less_sessions"])
+    stale_total = int(overall["stale_sessions"])
+    ambiguous_total = int(overall["ambiguous_sessions"])
+    unresolved_total = int(overall["unresolved_sessions"])
+    full_total = resolved
+    partial_total = hardware_less + stale_total
+    worked_total = full_total + partial_total
+    failed_total = ambiguous_total + unresolved_total
     orchestrated_total = resolved + hardware_less
 
     per_org: list[dict[str, Any]] = []
@@ -410,7 +417,14 @@ def fetch_recent_attribution_summary(
         selected = int(row["selected_sessions"])
         resolved_count = int(row["resolved_sessions"])
         hardware_less_count = int(row["hardware_less_sessions"])
+        stale_count = int(row["stale_sessions"])
+        ambiguous_count = int(row["ambiguous_sessions"])
+        unresolved_count = int(row["unresolved_sessions"])
         orchestrated = resolved_count + hardware_less_count
+        full = resolved_count
+        partial = hardware_less_count + stale_count
+        worked = full + partial
+        failed = ambiguous_count + unresolved_count
         per_org.append(
             {
                 "org": row["org"],
@@ -420,18 +434,26 @@ def fetch_recent_attribution_summary(
                 "no_orch_pct": percent(int(row["no_orch_sessions"]), int(row["recent_sessions"])),
                 "unknown_sessions": int(row["unknown_sessions"]),
                 "unknown_pct": percent(int(row["unknown_sessions"]), int(row["recent_sessions"])),
+                "worked": worked,
+                "worked_pct": percent(worked, selected),
+                "full": full,
+                "full_pct": percent(full, selected),
+                "partial": partial,
+                "partial_pct": percent(partial, selected),
+                "failed": failed,
+                "failed_pct": percent(failed, selected),
                 "resolved": resolved_count,
                 "hardware_less": hardware_less_count,
                 "orchestrator_identity": orchestrated,
                 "orchestrator_identity_pct": percent(orchestrated, selected),
                 "resolved_pct": percent(resolved_count, selected),
                 "hardware_less_pct": percent(hardware_less_count, selected),
-                "stale": int(row["stale_sessions"]),
-                "stale_pct": percent(int(row["stale_sessions"]), selected),
-                "ambiguous": int(row["ambiguous_sessions"]),
-                "ambiguous_pct": percent(int(row["ambiguous_sessions"]), selected),
-                "unresolved": int(row["unresolved_sessions"]),
-                "unresolved_pct": percent(int(row["unresolved_sessions"]), selected),
+                "stale": stale_count,
+                "stale_pct": percent(stale_count, selected),
+                "ambiguous": ambiguous_count,
+                "ambiguous_pct": percent(ambiguous_count, selected),
+                "unresolved": unresolved_count,
+                "unresolved_pct": percent(unresolved_count, selected),
             }
         )
 
@@ -446,18 +468,26 @@ def fetch_recent_attribution_summary(
         },
         "selected_sessions": {
             "total": selected_total,
+            "worked": worked_total,
+            "worked_pct": percent(worked_total, selected_total),
+            "full": full_total,
+            "full_pct": percent(full_total, selected_total),
+            "partial": partial_total,
+            "partial_pct": percent(partial_total, selected_total),
+            "failed": failed_total,
+            "failed_pct": percent(failed_total, selected_total),
             "resolved": resolved,
             "hardware_less": hardware_less,
             "orchestrator_identity": orchestrated_total,
             "orchestrator_identity_pct": percent(orchestrated_total, selected_total),
             "resolved_pct": percent(resolved, selected_total),
             "hardware_less_pct": percent(hardware_less, selected_total),
-            "stale": int(overall["stale_sessions"]),
-            "stale_pct": percent(int(overall["stale_sessions"]), selected_total),
-            "ambiguous": int(overall["ambiguous_sessions"]),
-            "ambiguous_pct": percent(int(overall["ambiguous_sessions"]), selected_total),
-            "unresolved": int(overall["unresolved_sessions"]),
-            "unresolved_pct": percent(int(overall["unresolved_sessions"]), selected_total),
+            "stale": stale_total,
+            "stale_pct": percent(stale_total, selected_total),
+            "ambiguous": ambiguous_total,
+            "ambiguous_pct": percent(ambiguous_total, selected_total),
+            "unresolved": unresolved_total,
+            "unresolved_pct": percent(unresolved_total, selected_total),
         },
         "startup_outcomes": {
             row["startup_outcome"]: int(row["sessions"]) for row in startup_rows
@@ -504,6 +534,253 @@ def fetch_recent_attribution_summary(
                 int(status_recent["error_samples"]), int(status_recent["samples"])
             ),
         },
+    }
+
+
+def fetch_recent_job_attribution_summary(
+    ch: ClickHouseHTTPClient, job_window_minutes: int
+) -> dict[str, Any]:
+    overall_rows = ch.query(
+        f"""
+        WITH recent_jobs AS (
+            SELECT
+                'ai-batch' AS job_type,
+                org,
+                pipeline AS dimension,
+                attribution_status,
+                completed_at AS event_ts
+            FROM naap.canonical_ai_batch_jobs
+            WHERE completed_at >= now() - INTERVAL {job_window_minutes} MINUTE
+
+            UNION ALL
+
+            SELECT
+                'byoc' AS job_type,
+                org,
+                capability AS dimension,
+                attribution_status,
+                completed_at AS event_ts
+            FROM naap.canonical_byoc_jobs
+            WHERE completed_at >= now() - INTERVAL {job_window_minutes} MINUTE
+        )
+        SELECT
+            job_type,
+            count() AS recent_jobs,
+            countIf(attribution_status = 'resolved') AS resolved_jobs,
+            countIf(attribution_status = 'hardware_less') AS hardware_less_jobs,
+            countIf(attribution_status = 'stale') AS stale_jobs,
+            countIf(attribution_status = 'ambiguous') AS ambiguous_jobs,
+            countIf(attribution_status = 'unresolved') AS unresolved_jobs
+        FROM recent_jobs
+        GROUP BY job_type
+        ORDER BY recent_jobs DESC, job_type
+        """,
+        fmt="JSONEachRow",
+    )
+    per_org_rows = ch.query(
+        f"""
+        WITH recent_jobs AS (
+            SELECT
+                'ai-batch' AS job_type,
+                org,
+                attribution_status,
+                completed_at AS event_ts
+            FROM naap.canonical_ai_batch_jobs
+            WHERE completed_at >= now() - INTERVAL {job_window_minutes} MINUTE
+
+            UNION ALL
+
+            SELECT
+                'byoc' AS job_type,
+                org,
+                attribution_status,
+                completed_at AS event_ts
+            FROM naap.canonical_byoc_jobs
+            WHERE completed_at >= now() - INTERVAL {job_window_minutes} MINUTE
+        )
+        SELECT
+            org,
+            job_type,
+            count() AS recent_jobs,
+            countIf(attribution_status = 'resolved') AS resolved_jobs,
+            countIf(attribution_status = 'hardware_less') AS hardware_less_jobs,
+            countIf(attribution_status = 'stale') AS stale_jobs,
+            countIf(attribution_status = 'ambiguous') AS ambiguous_jobs,
+            countIf(attribution_status = 'unresolved') AS unresolved_jobs
+        FROM recent_jobs
+        GROUP BY org, job_type
+        ORDER BY recent_jobs DESC, org, job_type
+        LIMIT 12
+        """,
+        fmt="JSONEachRow",
+    )
+    dimension_rows = ch.query(
+        f"""
+        WITH recent_jobs AS (
+            SELECT
+                'ai-batch' AS job_type,
+                org,
+                pipeline AS dimension,
+                attribution_status,
+                completed_at AS event_ts
+            FROM naap.canonical_ai_batch_jobs
+            WHERE completed_at >= now() - INTERVAL {job_window_minutes} MINUTE
+
+            UNION ALL
+
+            SELECT
+                'byoc' AS job_type,
+                org,
+                capability AS dimension,
+                attribution_status,
+                completed_at AS event_ts
+            FROM naap.canonical_byoc_jobs
+            WHERE completed_at >= now() - INTERVAL {job_window_minutes} MINUTE
+        )
+        SELECT
+            job_type,
+            dimension,
+            count() AS recent_jobs,
+            countIf(attribution_status = 'resolved') AS resolved_jobs,
+            countIf(attribution_status = 'hardware_less') AS hardware_less_jobs,
+            countIf(attribution_status = 'stale') AS stale_jobs,
+            countIf(attribution_status = 'ambiguous') AS ambiguous_jobs,
+            countIf(attribution_status = 'unresolved') AS unresolved_jobs
+        FROM recent_jobs
+        GROUP BY job_type, dimension
+        ORDER BY recent_jobs DESC, job_type, dimension
+        LIMIT 10
+        """,
+        fmt="JSONEachRow",
+    )
+
+    by_type: dict[str, Any] = {}
+    total_jobs = 0
+    for row in overall_rows:
+        total = int(row["recent_jobs"])
+        total_jobs += total
+        resolved = int(row["resolved_jobs"])
+        hardware_less = int(row["hardware_less_jobs"])
+        stale = int(row["stale_jobs"])
+        ambiguous = int(row["ambiguous_jobs"])
+        unresolved = int(row["unresolved_jobs"])
+        identified = resolved + hardware_less
+        full = resolved
+        partial = hardware_less + stale
+        worked = full + partial
+        failed = ambiguous + unresolved
+        by_type[row["job_type"]] = {
+            "recent_jobs": total,
+            "worked": worked,
+            "worked_pct": percent(worked, total),
+            "full": full,
+            "full_pct": percent(full, total),
+            "partial": partial,
+            "partial_pct": percent(partial, total),
+            "failed": failed,
+            "failed_pct": percent(failed, total),
+            "resolved": resolved,
+            "resolved_pct": percent(resolved, total),
+            "hardware_less": hardware_less,
+            "hardware_less_pct": percent(hardware_less, total),
+            "identity": identified,
+            "identity_pct": percent(identified, total),
+            "stale": stale,
+            "stale_pct": percent(stale, total),
+            "ambiguous": ambiguous,
+            "ambiguous_pct": percent(ambiguous, total),
+            "unresolved": unresolved,
+            "unresolved_pct": percent(unresolved, total),
+        }
+
+    per_org: list[dict[str, Any]] = []
+    for row in per_org_rows:
+        total = int(row["recent_jobs"])
+        resolved = int(row["resolved_jobs"])
+        hardware_less = int(row["hardware_less_jobs"])
+        stale = int(row["stale_jobs"])
+        ambiguous = int(row["ambiguous_jobs"])
+        unresolved = int(row["unresolved_jobs"])
+        identified = resolved + hardware_less
+        full = resolved
+        partial = hardware_less + stale
+        worked = full + partial
+        failed = ambiguous + unresolved
+        per_org.append(
+            {
+                "org": row["org"],
+                "job_type": row["job_type"],
+                "recent_jobs": total,
+                "worked": worked,
+                "worked_pct": percent(worked, total),
+                "full": full,
+                "full_pct": percent(full, total),
+                "partial": partial,
+                "partial_pct": percent(partial, total),
+                "failed": failed,
+                "failed_pct": percent(failed, total),
+                "resolved": resolved,
+                "resolved_pct": percent(resolved, total),
+                "hardware_less": hardware_less,
+                "hardware_less_pct": percent(hardware_less, total),
+                "identity": identified,
+                "identity_pct": percent(identified, total),
+                "stale": stale,
+                "stale_pct": percent(stale, total),
+                "ambiguous": ambiguous,
+                "ambiguous_pct": percent(ambiguous, total),
+                "unresolved": unresolved,
+                "unresolved_pct": percent(unresolved, total),
+            }
+        )
+
+    dimensions: list[dict[str, Any]] = []
+    for row in dimension_rows:
+        total = int(row["recent_jobs"])
+        resolved = int(row["resolved_jobs"])
+        hardware_less = int(row["hardware_less_jobs"])
+        stale = int(row["stale_jobs"])
+        ambiguous = int(row["ambiguous_jobs"])
+        unresolved = int(row["unresolved_jobs"])
+        identified = resolved + hardware_less
+        full = resolved
+        partial = hardware_less + stale
+        worked = full + partial
+        failed = ambiguous + unresolved
+        dimensions.append(
+            {
+                "job_type": row["job_type"],
+                "dimension": row["dimension"],
+                "recent_jobs": total,
+                "worked": worked,
+                "worked_pct": percent(worked, total),
+                "full": full,
+                "full_pct": percent(full, total),
+                "partial": partial,
+                "partial_pct": percent(partial, total),
+                "failed": failed,
+                "failed_pct": percent(failed, total),
+                "resolved": resolved,
+                "resolved_pct": percent(resolved, total),
+                "hardware_less": hardware_less,
+                "hardware_less_pct": percent(hardware_less, total),
+                "identity": identified,
+                "identity_pct": percent(identified, total),
+                "stale": stale,
+                "stale_pct": percent(stale, total),
+                "ambiguous": ambiguous,
+                "ambiguous_pct": percent(ambiguous, total),
+                "unresolved": unresolved,
+                "unresolved_pct": percent(unresolved, total),
+            }
+        )
+
+    return {
+        "recent_window_minutes": job_window_minutes,
+        "recent_jobs": total_jobs,
+        "by_type": by_type,
+        "per_org": per_org,
+        "top_dimensions": dimensions,
     }
 
 
@@ -778,8 +1055,8 @@ def build_api_probe_table(rows: list[dict[str, Any]]) -> list[str]:
 
 def build_attribution_org_table(rows: list[dict[str, Any]]) -> list[str]:
     out = [
-        "| Org | Recent Sessions | Selected | Identity | Resolved | Hardware-less | Stale | Ambiguous | Unresolved | No Orch | Unknown |",
-        "|---|---:|---:|---|---|---|---|---|---|---|---|",
+        "| Org | Recent Sessions | Selected | Worked | Full | Partial | Failed | Fresh Id | Resolved | Hardware-less | Stale | Ambiguous | Unresolved | No Orch | Unknown |",
+        "|---|---:|---:|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for row in rows:
         def fmt_pair(count_key: str, pct_key: str) -> str:
@@ -789,6 +1066,10 @@ def build_attribution_org_table(rows: list[dict[str, Any]]) -> list[str]:
 
         out.append(
             f"| `{row['org']}` | {row['recent_sessions']} | {row['selected_sessions']} | "
+            f"{fmt_pair('worked', 'worked_pct')} | "
+            f"{fmt_pair('full', 'full_pct')} | "
+            f"{fmt_pair('partial', 'partial_pct')} | "
+            f"{fmt_pair('failed', 'failed_pct')} | "
             f"{fmt_pair('orchestrator_identity', 'orchestrator_identity_pct')} | "
             f"{fmt_pair('resolved', 'resolved_pct')} | "
             f"{fmt_pair('hardware_less', 'hardware_less_pct')} | "
@@ -797,6 +1078,60 @@ def build_attribution_org_table(rows: list[dict[str, Any]]) -> list[str]:
             f"{fmt_pair('unresolved', 'unresolved_pct')} | "
             f"{fmt_pair('no_orch_sessions', 'no_orch_pct')} | "
             f"{fmt_pair('unknown_sessions', 'unknown_pct')} |"
+        )
+    return out
+
+
+def build_job_attribution_org_table(rows: list[dict[str, Any]]) -> list[str]:
+    out = [
+        "| Org | Job Type | Recent Jobs | Worked | Full | Partial | Failed | Fresh Id | Resolved | Hardware-less | Stale | Ambiguous | Unresolved |",
+        "|---|---|---:|---|---|---|---|---|---|---|---|---|---|",
+    ]
+    for row in rows:
+        def fmt_pair(count_key: str, pct_key: str) -> str:
+            pct = row.get(pct_key)
+            pct_text = f"{pct:.2f}%" if pct is not None else "n/a"
+            return f"{row[count_key]} ({pct_text})"
+
+        out.append(
+            f"| `{row['org']}` | `{row['job_type']}` | {row['recent_jobs']} | "
+            f"{fmt_pair('worked', 'worked_pct')} | "
+            f"{fmt_pair('full', 'full_pct')} | "
+            f"{fmt_pair('partial', 'partial_pct')} | "
+            f"{fmt_pair('failed', 'failed_pct')} | "
+            f"{fmt_pair('identity', 'identity_pct')} | "
+            f"{fmt_pair('resolved', 'resolved_pct')} | "
+            f"{fmt_pair('hardware_less', 'hardware_less_pct')} | "
+            f"{fmt_pair('stale', 'stale_pct')} | "
+            f"{fmt_pair('ambiguous', 'ambiguous_pct')} | "
+            f"{fmt_pair('unresolved', 'unresolved_pct')} |"
+        )
+    return out
+
+
+def build_job_attribution_dimension_table(rows: list[dict[str, Any]]) -> list[str]:
+    out = [
+        "| Job Type | Pipeline / Capability | Recent Jobs | Worked | Full | Partial | Failed | Fresh Id | Resolved | Hardware-less | Stale | Ambiguous | Unresolved |",
+        "|---|---|---:|---|---|---|---|---|---|---|---|---|---|",
+    ]
+    for row in rows:
+        def fmt_pair(count_key: str, pct_key: str) -> str:
+            pct = row.get(pct_key)
+            pct_text = f"{pct:.2f}%" if pct is not None else "n/a"
+            return f"{row[count_key]} ({pct_text})"
+
+        out.append(
+            f"| `{row['job_type']}` | `{row['dimension']}` | {row['recent_jobs']} | "
+            f"{fmt_pair('worked', 'worked_pct')} | "
+            f"{fmt_pair('full', 'full_pct')} | "
+            f"{fmt_pair('partial', 'partial_pct')} | "
+            f"{fmt_pair('failed', 'failed_pct')} | "
+            f"{fmt_pair('identity', 'identity_pct')} | "
+            f"{fmt_pair('resolved', 'resolved_pct')} | "
+            f"{fmt_pair('hardware_less', 'hardware_less_pct')} | "
+            f"{fmt_pair('stale', 'stale_pct')} | "
+            f"{fmt_pair('ambiguous', 'ambiguous_pct')} | "
+            f"{fmt_pair('unresolved', 'unresolved_pct')} |"
         )
     return out
 
@@ -835,6 +1170,7 @@ def build_sla_cohort_markdown(rows: list[dict[str, Any]]) -> list[str]:
 def build_markdown_report(
     transport: dict[str, Any],
     attribution_summary: dict[str, Any],
+    job_attribution_summary: dict[str, Any],
     runtime: dict[str, Any],
     api_probes: list[dict[str, Any]],
     sla_cohort_examples: list[dict[str, Any]],
@@ -852,12 +1188,57 @@ def build_markdown_report(
         )
     ]
     selected_session = attribution_summary.get("selected_sessions", {})
+    job_by_type = job_attribution_summary.get("by_type", {})
     startup_rows = [
         (bucket, count, percent(count, bucket_total) or 0.0)
         for bucket, count in sorted(
             attribution_summary["startup_outcomes"].items(), key=lambda item: item[1], reverse=True
         )
     ]
+    live_video_probe_rows = [
+        row
+        for row in api_probes
+        if any(
+            token in row.get("name", "")
+            for token in (
+                "/v1/dashboard/kpi",
+                "/v1/dashboard/orchestrators",
+                "/v1/net/orchestrators",
+                "/v1/sla/compliance",
+                "/v1/network/demand",
+                "/v1/gpu/network-demand",
+                "/v1/gpu/metrics",
+            )
+        )
+    ]
+    request_response_probe_rows = [
+        row
+        for row in api_probes
+        if any(
+            token in row.get("name", "")
+            for token in (
+                "/v1/ai-batch/jobs",
+                "/v1/byoc/jobs",
+                "/v1/jobs/demand",
+                "/v1/jobs/sla",
+            )
+        )
+    ]
+    shared_probe_rows = [
+        row
+        for row in api_probes
+        if row not in live_video_probe_rows and row not in request_response_probe_rows
+    ]
+    live_video_probe_table = (
+        build_api_probe_table(live_video_probe_rows)
+        if live_video_probe_rows
+        else ["No live-video API probes captured."]
+    )
+    request_response_probe_table = (
+        build_api_probe_table(request_response_probe_rows)
+        if request_response_probe_rows
+        else ["No request/response API probes captured."]
+    )
 
     lines = [
         f"# {measured['lag_sample_end_utc'][:10]} Job Baseline",
@@ -872,15 +1253,18 @@ def build_markdown_report(
         "",
         "## Scope",
         "",
-        "This baseline captures the transport plane and the recent session plane separately.",
+        "This baseline separates live-video attribution from request/response job attribution.",
         (
             f"- Transport throughput reflects the current local processing rate for `{transport['network_events']['table']}`."
             if transport.get("available", True)
             else "- Transport throughput was not measured because Kafka UI topic metadata was unavailable or did not match the active ClickHouse source."
         ),
-        f"- Recent attribution uses `canonical_session_current` over the last `{fmt_window(attribution_summary['recent_window_minutes'])}` across all orgs.",
+        f"- Live-video attribution uses `canonical_session_current` over the last `{fmt_window(attribution_summary['recent_window_minutes'])}` across all orgs.",
+        f"- Request/response attribution uses `canonical_ai_batch_jobs` and `canonical_byoc_jobs` over the last `{fmt_window(job_attribution_summary['recent_window_minutes'])}` across all orgs.",
         "",
         "## Baseline",
+        "",
+        "## Live-Video",
         "",
         "### 1. `network_events` throughput",
         "",
@@ -919,7 +1303,7 @@ def build_markdown_report(
                 f"- Local consume rate: `{streaming['consumed_delta']:,} / {transport['window_seconds']}s = {streaming['consumed_rate_per_sec']:.2f} msg/s`",
                 f"- Lag at sample end: `{streaming['lag_total_t1']:,}`",
                 "",
-                "### 3. Attribution rate by semantic bucket",
+                "### 3. Live-video attribution rate by semantic bucket",
                 "",
             ]
         )
@@ -928,7 +1312,7 @@ def build_markdown_report(
             [
                 f"- Transport measurement unavailable: `{transport.get('unavailable_reason')}`",
                 "",
-                "### 2. Attribution rate by semantic bucket",
+                "### 2. Live-video attribution rate by semantic bucket",
                 "",
             ]
         )
@@ -943,11 +1327,21 @@ def build_markdown_report(
             "",
             "### 3. Attribution by org and subtype",
             "",
-            "Primary metric: selected sessions with `attribution_status in ('resolved', 'hardware_less')`.",
-            "That shows orchestrator identity and pipeline/model canonicalization worked, even when hardware metadata is missing.",
+            "The report now separates attribution into outcome slices before showing raw subtypes:",
+            "- `Worked` = `resolved + hardware_less + stale`",
+            "- `Full` = `resolved`",
+            "- `Partial` = `hardware_less + stale`",
+            "- `Failed` = `ambiguous + unresolved`",
+            "",
+            "`hardware_less` and `stale` still indicate successful attribution, but only as partial success.",
+            "`resolved` is the only fully fresh attribution class.",
             "",
             f"- Selected sessions overall: `{selected_session.get('total', 0)}`",
-            f"- Orchestrator identity on selected sessions: `{selected_session.get('orchestrator_identity', 0)} / {selected_session.get('total', 0)} = {(selected_session.get('orchestrator_identity_pct') or 0.0):.2f}%`",
+            f"- Worked attribution: `{selected_session.get('worked', 0)} / {selected_session.get('total', 0)} = {(selected_session.get('worked_pct') or 0.0):.2f}%`",
+            f"- Full attribution: `{selected_session.get('full', 0)} / {selected_session.get('total', 0)} = {(selected_session.get('full_pct') or 0.0):.2f}%`",
+            f"- Partial attribution: `{selected_session.get('partial', 0)} / {selected_session.get('total', 0)} = {(selected_session.get('partial_pct') or 0.0):.2f}%`",
+            f"- Failed attribution: `{selected_session.get('failed', 0)} / {selected_session.get('total', 0)} = {(selected_session.get('failed_pct') or 0.0):.2f}%`",
+            f"- Fresh identity on selected sessions: `{selected_session.get('orchestrator_identity', 0)} / {selected_session.get('total', 0)} = {(selected_session.get('orchestrator_identity_pct') or 0.0):.2f}%`",
             f"- Resolved on selected sessions: `{selected_session.get('resolved', 0)} / {selected_session.get('total', 0)} = {(selected_session.get('resolved_pct') or 0.0):.2f}%`",
             f"- Hardware-less on selected sessions: `{selected_session.get('hardware_less', 0)} / {selected_session.get('total', 0)} = {(selected_session.get('hardware_less_pct') or 0.0):.2f}%`",
             f"- Stale on selected sessions: `{selected_session.get('stale', 0)} / {selected_session.get('total', 0)} = {(selected_session.get('stale_pct') or 0.0):.2f}%`",
@@ -955,26 +1349,91 @@ def build_markdown_report(
             f"- Unresolved on selected sessions: `{selected_session.get('unresolved', 0)} / {selected_session.get('total', 0)} = {(selected_session.get('unresolved_pct') or 0.0):.2f}%`",
             "",
             *build_attribution_org_table(attribution_summary.get("per_org", [])),
+            "",
+            "### 4. Live-video API latency probes",
+            "",
+            *live_video_probe_table,
+            "",
+            "### 5. Sample live-video SLA cohort examples",
+            "",
+            "Representative low / medium / high rows for the largest recent live-video SLA cohorts.",
+            "",
+            *build_sla_cohort_markdown(sla_cohort_examples),
+            "",
+            "## Request/Response",
+            "",
+            "### 6. Request/response job attribution",
+            "",
+            f"Recent AI-batch/BYOC jobs in the last `{fmt_window(job_attribution_summary['recent_window_minutes'])}`: `{job_attribution_summary['recent_jobs']}`",
+        ]
+    )
+    for job_type in ("ai-batch", "byoc"):
+        row = job_by_type.get(job_type)
+        if not row:
+            continue
+        lines.extend(
+            [
+                "",
+                f"`{job_type}`:",
+                f"- Jobs: `{row['recent_jobs']}`",
+                f"- Worked attribution: `{row['worked']} / {row['recent_jobs']} = {(row.get('worked_pct') or 0.0):.2f}%`",
+                f"- Full attribution: `{row['full']} / {row['recent_jobs']} = {(row.get('full_pct') or 0.0):.2f}%`",
+                f"- Partial attribution: `{row['partial']} / {row['recent_jobs']} = {(row.get('partial_pct') or 0.0):.2f}%`",
+                f"- Failed attribution: `{row['failed']} / {row['recent_jobs']} = {(row.get('failed_pct') or 0.0):.2f}%`",
+                f"- Fresh identity on jobs: `{row['identity']} / {row['recent_jobs']} = {(row.get('identity_pct') or 0.0):.2f}%`",
+                f"- Resolved: `{row['resolved']} / {row['recent_jobs']} = {(row.get('resolved_pct') or 0.0):.2f}%`",
+                f"- Hardware-less: `{row['hardware_less']} / {row['recent_jobs']} = {(row.get('hardware_less_pct') or 0.0):.2f}%`",
+                f"- Stale: `{row['stale']} / {row['recent_jobs']} = {(row.get('stale_pct') or 0.0):.2f}%`",
+                f"- Ambiguous: `{row['ambiguous']} / {row['recent_jobs']} = {(row.get('ambiguous_pct') or 0.0):.2f}%`",
+                f"- Unresolved: `{row['unresolved']} / {row['recent_jobs']} = {(row.get('unresolved_pct') or 0.0):.2f}%`",
+            ]
+        )
+    if job_attribution_summary.get("per_org"):
+        lines.extend(
+            [
+                "",
+                "Top orgs by recent request/response jobs:",
+                "",
+                *build_job_attribution_org_table(job_attribution_summary["per_org"]),
+            ]
+        )
+    if job_attribution_summary.get("top_dimensions"):
+        lines.extend(
+            [
+                "",
+                "Top pipelines / capabilities by recent request/response jobs:",
+                "",
+                *build_job_attribution_dimension_table(job_attribution_summary["top_dimensions"]),
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            "### 7. Request/response API latency probes",
+            "",
+            *request_response_probe_table,
         ]
     )
     status_recent = attribution_summary["status_recent"]
     lines.extend(
         [
             "",
-            "### 4. Other key metrics",
+            "## Cross-Cutting Health",
             "",
-            "Startup outcomes for recent sessions:",
+            "### 8. Shared operational metrics",
+            "",
+            "Live-video startup outcomes for recent sessions:",
             "",
             *markdown_rate_table(startup_rows),
             "",
-            "Operational health:",
+            "Live-video operational health:",
             "",
             f"- Sessions with `selection_outcome = no_orch`: `{attribution_summary['selection_outcomes'].get('no_orch', 0)} / {recent_count} = {(percent(attribution_summary['selection_outcomes'].get('no_orch', 0), recent_count) or 0.0):.2f}%`",
             f"- Swapped sessions: `{attribution_summary['swapped_sessions']} / {recent_count} = {(percent(attribution_summary['swapped_sessions'], recent_count) or 0.0):.2f}%`",
             f"- Average health signal coverage ratio: `{attribution_summary['avg_health_signal_coverage_ratio']}`",
             f"- Average status samples per session with status evidence: `{attribution_summary['avg_status_samples_per_session']}`",
             "",
-            f"Recent status quality, last `{status_recent.get('window_minutes')}`m:",
+            f"Recent live-video status quality, last `{status_recent.get('window_minutes')}`m:",
             "",
             f"- Status samples: `{status_recent.get('samples')}`",
             f"- Sessions represented: `{status_recent.get('sessions')}`",
@@ -999,18 +1458,17 @@ def build_markdown_report(
             f"- `warehouse`: last observed run `{runtime['warehouse_last_run']}`",
             f"- ClickHouse Kafka metrics: `KafkaBackgroundReads={runtime['kafka_background_reads']}`, `KafkaConsumersInUse={runtime['kafka_consumers_in_use']}`",
             f"- `system.kafka_consumers` exceptions: `{runtime['kafka_consumer_exceptions_observed']}`",
-            "",
-            "### 5. API latency probes",
-            "",
-            *build_api_probe_table(api_probes),
-            "",
-            "### 6. Sample SLA cohort examples",
-            "",
-            "Representative low / medium / high rows for the largest recent SLA cohorts.",
-            "",
-            *build_sla_cohort_markdown(sla_cohort_examples),
         ]
     )
+    if shared_probe_rows:
+        lines.extend(
+            [
+                "",
+                "Shared API probes:",
+                "",
+                *build_api_probe_table(shared_probe_rows),
+            ]
+        )
     return "\n".join(lines) + "\n"
 
 
@@ -1062,6 +1520,9 @@ def main() -> None:
     attribution_summary = fetch_recent_attribution_summary(
         ch, args.session_window_minutes, args.status_window_minutes
     )
+    job_attribution_summary = fetch_recent_job_attribution_summary(
+        ch, args.session_window_minutes
+    )
 
     stats = docker_stats(args.docker_compose_cmd)
     metrics = clickhouse_metrics(ch)
@@ -1074,6 +1535,10 @@ def main() -> None:
         ("GET /v1/network/demand?limit=10", "/v1/network/demand?limit=10", "default"),
         ("GET /v1/gpu/network-demand?limit=10", "/v1/gpu/network-demand?limit=10", "default"),
         ("GET /v1/gpu/metrics?limit=10", "/v1/gpu/metrics?limit=10", "default"),
+        ("GET /v1/ai-batch/jobs?limit=10", "/v1/ai-batch/jobs?limit=10", "default"),
+        ("GET /v1/byoc/jobs?limit=10", "/v1/byoc/jobs?limit=10", "default"),
+        ("GET /v1/jobs/demand?limit=10", "/v1/jobs/demand?limit=10", "default"),
+        ("GET /v1/jobs/sla?limit=10", "/v1/jobs/sla?limit=10", "default"),
     ]
     api_probes: list[dict[str, Any]] = []
     for name, path, window in api_probe_specs:
@@ -1168,18 +1633,25 @@ def main() -> None:
                 and transport["network_events"]["lag_delta"] < 0
                 else "transport throughput was unavailable or network_events was not reducing lag during the measurement window"
             ),
-            f"recent attribution was measured from canonical_session_current across all orgs in the last {fmt_window(args.session_window_minutes)}",
+            f"recent live-video attribution was measured from canonical_session_current across all orgs in the last {fmt_window(args.session_window_minutes)}",
+            f"recent request/response attribution was measured from canonical_ai_batch_jobs and canonical_byoc_jobs across all orgs in the last {fmt_window(args.session_window_minutes)}",
         ],
         "network_events": transport["network_events"],
         "streaming_events": transport["streaming_events"],
         f"recent_attribution_{fmt_window(args.session_window_minutes)}": attribution_summary,
+        f"recent_job_attribution_{fmt_window(args.session_window_minutes)}": job_attribution_summary,
         f"status_{args.status_window_minutes}m": attribution_summary.get("status_recent", {}),
         "api_probes": api_probes,
         "sla_cohort_examples": sla_cohort_examples,
         "local_runtime": runtime,
     }
     md_payload = build_markdown_report(
-        transport, attribution_summary, runtime, api_probes, sla_cohort_examples
+        transport,
+        attribution_summary,
+        job_attribution_summary,
+        runtime,
+        api_probes,
+        sla_cohort_examples,
     )
 
     json_path.write_text(json_dumps(json_payload) + "\n")

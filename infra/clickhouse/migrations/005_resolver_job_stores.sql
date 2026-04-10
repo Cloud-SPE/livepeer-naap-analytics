@@ -2,6 +2,8 @@
 --
 -- These tables are the single source of truth for attributed job records.
 -- The Go resolver writes to them; dbt models read from them as thin views.
+-- Canonical read layers must collapse them deterministically to one latest row
+-- per logical job key before any downstream rollup reads them.
 --
 -- Both tables use ReplacingMergeTree(materialized_at) so that a later resolver
 -- run for the same job key (re-attribution after new capability data arrives)

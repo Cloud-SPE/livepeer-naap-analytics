@@ -425,7 +425,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "sql",
-          "rawSql": "SELECT toFloat64(avg(avg_duration_ms)) FROM naap.api_unified_demand WHERE $__timeFilter(window_start) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))",
+          "rawSql": "SELECT toFloat64(sum(avg_duration_ms * job_count)) / nullIf(toFloat64(sum(job_count)), 0) FROM naap.api_unified_demand WHERE $__timeFilter(window_start) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))",
           "refId": "A"
         }
       ]
@@ -581,7 +581,7 @@
           "editorType": "sql",
           "format": 2,
           "queryType": "sql",
-          "rawSql": "SELECT pipeline_id, job_type, sum(job_count) AS total_jobs, toFloat64(sum(success_count)) / nullIf(toFloat64(sum(job_count)), 0) AS success_rate, avg(avg_duration_ms) AS avg_duration_ms FROM naap.api_unified_demand WHERE $__timeFilter(window_start) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) AND pipeline_id != '' GROUP BY pipeline_id, job_type ORDER BY total_jobs DESC LIMIT 20",
+          "rawSql": "SELECT pipeline_id, job_type, sum(job_count) AS total_jobs, toFloat64(sum(success_count)) / nullIf(toFloat64(sum(job_count)), 0) AS success_rate, round(toFloat64(sum(avg_duration_ms * job_count)) / nullIf(toFloat64(sum(job_count)), 0), 1) AS avg_duration_ms FROM naap.api_unified_demand WHERE $__timeFilter(window_start) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) AND pipeline_id != '' GROUP BY pipeline_id, job_type ORDER BY total_jobs DESC LIMIT 20",
           "refId": "A"
         }
       ]
@@ -679,7 +679,179 @@
           "editorType": "sql",
           "format": 2,
           "queryType": "sql",
-          "rawSql": "SELECT orchestrator_address, pipeline_id, job_type, sum(job_count) AS total_jobs, sum(success_count) AS success_jobs, round(toFloat64(sum(success_count)) / nullIf(toFloat64(sum(job_count)), 0) * 100, 1) AS success_pct, round(avg(avg_duration_ms), 1) AS avg_duration_ms FROM naap.api_unified_sla WHERE $__timeFilter(window_start) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) AND orchestrator_address != '' GROUP BY orchestrator_address, pipeline_id, job_type ORDER BY total_jobs DESC LIMIT 50",
+          "rawSql": "SELECT orchestrator_uri, pipeline_id, job_type, sum(job_count) AS total_jobs, sum(success_count) AS success_jobs, round(toFloat64(sum(success_count)) / nullIf(toFloat64(sum(job_count)), 0) * 100, 1) AS success_pct, round(toFloat64(sum(avg_duration_ms * job_count)) / nullIf(toFloat64(sum(job_count)), 0), 1) AS avg_duration_ms FROM naap.api_unified_sla WHERE $__timeFilter(window_start) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) AND orchestrator_uri != '' GROUP BY orchestrator_uri, pipeline_id, job_type ORDER BY total_jobs DESC LIMIT 50",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "id": 505,
+      "title": "Integrity & Coverage",
+      "type": "row",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 67
+      }
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "id": 506,
+      "type": "stat",
+      "title": "AI Batch Duplicate Rows",
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 0,
+        "y": 68
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "percentChangeColorMode": "standard"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT greatest(toInt64(count()) - toInt64(uniqExact(request_id)), 0) FROM naap.canonical_ai_batch_jobs WHERE $__timeFilter(completed_at) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "id": 507,
+      "type": "stat",
+      "title": "BYOC Duplicate Rows",
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 8,
+        "y": 68
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "percentChangeColorMode": "standard"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT greatest(toInt64(count()) - toInt64(uniqExact(request_id)), 0) FROM naap.canonical_byoc_jobs WHERE $__timeFilter(completed_at) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "id": 508,
+      "type": "table",
+      "title": "Canonical Coverage vs Source",
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 16,
+        "y": 68
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": []
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 2,
+          "queryType": "sql",
+          "rawSql": "WITH source_counts AS (\n  SELECT 'ai-batch' AS job_type, count() AS source_jobs\n  FROM naap.normalized_ai_batch_job FINAL\n  WHERE subtype = 'ai_batch_request_completed'\n    AND request_id != ''\n    AND $__timeFilter(event_ts)\n    AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n  UNION ALL\n  SELECT 'byoc' AS job_type, count() AS source_jobs\n  FROM naap.normalized_byoc_job FINAL\n  WHERE subtype = 'job_gateway_completed'\n    AND $__timeFilter(event_ts)\n    AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n), canonical_counts AS (\n  SELECT 'ai-batch' AS job_type, count() AS canonical_jobs\n  FROM naap.canonical_ai_batch_jobs\n  WHERE $__timeFilter(completed_at)\n    AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n  UNION ALL\n  SELECT 'byoc' AS job_type, count() AS canonical_jobs\n  FROM naap.canonical_byoc_jobs\n  WHERE $__timeFilter(completed_at)\n    AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n)\nSELECT s.job_type, s.source_jobs, c.canonical_jobs,\n  round(toFloat64(c.canonical_jobs) * 100.0 / nullIf(toFloat64(s.source_jobs), 0), 1) AS coverage_pct\nFROM source_counts s\nLEFT JOIN canonical_counts c ON s.job_type = c.job_type",
           "refId": "A"
         }
       ]
@@ -813,7 +985,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 67
+        "y": 72
       }
     },
     {
@@ -828,7 +1000,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 68
+        "y": 73
       },
       "options": {
         "showHeader": true,
@@ -861,7 +1033,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 76
+        "y": 81
       }
     },
     {
@@ -876,7 +1048,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 77
+        "y": 82
       },
       "options": {
         "showHeader": true,
@@ -909,7 +1081,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 85
+        "y": 90
       }
     },
     {
@@ -924,7 +1096,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 86
+        "y": 91
       },
       "options": {
         "showHeader": true,

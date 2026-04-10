@@ -18,40 +18,42 @@
 --   ambiguous      — multiple incompatible candidates
 --   unresolved     — no matching candidate found
 
-with {{ latest_value_cte('latest', 'naap.canonical_byoc_job_store', ['org', 'event_id'], 'materialized_at', 'materialized_at') }}
+with {{ latest_rows_cte(
+    'latest',
+    'naap.canonical_byoc_job_store',
+    ['org', 'event_id'],
+    [
+        'materialized_at desc',
+        'completed_at desc',
+        'resolver_run_id desc',
+        "ifNull(capability_version_id, '') desc",
+        "ifNull(attributed_orch_uri, '') desc"
+    ]
+) }}
 
 select
-    -- Explicit aliases required: ClickHouse qualifies ambiguous column names with
-    -- the table alias (e.g. s.org) when the same column exists in multiple joined
-    -- tables (here: canonical_byoc_job_store and the latest CTE which also has
-    -- org and event_id). Without aliases the view schema exposes "s.org" instead
-    -- of "org", which breaks any downstream view referencing these columns by plain name.
-    s.event_id              as request_id,
-    s.org                   as org,
-    s.gateway               as gateway,
-    s.capability            as capability,
+    latest.event_id              as request_id,
+    latest.org                   as org,
+    latest.gateway               as gateway,
+    latest.capability            as capability,
     cast(null as Nullable(DateTime64(3, 'UTC'))) as submitted_at,
-    s.completed_at          as completed_at,
-    s.success               as success,
-    s.duration_ms           as duration_ms,
-    s.http_status           as http_status,
-    s.orch_address          as orch_address,
-    s.orch_url              as orch_url,
-    s.orch_url_norm         as orch_url_norm,
-    s.worker_url            as worker_url,
-    s.charged_compute       as charged_compute,
-    s.error                 as error,
-    s.model                 as model,
-    s.price_per_unit        as price_per_unit,
-    s.gpu_id                as gpu_id,
-    s.gpu_model_name        as gpu_model_name,
-    s.gpu_memory_bytes_total as gpu_memory_bytes_total,
-    s.attribution_status    as attribution_status,
-    s.attribution_reason    as attribution_reason,
-    s.attribution_method    as attribution_method,
-    s.attribution_confidence as attribution_confidence
-from naap.canonical_byoc_job_store s
-inner join latest
-    on latest.org = s.org
-   and latest.event_id = s.event_id
-   and latest.materialized_at = s.materialized_at
+    latest.completed_at          as completed_at,
+    latest.success               as success,
+    latest.duration_ms           as duration_ms,
+    latest.http_status           as http_status,
+    latest.orch_address          as orch_address,
+    latest.orch_url              as orch_url,
+    latest.orch_url_norm         as orch_url_norm,
+    latest.worker_url            as worker_url,
+    latest.charged_compute       as charged_compute,
+    latest.error                 as error,
+    latest.model                 as model,
+    latest.price_per_unit        as price_per_unit,
+    latest.gpu_id                as gpu_id,
+    latest.gpu_model_name        as gpu_model_name,
+    latest.gpu_memory_bytes_total as gpu_memory_bytes_total,
+    latest.attribution_status    as attribution_status,
+    latest.attribution_reason    as attribution_reason,
+    latest.attribution_method    as attribution_method,
+    latest.attribution_confidence as attribution_confidence
+from latest

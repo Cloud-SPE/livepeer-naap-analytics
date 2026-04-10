@@ -107,8 +107,28 @@ func TestJobsSLA_InvalidCursor(t *testing.T) {
 	assertProblemDetail(t, rr, types.ErrInvalidCursor.Error())
 }
 
+func TestJobsSLA_UsesOrchestratorURIQueryParam(t *testing.T) {
+	repoSpy := &jobParamCaptureRepo{}
+	srv := newTestServerWithRepo(t, repoSpy)
+	req := httptest.NewRequest(http.MethodGet, "/v1/jobs/sla?orchestrator_uri=HTTPS://ORCH.EXAMPLE.COM:8935", nil)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	if repoSpy.jobsSLAParams.OrchestratorURI != "https://orch.example.com:8935" {
+		t.Fatalf("orchestrator_uri = %q", repoSpy.jobsSLAParams.OrchestratorURI)
+	}
+}
+
 type invalidCursorJobRepo struct {
 	repo.NoopAnalyticsRepo
+}
+
+type jobParamCaptureRepo struct {
+	repo.NoopAnalyticsRepo
+	jobsSLAParams types.JobsParams
 }
 
 func (invalidCursorJobRepo) ListAIBatchJobs(_ context.Context, p types.QueryParams) ([]types.AIBatchJobRecord, types.CursorPageInfo, error) {
@@ -136,5 +156,10 @@ func (invalidCursorJobRepo) ListJobsSLA(_ context.Context, p types.JobsParams) (
 	if p.Cursor != "" {
 		return nil, types.CursorPageInfo{}, types.ErrInvalidCursor
 	}
+	return []types.JobsSLARow{}, types.CursorPageInfo{}, nil
+}
+
+func (r *jobParamCaptureRepo) ListJobsSLA(_ context.Context, p types.JobsParams) ([]types.JobsSLARow, types.CursorPageInfo, error) {
+	r.jobsSLAParams = p
 	return []types.JobsSLARow{}, types.CursorPageInfo{}, nil
 }

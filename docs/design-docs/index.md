@@ -4,6 +4,7 @@
 |----------|--------|--------------|-------------|
 | [`core-beliefs.md`](core-beliefs.md) | ✅ current | 2026-03-24 | Project tenants and agent-first principles |
 | [`architecture.md`](architecture.md) | ✅ current | 2026-04-09 | Current Go layer rules, warehouse tier contract, and rollup-safety rules |
+| [`attribution-rollup-coding-rules.md`](attribution-rollup-coding-rules.md) | ✅ current | 2026-04-10 | Merge-blocking rules for attribution authority, one-row-per-job facts, inflation safety, and dashboard math |
 | [`system-visuals.md`](system-visuals.md) | ✅ current | 2026-03-30 | Mermaid diagrams for ingest, resolver publication, and deployment topology |
 | [`adr-001-storage-architecture.md`](adr-001-storage-architecture.md) | ✅ current | 2026-03-24 | ClickHouse + Kafka engine decision, compression, retention |
 | [`adr-002-api-design.md`](adr-002-api-design.md) | ✅ current | 2026-03-24 | REST/JSON, auth model, org model, rate limiting |

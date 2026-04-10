@@ -48,6 +48,7 @@ current layer rules and enforcement model.
 | [`docs/backlog.md`](docs/backlog.md) | Current engineering backlog |
 | [`docs/repository-guide.md`](docs/repository-guide.md) | Detailed repo map, common tasks, and deeper setup guidance |
 | [`docs/design-docs/index.md`](docs/design-docs/index.md) | Design document index |
+| [`docs/design-docs/attribution-rollup-coding-rules.md`](docs/design-docs/attribution-rollup-coding-rules.md) | Merge-blocking rules for attribution, inflation safety, and dashboard math |
 | [`docs/operations/run-modes-and-recovery.md`](docs/operations/run-modes-and-recovery.md) | Resolver modes, rebuilds, and recovery |
 | [`docs/operations/compose-services.md`](docs/operations/compose-services.md) | Local Compose runtime responsibilities |
 | [`docs/operations/runtime-validation-and-performance.md`](docs/operations/runtime-validation-and-performance.md) | Runtime validation checklist |

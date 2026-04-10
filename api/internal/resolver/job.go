@@ -98,10 +98,19 @@ func (j AIBatchJobRecord) toSelectionEvent() SelectionEvent {
 // "openai-chat-completions") bypass the canonical pipeline allow-list and are
 // matched verbatim against the capability interval's Pipeline field.
 //
-// ObservedPipeline carries the raw capability string from the job. Model hint
-// is empty here — it is resolved separately via worker_lifecycle snapshots and
-// written onto BYOCJobRow.Model after attribution.
+// ObservedPipeline carries the raw capability string from the job. BYOC model
+// evidence comes from worker_lifecycle snapshots and is injected through
+// toSelectionEventWithModelHint so compatibility selection can disambiguate
+// same-capability candidates before the final BYOC row is materialized.
 func (j BYOCJobRecord) toSelectionEvent() SelectionEvent {
+	return j.toSelectionEventWithModelHint("")
+}
+
+// toSelectionEventWithModelHint converts a BYOC job into a SelectionEvent and
+// optionally carries a worker-lifecycle model hint into compatibility
+// selection. When modelHint is empty, BYOC matching falls back to capability +
+// identity only.
+func (j BYOCJobRecord) toSelectionEventWithModelHint(modelHint string) SelectionEvent {
 	se := SelectionEvent{
 		ID:                   stableHash(j.Org, j.EventID, "byoc"),
 		Org:                  j.Org,
@@ -112,11 +121,19 @@ func (j BYOCJobRecord) toSelectionEvent() SelectionEvent {
 		ObservedURL:          strings.TrimSpace(j.OrchURL),
 		ObservedAddress:      j.OrchAddress,
 		ObservedPipeline:     j.Capability,
-		ObservedModelHint:    "",
+		ObservedModelHint:    strings.TrimSpace(modelHint),
 		PipelineHintVerbatim: true,
 		AnchorEventTS:        j.CompletedAt.UTC(),
 	}
-	se.InputHash = stableHash(se.Org, se.SessionKey, se.ObservedURL, se.ObservedAddress, se.ObservedPipeline, j.CompletedAt.UTC().Format(time.RFC3339Nano))
+	se.InputHash = stableHash(
+		se.Org,
+		se.SessionKey,
+		se.ObservedURL,
+		se.ObservedAddress,
+		se.ObservedPipeline,
+		se.ObservedModelHint,
+		j.CompletedAt.UTC().Format(time.RFC3339Nano),
+	)
 	return se
 }
 
@@ -128,43 +145,64 @@ type workerModel struct {
 }
 
 // resolveWorkerModels returns a map of BYOC event_id to the resolved
-// workerModel for that job. For each job, it finds the most recent
-// worker_lifecycle snapshot where:
-//   - snapshot.Org == job.Org
-//   - snapshot.Capability == job.Capability
-//   - snapshot.OrchAddress == job.OrchAddress
-//   - snapshot.EventTS <= job.CompletedAt
-//
-// Jobs with no matching snapshot get a zero-value workerModel (empty model,
-// zero price).
+// workerModel for that job. Matching prefers the exact worker identity
+// `(org, capability, orch_address, worker_url)` and falls back to
+// `(org, capability, orch_address)` only when the job or snapshot lacks a
+// worker URL. The most recent snapshot where EventTS <= job.CompletedAt wins.
 func resolveWorkerModels(jobs []BYOCJobRecord, snapshots []workerLifecycleSnapshot) map[string]workerModel {
-	// Index snapshots by (org, capability, orch_address), sorted by EventTS desc
-	// so the first match is always the most recent valid one.
-	type key struct{ org, capability, orchAddress string }
-	index := make(map[key][]workerLifecycleSnapshot, len(snapshots))
-	for _, s := range snapshots {
-		k := key{s.Org, s.Capability, s.OrchAddress}
-		index[k] = append(index[k], s)
+	type workerKey struct {
+		org, capability, orchAddress, workerURL string
 	}
-	for k := range index {
-		list := index[k]
+	type fallbackKey struct{ org, capability, orchAddress string }
+
+	// Index snapshots by exact worker identity and by address-only fallback, both
+	// sorted newest-first so the first non-future row is the winner.
+	exactIndex := make(map[workerKey][]workerLifecycleSnapshot, len(snapshots))
+	fallbackIndex := make(map[fallbackKey][]workerLifecycleSnapshot, len(snapshots))
+	for _, s := range snapshots {
+		exactIndex[workerKey{s.Org, s.Capability, s.OrchAddress, normalizeURL(s.WorkerURL)}] = append(
+			exactIndex[workerKey{s.Org, s.Capability, s.OrchAddress, normalizeURL(s.WorkerURL)}],
+			s,
+		)
+		fallbackIndex[fallbackKey{s.Org, s.Capability, s.OrchAddress}] = append(
+			fallbackIndex[fallbackKey{s.Org, s.Capability, s.OrchAddress}],
+			s,
+		)
+	}
+	sortSnapshots := func(list []workerLifecycleSnapshot) []workerLifecycleSnapshot {
 		sort.Slice(list, func(i, j int) bool {
 			return list[i].EventTS.After(list[j].EventTS)
 		})
-		index[k] = list
+		return list
+	}
+	for k := range exactIndex {
+		exactIndex[k] = sortSnapshots(exactIndex[k])
+	}
+	for k := range fallbackIndex {
+		fallbackIndex[k] = sortSnapshots(fallbackIndex[k])
 	}
 
 	out := make(map[string]workerModel, len(jobs))
 	for _, j := range jobs {
-		k := key{j.Org, j.Capability, j.OrchAddress}
-		for _, s := range index[k] {
-			if !s.EventTS.After(j.CompletedAt) {
-				out[j.EventID] = workerModel{
-					Model:        s.Model,
-					PricePerUnit: s.PricePerUnit,
-				}
-				break
+		candidates := []workerLifecycleSnapshot(nil)
+		if workerURL := normalizeURL(j.WorkerURL); workerURL != "" {
+			candidates = exactIndex[workerKey{j.Org, j.Capability, j.OrchAddress, workerURL}]
+		}
+		if len(candidates) == 0 {
+			candidates = fallbackIndex[fallbackKey{j.Org, j.Capability, j.OrchAddress}]
+		}
+		for _, s := range candidates {
+			if s.WorkerURL != "" && j.WorkerURL != "" && !strings.EqualFold(normalizeURL(s.WorkerURL), normalizeURL(j.WorkerURL)) {
+				continue
 			}
+			if s.EventTS.After(j.CompletedAt) {
+				continue
+			}
+			out[j.EventID] = workerModel{
+				Model:        s.Model,
+				PricePerUnit: s.PricePerUnit,
+			}
+			break
 		}
 	}
 	return out

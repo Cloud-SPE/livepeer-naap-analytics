@@ -58,7 +58,7 @@ models:
           - not_null
           - accepted_values:
               arguments:
-                values: ['resolved', 'unresolved']
+                values: ['resolved', 'hardware_less', 'stale', 'ambiguous', 'unresolved']
   - name: canonical_byoc_jobs
     columns:
       - name: request_id
@@ -75,7 +75,7 @@ models:
           - not_null
           - accepted_values:
               arguments:
-                values: ['resolved', 'inferred', 'unresolved']
+                values: ['resolved', 'hardware_less', 'stale', 'ambiguous', 'unresolved']
   - name: canonical_byoc_payments
     columns:
       - name: event_id
@@ -107,6 +107,9 @@ models:
   - name: canonical_ai_llm_requests
     columns:
       - name: request_id
+        tests:
+          - not_null
+      - name: org
         tests:
           - not_null
       - name: model

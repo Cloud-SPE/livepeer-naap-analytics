@@ -31,6 +31,7 @@ Grafana runs on port 3000 (local) or via Traefik HTTPS (production). Dashboards 
 | `naap-economics` | Payments and revenue metrics by org | Billing queries, economics anomalies |
 | `naap-performance-drilldown` | FPS, latency, WebRTC metrics per orch | Quality degradation investigations |
 | `naap-supply-inventory` | GPU supply and capacity by org | Capacity planning, supply gaps |
+| `naap-jobs` | AI-batch / BYOC job volume, SLA, attribution, and integrity | Request-response job investigations, duplicate or coverage checks |
 
 **Infrastructure dashboards** — check these when investigating a system-level issue:
 
@@ -143,6 +144,7 @@ docker compose logs -f clickhouse | grep -E "bootstrap|migration|ready"
 # 6. Verify everything is healthy
 make ch-smoke          # confirms events flowing Kafka → ClickHouse
 make test-integration  # integration tests against running ClickHouse
+curl -s http://localhost:8000/v1/jobs/sla?limit=5
 ```
 
 ### Service endpoints (local)
@@ -205,7 +207,17 @@ docker compose exec clickhouse clickhouse-client \
 docker compose exec clickhouse clickhouse-client \
   --user default --password changeme \
   --query "SELECT count(), min(event_ts), max(event_ts) FROM naap.accepted_raw_events"
+
+# 5. Resolver-owned job stores populated
+docker compose exec clickhouse clickhouse-client \
+  --user default --password changeme \
+  --query "SELECT 'ai_batch', count() FROM naap.canonical_ai_batch_jobs UNION ALL SELECT 'byoc', count() FROM naap.canonical_byoc_jobs"
 ```
+
+When request/response job schemas or attribution logic change, treat the
+resolver bootstrap/backfill as part of deploy validation. `dbt` can publish the
+views immediately, but those views are not meaningful until the resolver-owned
+job stores contain rows.
 
 ---
 
@@ -415,14 +427,15 @@ make migrate-up        # apply pending migrations
 
 Migrations live in `infra/clickhouse/migrations/`. Each file is tracked by SHA-256 checksum in `naap.schema_migrations`. Do not modify already-applied migration files — add a new file instead.
 
-To regenerate the bootstrap baseline after schema changes:
+To refresh the generated schema inventory after bootstrap changes:
 
 ```bash
-docker compose --profile validation up -d validation-clickhouse
-docker compose --profile validation run --rm warehouse-validation
 make bootstrap-extract
-# Output: infra/clickhouse/bootstrap/v1.sql
 ```
+
+`make bootstrap-extract` rewrites `docs/generated/schema.md` from the
+checked-in `infra/clickhouse/bootstrap/v1.sql`. Refreshing `v1.sql` itself from
+a clean migrated ClickHouse instance remains a separate operator task.
 
 ---
 

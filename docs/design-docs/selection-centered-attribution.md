@@ -64,6 +64,13 @@ and produce the same five-class attribution status. Only the event source and
   case-insensitively and directly
 - Model: resolved from `normalized_worker_lifecycle` snapshot (most recent
   event where `event_ts <= job.completed_at`); CI `canonical_model` is fallback
+- Worker identity precedence: match `worker_lifecycle` by
+  `(org, capability, orch_address, worker_url)` first, then fall back to
+  `(org, capability, orch_address)` only when worker URLs are missing
+- Model-hint precedence: when worker lifecycle resolves a model, that model is
+  pushed into `SelectionEvent.ObservedModelHint` before compatibility
+  filtering; BYOC model evidence participates in candidate selection, not only
+  final row decoration
 - Output: `canonical_byoc_job_store`
 
 ## Capability interval building — three paths
@@ -203,9 +210,25 @@ from the job event itself. The resolver:
 2. Fetches snapshots with a 30-day lookback before the window start — BYOC
    workers may have registered well before the attribution window.
 3. For each job, picks the most recent snapshot where
-   `snapshot.event_ts <= job.completed_at` matching on
-   `(org, capability, orch_address)`.
+   `snapshot.event_ts <= job.completed_at`, preferring exact worker identity
+   matches on `(org, capability, orch_address, worker_url)` and falling back to
+   `(org, capability, orch_address)` only when worker URLs are absent.
 4. `worker_lifecycle` model takes precedence; CI `canonical_model` is fallback.
+5. When worker lifecycle resolves a model, that model becomes the BYOC
+   `ObservedModelHint` used by `isCompatible`.
+
+## One-row-per-job contract
+
+- `canonical_ai_batch_jobs` must be one row per `(org, request_id)`.
+- `canonical_byoc_jobs` must be one row per `(org, event_id)`; the view exposes
+  `event_id` as `request_id` only for downstream contract reuse.
+- `canonical_ai_llm_requests` must be one row per `(org, request_id)` before it
+  is joined into `canonical_ai_batch_jobs`.
+- Direct one-to-many enrichment joins into canonical job fact views are
+  forbidden.
+- Resolver-owned job stores may be append/update stores internally, but the
+  canonical read layer must collapse them deterministically to one latest row
+  per job key before any downstream rollup or API view reads them.
 
 ## Dirty partition tracking
 
@@ -230,6 +253,20 @@ job_gateway, job_orchestrator, worker_lifecycle
 - `tail` owns `event_ts > cutoff - lateness_window` when run directly
 - `repair-window` claims exclusive ownership for its requested window
 - `verify` never writes current-state tables
+
+`verify` and `dry-run` still execute the full compute graph, including AI-batch
+and BYOC attribution. They skip only inserts/publication.
+
+## Resolver-owned job-store rollout
+
+AI-batch and BYOC public views now read from resolver-owned attribution stores.
+That changes deploy behavior:
+
+- a schema migration alone only creates empty stores
+- `dbt` publication alone does not backfill those stores
+- fresh deploys and fresh-volume rebuilds must include a resolver bootstrap or
+  bounded backfill so historical non-streaming jobs are republished into the
+  stores before the jobs API and dashboard are considered healthy
 
 Automatic historical repair is quiet-period gated. Closed days dirtied by newly
 accepted late arrivals are repaired only after that day has gone quiet for the

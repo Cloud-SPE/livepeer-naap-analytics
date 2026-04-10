@@ -1,8 +1,8 @@
 # Generated Schema
 
-This reference is generated from the extracted bootstrap baseline in [`v1.sql`](../../infra/clickhouse/bootstrap/v1.sql).
+This reference is generated from the checked-in bootstrap baseline in [`v1.sql`](../../infra/clickhouse/bootstrap/v1.sql).
 
-Regenerate both artifacts with the ClickHouse bootstrap extraction workflow and update [`v1.sql`](../../infra/clickhouse/bootstrap/v1.sql) in the same change.
+Regenerate this inventory with `make bootstrap-extract`. If the physical bootstrap changes, update [`v1.sql`](../../infra/clickhouse/bootstrap/v1.sql) first and rerun the generator in the same change.
 
 The documented `raw_*`, `normalized_*`, `canonical_*`, `operational_*`, `api_base_*`, and `api_*` tiers are semantic/modeling guidance. This inventory is the supported physical schema, so it also includes infrastructure/runtime objects such as `accepted_raw_events`, `ignored_raw_events`, `kafka_*`, `resolver_*`, `agg_*`, metadata tables, and change/audit tables.
 
@@ -31,6 +31,8 @@ The documented `raw_*`, `normalized_*`, `canonical_*`, `operational_*`, `api_bas
 | `api_sla_compliance_by_org_store` | `MergeTree` |
 | `api_sla_compliance_store` | `MergeTree` |
 | `canonical_active_stream_state_latest_store` | `MergeTree` |
+| `canonical_ai_batch_job_store` | `ReplacingMergeTree` |
+| `canonical_byoc_job_store` | `ReplacingMergeTree` |
 | `canonical_capability_hardware_inventory` | `ReplacingMergeTree` |
 | `canonical_capability_hardware_inventory_by_snapshot` | `ReplacingMergeTree` |
 | `canonical_capability_snapshot_latest` | `AggregatingMergeTree` |
@@ -39,6 +41,7 @@ The documented `raw_*`, `normalized_*`, `canonical_*`, `operational_*`, `api_bas
 | `canonical_latest_orchestrator_pipeline_inventory_agg` | `AggregatingMergeTree` |
 | `canonical_orch_capability_intervals` | `ReplacingMergeTree` |
 | `canonical_orch_capability_versions` | `ReplacingMergeTree` |
+| `canonical_payment_links_store` | `ReplacingMergeTree` |
 | `canonical_selection_attribution_current` | `ReplacingMergeTree` |
 | `canonical_selection_attribution_decisions` | `MergeTree` |
 | `canonical_selection_events` | `ReplacingMergeTree` |

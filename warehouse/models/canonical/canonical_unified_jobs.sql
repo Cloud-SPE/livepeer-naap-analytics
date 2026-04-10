@@ -1,5 +1,7 @@
 -- Unified view of all three job types: streaming sessions, AI-batch jobs, BYOC jobs.
--- Provides a common schema for cross-type analytics endpoints.
+-- Provides a common schema for cross-type analytics endpoints. The unified
+-- non-streaming identity field is orchestrator_uri; address fields remain only
+-- where a true on-chain address exists.
 
 with stream_gateway as (
     select
@@ -18,8 +20,8 @@ streams as (
         ifNull(sg.gateway, '')                                    as gateway,
         s.canonical_pipeline                                      as pipeline,
         s.canonical_model                                         as model,
-        ifNull(s.attributed_orch_address, '')                     as orch_address,
-        ifNull(s.attributed_orch_uri, '')                         as orch_url_norm,
+        ifNull(s.attributed_orch_address, '')                     as orchestrator_address,
+        ifNull(s.attributed_orch_uri, '')                         as orchestrator_uri,
         ifNull(s.gpu_id, '')                                      as gpu_id,
         ''                                                        as gpu_model_name,
         if(s.startup_outcome = 'success', toUInt8(1), toUInt8(0)) as success,
@@ -41,8 +43,8 @@ ai_batch as (
         ifNull(gateway, '')                                       as gateway,
         pipeline                                                  as pipeline,
         model_id                                                  as model,
-        ifNull(orch_url_norm, '')                                 as orch_address,
-        ifNull(orch_url_norm, '')                                 as orch_url_norm,
+        ''                                                        as orchestrator_address,
+        ifNull(orch_url_norm, '')                                 as orchestrator_uri,
         ifNull(gpu_id, '')                                        as gpu_id,
         ifNull(gpu_model_name, '')                                as gpu_model_name,
         toUInt8(coalesce(success, 0))                             as success,
@@ -62,8 +64,8 @@ byoc as (
         ifNull(gateway, '')                                       as gateway,
         capability                                                as pipeline,
         ifNull(model, '')                                         as model,
-        ifNull(orch_address, '')                                  as orch_address,
-        ifNull(orch_url_norm, '')                                 as orch_url_norm,
+        ifNull(orch_address, '')                                  as orchestrator_address,
+        ifNull(orch_url_norm, '')                                 as orchestrator_uri,
         ifNull(gpu_id, '')                                        as gpu_id,
         ifNull(gpu_model_name, '')                                as gpu_model_name,
         toUInt8(coalesce(success, 0))                             as success,

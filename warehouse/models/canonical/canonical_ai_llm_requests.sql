@@ -1,6 +1,14 @@
 -- One row per completed LLM request within the AI batch pipeline.
--- Links to canonical_ai_batch_jobs via (org, request_id) for per-job enrichment.
--- Used independently for per-model token/TPS/TTFT aggregations.
+-- Links to canonical_ai_batch_jobs via (org, request_id) for per-job
+-- enrichment. This model must stay one-row-per-request so joins into
+-- canonical_ai_batch_jobs cannot inflate job counts.
+
+with {{ latest_rows_cte(
+    'latest',
+    ref('stg_ai_llm_requests'),
+    ['org', 'request_id'],
+    ['event_ts desc', 'event_id desc']
+) }}
 
 select
     event_id,
@@ -23,5 +31,5 @@ select
     ttft_ms,
     finish_reason,
     error
-from {{ ref('stg_ai_llm_requests') }}
+from latest
 where request_id != ''

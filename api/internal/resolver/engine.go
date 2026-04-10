@@ -865,6 +865,30 @@ func (e *Engine) executeWindow(ctx context.Context, req RunRequest) (stats RunSt
 		zap.Int("status_hour_rows", len(statusRows)),
 	)
 
+	// Compute all downstream attribution phases even in verify/dry-run mode.
+	// Non-mutating runs must exercise the full resolver graph and skip only the
+	// final inserts/publication steps.
+	stageStarted = time.Now()
+	aiBatchRows, err := e.executeAIBatchAttribution(ctx, spec, req, runID)
+	if err != nil {
+		return stats, runStatus, err
+	}
+	stats.AIBatchJobRows = aiBatchRows
+	logStage("ai_batch_attribution", stageStarted,
+		zap.Int("ai_batch_job_rows", aiBatchRows),
+	)
+
+	// BYOC attribution phase — independent from AI batch and live V2V.
+	stageStarted = time.Now()
+	byocRows, err := e.executeBYOCAttribution(ctx, spec, req, runID)
+	if err != nil {
+		return stats, runStatus, err
+	}
+	stats.BYOCJobRows = byocRows
+	logStage("byoc_attribution", stageStarted,
+		zap.Int("byoc_job_rows", byocRows),
+	)
+
 	if !req.Mutates() {
 		return stats, runStatus, nil
 	}
@@ -910,28 +934,6 @@ func (e *Engine) executeWindow(ctx context.Context, req RunRequest) (stats RunSt
 	e.setTailWatermark(req.End)
 	logStage("publish_serving_rollups", stageStarted,
 		zap.Int("window_slices", len(windowSlices)),
-	)
-
-	// AI batch attribution phase — independent from the live V2V path above.
-	stageStarted = time.Now()
-	aiBatchRows, err := e.executeAIBatchAttribution(ctx, spec, req, runID)
-	if err != nil {
-		return stats, runStatus, err
-	}
-	stats.AIBatchJobRows = aiBatchRows
-	logStage("ai_batch_attribution", stageStarted,
-		zap.Int("ai_batch_job_rows", aiBatchRows),
-	)
-
-	// BYOC attribution phase — independent from AI batch and live V2V.
-	stageStarted = time.Now()
-	byocRows, err := e.executeBYOCAttribution(ctx, spec, req, runID)
-	if err != nil {
-		return stats, runStatus, err
-	}
-	stats.BYOCJobRows = byocRows
-	logStage("byoc_attribution", stageStarted,
-		zap.Int("byoc_job_rows", byocRows),
 	)
 
 	return stats, runStatus, nil
@@ -1020,7 +1022,7 @@ func (e *Engine) executeBYOCAttribution(ctx context.Context, spec WindowSpec, re
 
 	selections := make([]SelectionEvent, 0, len(jobs))
 	for _, j := range jobs {
-		selections = append(selections, j.toSelectionEvent())
+		selections = append(selections, j.toSelectionEventWithModelHint(workerModels[j.EventID].Model))
 	}
 	decisions := resolveSelectionDecisions(selections, intervals)
 

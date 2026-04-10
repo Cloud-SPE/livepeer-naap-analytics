@@ -38,11 +38,14 @@ Forward migrations are managed by the repo-native `ch-migrate` runner, which
 records checksums in `naap.schema_migrations` only when forward migrations are
 actually present and supports `up`, `bootstrap`, `status`, and `validate`.
 
-Regenerate the bootstrap artifact from a clean bootstrap-backed validation stack with:
+Refresh the generated schema inventory from the checked-in bootstrap with:
 
 ```bash
 make bootstrap-extract
 ```
+
+Refreshing `bootstrap/v1.sql` itself from a clean migrated ClickHouse instance
+remains a separate operator step.
 
 ### Table population strategies
 

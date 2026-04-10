@@ -74,6 +74,8 @@ Use the `infra2` deployment guide in [`../../deploy/infra2/README.md`](../../dep
 
 - Read-only parity/verification pass.
 - Use after backfill or repair to confirm the expected state is published.
+- Executes the full resolver compute graph, including AI-batch and BYOC
+  attribution, but skips inserts and publication.
 
 Examples:
 
@@ -104,15 +106,22 @@ Run `dbt` publication when:
 
 ## Fresh Bootstrap And Baseline Extraction
 
-Generate the v1 bootstrap baseline from a clean validation database:
+Refresh the generated schema inventory from the checked-in bootstrap baseline:
 
 ```bash
-docker compose --profile validation up -d validation-clickhouse
-docker compose --profile validation run --rm warehouse-validation
 make bootstrap-extract
 ```
 
-The extracted bootstrap is written to [`../../infra/clickhouse/bootstrap/v1.sql`](../../infra/clickhouse/bootstrap/v1.sql), and the corresponding inventory doc is written to [`../generated/schema.md`](../generated/schema.md).
+The generator refreshes [`../generated/schema.md`](../generated/schema.md) from
+[`../../infra/clickhouse/bootstrap/v1.sql`](../../infra/clickhouse/bootstrap/v1.sql).
+Refreshing the checked-in bootstrap SQL itself from a clean migrated
+ClickHouse instance remains a separate operator step.
+
+If the change introduced or modified resolver-owned job stores, do not stop at
+bootstrap extraction. Fresh and existing environments both still need a
+resolver bootstrap or bounded backfill so those stores contain historical job
+rows before `/v1/jobs/*`, `/v1/ai-batch/*`, `/v1/byoc/*`, and the jobs
+dashboard are treated as healthy.
 
 ## Failure Recovery
 
@@ -184,7 +193,9 @@ Use this when the volume is disposable or the safest path is a clean rebuild:
 2. start ClickHouse with the extracted bootstrap
 3. republish semantic views with `dbt`
 4. run resolver bootstrap or bounded backfill
-5. verify with validation and parity checks
+5. verify that AI-batch/BYOC canonical job stores are populated, not just that
+   the views exist
+6. verify with validation and parity checks
 
 ## Validation And Post-Recovery Checks
 

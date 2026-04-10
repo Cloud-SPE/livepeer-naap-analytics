@@ -120,10 +120,10 @@ tags:
       Kafka events. BYOC workers register via `worker_lifecycle` events rather than
       the standard Livepeer capability heartbeat, so they do not appear in
       `/v1/net/models` or `/v1/net/orchestrators`. The set of capability names is
-      fully dynamic and never hardcoded in the API. For BYOC, `orchestrator_address`
-      in job SLA rows contains the orchestrator service URL (e.g.
-      `https://livepeer-ai.xodeapp.xyz:18935`), not an Ethereum address, because
-      BYOC jobs are identified by URL rather than on-chain address.
+      fully dynamic and never hardcoded in the API. In `/v1/jobs/sla`, BYOC rows
+      use `orchestrator_uri` for the orchestrator service URL (e.g.
+      `https://livepeer-ai.xodeapp.xyz:18935`) because BYOC jobs are identified
+      by URL rather than on-chain address.
   - name: Jobs
     description: |
       Cross-type demand, SLA, and model-performance endpoints that cover both
@@ -240,6 +240,13 @@ components:
       schema:
         type: string
         example: ""
+    orchestrator_uri:
+      name: orchestrator_uri
+      in: query
+      description: Filter by non-streaming orchestrator service URI (lowercased).
+      schema:
+        type: string
+        example: "https://orch.example.com:8935"
     pipeline_id:
       name: pipeline_id
       in: query
@@ -406,7 +413,7 @@ components:
       properties:
         window_start:         { type: string, format: date-time }
         org:                  { type: string, nullable: true }
-        orchestrator_address: { type: string }
+        orchestrator_uri:     { type: string }
         pipeline_id:          { type: string }
         model_id:             { type: string, nullable: true }
         gpu_id:               { type: string, nullable: true }
@@ -416,7 +423,7 @@ components:
         success_rate:         { type: number, format: double }
         avg_duration_ms:      { type: number, format: double }
         sla_score:            { type: number, format: double, nullable: true }
-      required: [window_start, orchestrator_address, pipeline_id, job_type, job_count, success_count, success_rate, avg_duration_ms]
+      required: [window_start, orchestrator_uri, pipeline_id, job_type, job_count, success_count, success_rate, avg_duration_ms]
 
     JobModelPerformance:
       type: object
@@ -2147,19 +2154,17 @@ paths:
       description: |
         Returns hourly per-orchestrator SLA metrics — job counts, success rates,
         and SLA scores — for AI-batch and BYOC jobs grouped by
-        (window_start, org, orchestrator_address, pipeline_id, model_id, gpu_id,
+        (window_start, org, orchestrator_uri, pipeline_id, model_id, gpu_id,
         job_type). Backed by `naap.api_unified_sla`. The `job_type` field
         distinguishes `ai-batch` from `byoc` rows.
 
         **This endpoint covers AI-batch and BYOC jobs only.** Streaming session
         SLA is tracked separately at `/v1/sla/compliance`.
 
-        **Important gotcha for BYOC rows:** `orchestrator_address` contains the
-        orchestrator service URL (e.g. `https://livepeer-ai.xodeapp.xyz:18935`),
-        not an Ethereum address. BYOC jobs are identified by orchestrator URL
-        rather than on-chain address because BYOC orchestrators are not required
-        to be registered on-chain. Do not attempt to look up BYOC orchestrator
-        addresses in `/v1/net/orchestrators`.
+        `orchestrator_uri` is always a service URI, not an on-chain address.
+        BYOC jobs are identified by orchestrator URL rather than Ethereum
+        address because BYOC orchestrators are not required to be registered
+        on-chain. Do not attempt to look up BYOC URIs in `/v1/net/orchestrators`.
 
         `sla_score` is nullable — it may be null for rows where the scoring model
         could not produce a score (e.g. insufficient data in the window).
@@ -2180,10 +2185,7 @@ paths:
           in: query
           description: Filter by model identifier.
           schema: { type: string }
-        - name: orchestrator_address
-          in: query
-          description: Filter by orchestrator address or URL. For BYOC rows, this field contains a URL, not an Ethereum address.
-          schema: { type: string }
+        - $ref: "#/components/parameters/orchestrator_uri"
         - name: job_type
           in: query
           description: Filter to one job type. One of "ai-batch" or "byoc".

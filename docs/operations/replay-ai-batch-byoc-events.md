@@ -205,11 +205,17 @@ WHERE event_type = 'job_payment';
 ## After replay
 
 1. Verify row counts in each normalized table match expectations.
-2. Trigger a dbt run to refresh canonical and api_ views:
+2. Run a resolver repair/backfill over the replayed window so the resolver-owned
+   AI-batch and BYOC canonical job stores are repopulated from the replayed
+   normalized events:
+   ```bash
+   make resolver-repair-window FROM=<window-start> TO=<window-end> ORG=<org>
+   ```
+3. Trigger a dbt run to refresh canonical and api_ views:
    ```bash
    make dbt-run MODELS=canonical_ai_batch_jobs,canonical_byoc_jobs,...
    ```
-3. Confirm API endpoints return the replayed data.
+4. Confirm API endpoints return the replayed data.
 
 ---
 

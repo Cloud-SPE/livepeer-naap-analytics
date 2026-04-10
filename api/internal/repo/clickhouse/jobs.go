@@ -111,7 +111,7 @@ func buildJobsDemandWhere(p types.JobsParams) (string, []any) {
 // ---------------------------------------------------------------------------
 
 // ListJobsSLA returns cursor-paginated SLA rows for non-streaming jobs ordered
-// by (window_start DESC, orchestrator_address DESC, pipeline_id DESC, model_id
+// by (window_start DESC, orchestrator_uri DESC, pipeline_id DESC, model_id
 // DESC, gpu_id DESC, job_type DESC).
 func (r *Repo) ListJobsSLA(ctx context.Context, p types.JobsParams) ([]types.JobsSLARow, types.CursorPageInfo, error) {
 	where, args := buildJobsSLAWhere(p)
@@ -123,15 +123,15 @@ func (r *Repo) ListJobsSLA(ctx context.Context, p types.JobsParams) ([]types.Job
 		if parseErr != nil {
 			return nil, types.CursorPageInfo{}, fmt.Errorf("%w: parse window_start", types.ErrInvalidCursor)
 		}
-		where += " AND (window_start, orchestrator_address, pipeline_id, ifNull(model_id, ''), ifNull(gpu_id, ''), job_type) < (?, ?, ?, ?, ?, ?)"
+		where += " AND (window_start, orchestrator_uri, pipeline_id, ifNull(model_id, ''), ifNull(gpu_id, ''), job_type) < (?, ?, ?, ?, ?, ?)"
 		args = append(args, cursorWindowStart.UTC(), values[1], values[2], values[3], values[4], values[5])
 	}
 	rows, err := r.conn.Query(ctx, `
 		SELECT
-			window_start, org, orchestrator_address, pipeline_id, model_id, gpu_id, job_type,
+			window_start, org, orchestrator_uri, pipeline_id, model_id, gpu_id, job_type,
 			job_count, success_count, success_rate, avg_duration_ms, sla_score
 		FROM naap.api_unified_sla `+where+`
-		ORDER BY window_start DESC, orchestrator_address DESC, pipeline_id DESC, ifNull(model_id, '') DESC, ifNull(gpu_id, '') DESC, job_type DESC
+		ORDER BY window_start DESC, orchestrator_uri DESC, pipeline_id DESC, ifNull(model_id, '') DESC, ifNull(gpu_id, '') DESC, job_type DESC
 		LIMIT ?
 	`, append(args, limit+1)...)
 	if err != nil {
@@ -144,7 +144,7 @@ func (r *Repo) ListJobsSLA(ctx context.Context, p types.JobsParams) ([]types.Job
 		var row types.JobsSLARow
 		var org, modelID, gpuID *string
 		if err := rows.Scan(
-			&row.WindowStart, &org, &row.OrchestratorAddress, &row.PipelineID, &modelID, &gpuID, &row.JobType,
+			&row.WindowStart, &org, &row.OrchestratorURI, &row.PipelineID, &modelID, &gpuID, &row.JobType,
 			&row.JobCount, &row.SuccessCount, &row.SuccessRate, &row.AvgDurationMs, &row.SLAScore,
 		); err != nil {
 			return nil, types.CursorPageInfo{}, fmt.Errorf("clickhouse jobs sla scan: %w", err)
@@ -169,7 +169,7 @@ func (r *Repo) ListJobsSLA(ctx context.Context, p types.JobsParams) ([]types.Job
 		last := result[len(result)-1]
 		page.NextCursor = encodeCursorValues(
 			last.WindowStart.UTC().Format(time.RFC3339Nano),
-			last.OrchestratorAddress,
+			last.OrchestratorURI,
 			last.PipelineID,
 			nullableString(last.ModelID),
 			nullableString(last.GPUID),
@@ -186,9 +186,9 @@ func buildJobsSLAWhere(p types.JobsParams) (string, []any) {
 		conds = append(conds, "org = ?")
 		args = append(args, p.Org)
 	}
-	if p.OrchestratorAddress != "" {
-		conds = append(conds, "orchestrator_address = ?")
-		args = append(args, strings.ToLower(p.OrchestratorAddress))
+	if p.OrchestratorURI != "" {
+		conds = append(conds, "orchestrator_uri = ?")
+		args = append(args, strings.ToLower(p.OrchestratorURI))
 	}
 	if p.PipelineID != "" {
 		conds = append(conds, "pipeline_id = ?")

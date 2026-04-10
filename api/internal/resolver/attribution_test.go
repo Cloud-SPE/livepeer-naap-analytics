@@ -84,6 +84,35 @@ func TestIsCompatible_RecognizedPipelineMismatchReturnsFalse(t *testing.T) {
 	}
 }
 
+func TestIsCompatible_BYOCModelHintMustMatchWhenPresent(t *testing.T) {
+	selection := SelectionEvent{
+		ID:                   "sel-byoc-model",
+		Org:                  "acme",
+		SessionKey:           "evt-1",
+		SelectionTS:          time.Date(2026, 4, 1, 12, 0, 0, 0, time.UTC),
+		ObservedAddress:      "0xabc",
+		ObservedPipeline:     "openai-chat-completions",
+		ObservedModelHint:    "Qwen/Qwen2.5-14B-Instruct-AWQ",
+		PipelineHintVerbatim: true,
+		InputHash:            "input-byoc-model",
+	}
+
+	if isCompatible(selection, CapabilityInterval{
+		Org:      "acme",
+		Pipeline: "openai-chat-completions",
+		Model:    "Llama-3-8B",
+	}) {
+		t.Fatalf("expected BYOC model mismatch to be incompatible")
+	}
+	if !isCompatible(selection, CapabilityInterval{
+		Org:      "acme",
+		Pipeline: "openai-chat-completions",
+		Model:    "Qwen/Qwen2.5-14B-Instruct-AWQ",
+	}) {
+		t.Fatalf("expected BYOC model match to be compatible")
+	}
+}
+
 func TestResolveSelectionDecision_StaleOnlyCandidateIsStale(t *testing.T) {
 	selection := SelectionEvent{
 		ID:              "sel-stale",

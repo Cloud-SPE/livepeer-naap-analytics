@@ -4,7 +4,7 @@
 select
     toStartOfHour(event_ts)          as window_start,
     org,
-    orch_url_norm                    as orchestrator_address,
+    orchestrator_uri                 as orchestrator_uri,
     pipeline                         as pipeline_id,
     model                            as model_id,
     gpu_id,
@@ -20,7 +20,7 @@ where job_type != 'stream'
 group by
     window_start,
     org,
-    orchestrator_address,
+    orchestrator_uri,
     pipeline_id,
     model_id,
     gpu_id,

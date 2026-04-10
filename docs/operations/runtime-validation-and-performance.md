@@ -68,6 +68,8 @@ Use these to judge runtime cost and user-visible responsiveness.
   - `/v1/dashboard/kpi`
   - `/v1/dashboard/orchestrators`
   - `/v1/sla/compliance`
+  - `/v1/jobs/demand`
+  - `/v1/jobs/sla`
   - `/v1/network/demand`
   - `/v1/gpu/network-demand`
   - `/v1/gpu/metrics`
@@ -146,11 +148,19 @@ aggregate-of-aggregate math.
   - `loading_only_sessions`
   - `zero_output_fps_sessions`
   - `output_failed_sessions`
+- canonical job duplicate sentinels:
+  - `count() - uniq(request_id)` on `canonical_ai_batch_jobs`
+  - `count() - uniq(request_id)` on `canonical_byoc_jobs`
+- source-versus-canonical coverage for AI-batch and BYOC:
+  - normalized completed events
+  - canonical job rows
 
 Primary sources:
 
 - public `api_*` views
 - additive support fields exposed on those views
+- `canonical_ai_batch_jobs`
+- `canonical_byoc_jobs`
 
 ---
 
@@ -184,6 +194,8 @@ Both scripts write local-only artifacts under `.local/baselines/` by default.
 - it includes selected-session attribution breakdowns
 - it includes sample low / medium / high SLA cohort rows with their additive
   support values
+- it should be paired with duplicate and coverage checks for non-streaming job
+  stores after resolver or warehouse changes
 
 Keep `make ch-smoke` lightweight. Do not move the richer cohort/API baseline
 checks into the smoke target.

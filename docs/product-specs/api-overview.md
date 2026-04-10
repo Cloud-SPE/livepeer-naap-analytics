@@ -94,3 +94,6 @@ The cursor-paginated public list routes in `v1` use the same envelope:
 Clients request the first page with `?limit=<n>` and follow with
 `?limit=<n>&cursor=<pagination.next_cursor>`. Legacy `offset`, `page`, and
 `page_size` parameters are rejected on migrated endpoints.
+
+For `GET /v1/jobs/sla`, the non-streaming identity field is `orchestrator_uri`.
+It is always a service URI, not an Ethereum address.

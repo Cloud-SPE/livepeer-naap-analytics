@@ -91,15 +91,15 @@ func parseJobsParams(r *http.Request) (types.JobsParams, error) {
 	start, end, _ := parseWindowParam(r, 24*time.Hour, time.Hour, 30*24*time.Hour)
 	q := r.URL.Query()
 	return types.JobsParams{
-		OrchestratorAddress: strings.ToLower(trimStr(q.Get("orchestrator_address"), 256)),
-		Gateway:             trimStr(q.Get("gateway"), 256),
-		PipelineID:          trimStr(q.Get("pipeline_id"), 256),
-		ModelID:             trimStr(q.Get("model_id"), 256),
-		JobType:             trimStr(q.Get("job_type"), 32),
-		Org:                 trimStr(q.Get("org"), 256),
-		Start:               start,
-		End:                 end,
-		Limit:               parseListLimit(q, defaultCursorLimit),
-		Cursor:              strings.TrimSpace(q.Get("cursor")),
+		OrchestratorURI: strings.ToLower(trimStr(q.Get("orchestrator_uri"), 256)),
+		Gateway:         trimStr(q.Get("gateway"), 256),
+		PipelineID:      trimStr(q.Get("pipeline_id"), 256),
+		ModelID:         trimStr(q.Get("model_id"), 256),
+		JobType:         trimStr(q.Get("job_type"), 32),
+		Org:             trimStr(q.Get("org"), 256),
+		Start:           start,
+		End:             end,
+		Limit:           parseListLimit(q, defaultCursorLimit),
+		Cursor:          strings.TrimSpace(q.Get("cursor")),
 	}, nil
 }

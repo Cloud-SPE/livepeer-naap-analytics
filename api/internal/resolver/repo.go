@@ -3574,8 +3574,10 @@ func orchIdentitiesToStrings(identities []orchIdentity) []string {
 }
 
 // fetchAIBatchJobCandidates returns AI batch jobs that completed within the
-// window. It LEFT JOINs the received event onto the completed event so that
-// ReceivedAt is populated when available (used as SelectionTS anchor).
+// window. It joins each completed row to exactly one deduped received timestamp
+// per (org, request_id), using the earliest received event that is not later
+// than the completion. This preserves the one-row-per-job invariant for
+// resolver-owned job stores and downstream rollups.
 // Jobs with an empty request_id are excluded — those belong to the known gap
 // period before request_id tracking was fixed.
 func (r *repo) fetchAIBatchJobCandidates(ctx context.Context, spec WindowSpec) ([]AIBatchJobRecord, error) {
@@ -3594,7 +3596,7 @@ func (r *repo) fetchAIBatchJobCandidates(ctx context.Context, spec WindowSpec) (
 			ifNull(c.model_id, '') AS model_id,
 			ifNull(c.orch_url, '') AS orch_url,
 			ifNull(lowerUTF8(c.orch_url), '') AS orch_url_norm,
-			received.received_at,
+			minIf(received.event_ts, received.event_ts <= c.event_ts) AS received_at,
 			c.event_ts AS completed_at,
 			c.success,
 			ifNull(toUInt16OrZero(toString(c.tries)), 0) AS tries,
@@ -3605,14 +3607,30 @@ func (r *repo) fetchAIBatchJobCandidates(ctx context.Context, spec WindowSpec) (
 			ifNull(c.error, '') AS error
 		FROM naap.normalized_ai_batch_job AS c FINAL
 		LEFT JOIN (
-			SELECT request_id, org, event_ts AS received_at
+			SELECT request_id, org, event_ts
 			FROM naap.normalized_ai_batch_job FINAL
 			WHERE subtype = 'ai_batch_request_received'
-		) received ON received.org = c.org AND received.request_id = c.request_id
+		) received ON received.org = c.org
+		         AND received.request_id = c.request_id
 		WHERE c.subtype = 'ai_batch_request_completed'
 		  AND c.event_ts >= ? AND c.event_ts < ?
 		  AND c.request_id != ''
 		  AND `+orgClause+`
+		GROUP BY
+			c.request_id,
+			c.org,
+			c.gateway,
+			c.pipeline,
+			c.model_id,
+			c.orch_url,
+			c.event_ts,
+			c.success,
+			c.tries,
+			c.duration_ms,
+			c.latency_score,
+			c.price_per_unit,
+			c.error_type,
+			c.error
 		ORDER BY c.org, c.request_id, c.event_ts
 	`, args...)
 	if err != nil {
@@ -3755,9 +3773,11 @@ func (r *repo) fetchWorkerLifecycleSnapshots(ctx context.Context, spec WindowSpe
 }
 
 // insertAIBatchJobRows upserts AI batch job attribution rows into
-// canonical_ai_batch_job_store. The ReplacingMergeTree on materialized_at
-// means a later write for the same (org, request_id, completed_at) supersedes
-// the previous one.
+// canonical_ai_batch_job_store. The input must already be one row per logical
+// job key `(org, request_id)` for the window being processed; downstream SQL
+// relies on that invariant when it projects the latest attributed job row.
+// The ReplacingMergeTree on materialized_at means a later write for the same
+// (org, request_id, completed_at) supersedes the previous one.
 func (r *repo) insertAIBatchJobRows(ctx context.Context, runID string, rows []AIBatchJobRow) error {
 	if len(rows) == 0 {
 		return nil
@@ -3802,9 +3822,10 @@ func (r *repo) insertAIBatchJobRows(ctx context.Context, runID string, rows []AI
 }
 
 // insertBYOCJobRows upserts BYOC job attribution rows into
-// canonical_byoc_job_store. The ReplacingMergeTree on materialized_at
-// means a later write for the same (org, event_id, completed_at) supersedes
-// the previous one.
+// canonical_byoc_job_store. The input must already be one row per BYOC job key
+// `(org, event_id)` for the window being processed. The ReplacingMergeTree on
+// materialized_at means a later write for the same (org, event_id,
+// completed_at) supersedes the previous one.
 func (r *repo) insertBYOCJobRows(ctx context.Context, runID string, rows []BYOCJobRow) error {
 	if len(rows) == 0 {
 		return nil

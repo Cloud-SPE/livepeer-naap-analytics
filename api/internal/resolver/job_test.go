@@ -84,13 +84,33 @@ func TestBYOCJobRecord_ToSelectionEvent_SetsPipelineHintVerbatim(t *testing.T) {
 		t.Fatalf("ObservedPipeline = %q, want openai-chat-completions", se.ObservedPipeline)
 	}
 	if se.ObservedModelHint != "" {
-		t.Fatalf("ObservedModelHint should be empty for BYOC (comes from worker_lifecycle), got %q", se.ObservedModelHint)
+		t.Fatalf("ObservedModelHint should be empty for BYOC without worker_lifecycle evidence, got %q", se.ObservedModelHint)
 	}
 	if se.ObservedAddress != "0xabc123" {
 		t.Fatalf("ObservedAddress = %q, want 0xabc123", se.ObservedAddress)
 	}
 	if se.SessionKey != "evt-byoc-1" {
 		t.Fatalf("SessionKey = %q, want evt-byoc-1", se.SessionKey)
+	}
+}
+
+func TestBYOCJobRecord_ToSelectionEventWithModelHint_PropagatesWorkerLifecycleModel(t *testing.T) {
+	completedAt := time.Date(2026, 4, 1, 11, 0, 0, 0, time.UTC)
+	j := BYOCJobRecord{
+		EventID:     "evt-byoc-2",
+		Org:         "acme",
+		Capability:  "openai-chat-completions",
+		OrchAddress: "0xabc123",
+		OrchURL:     "https://byoc.example.com:8935",
+		CompletedAt: completedAt,
+	}
+	se := j.toSelectionEventWithModelHint("Qwen/Qwen2.5-14B-Instruct-AWQ")
+
+	if se.ObservedModelHint != "Qwen/Qwen2.5-14B-Instruct-AWQ" {
+		t.Fatalf("ObservedModelHint = %q", se.ObservedModelHint)
+	}
+	if !se.PipelineHintVerbatim {
+		t.Fatalf("PipelineHintVerbatim should remain true for BYOC")
 	}
 }
 
@@ -107,19 +127,19 @@ func TestResolveWorkerModels_PicksMostRecentSnapshotBeforeCompletion(t *testing.
 	}}
 	snapshots := []workerLifecycleSnapshot{
 		{
-			Org:         "acme",
-			Capability:  "openai-chat-completions",
-			OrchAddress: "0xabc",
-			EventTS:     time.Date(2026, 4, 1, 11, 0, 0, 0, time.UTC), // before completedAt
-			Model:       "gpt-4o-mini",
+			Org:          "acme",
+			Capability:   "openai-chat-completions",
+			OrchAddress:  "0xabc",
+			EventTS:      time.Date(2026, 4, 1, 11, 0, 0, 0, time.UTC), // before completedAt
+			Model:        "gpt-4o-mini",
 			PricePerUnit: 0.01,
 		},
 		{
-			Org:         "acme",
-			Capability:  "openai-chat-completions",
-			OrchAddress: "0xabc",
-			EventTS:     time.Date(2026, 4, 1, 10, 0, 0, 0, time.UTC), // older
-			Model:       "gpt-3.5-turbo",
+			Org:          "acme",
+			Capability:   "openai-chat-completions",
+			OrchAddress:  "0xabc",
+			EventTS:      time.Date(2026, 4, 1, 10, 0, 0, 0, time.UTC), // older
+			Model:        "gpt-3.5-turbo",
 			PricePerUnit: 0.001,
 		},
 	}
@@ -145,11 +165,11 @@ func TestResolveWorkerModels_ExcludesSnapshotAfterCompletion(t *testing.T) {
 	}}
 	snapshots := []workerLifecycleSnapshot{
 		{
-			Org:         "acme",
-			Capability:  "openai-chat-completions",
-			OrchAddress: "0xabc",
-			EventTS:     time.Date(2026, 4, 1, 13, 0, 0, 0, time.UTC), // after completedAt — must be excluded
-			Model:       "gpt-4o",
+			Org:          "acme",
+			Capability:   "openai-chat-completions",
+			OrchAddress:  "0xabc",
+			EventTS:      time.Date(2026, 4, 1, 13, 0, 0, 0, time.UTC), // after completedAt — must be excluded
+			Model:        "gpt-4o",
 			PricePerUnit: 0.02,
 		},
 	}
@@ -171,11 +191,11 @@ func TestResolveWorkerModels_NoMatchForDifferentCapability(t *testing.T) {
 	}}
 	snapshots := []workerLifecycleSnapshot{
 		{
-			Org:         "acme",
-			Capability:  "openai-image-generation", // different capability
-			OrchAddress: "0xabc",
-			EventTS:     time.Date(2026, 4, 1, 11, 0, 0, 0, time.UTC),
-			Model:       "dall-e-3",
+			Org:          "acme",
+			Capability:   "openai-image-generation", // different capability
+			OrchAddress:  "0xabc",
+			EventTS:      time.Date(2026, 4, 1, 11, 0, 0, 0, time.UTC),
+			Model:        "dall-e-3",
 			PricePerUnit: 0.05,
 		},
 	}
@@ -183,6 +203,70 @@ func TestResolveWorkerModels_NoMatchForDifferentCapability(t *testing.T) {
 	models := resolveWorkerModels(jobs, snapshots)
 	if _, ok := models["evt-1"]; ok {
 		t.Fatalf("expected no match when capability differs")
+	}
+}
+
+func TestResolveWorkerModels_PrefersExactWorkerURLMatch(t *testing.T) {
+	completedAt := time.Date(2026, 4, 1, 12, 0, 0, 0, time.UTC)
+	jobs := []BYOCJobRecord{{
+		EventID:     "evt-1",
+		Org:         "acme",
+		Capability:  "openai-chat-completions",
+		OrchAddress: "0xabc",
+		WorkerURL:   "https://worker-b.example.com",
+		CompletedAt: completedAt,
+	}}
+	snapshots := []workerLifecycleSnapshot{
+		{
+			Org:          "acme",
+			Capability:   "openai-chat-completions",
+			OrchAddress:  "0xabc",
+			WorkerURL:    "https://worker-a.example.com",
+			EventTS:      time.Date(2026, 4, 1, 11, 55, 0, 0, time.UTC),
+			Model:        "wrong-model",
+			PricePerUnit: 0.02,
+		},
+		{
+			Org:          "acme",
+			Capability:   "openai-chat-completions",
+			OrchAddress:  "0xabc",
+			WorkerURL:    "https://worker-b.example.com",
+			EventTS:      time.Date(2026, 4, 1, 11, 50, 0, 0, time.UTC),
+			Model:        "correct-model",
+			PricePerUnit: 0.01,
+		},
+	}
+
+	models := resolveWorkerModels(jobs, snapshots)
+	if got := models["evt-1"].Model; got != "correct-model" {
+		t.Fatalf("model = %q, want correct-model", got)
+	}
+}
+
+func TestResolveWorkerModels_FallsBackWhenWorkerURLMissing(t *testing.T) {
+	completedAt := time.Date(2026, 4, 1, 12, 0, 0, 0, time.UTC)
+	jobs := []BYOCJobRecord{{
+		EventID:     "evt-1",
+		Org:         "acme",
+		Capability:  "openai-chat-completions",
+		OrchAddress: "0xabc",
+		CompletedAt: completedAt,
+	}}
+	snapshots := []workerLifecycleSnapshot{
+		{
+			Org:          "acme",
+			Capability:   "openai-chat-completions",
+			OrchAddress:  "0xabc",
+			WorkerURL:    "https://worker-a.example.com",
+			EventTS:      time.Date(2026, 4, 1, 11, 55, 0, 0, time.UTC),
+			Model:        "fallback-model",
+			PricePerUnit: 0.02,
+		},
+	}
+
+	models := resolveWorkerModels(jobs, snapshots)
+	if got := models["evt-1"].Model; got != "fallback-model" {
+		t.Fatalf("model = %q, want fallback-model", got)
 	}
 }
 

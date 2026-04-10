@@ -1,5 +1,5 @@
 -- Generated from a fresh migrated ClickHouse instance.
--- Regenerate with:
+-- Refresh the generated schema inventory from this bootstrap with:
 --   python3 scripts/extract_clickhouse_bootstrap.py
 
 CREATE DATABASE IF NOT EXISTS naap;
