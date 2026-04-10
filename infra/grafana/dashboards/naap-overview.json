@@ -955,7 +955,7 @@
           "sort": "none"
         },
         "xField": "Orchestrator ENS",
-        "xTickLabelRotation": 0,
+        "xTickLabelRotation": -45,
         "xTickLabelSpacing": 0
       },
       "targets": [
@@ -967,7 +967,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "WITH ens AS (SELECT orch_address AS addr, name AS ens_name FROM naap.api_latest_orchestrator_state)\nSELECT\n    if(ifNull(ens.ens_name, '') != '' AND NOT startsWith(lower(ens.ens_name), '0x'),\n       ens.ens_name, fps.orch_address) AS \"Orchestrator ENS\",\n    fps.avg_fps AS \"Avg FPS\"\nFROM (\n    SELECT orch_address,\n        sum(inference_fps_sum) / nullIf(sum(sample_count), 0) AS avg_fps\n    FROM naap.api_fps_hourly\n    WHERE $__timeFilter(hour)\n      AND orch_address != ''\n      AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n      AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address))\n    GROUP BY orch_address\n) AS fps\nLEFT JOIN ens ON ens.addr = fps.orch_address\nORDER BY \"Avg FPS\" DESC\nLIMIT 10",
+          "rawSql": "WITH ens AS (SELECT orch_address AS addr, name AS ens_name FROM naap.api_latest_orchestrator_state)\nSELECT\n    if(ifNull(ens.ens_name, '') != '' AND NOT startsWith(lower(ens.ens_name), '0x'),\n       ens.ens_name, concat(left(fps.orch_address, 8), '...', right(fps.orch_address, 4))) AS \"Orchestrator ENS\",\n    fps.avg_fps AS \"Avg FPS\"\nFROM (\n    SELECT orch_address,\n        sum(inference_fps_sum) / nullIf(sum(sample_count), 0) AS avg_fps\n    FROM naap.api_fps_hourly\n    WHERE $__timeFilter(hour)\n      AND orch_address != ''\n      AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n      AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address))\n    GROUP BY orch_address\n) AS fps\nLEFT JOIN ens ON ens.addr = fps.orch_address\nORDER BY \"Avg FPS\" DESC\nLIMIT 10",
           "refId": "A"
         }
       ],

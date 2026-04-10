@@ -372,7 +372,7 @@
           "sort": "none"
         },
         "xField": "Orchestrator Label",
-        "xTickLabelRotation": 0,
+        "xTickLabelRotation": -45,
         "xTickLabelSpacing": 0
       },
       "targets": [
@@ -384,7 +384,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "WITH ens AS (SELECT orch_address AS addr, name AS ens_name FROM naap.api_latest_orchestrator_state),\nactive_counts AS (\n    SELECT orch_address AS addr, countDistinct(stream_id) AS active_streams\n    FROM naap.api_active_stream_state\n    WHERE last_seen > now() - INTERVAL 120 SECOND\n    AND stream_id != ''\n    AND attribution_status = 'resolved' AND length(ifNull(orch_address, '')) > 0\n    AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n    GROUP BY addr\n)\nSELECT if(ifNull(e.ens_name, '') != '' AND NOT startsWith(lower(e.ens_name), '0x'), e.ens_name, concat('addr:', o.orch_address)) AS \"Orchestrator Label\",\n    toUInt64(ifNull(a.active_streams, 0)) AS \"Active Streams\"\nFROM naap.api_latest_orchestrator_state o\nLEFT JOIN active_counts a ON a.addr = o.orch_address\nLEFT JOIN ens e ON e.addr = o.orch_address\nWHERE ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), o.org))\nAND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), o.orch_address))\nORDER BY \"Active Streams\" DESC, \"Orchestrator Label\" ASC\nLIMIT 12",
+          "rawSql": "WITH ens AS (SELECT orch_address AS addr, name AS ens_name FROM naap.api_latest_orchestrator_state),\nactive_counts AS (\n    SELECT orch_address AS addr, countDistinct(stream_id) AS active_streams\n    FROM naap.api_active_stream_state\n    WHERE last_seen > now() - INTERVAL 120 SECOND\n    AND stream_id != ''\n    AND attribution_status = 'resolved' AND length(ifNull(orch_address, '')) > 0\n    AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n    GROUP BY addr\n)\nSELECT if(ifNull(e.ens_name, '') != '' AND NOT startsWith(lower(e.ens_name), '0x'), e.ens_name, concat(left(o.orch_address, 8), '...', right(o.orch_address, 4))) AS \"Orchestrator Label\",\n    toUInt64(ifNull(a.active_streams, 0)) AS \"Active Streams\"\nFROM naap.api_latest_orchestrator_state o\nLEFT JOIN active_counts a ON a.addr = o.orch_address\nLEFT JOIN ens e ON e.addr = o.orch_address\nWHERE ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), o.org))\nAND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), o.orch_address))\nORDER BY \"Active Streams\" DESC, \"Orchestrator Label\" ASC\nLIMIT 12",
           "refId": "A"
         }
       ],
