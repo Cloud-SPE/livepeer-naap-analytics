@@ -13,7 +13,7 @@ For the standard runtime and recovery model, see [`../../docs/operations/run-mod
 | `naap-clickhouse` | ClickHouse | — (internal, SSH tunnel for access) |
 | `naap-app` | API | `naap-api.cloudspe.com` |
 | `naap-prometheus` | Prometheus, Node Exporter, cAdvisor | — (SSH tunnel only) |
-| `naap-grafana` | Grafana | `grafana.cloudspe.com` |
+| `naap-grafana` | Grafana | `grafana.livepeer.cloud` |
 | `naap-kafka-ui` | Kafka UI | `kafka-ui.cloudspe.com` |
 | `naap-mirrormaker2` | MM2 (daydream→infra2) | — (internal) |
 

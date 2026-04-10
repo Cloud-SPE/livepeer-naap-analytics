@@ -169,4 +169,5 @@ Run after applying all three action items:
 [ ] ClickHouse — docker exec query returns 1 (port 8123 rule removal only)
 [ ] API — GET /healthz returns 200
 [ ] Grafana — dashboards loading, Kafka and ClickHouse metrics visible
+[ ] Grafana — provisioned Discord and Telegram alert contact points load without missing-secret errors
 ```

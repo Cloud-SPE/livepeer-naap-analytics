@@ -58,7 +58,6 @@ services:
     environment:
       PORT: "8000"
       ENV: development
-      KAFKA_BROKERS: kafka:29092
       LOG_LEVEL: debug
       CLICKHOUSE_ADDR: clickhouse:9000
       CLICKHOUSE_DB: naap
@@ -282,6 +281,7 @@ services:
 
   grafana:
     image: grafana/grafana:latest
+    entrypoint: ["/bin/sh", "/usr/local/bin/render-grafana-provisioning.sh"]
     depends_on:
       - prometheus
       - clickhouse
@@ -293,10 +293,22 @@ services:
       GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
       GF_INSTALL_PLUGINS: grafana-clickhouse-datasource
       GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/naap-overview.json
+      GF_SERVER_ROOT_URL: ${GRAFANA_PUBLIC_URL:-http://localhost:3000/}
+      GF_PATHS_PROVISIONING: /tmp/grafana-provisioning
+      GRAFANA_PROVISIONING_SRC_DIR: /etc/grafana/provisioning-src
+      GRAFANA_RENDERED_PROVISIONING_DIR: /tmp/grafana-provisioning
+      # Alert links are derived from this explicit public URL and repo-managed provisioning.
       CLICKHOUSE_READER_PASSWORD: ${CLICKHOUSE_READER_PASSWORD:-naap_reader_changeme}
+      GRAFANA_ALERTING_ENABLED: ${GRAFANA_ALERTING_ENABLED:-false}
+      GRAFANA_ALERT_DISCORD_ENABLED: ${GRAFANA_ALERT_DISCORD_ENABLED:-false}
+      GRAFANA_ALERT_DISCORD_WEBHOOK_URL: ${GRAFANA_ALERT_DISCORD_WEBHOOK_URL:-}
+      GRAFANA_ALERT_TELEGRAM_ENABLED: ${GRAFANA_ALERT_TELEGRAM_ENABLED:-false}
+      GRAFANA_ALERT_TELEGRAM_BOT_TOKEN: ${GRAFANA_ALERT_TELEGRAM_BOT_TOKEN:-}
+      GRAFANA_ALERT_TELEGRAM_CHAT_ID: ${GRAFANA_ALERT_TELEGRAM_CHAT_ID:-}
     volumes:
-      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning-src:ro
       - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./infra/grafana/scripts/render-provisioning.sh:/usr/local/bin/render-grafana-provisioning.sh:ro
 
   # ── ClickHouse ───────────────────────────────────────────────────────────────
 

@@ -27,10 +27,22 @@
       "keepTime": true,
       "tags": [],
       "targetBlank": false,
-      "title": "Overview",
+      "title": "Live AI Video",
       "tooltip": "",
       "type": "link",
       "url": "/d/naap-overview"
+    },
+    {
+      "asDropdown": false,
+      "icon": "dashboard",
+      "includeVars": true,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
+      "title": "Jobs",
+      "tooltip": "",
+      "type": "link",
+      "url": "/d/naap-jobs"
     },
     {
       "asDropdown": false,
@@ -39,7 +51,7 @@
       "keepTime": true,
       "tags": [],
       "targetBlank": false,
-      "title": "Live Ops",
+      "title": "AI Video Ops",
       "tooltip": "",
       "type": "link",
       "url": "/d/naap-live-operations"
@@ -51,7 +63,7 @@
       "keepTime": true,
       "tags": [],
       "targetBlank": false,
-      "title": "Performance",
+      "title": "AI Video Perf",
       "tooltip": "",
       "type": "link",
       "url": "/d/naap-performance-drilldown"
@@ -79,18 +91,6 @@
       "tooltip": "",
       "type": "link",
       "url": "/d/naap-economics"
-    },
-    {
-      "asDropdown": false,
-      "icon": "apps",
-      "includeVars": true,
-      "keepTime": true,
-      "tags": [],
-      "targetBlank": false,
-      "title": "Jobs",
-      "tooltip": "",
-      "type": "link",
-      "url": "/d/naap-jobs"
     }
   ],
   "panels": [
@@ -1133,11 +1133,14 @@
         "name": "clickhouse_ds",
         "type": "datasource",
         "label": "Datasource",
-        "pluginId": "grafana-clickhouse-datasource",
         "hide": 0,
+        "includeAll": false,
+        "options": [],
+        "query": "grafana-clickhouse-datasource",
+        "refresh": 1,
         "current": {
           "text": "ClickHouse Prod",
-          "value": "ClickHouse Prod"
+          "value": "clickhouse_prod"
         }
       },
       {
@@ -1168,7 +1171,7 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "NaaP \u2013 Jobs",
+  "title": "NaaP: Jobs",
   "uid": "naap-jobs",
   "version": 1
 }

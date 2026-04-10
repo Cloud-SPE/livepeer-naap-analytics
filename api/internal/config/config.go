@@ -4,7 +4,6 @@ package config
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/kelseyhightower/envconfig"
@@ -12,18 +11,12 @@ import (
 
 // Config holds all application configuration.
 // All fields are loaded from environment variables at startup.
-// See .env.example for the full list of supported variables.
+// See .env.example for the common documented env surface used by local and deployed stacks.
 type Config struct {
 	// Server
 	Port     string `envconfig:"PORT" default:"8000"`
 	Env      string `envconfig:"ENV" default:"development"`
 	LogLevel string `envconfig:"LOG_LEVEL" default:"info"`
-
-	// Kafka (retained for pipeline compatibility; not used by Go API in Phase 3+)
-	KafkaBrokers      string        `envconfig:"KAFKA_BROKERS" default:"localhost:9092"`
-	KafkaDialTimeout  time.Duration `envconfig:"KAFKA_DIAL_TIMEOUT" default:"10s"`
-	KafkaReadTimeout  time.Duration `envconfig:"KAFKA_READ_TIMEOUT" default:"10s"`
-	KafkaWriteTimeout time.Duration `envconfig:"KAFKA_WRITE_TIMEOUT" default:"10s"`
 
 	// ClickHouse — native protocol (port 9000)
 	ClickHouseAddr     string        `envconfig:"CLICKHOUSE_ADDR" default:"localhost:9000"`
@@ -41,9 +34,6 @@ type Config struct {
 	EnrichmentInterval time.Duration `envconfig:"ENRICHMENT_INTERVAL" default:"5m"`
 	LivepeerAPIURL     string        `envconfig:"LIVEPEER_API_URL" default:"https://livepeer-api.livepeer.cloud"`
 
-	// Telemetry
-	OTLPEndpoint string `envconfig:"OTLP_ENDPOINT" default:""`
-
 	// Selection-centered resolver runtime
 	ResolverEnabled          bool          `envconfig:"RESOLVER_ENABLED" default:"false"`
 	ResolverMode             string        `envconfig:"RESOLVER_MODE" default:"auto"`
@@ -54,11 +44,6 @@ type Config struct {
 	ResolverPort             string        `envconfig:"RESOLVER_PORT" default:"9102"`
 	ResolverVersion          string        `envconfig:"RESOLVER_VERSION" default:"selection-centered-v1"`
 	ResolverBatchSize        int           `envconfig:"RESOLVER_BATCH_SIZE" default:"10000"`
-}
-
-// Brokers parses the KAFKA_BROKERS env var (comma-separated) into a slice.
-func (c *Config) Brokers() []string {
-	return strings.Split(c.KafkaBrokers, ",")
 }
 
 // IsDevelopment returns true when running in development mode.

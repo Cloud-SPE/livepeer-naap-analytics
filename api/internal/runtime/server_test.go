@@ -20,7 +20,7 @@ func newTestServer(tb testing.TB) *runtime.Server {
 
 func newTestServerWithRepo(tb testing.TB, analyticsRepo repo.AnalyticsRepo) *runtime.Server {
 	tb.Helper()
-	cfg := &config.Config{Port: "8000", Env: "development", LogLevel: "debug", KafkaBrokers: "localhost:9092"}
+	cfg := &config.Config{Port: "8000", Env: "development", LogLevel: "debug"}
 	p, err := providers.New(cfg)
 	if err != nil {
 		tb.Fatalf("init providers: %v", err)

@@ -26,9 +26,21 @@
       "includeVars": true,
       "keepTime": true,
       "targetBlank": false,
-      "title": "Overview",
+      "title": "Live AI Video",
       "type": "link",
       "url": "/d/naap-overview"
+    },
+    {
+      "asDropdown": false,
+      "icon": "dashboard",
+      "includeVars": true,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
+      "title": "Jobs",
+      "tooltip": "",
+      "type": "link",
+      "url": "/d/naap-jobs"
     },
     {
       "asDropdown": false,
@@ -36,7 +48,7 @@
       "includeVars": true,
       "keepTime": true,
       "targetBlank": false,
-      "title": "Live Ops",
+      "title": "AI Video Ops",
       "type": "link",
       "url": "/d/naap-live-operations"
     },
@@ -46,7 +58,7 @@
       "includeVars": true,
       "keepTime": true,
       "targetBlank": false,
-      "title": "Performance",
+      "title": "AI Video Perf",
       "type": "link",
       "url": "/d/naap-performance-drilldown"
     },
@@ -69,18 +81,6 @@
       "title": "Economics",
       "type": "link",
       "url": "/d/naap-economics"
-    },
-    {
-      "asDropdown": false,
-      "icon": "apps",
-      "includeVars": true,
-      "keepTime": true,
-      "tags": [],
-      "targetBlank": false,
-      "title": "Jobs",
-      "tooltip": "",
-      "type": "link",
-      "url": "/d/naap-jobs"
     }
   ],
   "panels": [
@@ -1209,7 +1209,7 @@
   },
   "timepicker": {},
   "timezone": "utc",
-  "title": "NaaP: Overview",
+  "title": "NaaP: Live AI Video",
   "uid": "naap-overview",
   "version": 1
 }

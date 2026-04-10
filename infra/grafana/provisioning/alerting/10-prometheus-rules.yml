@@ -1,0 +1,318 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: naap-prometheus-critical
+    folder: infra
+    interval: 1m
+    rules:
+      - uid: naap_scrape_target_down
+        title: NaapScrapeTargetDown
+        condition: B
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              datasource:
+                type: prometheus
+                uid: prometheus
+              editorMode: code
+              exemplar: false
+              expr: up{job=~"naap-api|resolver|clickhouse|kafka|node|node-infra2|cadvisor|cadvisor-infra2|prometheus"}
+              instant: true
+              intervalMs: 1000
+              legendFormat: __auto
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 0
+              to: 0
+            model:
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: $A < 1
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+              type: math
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 2m
+        annotations:
+          summary: '{{ if $labels.instance }}Scrape target down on {{$labels.instance}}{{ with $labels.job }} (job={{ . }}){{ end }}.{{ else }}A scraped NAAP component or host target is down.{{ end }}'
+          description: Prometheus reports one or more core NAAP scrape targets below 1.
+          runbook_url: https://github.com/Cloud-SPE/livepeer-naap-analytics/blob/main/docs/operations/operations-runbook.md
+        labels:
+          severity: critical
+          datasource: prometheus
+          component: observability
+          surface: system
+          pipeline_type: system
+      - uid: naap_host_disk_high
+        title: NaapHostDiskUsageHigh
+        condition: B
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 900
+              to: 0
+            model:
+              datasource:
+                type: prometheus
+                uid: prometheus
+              editorMode: code
+              exemplar: false
+              expr: |
+                (
+                  (
+                    node_filesystem_size_bytes{job=~"node|node-infra2", mountpoint="/", fstype!="rootfs"}
+                    - node_filesystem_avail_bytes{job=~"node|node-infra2", mountpoint="/", fstype!="rootfs"}
+                  )
+                  / node_filesystem_size_bytes{job=~"node|node-infra2", mountpoint="/", fstype!="rootfs"}
+                ) * 100
+              instant: true
+              intervalMs: 1000
+              legendFormat: __auto
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 0
+              to: 0
+            model:
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: $A > 85
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+              type: math
+        noDataState: OK
+        execErrState: Alerting
+        for: 15m
+        annotations:
+          summary: '{{ if $labels.instance }}Root filesystem usage is high on {{$labels.instance}}.{{ else }}Root filesystem usage is high on a monitored NAAP host.{{ end }}'
+          description: Root filesystem usage has remained above 85 percent for 15 minutes.
+          runbook_url: https://github.com/Cloud-SPE/livepeer-naap-analytics/blob/main/docs/operations/operations-runbook.md
+        labels:
+          severity: critical
+          datasource: prometheus
+          component: host
+          surface: system
+          pipeline_type: system
+      - uid: naap_api_5xx_ratio_high
+        title: NaapApi5xxRatioHigh
+        condition: B
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              datasource:
+                type: prometheus
+                uid: prometheus
+              editorMode: code
+              exemplar: false
+              expr: |
+                sum(rate(http_requests_total{route!="/metrics",route!="/healthz",status=~"5.."}[5m]))
+                /
+                clamp_min(sum(rate(http_requests_total{route!="/metrics",route!="/healthz"}[5m])), 0.1)
+              instant: true
+              intervalMs: 1000
+              legendFormat: __auto
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 0
+              to: 0
+            model:
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: $A > 0.05
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+              type: math
+        noDataState: OK
+        execErrState: Alerting
+        for: 10m
+        annotations:
+          summary: API 5xx error ratio is elevated.
+          description: API responses have exceeded a 5 percent 5xx ratio for 10 minutes.
+          runbook_url: https://github.com/Cloud-SPE/livepeer-naap-analytics/blob/main/docs/operations/operations-runbook.md
+        labels:
+          severity: degraded
+          datasource: prometheus
+          component: api
+          surface: serving
+          pipeline_type: system
+      - uid: naap_api_latency_high
+        title: NaapApiLatencyHigh
+        condition: B
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              datasource:
+                type: prometheus
+                uid: prometheus
+              editorMode: code
+              exemplar: false
+              expr: |
+                histogram_quantile(
+                  0.99,
+                  sum by (le) (
+                    rate(http_request_duration_seconds_bucket{route!="/metrics",route!="/healthz"}[5m])
+                  )
+                )
+              instant: true
+              intervalMs: 1000
+              legendFormat: __auto
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 0
+              to: 0
+            model:
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: $A > 0.5
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+              type: math
+        noDataState: OK
+        execErrState: Alerting
+        for: 10m
+        annotations:
+          summary: API p99 latency is elevated.
+          description: The API p99 latency has remained above 500ms for 10 minutes.
+          runbook_url: https://github.com/Cloud-SPE/livepeer-naap-analytics/blob/main/docs/operations/operations-runbook.md
+        labels:
+          severity: degraded
+          datasource: prometheus
+          component: api
+          surface: serving
+          pipeline_type: system
+      - uid: naap_kafka_lag_high
+        title: NaapKafkaConsumerLagHigh
+        condition: B
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 900
+              to: 0
+            model:
+              datasource:
+                type: prometheus
+                uid: prometheus
+              editorMode: code
+              exemplar: false
+              expr: max by (consumergroup, topic) (kafka_consumergroup_lag{consumergroup=~"clickhouse-naap-(network|streaming)",topic=~"network_events|streaming_events"})
+              instant: true
+              intervalMs: 1000
+              legendFormat: __auto
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 0
+              to: 0
+            model:
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: $A > 50000
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+              type: math
+        noDataState: OK
+        execErrState: Alerting
+        for: 15m
+        annotations:
+          summary: '{{ if $labels.consumergroup }}Kafka consumer lag is elevated for {{$labels.consumergroup}}{{ with $labels.topic }} on {{ . }}{{ end }}.{{ else }}Kafka consumer lag is elevated for a ClickHouse consumer group.{{ end }}'
+          description: ClickHouse consumer lag has exceeded 50,000 messages for 15 minutes.
+          runbook_url: https://github.com/Cloud-SPE/livepeer-naap-analytics/blob/main/docs/operations/operations-runbook.md
+        labels:
+          severity: critical
+          datasource: prometheus
+          component: kafka
+          surface: ingest
+          pipeline_type: system
+      - uid: naap_resolver_claim_conflicts
+        title: NaapResolverClaimConflictsHigh
+        condition: B
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 900
+              to: 0
+            model:
+              datasource:
+                type: prometheus
+                uid: prometheus
+              editorMode: code
+              exemplar: false
+              expr: increase(resolver_claim_conflicts_total[15m])
+              instant: true
+              intervalMs: 1000
+              legendFormat: __auto
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 0
+              to: 0
+            model:
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: $A > 3
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+              type: math
+        noDataState: OK
+        execErrState: Alerting
+        for: 0s
+        annotations:
+          summary: Resolver claim conflicts are spiking.
+          description: Resolver window claims have conflicted more than three times over the last 15 minutes.
+          runbook_url: https://github.com/Cloud-SPE/livepeer-naap-analytics/blob/main/docs/operations/run-modes-and-recovery.md
+        labels:
+          severity: degraded
+          datasource: prometheus
+          component: resolver
+          surface: streaming
+          pipeline_type: streaming

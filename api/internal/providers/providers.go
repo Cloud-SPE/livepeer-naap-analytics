@@ -15,7 +15,6 @@ import (
 // Providers bundles all cross-cutting dependencies.
 type Providers struct {
 	Logger *zap.Logger
-	// Tracer go.opentelemetry.io/otel/trace.Tracer  — add when OTLP endpoint is configured
 }
 
 // New constructs and initialises all providers from configuration.

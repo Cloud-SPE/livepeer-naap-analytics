@@ -44,6 +44,10 @@ Response times apply from the moment the incident is detected or reported, which
 1. Post in **`#naap-incidents`** (or equivalent incident channel — _update with actual channel_): `🚨 Incident declared: [brief description] — Severity: P[N]`
 2. Assign an **incident commander** — the person leading coordination. For P0/P1 this is the on-call engineer.
 3. Open an incident thread or document to track timeline, actions taken, and status updates.
+4. If the incident started from Grafana alerting, copy the alert title plus the
+   contextual labels (`component`, `surface`, `pipeline_type`, and any
+   `job_type`, `pipeline_id`, `gateway`, `topic`, or `consumergroup`) into the
+   incident record before silencing or acknowledging it.
 
 ### Communication cadence
 
@@ -122,6 +126,11 @@ docker logs naap-traefik 2>&1 | grep -i error | tail -10
 ```
 
 **Next step:** Based on which check fails, go to the relevant section in [`operations-runbook.md`](operations-runbook.md) §4 Troubleshooting.
+
+If Grafana is reachable, also inspect the `infra` folder first. The
+provisioned rules separate infrastructure, request/response, and streaming
+surfaces so the alert labels usually identify the failing component before you
+start shell access.
 
 ---
 

@@ -24,8 +24,10 @@ echo "[prep] Creating directory tree..."
 mkdir -p \
   "${NAAP_DIR}/kafka/config" \
   "${NAAP_DIR}/prometheus" \
+  "${NAAP_DIR}/grafana/provisioning/alerting" \
   "${NAAP_DIR}/grafana/provisioning/datasources" \
   "${NAAP_DIR}/grafana/provisioning/dashboards" \
+  "${NAAP_DIR}/grafana/scripts" \
   "${NAAP_DIR}/grafana/dashboards/infra"
 
 # ── Kafka JAAS config ─────────────────────────────────────────────────────────
@@ -40,14 +42,20 @@ cp "${REPO_ROOT}/deploy/infra2/prometheus/prometheus.yml" \
 
 # ── Grafana provisioning ───────────────────────────────────────────────────────
 echo "[prep] Copying Grafana datasource provisioning..."
-cp "${REPO_ROOT}/deploy/infra2/grafana/provisioning/datasources/prometheus.yml" \
+cp "${REPO_ROOT}/infra/grafana/provisioning/datasources/prometheus.yml" \
    "${NAAP_DIR}/grafana/provisioning/datasources/prometheus.yml"
-cp "${REPO_ROOT}/deploy/infra2/grafana/provisioning/datasources/clickhouse.yml" \
+cp "${REPO_ROOT}/infra/grafana/provisioning/datasources/clickhouse.yml" \
    "${NAAP_DIR}/grafana/provisioning/datasources/clickhouse.yml"
 
 echo "[prep] Copying Grafana dashboard provider config..."
-cp "${REPO_ROOT}/deploy/infra2/grafana/provisioning/dashboards/provider.yml" \
+cp "${REPO_ROOT}/infra/grafana/provisioning/dashboards/provider.yml" \
    "${NAAP_DIR}/grafana/provisioning/dashboards/provider.yml"
+
+echo "[prep] Copying Grafana alerting provisioning..."
+cp "${REPO_ROOT}/infra/grafana/provisioning/alerting/"*.yml \
+   "${NAAP_DIR}/grafana/provisioning/alerting/"
+cp "${REPO_ROOT}/infra/grafana/scripts/render-provisioning.sh" \
+   "${NAAP_DIR}/grafana/scripts/render-provisioning.sh"
 
 # ── Grafana dashboards ─────────────────────────────────────────────────────────
 echo "[prep] Copying NAAP dashboards..."

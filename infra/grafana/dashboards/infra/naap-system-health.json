@@ -13,7 +13,7 @@
       "includeVars": true,
       "keepTime": true,
       "targetBlank": false,
-      "title": "Overview",
+      "title": "Live AI Video",
       "type": "link",
       "url": "/d/naap-overview"
     },
@@ -23,7 +23,7 @@
       "includeVars": true,
       "keepTime": true,
       "targetBlank": false,
-      "title": "Live Ops",
+      "title": "AI Video Ops",
       "type": "link",
       "url": "/d/naap-live-operations"
     },
@@ -43,7 +43,7 @@
       "includeVars": true,
       "keepTime": true,
       "targetBlank": false,
-      "title": "Performance",
+      "title": "AI Video Perf",
       "type": "link",
       "url": "/d/naap-performance-drilldown"
     }
@@ -1232,6 +1232,241 @@
         },
         "overrides": []
       }
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 43
+      },
+      "id": 19,
+      "panels": [],
+      "title": "Alerting Signals",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "description": "Alert signal for NaapRequestResponseDuplicateRowsPresent. Fires when duplicate canonical job rows are present in the last 24 hours.",
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 44
+      },
+      "id": 20,
+      "options": {
+        "showHeader": true,
+        "sortBy": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 2,
+          "queryType": "sql",
+          "rawSql": "SELECT job_type, duplicate_rows FROM (SELECT 'ai-batch' AS job_type, greatest(toInt64(count()) - toInt64(uniqExact(request_id)), 0) AS duplicate_rows FROM naap.canonical_ai_batch_jobs WHERE $__timeFilter(completed_at) UNION ALL SELECT 'byoc' AS job_type, greatest(toInt64(count()) - toInt64(uniqExact(request_id)), 0) AS duplicate_rows FROM naap.canonical_byoc_jobs WHERE $__timeFilter(completed_at)) ORDER BY duplicate_rows DESC, job_type",
+          "refId": "A"
+        }
+      ],
+      "title": "Request/Response Duplicate Rows",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "description": "Alert signal for NaapRequestResponseCanonicalCoverageLow. Fires when canonical request-response job coverage falls below 98 percent after the 20-source-job guard.",
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 44
+      },
+      "id": 21,
+      "options": {
+        "showHeader": true,
+        "sortBy": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 2,
+          "queryType": "sql",
+          "rawSql": "WITH source_counts AS (\n  SELECT 'ai-batch' AS job_type, count() AS source_jobs\n  FROM naap.normalized_ai_batch_job FINAL\n  WHERE subtype = 'ai_batch_request_completed'\n    AND request_id != ''\n    AND event_ts >= now() - INTERVAL 6 HOUR\n  UNION ALL\n  SELECT 'byoc' AS job_type, count() AS source_jobs\n  FROM naap.normalized_byoc_job FINAL\n  WHERE subtype = 'job_gateway_completed'\n    AND event_ts >= now() - INTERVAL 6 HOUR\n), canonical_counts AS (\n  SELECT 'ai-batch' AS job_type, count() AS canonical_jobs\n  FROM naap.canonical_ai_batch_jobs\n  WHERE completed_at >= now() - INTERVAL 6 HOUR\n  UNION ALL\n  SELECT 'byoc' AS job_type, count() AS canonical_jobs\n  FROM naap.canonical_byoc_jobs\n  WHERE completed_at >= now() - INTERVAL 6 HOUR\n)\nSELECT s.job_type, s.source_jobs, ifNull(c.canonical_jobs, 0) AS canonical_jobs,\n  round(ifNull(c.canonical_jobs, 0) * 100.0 / nullIf(toFloat64(s.source_jobs), 0), 2) AS coverage_pct\nFROM source_counts s\nLEFT JOIN canonical_counts c ON s.job_type = c.job_type\nWHERE s.source_jobs >= 20\nORDER BY coverage_pct ASC, s.job_type",
+          "refId": "A"
+        }
+      ],
+      "title": "Request/Response Canonical Coverage",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "description": "Alert signal for NaapRequestResponseDensityCollapse. Fires when the previous full hour falls below 20 percent of the trailing 24 hour median hourly job count for a job_type and pipeline_id pair.",
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 44
+      },
+      "id": 22,
+      "options": {
+        "showHeader": true,
+        "sortBy": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 2,
+          "queryType": "sql",
+          "rawSql": "WITH current_bucket AS (\n  SELECT toStartOfHour(now()) - INTERVAL 1 HOUR AS window_start\n), current_counts AS (\n  SELECT job_type, pipeline_id, sum(job_count) AS current_jobs\n  FROM naap.api_unified_demand\n  WHERE window_start = (SELECT window_start FROM current_bucket)\n  GROUP BY job_type, pipeline_id\n), historical_counts AS (\n  SELECT job_type, pipeline_id, window_start, sum(job_count) AS hourly_jobs\n  FROM naap.api_unified_demand\n  WHERE window_start >= (SELECT window_start FROM current_bucket) - INTERVAL 24 HOUR\n    AND window_start < (SELECT window_start FROM current_bucket)\n  GROUP BY job_type, pipeline_id, window_start\n), baselines AS (\n  SELECT job_type, pipeline_id, quantileExact(0.5)(hourly_jobs) AS baseline_jobs\n  FROM historical_counts\n  GROUP BY job_type, pipeline_id\n)\nSELECT b.job_type, b.pipeline_id, ifNull(c.current_jobs, 0) AS current_jobs, b.baseline_jobs,\n  round(ifNull(c.current_jobs, 0) * 100.0 / nullIf(toFloat64(b.baseline_jobs), 0), 2) AS density_pct\nFROM baselines b\nLEFT JOIN current_counts c ON c.job_type = b.job_type AND c.pipeline_id = b.pipeline_id\nWHERE b.baseline_jobs >= 20\nORDER BY density_pct ASC, b.job_type, b.pipeline_id\nLIMIT 50",
+          "refId": "A"
+        }
+      ],
+      "title": "Request/Response Density Collapse Watch",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "description": "Alert signal for NaapStreamingHealthSignalCoverageLow. Fires when the previous published hour falls below 60 percent health-signal coverage after the 50-requested-session guard.",
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 52
+      },
+      "id": 23,
+      "options": {
+        "showHeader": true,
+        "sortBy": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "WITH current_bucket AS (\n  SELECT toStartOfHour(now()) - INTERVAL 1 HOUR AS window_start\n)\nSELECT pipeline_id AS \"Pipeline\",\n  sum(requested_sessions) AS \"Requested Sessions\",\n  round(if(sum(health_expected_signal_count) = 0,\n    1.0,\n    sum(health_signal_count) / toFloat64(sum(health_expected_signal_count))\n  ) * 100, 2) AS \"Coverage %\"\nFROM naap.api_network_demand\nWHERE window_start = (SELECT window_start FROM current_bucket)\n  AND pipeline_id != ''\nGROUP BY pipeline_id\nHAVING sum(requested_sessions) >= 50\nORDER BY \"Coverage %\" ASC, \"Pipeline\"",
+          "refId": "A"
+        }
+      ],
+      "title": "Streaming Health-Signal Coverage",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "description": "Alert signal for NaapStreamingUnservedDemandHigh. Fires when the previous published hour exceeds a 40 percent effective failure rate for a gateway and pipeline pair after the 50-requested-session guard.",
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 52
+      },
+      "id": 24,
+      "options": {
+        "showHeader": true,
+        "sortBy": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "WITH current_bucket AS (\n  SELECT toStartOfHour(now()) - INTERVAL 1 HOUR AS window_start\n)\nSELECT gateway_label AS \"Gateway\",\n  pipeline_id AS \"Pipeline\",\n  sum(requested_sessions) AS \"Requested Sessions\",\n  sum(effective_failed_sessions) AS \"Unserved Sessions\",\n  round(sum(effective_failed_sessions) * 100.0 / nullIf(toFloat64(sum(requested_sessions)), 0), 2) AS \"Unserved %\"\nFROM (\n  SELECT ifNull(nullIf(gateway, ''), 'unattributed_gateway') AS gateway_label,\n    pipeline_id,\n    requested_sessions,\n    effective_failed_sessions\n  FROM naap.api_network_demand_by_org\n  WHERE window_start = (SELECT window_start FROM current_bucket)\n    AND pipeline_id != ''\n)\nGROUP BY gateway_label, pipeline_id\nHAVING sum(requested_sessions) >= 50\nORDER BY \"Unserved %\" DESC, \"Requested Sessions\" DESC\nLIMIT 25",
+          "refId": "A"
+        }
+      ],
+      "title": "Streaming Unserved Demand Rate",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "description": "Alert signal for NaapStreamingDemandDensityCollapse. Fires when the previous full hour falls below 20 percent of the trailing 24 hour median hourly requested-session count for a pipeline.",
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 52
+      },
+      "id": 25,
+      "options": {
+        "showHeader": true,
+        "sortBy": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "WITH current_bucket AS (\n  SELECT toStartOfHour(now()) - INTERVAL 1 HOUR AS window_start\n), current_counts AS (\n  SELECT pipeline_id, sum(requested_sessions) AS current_requested\n  FROM naap.api_network_demand\n  WHERE window_start = (SELECT window_start FROM current_bucket)\n    AND pipeline_id != ''\n  GROUP BY pipeline_id\n), historical_counts AS (\n  SELECT pipeline_id, window_start, sum(requested_sessions) AS hourly_requested\n  FROM naap.api_network_demand\n  WHERE window_start >= (SELECT window_start FROM current_bucket) - INTERVAL 24 HOUR\n    AND window_start < (SELECT window_start FROM current_bucket)\n    AND pipeline_id != ''\n  GROUP BY pipeline_id, window_start\n), baselines AS (\n  SELECT pipeline_id, quantileExact(0.5)(hourly_requested) AS baseline_requested\n  FROM historical_counts\n  GROUP BY pipeline_id\n)\nSELECT b.pipeline_id AS \"Pipeline\", ifNull(c.current_requested, 0) AS \"Current Requested\",\n  b.baseline_requested AS \"Baseline Requested\",\n  round(ifNull(c.current_requested, 0) * 100.0 / nullIf(toFloat64(b.baseline_requested), 0), 2) AS \"Density %\"\nFROM baselines b\nLEFT JOIN current_counts c ON c.pipeline_id = b.pipeline_id\nWHERE b.baseline_requested >= 50\nORDER BY \"Density %\" ASC, \"Pipeline\"\nLIMIT 25",
+          "refId": "A"
+        }
+      ],
+      "title": "Streaming Demand Density",
+      "type": "table"
     }
   ],
   "refresh": "1m",

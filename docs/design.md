@@ -26,11 +26,17 @@ Top-level architecture map for Livepeer NAAP Analytics.
   Observability
   ─────────────────────────────────────────────────────────────────────────────
   Go API :8000/metrics           ──scrape──► Prometheus :9090 ──► Grafana :3000
-  Resolver :9101/metrics          ──scrape──► Prometheus               │
+  Resolver :9102/metrics          ──scrape──► Prometheus               │
   ClickHouse :9363               ──scrape──► Prometheus               │
   Kafka exporter :9308           ──scrape──► Prometheus               │
   naap.* tables         ◄──query───────────────────────────────
 ```
+
+Grafana dashboards and alert rules are provisioned from the repository under
+`infra/grafana/provisioning/` and `infra/grafana/dashboards/`. Alert routing is
+managed in Grafana rather than Prometheus Alertmanager, and Grafana startup now
+renders and validates alerting receivers from explicit env flags so enabled
+channels fail fast when misconfigured.
 
 **Ingest path:** Two Kafka topics are consumed directly by ClickHouse via the Kafka Engine.
 No application-layer consumer sits between Kafka and ClickHouse.

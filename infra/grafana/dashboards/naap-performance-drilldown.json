@@ -15,7 +15,7 @@
       }
     ]
   },
-  "description": "Canonical performance dashboard. Queries api_* serving views for product/performance analysis; live operational telemetry belongs on the Live Ops dashboard via operational_* surfaces.",
+  "description": "Live AI video performance dashboard. Queries api_* serving views for product/performance analysis; live operational telemetry belongs on the Live AI Video Operations dashboard via operational_* surfaces.",
   "editable": true,
   "graphTooltip": 0,
   "id": null,
@@ -26,9 +26,21 @@
       "includeVars": true,
       "keepTime": true,
       "targetBlank": false,
-      "title": "Overview",
+      "title": "Live AI Video",
       "type": "link",
       "url": "/d/naap-overview"
+    },
+    {
+      "asDropdown": false,
+      "icon": "dashboard",
+      "includeVars": true,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
+      "title": "Jobs",
+      "tooltip": "",
+      "type": "link",
+      "url": "/d/naap-jobs"
     },
     {
       "asDropdown": false,
@@ -36,7 +48,7 @@
       "includeVars": true,
       "keepTime": true,
       "targetBlank": false,
-      "title": "Live Ops",
+      "title": "AI Video Ops",
       "type": "link",
       "url": "/d/naap-live-operations"
     },
@@ -46,7 +58,7 @@
       "includeVars": true,
       "keepTime": true,
       "targetBlank": false,
-      "title": "Performance",
+      "title": "AI Video Perf",
       "type": "link",
       "url": "/d/naap-performance-drilldown"
     },
@@ -69,18 +81,6 @@
       "title": "Economics",
       "type": "link",
       "url": "/d/naap-economics"
-    },
-    {
-      "asDropdown": false,
-      "icon": "apps",
-      "includeVars": true,
-      "keepTime": true,
-      "tags": [],
-      "targetBlank": false,
-      "title": "Jobs",
-      "tooltip": "",
-      "type": "link",
-      "url": "/d/naap-jobs"
     }
   ],
   "panels": [
@@ -728,7 +728,7 @@
   },
   "timepicker": {},
   "timezone": "utc",
-  "title": "NaaP: Performance Drilldown",
+  "title": "NaaP: Live AI Video Performance",
   "uid": "naap-performance-drilldown",
   "version": 1
 }

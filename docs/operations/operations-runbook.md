@@ -124,7 +124,9 @@ make warehouse-run
 [ ] SELECT count() FROM system.kafka_consumers — returns 2 active consumers
 [ ] SELECT count() FROM naap.accepted_raw_events — growing over time
 [ ] curl https://naap-api.livepeer.cloud/healthz — 200 OK
-[ ] Grafana dashboards loading — naap-overview shows data
+[ ] Grafana dashboards loading — `naap-overview` (NaaP: Live AI Video) and `infra/naap-system-health` show data
+[ ] Grafana alert rules present — `infra` folder loads without provisioning errors
+[ ] Grafana contact points — enabled receivers resolve without missing env vars
 [ ] Kafka UI — naap cluster shows connected, consumer groups visible
 [ ] MM2 logs — "Successfully joined group", no SASL errors
 ```
@@ -177,23 +179,61 @@ docker logs -f --tail 200 naap-mm2-daydream
 
 ## 3. Alerting
 
-**Current state:** No Prometheus alert rules are configured. The `rule_files` path in `infra/prometheus/prometheus.yml` is set but the directory is empty. Operators must monitor dashboards manually.
+Grafana-managed alerting is provisioned from `infra/grafana/provisioning/alerting/`.
+Prometheus remains a datasource only; the repository does not use a separate
+Alertmanager path.
 
-### Recommended alerts
+### Provisioned alert families
 
-Add rules to `infra/prometheus/alerts/naap-critical.yml` (path already configured):
+| Surface | Alert family | Condition | Severity | Action |
+|---|---|---|---|---|
+| System | `NaapScrapeTargetDown` | Core scrape target `< 1` for 2m | `critical` | Check service/container health and Prometheus targets |
+| System | `NaapHostDiskUsageHigh` | Root disk usage `> 85%` for 15m | `critical` | Check host pressure and clear space before ClickHouse degrades |
+| System | `NaapApi5xxRatioHigh` | API 5xx ratio `> 5%` for 10m | `degraded` | Check API logs and ClickHouse latency |
+| System | `NaapApiLatencyHigh` | API p99 latency `> 500ms` for 10m | `degraded` | See §4.2 |
+| System | `NaapKafkaConsumerLagHigh` | Kafka lag `> 50,000` for 15m | `critical` | See §4.1 |
+| System | `NaapResolverClaimConflictsHigh` | Resolver claim conflicts `> 3` over 15m | `warning` | Inspect resolver ownership churn |
+| System | `NaapAcceptedRawFreshnessStale` | accepted raw freshness `> 300s` for 5m | `critical` | Check ingest path end to end |
+| System | `NaapDirtyScanLagHigh` | resolver watermark lag `> 300s` for 10m | `critical` | See `run-modes-and-recovery.md` |
+| System | `NaapDirtyHistoricalQueueBacklog` | pending dirty partitions `> 25` for 15m | `degraded` | See `run-modes-and-recovery.md` |
+| Streaming | `NaapStreamingAttributionRateLow` | attribution rate `< 75%` after 500-sample guard | `warning` | Check attribution inputs and resolver freshness |
+| Request / response | `NaapRequestResponseDuplicateRowsPresent` | duplicate canonical job rows `> 0` | `critical` | Check canonical job uniqueness and resolver publication |
+| Request / response | `NaapRequestResponseCanonicalCoverageLow` | canonical coverage `< 98%` after 20-source-job guard | `critical` | Check normalized vs canonical job publication |
+| Request / response | `NaapRequestResponseDensityCollapse` | previous full hour `< 20%` of trailing 24h median hourly job count | `degraded` | Check ingest, resolver, and source traffic |
+| Streaming | `NaapStreamingHealthSignalCoverageLow` | previous published hour `< 60%` coverage after 50-session guard | `degraded` | Check health sample publication |
+| Streaming | `NaapStreamingUnservedDemandHigh` | previous published hour `> 40%` effective failure rate after 50-session guard | `critical` | Check gateway + pipeline capacity and failures |
+| Streaming | `NaapStreamingDemandDensityCollapse` | previous full hour `< 20%` of trailing 24h median requested-session count | `degraded` | Check source traffic and ingest freshness |
 
-| Alert name | Condition | Severity | Action |
-|---|---|---|---|
-| `NaapClickhouseIngestStalled` | `accepted_raw_events` insert rate = 0 for > 5m | P1 | See §5.1 |
-| `NaapKafkaConsumerLagGrowing` | `clickhouse-naap-*` consumer lag > 50 000 and increasing | P1 | See §5.1 |
-| `NaapResolverDirtyPartitionsStuck` | dirty partition count unchanged for > 30m | P2 | See `run-modes-and-recovery.md` |
-| `NaapApiLatencyHigh` | API p99 latency > 500ms for > 5m | P2 | Check ClickHouse query performance §5.2 |
-| `NaapKafkaBrokerDown` | Kafka broker health check failing | P0 | Escalate immediately — see `incident-response.md` |
-| `NaapDlqSpiking` | `ignored_raw_events` insert rate > 5× baseline for > 10m | P2 | See §5.4 |
-| `NaapDiskUsageHigh` | Host disk usage > 80% on infra1 or infra2 | P1 | Check ClickHouse volume, clear old backups |
+### Notification routing
 
-For alert notification routing, configure Prometheus Alertmanager or Grafana alert contact points (not yet provisioned).
+| Severity | Delivery |
+|---|---|
+| `warning`, `degraded` | Default warning receiver for the enabled channels |
+| `critical`, `page-now` | Enabled critical channels; Discord + Telegram only when both are enabled |
+
+Grafana startup validates the explicit alerting config before it loads
+provisioning:
+
+- `GRAFANA_ALERTING_ENABLED=false` disables alerting intentionally.
+- If alerting is enabled, at least one delivery channel must be enabled.
+- If Discord is enabled, `GRAFANA_ALERT_DISCORD_WEBHOOK_URL` must be set.
+- If Telegram is enabled, both `GRAFANA_ALERT_TELEGRAM_BOT_TOKEN` and `GRAFANA_ALERT_TELEGRAM_CHAT_ID` must be set.
+- Set `GRAFANA_PUBLIC_URL=https://grafana.livepeer.cloud/` in deployed Grafana so alert links resolve to the public dashboard host instead of an internal container address.
+
+### Notification content
+
+The shared alert template is intentionally short:
+
+- The title carries severity plus the alert summary.
+- The body leads with the summary, then promotes a single `Target:` line before any lower-signal metadata.
+- `Observed:` should name the concrete instance, pipeline, or consumer group that needs investigation.
+- Multi-dimensional alerts are grouped by concrete source labels such as `instance`, `job`, `topic`, `consumergroup`, `pipeline_id`, and `gateway` so different failing targets do not collapse into one vague notification.
+- `Grafana:` links come from Grafana's configured root URL, so wrong `GRAFANA_PUBLIC_URL` values will produce wrong alert links.
+- Enabled-but-missing secrets are treated as startup errors, not silent channel skips.
+
+Alert messages must include the Grafana labels that identify the failing
+surface, including `component`, `surface`, `pipeline_type`, and where relevant
+`job_type`, `pipeline_id`, `gateway`, `topic`, or `consumergroup`.
 
 ---
 
@@ -233,7 +273,7 @@ docker exec naap-kafka /opt/kafka/bin/kafka-consumer-groups.sh \
 
 ### 4.2 ClickHouse query performance
 
-**Symptoms:** API p99 latency spike visible in `naap-overview` dashboard; `clickhouse-overview` shows high query duration.
+**Symptoms:** API p99 latency spike visible in `infra/naap-system-health`; `clickhouse-overview` shows high query duration.
 
 **Diagnose:**
 ```sql
@@ -421,12 +461,15 @@ make migrate-status   # all migrations should still show applied
 make test-validation-clean
 ```
 
-### 5.4 Updating Grafana dashboards (hot-reload, no restart)
+### 5.4 Updating Grafana dashboards and alerting (hot-reload, no restart)
 
 ```bash
-# Edit dashboard JSON in infra/grafana/dashboards/
-# Then copy to server — Grafana reloads provisioned dashboards every 30 seconds
+# Edit repo-managed dashboard JSON or alert provisioning in:
+#   infra/grafana/dashboards/
+#   infra/grafana/provisioning/alerting/
+# Then copy to server — Grafana reloads provisioned files every 30 seconds
 rsync -av infra/grafana/dashboards/ user@infra1:/opt/naap/grafana/dashboards/
+rsync -av infra/grafana/provisioning/alerting/ user@infra1:/opt/naap/grafana/provisioning/alerting/
 ```
 
 ### 5.5 Adding or rotating SCRAM users
@@ -459,6 +502,8 @@ docker exec naap-kafka /opt/kafka/bin/kafka-topics.sh \
 | `naap_v3_kafka_data` (event data) | 7-day event buffer | Low | Ephemeral — events beyond Kafka retention are in ClickHouse |
 
 ClickHouse table DDL (`infra/clickhouse/bootstrap/v1.sql`) and Grafana dashboards (`infra/grafana/dashboards/`) are version-controlled in git and do not need volume backups.
+Grafana alert rules, contact points, templates, and notification policies are
+also version-controlled in `infra/grafana/provisioning/alerting/`.
 
 ### ClickHouse data backup
 

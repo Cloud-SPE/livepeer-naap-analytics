@@ -18,18 +18,21 @@ Related docs:
 
 ## 1. Monitoring the System
 
-### Grafana dashboards
+### Grafana dashboards and alerting
 
-Grafana runs on port 3000 (local) or via Traefik HTTPS (production). Dashboards are provisioned from `infra/grafana/dashboards/`.
+Grafana runs on port 3000 (local) or via Traefik HTTPS (production). Dashboards
+are provisioned from `infra/grafana/dashboards/` and alerting is provisioned
+from `infra/grafana/provisioning/alerting/`. The repository is the source of
+truth for dashboards, contact points, notification policies, and alert rules.
 
 **Application dashboards** — check these first when investigating a business-level issue:
 
 | Dashboard | Purpose | When to use |
 |---|---|---|
-| `naap-overview` | System health at a glance: event rates, resolver lag, API latency | Daily health check, first stop in any incident |
-| `naap-live-operations` | Real-time stream activity: active sessions, encoder counts | Active stream investigations |
+| `naap-overview` | Live AI video overview: active sessions, GPU supply, latency, and demand | First stop for live AI video investigations |
+| `naap-live-operations` | Live AI video operational state: stream activity, pipeline paths, and telemetry freshness | Active live AI video investigations |
 | `naap-economics` | Payments and revenue metrics by org | Billing queries, economics anomalies |
-| `naap-performance-drilldown` | FPS, latency, WebRTC metrics per orch | Quality degradation investigations |
+| `naap-performance-drilldown` | Live AI video FPS, latency, and WebRTC quality by orch and pipeline | Live AI video quality degradation investigations |
 | `naap-supply-inventory` | GPU supply and capacity by org | Capacity planning, supply gaps |
 | `naap-jobs` | AI-batch / BYOC job volume, SLA, attribution, and integrity | Request-response job investigations, duplicate or coverage checks |
 
@@ -37,12 +40,33 @@ Grafana runs on port 3000 (local) or via Traefik HTTPS (production). Dashboards 
 
 | Dashboard | Purpose | When to use |
 |---|---|---|
-| `infra/naap-system-health` | Service availability overview | Any service degradation |
+| `infra/naap-system-health` | Service availability and alert-backed anomaly signals | Any service degradation or alert triage |
 | `infra/clickhouse-overview` | ClickHouse query load, merge activity, insert rates | Slow queries, ClickHouse memory/CPU pressure |
 | `infra/kafka-exporter-overview` | Topic lag, consumer group status, broker metrics | Consumer falling behind, Kafka errors |
 | `infra/cadvisor-docker` | Container CPU, memory, and network I/O | Container resource exhaustion |
 | `infra/node-exporter-full` | Host CPU, memory, disk, network | Host-level resource issues |
 | `infra/prometheus-overview` | Prometheus internal health and scrape status | Missing metrics, scrape failures |
+
+### Alert routing
+
+Grafana-managed alerting is grouped into three operator surfaces:
+
+| Surface | Datasource | Examples |
+|---|---|---|
+| Infrastructure / system | Prometheus + ClickHouse | scrape target down, disk high, raw freshness stale, dirty queue backlog |
+| Request / response | ClickHouse | duplicate canonical rows, canonical coverage low, demand density collapse |
+| Streaming / live video | ClickHouse | health-signal coverage low, unserved demand high, demand density collapse |
+
+Notification routing is severity-based and intentionally excludes email:
+
+| Severity | Delivery |
+|---|---|
+| `warning`, `degraded` | Default warning receiver for the enabled channels |
+| `critical`, `page-now` | Enabled critical channels; Discord + Telegram only when both are explicitly enabled |
+
+Every alert message is expected to include the contextual labels exported by the
+rule, including `component`, `surface`, `pipeline_type`, and when present
+`job_type`, `pipeline_id`, `gateway`, or `orchestrator_uri`.
 
 ### Key metrics to watch
 
@@ -50,8 +74,8 @@ Grafana runs on port 3000 (local) or via Traefik HTTPS (production). Dashboards 
 |---|---|---|---|
 | ClickHouse insert rate | `clickhouse-overview` | Consistent, matches Kafka produce rate | Drops to 0 — Kafka engine stalled |
 | Consumer group lag | `kafka-exporter-overview` | Near 0 for `clickhouse-naap-*` groups | Growing lag — ClickHouse falling behind |
-| Resolver dirty partitions | `naap-overview` | Drains to 0 over time | Stuck at non-zero — resolver blocked |
-| API p99 latency | `naap-overview` | < 100ms | Spikes > 500ms |
+| Resolver dirty partitions | `infra/naap-system-health` | Drains to 0 over time | Stuck at non-zero — resolver blocked |
+| API p99 latency | `infra/naap-system-health` | < 100ms | Spikes > 500ms |
 | `accepted_raw_events` insert rate | `clickhouse-overview` | Matches raw Kafka produce rate | Zero — ingest pipeline stalled |
 
 ### Accessing Prometheus
@@ -168,7 +192,13 @@ curl -s http://localhost:8000/v1/jobs/sla?limit=5
 | `ENV` | `development` | |
 | `LOG_LEVEL` | `debug` | |
 | `ENRICHMENT_ENABLED` | `true` | Periodically enriches orch/gateway metadata from Livepeer API |
-| `DBT_CRON_SCHEDULE` | `*/5 * * * *` | How often warehouse-init republishes semantic views |
+| `GRAFANA_ALERTING_ENABLED` | `false` | Enables repo-managed Grafana alerting at startup |
+| `GRAFANA_PUBLIC_URL` | `http://localhost:3000/` | Base URL Grafana uses when alert bodies include links back to dashboards and rules |
+| `GRAFANA_ALERT_DISCORD_ENABLED` | `false` | Enables Discord delivery; requires a webhook when true |
+| `GRAFANA_ALERT_DISCORD_WEBHOOK_URL` | _(empty)_ | Required when Discord delivery is enabled |
+| `GRAFANA_ALERT_TELEGRAM_ENABLED` | `false` | Enables Telegram delivery; requires both Telegram secrets when true |
+| `GRAFANA_ALERT_TELEGRAM_BOT_TOKEN` | _(empty)_ | Required when Telegram delivery is enabled |
+| `GRAFANA_ALERT_TELEGRAM_CHAT_ID` | _(empty)_ | Telegram destination when Telegram delivery is enabled |
 
 ### Common local dev tasks
 
@@ -266,6 +296,24 @@ All variables are set in Portainer's "Environment variables" panel for each stac
 | `KAFKA_AUTO_OFFSET_RESET` | `earliest` | `latest` (after initial bootstrap) |
 | `LOG_LEVEL` | `debug` | `info` |
 | `RATE_LIMIT_RPS` | `30` | `100` |
+| `GRAFANA_ALERTING_ENABLED` | `false` | Enable Grafana-managed alerting intentionally |
+| `GRAFANA_PUBLIC_URL` | `http://localhost:3000/` | Set to `https://grafana.livepeer.cloud/` so alert links resolve to the public Grafana host |
+| `GRAFANA_ALERT_DISCORD_ENABLED` | `false` | Enable Discord delivery intentionally |
+| `GRAFANA_ALERT_DISCORD_WEBHOOK_URL` | _(empty)_ | Required when Discord delivery is enabled |
+| `GRAFANA_ALERT_TELEGRAM_ENABLED` | `false` | Enable Telegram delivery intentionally |
+| `GRAFANA_ALERT_TELEGRAM_BOT_TOKEN` | _(empty)_ | Required when Telegram delivery is enabled |
+| `GRAFANA_ALERT_TELEGRAM_CHAT_ID` | _(empty)_ | Required when Telegram delivery is enabled |
+
+### Grafana alerting validation
+
+After any Grafana deploy or provisioning change, validate the alerting surface:
+
+1. Open Grafana and confirm the `infra` folder contains the provisioned alert rule groups.
+2. Confirm contact points `naap-default-warning` and `naap-critical-fanout` exist when alerting is enabled.
+3. Check `Alerting -> Notification policies` and confirm `critical|page-now` fan out only to the explicitly enabled channels.
+4. Confirm alert previews and delivered messages use the expected Grafana root URL rather than a container-local address.
+5. Verify the alert-backed panels on `naap-system-health` return data with the same queries used by the rules.
+6. Send test notifications only to the channels you explicitly enabled.
 
 ---
 
