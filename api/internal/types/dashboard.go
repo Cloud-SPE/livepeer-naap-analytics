@@ -42,6 +42,7 @@ type DashboardPipelineUsage struct {
 	Mins      float64                      `json:"mins"` // Phase 2: from network demand
 	Sessions  int64                        `json:"sessions"`
 	AvgFps    float64                      `json:"avgFps"` // Phase 2
+	JobType   string                       `json:"job_type,omitempty"`
 	ModelMins []DashboardPipelineModelMins `json:"modelMins,omitempty"`
 }
 
@@ -128,6 +129,7 @@ type DashboardJobFeedItem struct {
 	Gateway         string   `json:"gateway"`
 	OrchestratorURL string   `json:"orchestratorUrl"`
 	State           string   `json:"state"`
+	JobType         string   `json:"job_type,omitempty"`
 	InputFPS        float64  `json:"inputFps"`
 	OutputFPS       float64  `json:"outputFps"`
 	FirstSeen       string   `json:"firstSeen"`

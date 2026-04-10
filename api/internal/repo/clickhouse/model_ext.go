@@ -58,14 +58,18 @@ func (r *Repo) ListModelPerformance(ctx context.Context, p types.QueryParams) ([
 		if err := rows.Scan(&mp.ModelID, &mp.Pipeline, &fpsSum, &samp, &warmOrchs); err != nil {
 			return nil, fmt.Errorf("clickhouse list model performance scan: %w", err)
 		}
-		mp.AvgFPS = divSafe(fpsSum, float64(samp))
+		avg := divSafe(fpsSum, float64(samp))
+		mp.AvgFPS = avg
+		mp.P50FPS = avg // P50/P99 not available from hourly aggregates
+		mp.P99FPS = avg
 		mp.WarmOrchCount = int64(warmOrchs)
-		// P50/P99 not available from hourly aggregates; use AvgFPS as approximation
-		mp.P50FPS = mp.AvgFPS
-		mp.P99FPS = mp.AvgFPS
 		result = append(result, mp)
 	}
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }
 
 // GetModelDetail returns a lower-layer companion detail shape for model performance.

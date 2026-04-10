@@ -57,6 +57,19 @@ https://analytics.livepeer.cloud/v1/
 | Dashboard | `GET /v1/dashboard/pipeline-catalog` | Built-in |
 | Dashboard | `GET /v1/dashboard/pricing` | Built-in |
 | Dashboard | `GET /v1/dashboard/job-feed` | Built-in |
+| Dashboard (jobs) | `GET /v1/dashboard/jobs/overview` | Built-in |
+| Dashboard (jobs) | `GET /v1/dashboard/jobs/by-pipeline` | Built-in |
+| Dashboard (jobs) | `GET /v1/dashboard/jobs/by-capability` | Built-in |
+| Jobs (request/response) | `GET /v1/jobs/demand` | Built-in |
+| Jobs (request/response) | `GET /v1/jobs/sla` | Built-in |
+| Jobs (request/response) | `GET /v1/jobs/by-model` | Built-in |
+| AI Batch | `GET /v1/ai-batch/summary` | Built-in |
+| AI Batch | `GET /v1/ai-batch/jobs` | Built-in |
+| AI Batch | `GET /v1/ai-batch/llm/summary` | Built-in |
+| BYOC | `GET /v1/byoc/summary` | Built-in |
+| BYOC | `GET /v1/byoc/jobs` | Built-in |
+| BYOC | `GET /v1/byoc/workers` | Built-in |
+| BYOC | `GET /v1/byoc/auth` | Built-in |
 | Health | `GET /healthz` | Built-in, no spec needed |
 
 ## Cursor Pagination Contract

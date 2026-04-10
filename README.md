@@ -87,4 +87,7 @@ Primary API groups:
 - `/v1/sla/*` for compliance metrics
 - `/v1/network/*` for network demand
 - `/v1/gpu/*` for GPU demand and metrics
+- `/v1/ai-batch/*` for AI batch job analytics
+- `/v1/byoc/*` for BYOC job analytics
+- `/v1/jobs/*` for unified request/response job analytics
 - `/v1/dashboard/*` for dashboard-facing read models

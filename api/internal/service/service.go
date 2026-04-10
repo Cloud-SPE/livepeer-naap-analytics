@@ -100,6 +100,27 @@ type AnalyticsService interface {
 	GetDashboardPricing(ctx context.Context) ([]types.DashboardPipelinePricing, error)
 	GetDashboardJobFeed(ctx context.Context, limit int) ([]types.DashboardJobFeedItem, error)
 
+	// Jobs — request/response job types (R19)
+	ListJobsDemand(ctx context.Context, p types.JobsParams) ([]types.JobsDemandRow, types.CursorPageInfo, error)
+	ListJobsSLA(ctx context.Context, p types.JobsParams) ([]types.JobsSLARow, types.CursorPageInfo, error)
+	ListJobsByModel(ctx context.Context, p types.JobsParams) ([]types.JobModelPerformance, error)
+
+	// AI Batch Jobs (R17)
+	GetAIBatchSummary(ctx context.Context, p types.QueryParams) ([]types.AIBatchJobSummary, error)
+	ListAIBatchJobs(ctx context.Context, p types.QueryParams) ([]types.AIBatchJobRecord, types.CursorPageInfo, error)
+	GetAIBatchLLMSummary(ctx context.Context, p types.QueryParams) ([]types.AIBatchLLMSummary, error)
+
+	// BYOC Jobs (R18)
+	GetBYOCSummary(ctx context.Context, p types.QueryParams) ([]types.BYOCJobSummary, error)
+	ListBYOCJobs(ctx context.Context, p types.QueryParams) ([]types.BYOCJobRecord, types.CursorPageInfo, error)
+	GetBYOCWorkers(ctx context.Context, p types.QueryParams) ([]types.BYOCWorkerSummary, error)
+	GetBYOCAuthSummary(ctx context.Context, p types.QueryParams) ([]types.BYOCAuthSummary, error)
+
+	// Dashboard — request-job overview (R17/R18)
+	GetDashboardJobsOverview(ctx context.Context, p types.QueryParams) (*types.DashboardJobsOverview, error)
+	GetDashboardJobsByPipeline(ctx context.Context, p types.QueryParams) ([]types.DashboardJobsByPipelineRow, error)
+	GetDashboardJobsByCapability(ctx context.Context, p types.QueryParams) ([]types.DashboardJobsByCapabilityRow, error)
+
 	// Health
 	Ping(ctx context.Context) error
 }
@@ -581,4 +602,108 @@ func (s *analyticsService) GetDashboardJobFeed(ctx context.Context, limit int) (
 
 func (s *analyticsService) Ping(ctx context.Context) error {
 	return s.repo.Ping(ctx)
+}
+
+func (s *analyticsService) ListJobsDemand(ctx context.Context, p types.JobsParams) ([]types.JobsDemandRow, types.CursorPageInfo, error) {
+	rows, page, err := s.repo.ListJobsDemand(ctx, p)
+	if err != nil {
+		return nil, types.CursorPageInfo{}, fmt.Errorf("list jobs demand: %w", err)
+	}
+	return rows, page, nil
+}
+
+func (s *analyticsService) ListJobsSLA(ctx context.Context, p types.JobsParams) ([]types.JobsSLARow, types.CursorPageInfo, error) {
+	rows, page, err := s.repo.ListJobsSLA(ctx, p)
+	if err != nil {
+		return nil, types.CursorPageInfo{}, fmt.Errorf("list jobs sla: %w", err)
+	}
+	return rows, page, nil
+}
+
+func (s *analyticsService) ListJobsByModel(ctx context.Context, p types.JobsParams) ([]types.JobModelPerformance, error) {
+	v, err := s.repo.ListJobsByModel(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("list jobs by model: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) GetAIBatchSummary(ctx context.Context, p types.QueryParams) ([]types.AIBatchJobSummary, error) {
+	v, err := s.repo.GetAIBatchSummary(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("get ai batch summary: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) ListAIBatchJobs(ctx context.Context, p types.QueryParams) ([]types.AIBatchJobRecord, types.CursorPageInfo, error) {
+	v, page, err := s.repo.ListAIBatchJobs(ctx, p)
+	if err != nil {
+		return nil, types.CursorPageInfo{}, fmt.Errorf("list ai batch jobs: %w", err)
+	}
+	return v, page, nil
+}
+
+func (s *analyticsService) GetAIBatchLLMSummary(ctx context.Context, p types.QueryParams) ([]types.AIBatchLLMSummary, error) {
+	v, err := s.repo.GetAIBatchLLMSummary(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("get ai batch llm summary: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) GetBYOCSummary(ctx context.Context, p types.QueryParams) ([]types.BYOCJobSummary, error) {
+	v, err := s.repo.GetBYOCSummary(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("get byoc summary: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) ListBYOCJobs(ctx context.Context, p types.QueryParams) ([]types.BYOCJobRecord, types.CursorPageInfo, error) {
+	v, page, err := s.repo.ListBYOCJobs(ctx, p)
+	if err != nil {
+		return nil, types.CursorPageInfo{}, fmt.Errorf("list byoc jobs: %w", err)
+	}
+	return v, page, nil
+}
+
+func (s *analyticsService) GetBYOCWorkers(ctx context.Context, p types.QueryParams) ([]types.BYOCWorkerSummary, error) {
+	v, err := s.repo.GetBYOCWorkers(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("get byoc workers: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) GetBYOCAuthSummary(ctx context.Context, p types.QueryParams) ([]types.BYOCAuthSummary, error) {
+	v, err := s.repo.GetBYOCAuthSummary(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("get byoc auth summary: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) GetDashboardJobsOverview(ctx context.Context, p types.QueryParams) (*types.DashboardJobsOverview, error) {
+	v, err := s.repo.GetDashboardJobsOverview(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("get dashboard jobs overview: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) GetDashboardJobsByPipeline(ctx context.Context, p types.QueryParams) ([]types.DashboardJobsByPipelineRow, error) {
+	v, err := s.repo.GetDashboardJobsByPipeline(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("get dashboard jobs by pipeline: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) GetDashboardJobsByCapability(ctx context.Context, p types.QueryParams) ([]types.DashboardJobsByCapabilityRow, error) {
+	v, err := s.repo.GetDashboardJobsByCapability(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("get dashboard jobs by capability: %w", err)
+	}
+	return v, nil
 }

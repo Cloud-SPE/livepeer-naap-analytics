@@ -56,6 +56,18 @@
       "title": "Economics",
       "type": "link",
       "url": "/d/naap-economics"
+    },
+    {
+      "asDropdown": false,
+      "icon": "apps",
+      "includeVars": true,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
+      "title": "Jobs",
+      "tooltip": "",
+      "type": "link",
+      "url": "/d/naap-jobs"
     }
   ],
   "panels": [

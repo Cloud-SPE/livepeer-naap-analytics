@@ -238,6 +238,7 @@ func (r *Repo) ListModels(ctx context.Context, p types.QueryParams) ([]types.Mod
 		}
 		result = append(result, ma)
 	}
+
 	return result, nil
 }
 

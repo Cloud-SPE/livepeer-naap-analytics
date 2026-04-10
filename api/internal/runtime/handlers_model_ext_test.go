@@ -23,4 +23,3 @@ func TestListModelPerformance_HappyPath(t *testing.T) {
 		t.Error("expected non-null array")
 	}
 }
-

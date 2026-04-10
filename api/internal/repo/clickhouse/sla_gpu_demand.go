@@ -96,6 +96,7 @@ func (r *Repo) ListSLACompliance(ctx context.Context, p types.SLAComplianceParam
 	if hasMore {
 		result = result[:limit]
 	}
+
 	if result == nil {
 		result = []types.SLAComplianceRow{}
 	}
@@ -115,7 +116,11 @@ func (r *Repo) ListSLACompliance(ctx context.Context, p types.SLAComplianceParam
 }
 
 func buildSLAWhere(p types.SLAComplianceParams) (string, []any) {
-	conds := []string{"window_start >= ? AND window_start < ?"}
+	conds := []string{
+		"window_start >= ? AND window_start < ?",
+		"orchestrator_address != ''",
+		"pipeline_id != ''",
+	}
 	args := []any{p.Start.UTC(), p.End.UTC()}
 	if p.Org != "" {
 		conds = append(conds, "org = ?")
@@ -219,6 +224,7 @@ func (r *Repo) ListNetworkDemand(ctx context.Context, p types.NetworkDemandParam
 	if hasMore {
 		result = result[:limit]
 	}
+
 	if result == nil {
 		result = []types.NetworkDemandRow{}
 	}
@@ -237,7 +243,10 @@ func (r *Repo) ListNetworkDemand(ctx context.Context, p types.NetworkDemandParam
 }
 
 func buildDemandWhere(p types.NetworkDemandParams) (string, []any) {
-	conds := []string{"window_start >= ? AND window_start < ?"}
+	conds := []string{
+		"window_start >= ? AND window_start < ?",
+		"pipeline_id != ''",
+	}
 	args := []any{p.Start.UTC(), p.End.UTC()}
 	if p.Org != "" {
 		conds = append(conds, "org = ?")

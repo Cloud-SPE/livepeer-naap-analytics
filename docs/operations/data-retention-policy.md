@@ -65,6 +65,19 @@ TTL expressions are applied at the table level in ClickHouse and enforced asynch
 
 Queryable diagnostic view: `naap.ignored_raw_event_diagnostics`.
 
+### Tier 1b — Normalized event tables — AI Batch / BYOC (90 days)
+
+| Table | TTL column | TTL |
+|---|---|---|
+| `naap.normalized_ai_batch_job` | `event_ts` | 90 days |
+| `naap.normalized_ai_llm_request` | `event_ts` | 90 days |
+| `naap.normalized_byoc_job` | `event_ts` | 90 days |
+| `naap.normalized_byoc_auth` | `event_ts` | 90 days |
+| `naap.normalized_worker_lifecycle` | `event_ts` | 90 days |
+| `naap.normalized_byoc_payment` | `event_ts` | 90 days |
+
+These tables store all accepted AI batch, BYOC, and payment events after normalization. The 90-day TTL matches `accepted_raw_events` so that canonical dbt models can always be recomputed from normalized tables within the same audit window. TTL statements are in `infra/clickhouse/retention.sql`.
+
 ### Tier 2 — Aggregate samples (30 days)
 
 | Table | TTL column | TTL |

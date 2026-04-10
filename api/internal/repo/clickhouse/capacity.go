@@ -101,6 +101,48 @@ func (r *Repo) GetCapacitySummary(ctx context.Context, p types.QueryParams) (*ty
 		})
 	}
 
+	// Additional query: BYOC worker capacity from normalized_worker_lifecycle
+	byocCapWhere := "WHERE event_ts > now() - INTERVAL 24 HOUR"
+	byocCapArgs := []any{}
+	if p.Org != "" {
+		byocCapWhere += " AND org = ?"
+		byocCapArgs = append(byocCapArgs, p.Org)
+	}
+	byocCapRows, err := r.conn.Query(ctx, `
+		SELECT
+			capability                        AS pipeline,
+			ifNull(model, '')                 AS model_id,
+			countDistinct(orch_address)       AS warm_orchs
+		FROM naap.normalized_worker_lifecycle FINAL
+		`+byocCapWhere+`
+		  AND capability != ''
+		  AND model      != ''
+		GROUP BY capability, model_id
+	`, byocCapArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("clickhouse get capacity byoc: %w", err)
+	}
+	defer byocCapRows.Close()
+
+	for byocCapRows.Next() {
+		var pipeline, modelID string
+		var warmOrchs uint64
+		if err := byocCapRows.Scan(&pipeline, &modelID, &warmOrchs); err != nil {
+			return nil, fmt.Errorf("clickhouse get capacity byoc scan: %w", err)
+		}
+		entries = append(entries, types.CapacityEntry{
+			Pipeline:       pipeline,
+			ModelID:        modelID,
+			WarmOrchCount:  int64(warmOrchs),
+			ActiveStreams:  0,
+			UtilizationPct: 0,
+			TotalVRAMBytes: 0,
+		})
+	}
+	if err := byocCapRows.Err(); err != nil {
+		return nil, fmt.Errorf("clickhouse get capacity byoc rows: %w", err)
+	}
+
 	return &types.CapacitySummary{
 		SnapshotTime: time.Now().UTC(),
 		Entries:      entries,

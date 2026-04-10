@@ -132,6 +132,45 @@ func (r *Repo) GetDashboardKPI(ctx context.Context, windowHours int, pipeline, m
 		return nil, fmt.Errorf("clickhouse get dashboard kpi mins rows: %w", err)
 	}
 
+	// Query 3: non-streaming job counts and minutes from api_unified_demand
+	unifiedRows, err := r.conn.Query(ctx, `
+		SELECT
+			toStartOfHour(window_start) AS ts,
+			sum(job_count)              AS jobs,
+			sum(success_count)          AS successes,
+			sum(total_minutes)          AS mins
+		FROM naap.api_unified_demand
+		WHERE window_start >= now() - INTERVAL ? HOUR
+		GROUP BY ts
+		ORDER BY ts ASC
+	`, windowHours)
+	if err != nil {
+		return nil, fmt.Errorf("clickhouse get dashboard kpi unified: %w", err)
+	}
+	defer unifiedRows.Close()
+
+	for unifiedRows.Next() {
+		var ts time.Time
+		var jobs, successes uint64
+		var mins float64
+		if err := unifiedRows.Scan(&ts, &jobs, &successes, &mins); err != nil {
+			return nil, fmt.Errorf("clickhouse get dashboard kpi unified scan: %w", err)
+		}
+		ts = ts.UTC().Truncate(time.Hour)
+		if b, ok := bucketMap[ts]; ok {
+			b.sessions += jobs
+			b.successes += successes
+			b.mins += mins
+		} else {
+			nb := &kpiBucket{ts: ts, sessions: jobs, successes: successes, mins: mins}
+			bucketMap[ts] = nb
+			orderedTS = append(orderedTS, ts)
+		}
+	}
+	if err := unifiedRows.Err(); err != nil {
+		return nil, fmt.Errorf("clickhouse get dashboard kpi unified rows: %w", err)
+	}
+
 	// Sort by timestamp
 	sortTimeSlice(orderedTS)
 
@@ -259,6 +298,66 @@ func (r *Repo) GetDashboardPipelines(ctx context.Context, limit int) ([]types.Da
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("clickhouse get dashboard pipelines rows: %w", err)
+	}
+
+	// Second query: non-streaming pipelines from api_unified_demand (last 24h)
+	uRows, err := r.conn.Query(ctx, `
+		SELECT
+			pipeline_id,
+			job_type,
+			sum(job_count)    AS jobs,
+			sum(total_minutes) AS total_mins
+		FROM naap.api_unified_demand
+		WHERE window_start >= now() - INTERVAL 24 HOUR
+		  AND pipeline_id != ''
+		GROUP BY pipeline_id, job_type
+		ORDER BY jobs DESC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("clickhouse get dashboard pipelines unified: %w", err)
+	}
+	defer uRows.Close()
+
+	// Build a map keyed by pipeline+job_type to merge or append
+	type pipelineJobKey struct{ pipeline, jobType string }
+	pipelineMap := map[pipelineJobKey]*types.DashboardPipelineUsage{}
+	for _, entry := range result {
+		key := pipelineJobKey{entry.Name, "stream"}
+		pipelineMap[key] = &result[len(result)-1]
+	}
+	// Rebuild pipelineMap properly
+	pipelineMap = map[pipelineJobKey]*types.DashboardPipelineUsage{}
+	resultPtrs := make([]*types.DashboardPipelineUsage, len(result))
+	for i := range result {
+		resultPtrs[i] = &result[i]
+		pipelineMap[pipelineJobKey{result[i].Name, "stream"}] = resultPtrs[i]
+	}
+
+	var nonStreamEntries []types.DashboardPipelineUsage
+	for uRows.Next() {
+		var pipeline, jobType string
+		var jobs uint64
+		var mins float64
+		if err := uRows.Scan(&pipeline, &jobType, &jobs, &mins); err != nil {
+			return nil, fmt.Errorf("clickhouse get dashboard pipelines unified scan: %w", err)
+		}
+		nonStreamEntries = append(nonStreamEntries, types.DashboardPipelineUsage{
+			Name:     pipeline,
+			Sessions: int64(jobs),
+			Mins:     math.Round(mins*10) / 10,
+			AvgFps:   0,
+			JobType:  jobType,
+		})
+	}
+	if err := uRows.Err(); err != nil {
+		return nil, fmt.Errorf("clickhouse get dashboard pipelines unified rows: %w", err)
+	}
+	result = append(result, nonStreamEntries...)
+
+	// Sort all by sessions DESC and apply limit
+	sort.Slice(result, func(i, j int) bool { return result[i].Sessions > result[j].Sessions })
+	if len(result) > limit {
+		result = result[:limit]
 	}
 
 	if result == nil {
@@ -682,6 +781,40 @@ func (r *Repo) GetDashboardPipelineCatalog(ctx context.Context) ([]types.Dashboa
 		return nil, fmt.Errorf("clickhouse get dashboard pipeline catalog rows: %w", err)
 	}
 
+	uCatalogRows, err := r.conn.Query(ctx, `
+		SELECT DISTINCT pipeline_id, model_id
+		FROM naap.api_unified_demand
+		WHERE window_start >= now() - INTERVAL 168 HOUR
+		  AND pipeline_id != ''
+		  AND model_id != ''
+		ORDER BY pipeline_id, model_id
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("clickhouse get dashboard pipeline catalog unified: %w", err)
+	}
+	defer uCatalogRows.Close()
+
+	for uCatalogRows.Next() {
+		var pipeline, model string
+		if err := uCatalogRows.Scan(&pipeline, &model); err != nil {
+			return nil, fmt.Errorf("clickhouse get dashboard pipeline catalog unified scan: %w", err)
+		}
+		existing := catalogMap[pipeline]
+		found := false
+		for _, candidate := range existing {
+			if candidate == model {
+				found = true
+				break
+			}
+		}
+		if !found {
+			catalogMap[pipeline] = append(existing, model)
+		}
+	}
+	if err := uCatalogRows.Err(); err != nil {
+		return nil, fmt.Errorf("clickhouse get dashboard pipeline catalog unified rows: %w", err)
+	}
+
 	result := make([]types.DashboardPipelineCatalogEntry, 0, len(catalogMap))
 	for pipeline, models := range catalogMap {
 		result = append(result, types.DashboardPipelineCatalogEntry{
@@ -873,6 +1006,7 @@ func (r *Repo) GetDashboardJobFeed(ctx context.Context, limit int) ([]types.Dash
 			Gateway:         hostnameFromURI("https://" + it.gateway),
 			OrchestratorURL: orchURIs[it.orchAddress],
 			State:           it.state,
+			JobType:         "stream",
 			InputFPS:        it.inputFPS,
 			OutputFPS:       it.outputFPS,
 			FirstSeen:       it.firstSeen.UTC().Format(time.RFC3339),
@@ -881,8 +1015,120 @@ func (r *Repo) GetDashboardJobFeed(ctx context.Context, limit int) ([]types.Dash
 		})
 	}
 
+	result, err = appendByocJobFeed(ctx, r, result, limit)
+	if err != nil {
+		return nil, err
+	}
+	result, err = appendAIBatchJobFeed(ctx, r, result, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	sort.Slice(result, func(i, j int) bool { return result[i].LastSeen > result[j].LastSeen })
+	if len(result) > limit {
+		result = result[:limit]
+	}
+
 	if result == nil {
 		result = []types.DashboardJobFeedItem{}
 	}
 	return result, nil
+}
+
+func appendByocJobFeed(ctx context.Context, r *Repo, result []types.DashboardJobFeedItem, limit int) ([]types.DashboardJobFeedItem, error) {
+	rows, err := r.conn.Query(ctx, `
+		SELECT
+			request_id,
+			capability,
+			ifNull(model, '') AS model,
+			ifNull(gateway, '') AS gateway,
+			ifNull(orch_url_norm, '') AS orch_url,
+			ifNull(toString(success), '') AS state,
+			submitted_at,
+			completed_at,
+			toFloat64(ifNull(duration_ms, 0)) / 1000.0 AS duration_secs
+		FROM naap.canonical_byoc_jobs
+		WHERE completed_at > now() - INTERVAL ? SECOND
+		ORDER BY completed_at DESC
+		LIMIT ?
+	`, activeStreamSecs, limit)
+	if err != nil {
+		return nil, fmt.Errorf("clickhouse get dashboard job feed byoc: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id, pipeline, model, gateway, orchURL, state string
+		var submittedAt, completedAt time.Time
+		var durSecs float64
+		if err := rows.Scan(&id, &pipeline, &model, &gateway, &orchURL, &state, &submittedAt, &completedAt, &durSecs); err != nil {
+			return nil, fmt.Errorf("clickhouse get dashboard job feed byoc scan: %w", err)
+		}
+		var durPtr *float64
+		if durSecs > 0 {
+			durPtr = &durSecs
+		}
+		result = append(result, types.DashboardJobFeedItem{
+			ID:              id,
+			Pipeline:        pipeline,
+			Model:           model,
+			Gateway:         hostnameFromURI("https://" + gateway),
+			OrchestratorURL: orchURL,
+			State:           state,
+			JobType:         "byoc",
+			FirstSeen:       submittedAt.UTC().Format(time.RFC3339),
+			LastSeen:        completedAt.UTC().Format(time.RFC3339),
+			DurationSeconds: durPtr,
+		})
+	}
+	return result, rows.Err()
+}
+
+func appendAIBatchJobFeed(ctx context.Context, r *Repo, result []types.DashboardJobFeedItem, limit int) ([]types.DashboardJobFeedItem, error) {
+	rows, err := r.conn.Query(ctx, `
+		SELECT
+			request_id,
+			ifNull(pipeline, '') AS pipeline,
+			ifNull(model_id, '') AS model,
+			ifNull(gateway, '') AS gateway,
+			ifNull(orch_url_norm, '') AS orch_url,
+			ifNull(toString(success), '') AS state,
+			received_at,
+			completed_at,
+			toFloat64(ifNull(duration_ms, 0)) / 1000.0 AS duration_secs
+		FROM naap.canonical_ai_batch_jobs
+		WHERE completed_at > now() - INTERVAL ? SECOND
+		ORDER BY completed_at DESC
+		LIMIT ?
+	`, activeStreamSecs, limit)
+	if err != nil {
+		return nil, fmt.Errorf("clickhouse get dashboard job feed ai_batch: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id, pipeline, model, gateway, orchURL, state string
+		var receivedAt, completedAt time.Time
+		var durSecs float64
+		if err := rows.Scan(&id, &pipeline, &model, &gateway, &orchURL, &state, &receivedAt, &completedAt, &durSecs); err != nil {
+			return nil, fmt.Errorf("clickhouse get dashboard job feed ai_batch scan: %w", err)
+		}
+		var durPtr *float64
+		if durSecs > 0 {
+			durPtr = &durSecs
+		}
+		result = append(result, types.DashboardJobFeedItem{
+			ID:              id,
+			Pipeline:        pipeline,
+			Model:           model,
+			Gateway:         hostnameFromURI("https://" + gateway),
+			OrchestratorURL: orchURL,
+			State:           state,
+			JobType:         "ai-batch",
+			FirstSeen:       receivedAt.UTC().Format(time.RFC3339),
+			LastSeen:        completedAt.UTC().Format(time.RFC3339),
+			DurationSeconds: durPtr,
+		})
+	}
+	return result, rows.Err()
 }
