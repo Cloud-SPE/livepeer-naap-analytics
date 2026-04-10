@@ -36,7 +36,7 @@ templates:
       {{- end }}
 
       {{ define "naap.default.title" -}}
-      [NAAP][{{ .CommonLabels.severity }}] {{ with .CommonAnnotations.summary }}{{ . }}{{ else }}{{ .CommonLabels.alertname }}{{ end }}
+      [NaaP][{{ .CommonLabels.severity }}] {{ with .CommonAnnotations.summary }}{{ . }}{{ else }}{{ .CommonLabels.alertname }}{{ end }}
       {{- end }}
 
       {{ define "naap.default.message" -}}

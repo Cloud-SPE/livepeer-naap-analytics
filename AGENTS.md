@@ -5,7 +5,7 @@ Put detailed rules in `docs/` and link them here.
 
 ## What this project is
 
-Livepeer NAAP Analytics is a ClickHouse-backed analytics API for the Livepeer AI
+Livepeer NaaP Analytics is a ClickHouse-backed analytics API for the Livepeer AI
 Network. Events flow from Kafka into ClickHouse through the Kafka Engine, are
 published into semantic serving contracts by the resolver and dbt, and are
 served through a Go REST API.

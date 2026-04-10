@@ -1,6 +1,6 @@
 # Design
 
-Top-level architecture map for Livepeer NAAP Analytics.
+Top-level architecture map for Livepeer NaaP Analytics.
 
 ## System overview
 

@@ -1,9 +1,14 @@
-# NAAP Analytics
+# <img src="docs/naap_icon.png" alt="NaaP icon" width="80" valign="middle" /> NaaP Analytics
 
-Livepeer NAAP Analytics is a ClickHouse-backed analytics platform for the
+Livepeer NaaP Analytics is a ClickHouse-backed analytics platform for the
 Livepeer AI Network. Kafka topics are ingested directly into ClickHouse through
 the Kafka Engine, corrected and published by the resolver and dbt, and exposed
 through a Go REST API and Grafana dashboards.
+
+This repository is an analytics surface for the AI Network. It does not run
+media transcoding workloads or cover the legacy broadcaster/transcoder stack;
+its streaming coverage is limited to analytics for Livepeer AI
+`live-video-to-video` sessions and Batch AI job traffic.
 
 The supported serving spine is:
 
@@ -36,15 +41,13 @@ Local service entrypoints:
 
 Common local commands:
 
-```bash
-make down
-make test
-make lint
-make test-validation-clean
-make warehouse-run
-make ch-query
-make resolver-logs
-```
+- `make down`: Stop the local Docker Compose stack and remove containers, volumes, and orphans.
+- `make test`: Run the Go unit test suite with the race detector enabled.
+- `make lint`: Run Go vet and staticcheck for the API code.
+- `make test-validation-clean`: Run the full validation regression suite against a fresh isolated validation stack.
+- `make warehouse-run`: Manually run dbt publication for the warehouse serving contracts.
+- `make ch-query`: Open an interactive ClickHouse shell with the local admin user.
+- `make resolver-logs`: Tail resolver logs from the local Compose stack.
 
 ## Read Next
 

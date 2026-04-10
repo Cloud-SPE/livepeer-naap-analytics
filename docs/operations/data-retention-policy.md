@@ -11,7 +11,7 @@
 
 ## Overview
 
-This document is the single source of truth for all data retention decisions in the NAAP analytics stack. It covers Kafka topic retention windows, ClickHouse table TTLs, and the relationship between the two tiers.
+This document is the single source of truth for all data retention decisions in the NaaP analytics stack. It covers Kafka topic retention windows, ClickHouse table TTLs, and the relationship between the two tiers.
 
 For the architectural rationale behind the Kafka + ClickHouse engine choice, see [`../design-docs/adr-001-storage-architecture.md`](../design-docs/adr-001-storage-architecture.md). For the canonical SQL TTL statements, see [`../../infra/clickhouse/retention.sql`](../../infra/clickhouse/retention.sql).
 

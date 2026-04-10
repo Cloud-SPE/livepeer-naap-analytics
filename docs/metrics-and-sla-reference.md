@@ -7,13 +7,13 @@
 | **Ticket** | TASK 7.7 / [#274](https://github.com/livepeer/livepeer-naap-analytics-deployment/issues/274) |
 | **Audience** | External developers, partners, integrators |
 
-This document is the community-facing reference for all metrics, scoring formulas, SLA targets, and terminology used in the NAAP analytics platform. For the internal behavioral contract governing data validation, see [`docs/design-docs/data-validation-rules.md`](design-docs/data-validation-rules.md).
+This document is the community-facing reference for all metrics, scoring formulas, SLA targets, and terminology used in the NaaP analytics platform. For the internal behavioral contract governing data validation, see [`docs/design-docs/data-validation-rules.md`](design-docs/data-validation-rules.md).
 
 ---
 
 ## 1. Overview
 
-The NAAP analytics platform collects telemetry from AI inference streams on the Livepeer network and exposes it through a REST API. It tracks how well each **orchestrator** (an AI compute node) is performing across the streams it handles.
+The NaaP analytics platform collects telemetry from AI inference streams on the Livepeer network and exposes it through a REST API. It tracks how well each **orchestrator** (an AI compute node) is performing across the streams it handles.
 
 Two distinct scoring models are used:
 

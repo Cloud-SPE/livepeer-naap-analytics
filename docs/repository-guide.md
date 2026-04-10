@@ -37,16 +37,14 @@ deploy/
 
 ## Common Local Commands
 
-```bash
-make up
-make down
-make test
-make lint
-make test-validation-clean
-make warehouse-run
-make ch-query
-make resolver-logs
-```
+- `make up`: Start the local Docker Compose runtime and build images as needed.
+- `make down`: Stop the local Docker Compose stack and remove containers, volumes, and orphans.
+- `make test`: Run the Go unit test suite with the race detector enabled.
+- `make lint`: Run Go vet and staticcheck for the API code.
+- `make test-validation-clean`: Run the full validation regression suite against a fresh isolated validation stack.
+- `make warehouse-run`: Manually run dbt publication for the warehouse serving contracts.
+- `make ch-query`: Open an interactive ClickHouse shell with the local admin user.
+- `make resolver-logs`: Tail resolver logs from the local Compose stack.
 
 ## Local Workflow
 

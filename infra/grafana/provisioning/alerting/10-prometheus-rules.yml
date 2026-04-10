@@ -46,8 +46,8 @@ groups:
         execErrState: Alerting
         for: 2m
         annotations:
-          summary: '{{ if $labels.instance }}Scrape target down on {{$labels.instance}}{{ with $labels.job }} (job={{ . }}){{ end }}.{{ else }}A scraped NAAP component or host target is down.{{ end }}'
-          description: Prometheus reports one or more core NAAP scrape targets below 1.
+          summary: '{{ if $labels.instance }}Scrape target down on {{$labels.instance}}{{ with $labels.job }} (job={{ . }}){{ end }}.{{ else }}A scraped NaaP component or host target is down.{{ end }}'
+          description: Prometheus reports one or more core NaaP scrape targets below 1.
           runbook_url: https://github.com/Cloud-SPE/livepeer-naap-analytics/blob/main/docs/operations/operations-runbook.md
         labels:
           severity: critical
@@ -102,7 +102,7 @@ groups:
         execErrState: Alerting
         for: 15m
         annotations:
-          summary: '{{ if $labels.instance }}Root filesystem usage is high on {{$labels.instance}}.{{ else }}Root filesystem usage is high on a monitored NAAP host.{{ end }}'
+          summary: '{{ if $labels.instance }}Root filesystem usage is high on {{$labels.instance}}.{{ else }}Root filesystem usage is high on a monitored NaaP host.{{ end }}'
           description: Root filesystem usage has remained above 85 percent for 15 minutes.
           runbook_url: https://github.com/Cloud-SPE/livepeer-naap-analytics/blob/main/docs/operations/operations-runbook.md
         labels:

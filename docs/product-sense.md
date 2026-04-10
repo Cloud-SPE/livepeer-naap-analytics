@@ -2,7 +2,7 @@
 
 ## What We Are Building
 
-Livepeer NAAP Analytics is a real-time analytics pipeline and public API for the
+Livepeer NaaP Analytics is a real-time analytics pipeline and public API for the
 Livepeer AI Network. It ingests `network_events` and `streaming_events`,
 materializes corrected and queryable state in ClickHouse, and serves that state
 through a public REST API and operator dashboards.
@@ -28,6 +28,7 @@ through a public REST API and operator dashboards.
 - Authentication or API keys at launch
 - Multi-region deployment design
 - Long-term historical storage in Kafka
+- Acting as a media transcoding service or covering the legacy broadcaster/transcoder stack
 
 ## Non-Negotiable Principles
 

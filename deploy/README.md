@@ -106,7 +106,7 @@ docker volume create naap-analytics_clickhouse_data
 Ten dashboards are baked into the API image at `infra/grafana/dashboards/` and auto-provisioned
 on startup.
 
-### NAAP application dashboards (General folder)
+### NaaP application dashboards (General folder)
 
 | Dashboard | Description |
 |-----------|-------------|

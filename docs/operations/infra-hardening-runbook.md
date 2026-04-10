@@ -13,7 +13,7 @@ Related: [`deploy/set_ufw_rules.sh`](../../deploy/set_ufw_rules.sh) · [`deploy/
 
 ## Overview
 
-This runbook documents the current security posture of the NAAP analytics infrastructure, identifies the remaining open action items, and provides the exact commands to close them. It covers both infra2 (Kafka, Traefik, Kafka UI, MirrorMaker2) and infra1 (ClickHouse, API, Grafana, Prometheus).
+This runbook documents the current security posture of the NaaP analytics infrastructure, identifies the remaining open action items, and provides the exact commands to close them. It covers both infra2 (Kafka, Traefik, Kafka UI, MirrorMaker2) and infra1 (ClickHouse, API, Grafana, Prometheus).
 
 ---
 

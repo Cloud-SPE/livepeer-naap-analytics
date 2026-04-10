@@ -45,7 +45,7 @@ def _pct(num: int, denom: int) -> str:
 # ── Terminal report ───────────────────────────────────────────────────────────
 
 def print_report(results: list[AnalysisResult]) -> None:
-    console.rule("[bold cyan]NAAP Analytics — Kafka Inspector Report[/]")
+    console.rule("[bold cyan]NaaP Analytics — Kafka Inspector Report[/]")
     console.print()
 
     for r in results:

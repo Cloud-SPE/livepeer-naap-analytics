@@ -1,5 +1,5 @@
 /**
- * k6 load test script for the NAAP Analytics API.
+ * k6 load test script for the NaaP Analytics API.
  *
  * Usage:
  *   k6 run tests/load/script.js

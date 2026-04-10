@@ -1,4 +1,4 @@
-# NAAP Analytics — infra2 Deployment Guide
+# NaaP Analytics — infra2 Deployment Guide
 
 Production deployment for `infra2.cloudspe.com`. Each service is a separate
 Portainer stack for independent lifecycle management.
