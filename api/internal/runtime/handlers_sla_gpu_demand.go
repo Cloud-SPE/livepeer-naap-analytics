@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -9,20 +10,6 @@ import (
 
 	"github.com/livepeer/naap-analytics/internal/types"
 )
-
-// buildPagination constructs a Pagination struct from the given values.
-func buildPagination(page, pageSize, total int) types.Pagination {
-	pages := 0
-	if pageSize > 0 {
-		pages = (total + pageSize - 1) / pageSize
-	}
-	return types.Pagination{
-		Page:       page,
-		PageSize:   pageSize,
-		TotalCount: total,
-		TotalPages: pages,
-	}
-}
 
 // parseWindowParam parses the ?window query param as a Go duration string.
 // Day-suffix shorthand (e.g. "30d") is also accepted.
@@ -53,25 +40,6 @@ func parseWindowParam(r *http.Request, defaultW, minW, maxW time.Duration) (star
 	return start, end, true
 }
 
-// parsePageParams parses ?page and ?page_size with sensible defaults and caps.
-func parsePageParams(r *http.Request, defaultSize int) (page, pageSize int) {
-	page = 1
-	pageSize = defaultSize
-
-	q := r.URL.Query()
-	if v := q.Get("page"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 1 {
-			page = n
-		}
-	}
-	if v := q.Get("page_size"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 1 && n <= 500 {
-			pageSize = n
-		}
-	}
-	return page, pageSize
-}
-
 // trimStr trims whitespace and truncates s to maxLen UTF-8 characters.
 func trimStr(s string, maxLen int) string {
 	s = strings.TrimSpace(s)
@@ -87,22 +55,33 @@ func trimStr(s string, maxLen int) string {
 // ---------------------------------------------------------------------------
 
 func (s *Server) handleListSLACompliance(w http.ResponseWriter, r *http.Request) {
-	p := parseSLAComplianceParams(r)
-	rows, total, err := s.svc.ListSLACompliance(r.Context(), p)
+	p, err := parseSLAComplianceParams(r)
 	if err != nil {
+		writeError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	rows, page, err := s.svc.ListSLACompliance(r.Context(), p)
+	if err != nil {
+		if errors.Is(err, types.ErrInvalidCursor) {
+			writeError(w, http.StatusBadRequest, "Bad Request", err.Error())
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "Internal Server Error", err.Error())
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]any{
-		"compliance": rows,
-		"pagination": buildPagination(p.Page, p.PageSize, total),
+		"data":       rows,
+		"pagination": page,
+		"meta":       buildMeta(r),
 	})
 }
 
-func parseSLAComplianceParams(r *http.Request) types.SLAComplianceParams {
+func parseSLAComplianceParams(r *http.Request) (types.SLAComplianceParams, error) {
+	if err := rejectLegacyPaginationParams(r); err != nil {
+		return types.SLAComplianceParams{}, err
+	}
 	// window: default 3h, min 1m, max 30d
 	start, end, _ := parseWindowParam(r, 3*time.Hour, time.Minute, 30*24*time.Hour)
-	page, pageSize := parsePageParams(r, 50)
 	q := r.URL.Query()
 	return types.SLAComplianceParams{
 		OrchestratorAddress: strings.ToLower(trimStr(q.Get("orchestrator_address"), 256)),
@@ -113,9 +92,9 @@ func parseSLAComplianceParams(r *http.Request) types.SLAComplianceParams {
 		Org:                 trimStr(q.Get("org"), 256),
 		Start:               start,
 		End:                 end,
-		Page:                page,
-		PageSize:            pageSize,
-	}
+		Limit:               parseListLimit(q, defaultCursorLimit),
+		Cursor:              strings.TrimSpace(q.Get("cursor")),
+	}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -123,22 +102,33 @@ func parseSLAComplianceParams(r *http.Request) types.SLAComplianceParams {
 // ---------------------------------------------------------------------------
 
 func (s *Server) handleListNetworkDemand(w http.ResponseWriter, r *http.Request) {
-	p := parseNetworkDemandParams(r)
-	rows, total, err := s.svc.ListNetworkDemand(r.Context(), p)
+	p, err := parseNetworkDemandParams(r)
 	if err != nil {
+		writeError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	rows, page, err := s.svc.ListNetworkDemand(r.Context(), p)
+	if err != nil {
+		if errors.Is(err, types.ErrInvalidCursor) {
+			writeError(w, http.StatusBadRequest, "Bad Request", err.Error())
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "Internal Server Error", err.Error())
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]any{
-		"demand":     rows,
-		"pagination": buildPagination(p.Page, p.PageSize, total),
+		"data":       rows,
+		"pagination": page,
+		"meta":       buildMeta(r),
 	})
 }
 
-func parseNetworkDemandParams(r *http.Request) types.NetworkDemandParams {
+func parseNetworkDemandParams(r *http.Request) (types.NetworkDemandParams, error) {
+	if err := rejectLegacyPaginationParams(r); err != nil {
+		return types.NetworkDemandParams{}, err
+	}
 	// window: default 3h, min 1m, max 30d
 	start, end, _ := parseWindowParam(r, 3*time.Hour, time.Minute, 30*24*time.Hour)
-	page, pageSize := parsePageParams(r, 50)
 	q := r.URL.Query()
 	return types.NetworkDemandParams{
 		Gateway:    trimStr(q.Get("gateway"), 256),
@@ -148,9 +138,9 @@ func parseNetworkDemandParams(r *http.Request) types.NetworkDemandParams {
 		Org:        trimStr(q.Get("org"), 256),
 		Start:      start,
 		End:        end,
-		Page:       page,
-		PageSize:   pageSize,
-	}
+		Limit:      parseListLimit(q, defaultCursorLimit),
+		Cursor:     strings.TrimSpace(q.Get("cursor")),
+	}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -158,21 +148,32 @@ func parseNetworkDemandParams(r *http.Request) types.NetworkDemandParams {
 // ---------------------------------------------------------------------------
 
 func (s *Server) handleListGPUNetworkDemand(w http.ResponseWriter, r *http.Request) {
-	p := parseGPUNetworkDemandParams(r)
-	rows, total, err := s.svc.ListGPUNetworkDemand(r.Context(), p)
+	p, err := parseGPUNetworkDemandParams(r)
 	if err != nil {
+		writeError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	rows, page, err := s.svc.ListGPUNetworkDemand(r.Context(), p)
+	if err != nil {
+		if errors.Is(err, types.ErrInvalidCursor) {
+			writeError(w, http.StatusBadRequest, "Bad Request", err.Error())
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "Internal Server Error", err.Error())
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]any{
-		"demand":     rows,
-		"pagination": buildPagination(p.Page, p.PageSize, total),
+		"data":       rows,
+		"pagination": page,
+		"meta":       buildMeta(r),
 	})
 }
 
-func parseGPUNetworkDemandParams(r *http.Request) types.GPUNetworkDemandParams {
+func parseGPUNetworkDemandParams(r *http.Request) (types.GPUNetworkDemandParams, error) {
+	if err := rejectLegacyPaginationParams(r); err != nil {
+		return types.GPUNetworkDemandParams{}, err
+	}
 	start, end, _ := parseWindowParam(r, 3*time.Hour, time.Minute, 30*24*time.Hour)
-	page, pageSize := parsePageParams(r, 50)
 	q := r.URL.Query()
 	return types.GPUNetworkDemandParams{
 		Gateway:             trimStr(q.Get("gateway"), 256),
@@ -184,9 +185,9 @@ func parseGPUNetworkDemandParams(r *http.Request) types.GPUNetworkDemandParams {
 		Org:                 trimStr(q.Get("org"), 256),
 		Start:               start,
 		End:                 end,
-		Page:                page,
-		PageSize:            pageSize,
-	}
+		Limit:               parseListLimit(q, defaultCursorLimit),
+		Cursor:              strings.TrimSpace(q.Get("cursor")),
+	}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -194,22 +195,33 @@ func parseGPUNetworkDemandParams(r *http.Request) types.GPUNetworkDemandParams {
 // ---------------------------------------------------------------------------
 
 func (s *Server) handleListGPUMetrics(w http.ResponseWriter, r *http.Request) {
-	p := parseGPUMetricsParams(r)
-	rows, total, err := s.svc.ListGPUMetrics(r.Context(), p)
+	p, err := parseGPUMetricsParams(r)
 	if err != nil {
+		writeError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	rows, page, err := s.svc.ListGPUMetrics(r.Context(), p)
+	if err != nil {
+		if errors.Is(err, types.ErrInvalidCursor) {
+			writeError(w, http.StatusBadRequest, "Bad Request", err.Error())
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "Internal Server Error", err.Error())
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]any{
-		"metrics":    rows,
-		"pagination": buildPagination(p.Page, p.PageSize, total),
+		"data":       rows,
+		"pagination": page,
+		"meta":       buildMeta(r),
 	})
 }
 
-func parseGPUMetricsParams(r *http.Request) types.GPUMetricsParams {
+func parseGPUMetricsParams(r *http.Request) (types.GPUMetricsParams, error) {
+	if err := rejectLegacyPaginationParams(r); err != nil {
+		return types.GPUMetricsParams{}, err
+	}
 	// window: default 24h, min 1m, max 72h
 	start, end, _ := parseWindowParam(r, 24*time.Hour, time.Minute, 72*time.Hour)
-	page, pageSize := parsePageParams(r, 50)
 	q := r.URL.Query()
 	return types.GPUMetricsParams{
 		OrchestratorAddress: strings.ToLower(trimStr(q.Get("orchestrator_address"), 256)),
@@ -223,7 +235,7 @@ func parseGPUMetricsParams(r *http.Request) types.GPUMetricsParams {
 		Org:                 trimStr(q.Get("org"), 256),
 		Start:               start,
 		End:                 end,
-		Page:                page,
-		PageSize:            pageSize,
-	}
+		Limit:               parseListLimit(q, defaultCursorLimit),
+		Cursor:              strings.TrimSpace(q.Get("cursor")),
+	}, nil
 }

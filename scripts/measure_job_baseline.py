@@ -209,6 +209,22 @@ def fetch_api_json(base_url: str, path: str) -> tuple[dict[str, Any] | list[Any]
     return json.loads(body), elapsed, status
 
 
+def add_cursor_to_path(path: str, cursor: str) -> str:
+    parsed = urllib.parse.urlsplit(path)
+    query = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+    query = [(key, value) for key, value in query if key != "cursor"]
+    query.append(("cursor", cursor))
+    return urllib.parse.urlunsplit(
+        (
+            parsed.scheme,
+            parsed.netloc,
+            parsed.path,
+            urllib.parse.urlencode(query),
+            parsed.fragment,
+        )
+    )
+
+
 @dataclass
 class SamplePoint:
     remote_network_offsets: dict[int, int]
@@ -744,8 +760,14 @@ def build_api_probe_table(rows: list[dict[str, Any]]) -> list[str]:
             notes.append(f"error={row['error']}")
         if row.get("rows") is not None:
             notes.append(f"rows={row['rows']}")
-        if row.get("total_count") is not None:
-            notes.append(f"total_count={row['total_count']}")
+        if row.get("has_more") is not None:
+            notes.append(f"has_more={row['has_more']}")
+        if row.get("next_cursor"):
+            notes.append("next_cursor=yes")
+        if row.get("next_page_status") is not None:
+            notes.append(f"next_page_status={row['next_page_status']}")
+        if row.get("next_page_rows") is not None:
+            notes.append(f"next_page_rows={row['next_page_rows']}")
         if row.get("window") is not None:
             notes.append(f"window={row['window']}")
         out.append(
@@ -1047,6 +1069,7 @@ def main() -> None:
         ("GET /healthz", "/healthz", None),
         ("GET /v1/dashboard/kpi", "/v1/dashboard/kpi", "default"),
         ("GET /v1/dashboard/orchestrators", "/v1/dashboard/orchestrators", "default"),
+        ("GET /v1/net/orchestrators?limit=10", "/v1/net/orchestrators?limit=10", "default"),
         ("GET /v1/sla/compliance?limit=10", "/v1/sla/compliance?limit=10", "default"),
         ("GET /v1/network/demand?limit=10", "/v1/network/demand?limit=10", "default"),
         ("GET /v1/gpu/network-demand?limit=10", "/v1/gpu/network-demand?limit=10", "default"),
@@ -1065,15 +1088,19 @@ def main() -> None:
                 probe["window"] = window
             if isinstance(payload, dict):
                 if "pagination" in payload and isinstance(payload["pagination"], dict):
-                    probe["total_count"] = payload["pagination"].get("total_count")
-                if "compliance" in payload and isinstance(payload["compliance"], list):
-                    probe["rows"] = len(payload["compliance"])
-                elif "demand" in payload and isinstance(payload["demand"], list):
-                    probe["rows"] = len(payload["demand"])
-                elif "gpuMetrics" in payload and isinstance(payload["gpuMetrics"], list):
-                    probe["rows"] = len(payload["gpuMetrics"])
-                elif "orchestrators" in payload and isinstance(payload["orchestrators"], list):
-                    probe["rows"] = len(payload["orchestrators"])
+                    pagination = payload["pagination"]
+                    probe["has_more"] = pagination.get("has_more")
+                    probe["next_cursor"] = pagination.get("next_cursor")
+                    if pagination.get("has_more") and pagination.get("next_cursor"):
+                        next_payload, _, next_status = fetch_api_json(
+                            args.api_base_url,
+                            add_cursor_to_path(path, str(pagination["next_cursor"])),
+                        )
+                        probe["next_page_status"] = next_status
+                        if isinstance(next_payload, dict) and isinstance(next_payload.get("data"), list):
+                            probe["next_page_rows"] = len(next_payload["data"])
+                if "data" in payload and isinstance(payload["data"], list):
+                    probe["rows"] = len(payload["data"])
             api_probes.append(probe)
         except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError) as exc:
             api_probes.append(

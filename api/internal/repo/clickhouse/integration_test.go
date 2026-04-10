@@ -77,7 +77,7 @@ func TestIntegration_GetNetworkSummary(t *testing.T) {
 
 func TestIntegration_ListOrchestrators(t *testing.T) {
 	r := newIntegrationRepo(t)
-	if _, err := r.ListOrchestrators(context.Background(), defaultParams()); err != nil {
+	if _, _, err := r.ListOrchestrators(context.Background(), defaultParams()); err != nil {
 		t.Fatalf("ListOrchestrators: %v", err)
 	}
 }
@@ -176,10 +176,9 @@ func TestIntegration_GetWebRTCQuality(t *testing.T) {
 func TestIntegration_ListGPUMetrics(t *testing.T) {
 	r := newIntegrationRepo(t)
 	if _, _, err := r.ListGPUMetrics(context.Background(), types.GPUMetricsParams{
-		Start:    time.Now().Add(-3 * time.Hour).UTC(),
-		End:      time.Now().UTC(),
-		Page:     1,
-		PageSize: 10,
+		Start: time.Now().Add(-3 * time.Hour).UTC(),
+		End:   time.Now().UTC(),
+		Limit: 10,
 	}); err != nil {
 		t.Fatalf("ListGPUMetrics: %v", err)
 	}

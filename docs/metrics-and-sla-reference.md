@@ -280,7 +280,10 @@ All metrics can be filtered and grouped by the following dimensions via API quer
 | Time window start | `start` / `end` | `2026-03-01T00:00:00Z` | ISO 8601 UTC; windows are hourly |
 | Granularity | `granularity` | `5m`, `1h`, `1d` | Time bucket size; not all endpoints support all granularities |
 
-**Standard pagination parameters:** `limit` (default 100), `offset` (default 0).
+**Standard pagination parameters for cursor-paginated list endpoints:** `limit`
+(default 50) and `cursor` (opaque continuation token from the previous page).
+Responses use the shared `{data, pagination, meta}` envelope with
+`pagination.next_cursor`, `pagination.has_more`, and `pagination.page_size`.
 
 ---
 

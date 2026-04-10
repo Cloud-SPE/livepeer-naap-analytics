@@ -43,8 +43,9 @@ func (r *Repo) GetNetworkSummary(ctx context.Context, p types.QueryParams) (*typ
 }
 
 // ListOrchestrators returns active NET-001 orchestrator rows for
-// GET /v1/net/orchestrators.
-func (r *Repo) ListOrchestrators(ctx context.Context, p types.QueryParams) ([]types.Orchestrator, error) {
+// GET /v1/net/orchestrators using stable cursor pagination ordered by
+// (last_seen DESC, orch_address DESC).
+func (r *Repo) ListOrchestrators(ctx context.Context, p types.QueryParams) ([]types.Orchestrator, types.CursorPageInfo, error) {
 	where := "WHERE 1=1"
 	args := []any{}
 
@@ -57,7 +58,16 @@ func (r *Repo) ListOrchestrators(ctx context.Context, p types.QueryParams) ([]ty
 	}
 
 	limit := effectiveLimit(p)
-	args = append(args, limit, p.Offset)
+	if values, err := decodeCursorValues(p.Cursor, 2); err != nil {
+		return nil, types.CursorPageInfo{}, err
+	} else if len(values) == 2 {
+		cursorLastSeen, parseErr := time.Parse(time.RFC3339Nano, values[0])
+		if parseErr != nil {
+			return nil, types.CursorPageInfo{}, fmt.Errorf("%w: parse last_seen", types.ErrInvalidCursor)
+		}
+		where += " AND (last_seen < ? OR (last_seen = ? AND orch_address < ?))"
+		args = append(args, cursorLastSeen.UTC(), cursorLastSeen.UTC(), values[1])
+	}
 
 	query := fmt.Sprintf(`
 		SELECT
@@ -70,13 +80,13 @@ func (r *Repo) ListOrchestrators(ctx context.Context, p types.QueryParams) ([]ty
 			raw_capabilities
 		FROM naap.api_latest_orchestrator_state
 		%s
-		ORDER BY last_seen DESC
-		LIMIT ? OFFSET ?
+		ORDER BY last_seen DESC, orch_address DESC
+		LIMIT ?
 	`, activeOrchMinutes, where)
 
-	rows, err := r.conn.Query(ctx, query, args...)
+	rows, err := r.conn.Query(ctx, query, append(args, limit+1)...)
 	if err != nil {
-		return nil, fmt.Errorf("clickhouse list orchestrators: %w", err)
+		return nil, types.CursorPageInfo{}, fmt.Errorf("clickhouse list orchestrators: %w", err)
 	}
 	defer rows.Close()
 
@@ -85,7 +95,7 @@ func (r *Repo) ListOrchestrators(ctx context.Context, p types.QueryParams) ([]ty
 		var o types.Orchestrator
 		var uri string
 		if err := rows.Scan(&o.Address, &o.Org, &uri, &o.Version, &o.LastSeen, &o.IsActive, &o.RawCapabilities); err != nil {
-			return nil, fmt.Errorf("clickhouse list orchestrators scan: %w", err)
+			return nil, types.CursorPageInfo{}, fmt.Errorf("clickhouse list orchestrators scan: %w", err)
 		}
 		o.URI = uri
 		o.Name = hostnameFromURI(uri)
@@ -94,7 +104,22 @@ func (r *Repo) ListOrchestrators(ctx context.Context, p types.QueryParams) ([]ty
 		}
 		orchs = append(orchs, o)
 	}
-	return orchs, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, types.CursorPageInfo{}, err
+	}
+	hasMore := len(orchs) > limit
+	if hasMore {
+		orchs = orchs[:limit]
+	}
+	if orchs == nil {
+		orchs = []types.Orchestrator{}
+	}
+	page := types.CursorPageInfo{HasMore: hasMore, PageSize: len(orchs)}
+	if hasMore {
+		last := orchs[len(orchs)-1]
+		page.NextCursor = encodeCursorValues(last.LastSeen.UTC().Format(time.RFC3339Nano), last.Address)
+	}
+	return orchs, page, nil
 }
 
 // GetGPUSummary aggregates the legacy R1 GPU inventory summary shape.

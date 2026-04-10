@@ -15,13 +15,18 @@ import (
 
 func newTestServer(tb testing.TB) *runtime.Server {
 	tb.Helper()
+	return newTestServerWithRepo(tb, &repo.NoopAnalyticsRepo{})
+}
+
+func newTestServerWithRepo(tb testing.TB, analyticsRepo repo.AnalyticsRepo) *runtime.Server {
+	tb.Helper()
 	cfg := &config.Config{Port: "8000", Env: "development", LogLevel: "debug", KafkaBrokers: "localhost:9092"}
 	p, err := providers.New(cfg)
 	if err != nil {
 		tb.Fatalf("init providers: %v", err)
 	}
 	tb.Cleanup(func() { p.Close(context.Background()) })
-	return runtime.New(cfg, p, service.New(&repo.NoopAnalyticsRepo{}))
+	return runtime.New(cfg, p, service.New(analyticsRepo))
 }
 
 func TestHealthz(t *testing.T) {
@@ -34,4 +39,3 @@ func TestHealthz(t *testing.T) {
 		t.Errorf("expected 200, got %d", rr.Code)
 	}
 }
-

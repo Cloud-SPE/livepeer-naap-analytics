@@ -72,14 +72,12 @@ components:
         minimum: 1
         maximum: 1000
         default: 50
-    offset:
-      name: offset
+    cursor:
+      name: cursor
       in: query
-      description: Pagination offset.
+      description: Opaque cursor returned by the previous page. Omit on the first page.
       schema:
-        type: integer
-        minimum: 0
-        default: 0
+        type: string
     pipeline:
       name: pipeline
       in: query
@@ -130,23 +128,6 @@ components:
         type: string
         example: "24h"
         default: "24h"
-    page:
-      name: page
-      in: query
-      description: Page number (1-based).
-      schema:
-        type: integer
-        minimum: 1
-        default: 1
-    page_size:
-      name: page_size
-      in: query
-      description: Items per page (1–500).
-      schema:
-        type: integer
-        minimum: 1
-        maximum: 500
-        default: 50
     orchestrator_address:
       name: orchestrator_address
       in: query
@@ -479,14 +460,29 @@ components:
 
     # ── SLA / GPU / Network Demand (ported from leaderboard-serverless) ──────
 
-    Pagination:
+    ResponseMeta:
       type: object
-      description: Pagination metadata included in paged responses.
+      description: Standard response envelope metadata.
       properties:
-        page:        { type: integer, example: 1 }
+        generated_at: { type: string, format: date-time, description: "UTC timestamp when the response was generated." }
+        request_id:   { type: string, description: "Value of the X-Request-Id request header, if present." }
+
+    CursorPagination:
+      type: object
+      description: Cursor pagination metadata included in list responses.
+      properties:
+        next_cursor: { type: string, example: "WyIyMDI2LTA0LTA5VDEyOjAwOjAwWiIsIjB4YWJjMTIzIl0" }
+        has_more:    { type: boolean, example: true }
         page_size:   { type: integer, example: 50 }
-        total_count: { type: integer, example: 243 }
-        total_pages: { type: integer, example: 5 }
+
+    OrchestratorListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/Orchestrator" }
+        pagination: { $ref: "#/components/schemas/CursorPagination" }
+        meta: { $ref: "#/components/schemas/ResponseMeta" }
 
     SLAComplianceRow:
       type: object
@@ -544,10 +540,11 @@ components:
     SLAComplianceResponse:
       type: object
       properties:
-        compliance:
+        data:
           type: array
           items: { $ref: "#/components/schemas/SLAComplianceRow" }
-        pagination: { $ref: "#/components/schemas/Pagination" }
+        pagination: { $ref: "#/components/schemas/CursorPagination" }
+        meta: { $ref: "#/components/schemas/ResponseMeta" }
 
     NetworkDemandRow:
       type: object
@@ -589,10 +586,11 @@ components:
     NetworkDemandResponse:
       type: object
       properties:
-        demand:
+        data:
           type: array
           items: { $ref: "#/components/schemas/NetworkDemandRow" }
-        pagination: { $ref: "#/components/schemas/Pagination" }
+        pagination: { $ref: "#/components/schemas/CursorPagination" }
+        meta: { $ref: "#/components/schemas/ResponseMeta" }
 
     GPUNetworkDemandRow:
       type: object
@@ -637,10 +635,11 @@ components:
     GPUNetworkDemandResponse:
       type: object
       properties:
-        demand:
+        data:
           type: array
           items: { $ref: "#/components/schemas/GPUNetworkDemandRow" }
-        pagination: { $ref: "#/components/schemas/Pagination" }
+        pagination: { $ref: "#/components/schemas/CursorPagination" }
+        meta: { $ref: "#/components/schemas/ResponseMeta" }
 
     GPUMetric:
       type: object
@@ -693,10 +692,11 @@ components:
     GPUMetricsResponse:
       type: object
       properties:
-        metrics:
+        data:
           type: array
           items: { $ref: "#/components/schemas/GPUMetric" }
-        pagination: { $ref: "#/components/schemas/Pagination" }
+        pagination: { $ref: "#/components/schemas/CursorPagination" }
+        meta: { $ref: "#/components/schemas/ResponseMeta" }
 
   responses:
     429:
@@ -782,16 +782,15 @@ paths:
         - $ref: "#/components/parameters/org"
         - $ref: "#/components/parameters/active_only"
         - $ref: "#/components/parameters/limit"
-        - $ref: "#/components/parameters/offset"
+        - $ref: "#/components/parameters/cursor"
       responses:
         "200":
           description: OK
           content:
             application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Orchestrator"
+              schema: { $ref: "#/components/schemas/OrchestratorListResponse" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "429":
           $ref: "#/components/responses/429"
         "500":
@@ -886,14 +885,15 @@ paths:
         - $ref: "#/components/parameters/model_id"
         - $ref: "#/components/parameters/gpu_id"
         - $ref: "#/components/parameters/region"
-        - $ref: "#/components/parameters/page"
-        - $ref: "#/components/parameters/page_size"
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
       responses:
         "200":
           description: OK
           content:
             application/json:
               schema: { $ref: "#/components/schemas/SLAComplianceResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "500": { $ref: "#/components/responses/500" }
 
   /v1/network/demand:
@@ -916,14 +916,15 @@ paths:
         - $ref: "#/components/parameters/pipeline_id"
         - $ref: "#/components/parameters/model_id"
         - $ref: "#/components/parameters/region"
-        - $ref: "#/components/parameters/page"
-        - $ref: "#/components/parameters/page_size"
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
       responses:
         "200":
           description: OK
           content:
             application/json:
               schema: { $ref: "#/components/schemas/NetworkDemandResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "500": { $ref: "#/components/responses/500" }
 
   /v1/gpu/network-demand:
@@ -947,14 +948,15 @@ paths:
         - $ref: "#/components/parameters/model_id"
         - $ref: "#/components/parameters/gpu_id"
         - $ref: "#/components/parameters/region"
-        - $ref: "#/components/parameters/page"
-        - $ref: "#/components/parameters/page_size"
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
       responses:
         "200":
           description: OK
           content:
             application/json:
               schema: { $ref: "#/components/schemas/GPUNetworkDemandResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "500": { $ref: "#/components/responses/500" }
 
   /v1/gpu/metrics:
@@ -984,14 +986,15 @@ paths:
         - $ref: "#/components/parameters/runner_version"
         - $ref: "#/components/parameters/cuda_version"
         - $ref: "#/components/parameters/region"
-        - $ref: "#/components/parameters/page"
-        - $ref: "#/components/parameters/page_size"
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
       responses:
         "200":
           description: OK
           content:
             application/json:
               schema: { $ref: "#/components/schemas/GPUMetricsResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "500": { $ref: "#/components/responses/500" }
 
   # ── Dashboard paths (R16) ─────────────────────────────────────────────────

@@ -1,12 +1,19 @@
 package runtime
 
 import (
+	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/livepeer/naap-analytics/internal/types"
+)
+
+const (
+	defaultCursorLimit = 50
+	maxCursorLimit     = 1000
 )
 
 // parseQueryParams extracts common query parameters from an HTTP request.
@@ -28,19 +35,7 @@ func parseQueryParams(r *http.Request) types.QueryParams {
 		}
 	}
 
-	limit := 50
-	if l := q.Get("limit"); l != "" {
-		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 1000 {
-			limit = n
-		}
-	}
-
-	offset := 0
-	if o := q.Get("offset"); o != "" {
-		if n, err := strconv.Atoi(o); err == nil && n >= 0 {
-			offset = n
-		}
-	}
+	limit := parseListLimit(q, defaultCursorLimit)
 
 	activeOnly := strings.EqualFold(q.Get("active_only"), "true")
 
@@ -56,6 +51,26 @@ func parseQueryParams(r *http.Request) types.QueryParams {
 		Granularity: q.Get("granularity"),
 		ActiveOnly:  activeOnly,
 		Limit:       limit,
-		Offset:      offset,
+		Cursor:      strings.TrimSpace(q.Get("cursor")),
 	}
+}
+
+func parseListLimit(q url.Values, defaultLimit int) int {
+	limit := defaultLimit
+	if l := q.Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= maxCursorLimit {
+			limit = n
+		}
+	}
+	return limit
+}
+
+func rejectLegacyPaginationParams(r *http.Request) error {
+	q := r.URL.Query()
+	for _, key := range []string{"offset", "page", "page_size"} {
+		if q.Has(key) {
+			return fmt.Errorf("query parameter %q is no longer supported; use limit and cursor", key)
+		}
+	}
+	return nil
 }

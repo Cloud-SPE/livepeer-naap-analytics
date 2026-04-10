@@ -17,7 +17,7 @@ import (
 type AnalyticsService interface {
 	// Network state (R1)
 	GetNetworkSummary(ctx context.Context, p types.QueryParams) (*types.NetworkSummary, error)
-	ListOrchestrators(ctx context.Context, p types.QueryParams) ([]types.Orchestrator, error)
+	ListOrchestrators(ctx context.Context, p types.QueryParams) ([]types.Orchestrator, types.CursorPageInfo, error)
 	GetGPUSummary(ctx context.Context, p types.QueryParams) (*types.GPUSummary, error)
 	ListModels(ctx context.Context, p types.QueryParams) ([]types.ModelAvailability, error)
 
@@ -86,10 +86,10 @@ type AnalyticsService interface {
 	GetCapacitySummary(ctx context.Context, p types.QueryParams) (*types.CapacitySummary, error)
 
 	// SLA / GPU / Network Demand (ported from leaderboard-serverless)
-	ListSLACompliance(ctx context.Context, p types.SLAComplianceParams) ([]types.SLAComplianceRow, int, error)
-	ListNetworkDemand(ctx context.Context, p types.NetworkDemandParams) ([]types.NetworkDemandRow, int, error)
-	ListGPUNetworkDemand(ctx context.Context, p types.GPUNetworkDemandParams) ([]types.GPUNetworkDemandRow, int, error)
-	ListGPUMetrics(ctx context.Context, p types.GPUMetricsParams) ([]types.GPUMetric, int, error)
+	ListSLACompliance(ctx context.Context, p types.SLAComplianceParams) ([]types.SLAComplianceRow, types.CursorPageInfo, error)
+	ListNetworkDemand(ctx context.Context, p types.NetworkDemandParams) ([]types.NetworkDemandRow, types.CursorPageInfo, error)
+	ListGPUNetworkDemand(ctx context.Context, p types.GPUNetworkDemandParams) ([]types.GPUNetworkDemandRow, types.CursorPageInfo, error)
+	ListGPUMetrics(ctx context.Context, p types.GPUMetricsParams) ([]types.GPUMetric, types.CursorPageInfo, error)
 
 	// Dashboard — pre-aggregated UI endpoints (R16)
 	GetDashboardKPI(ctx context.Context, windowHours int, pipeline, modelID string) (*types.DashboardKPI, error)
@@ -121,12 +121,12 @@ func (s *analyticsService) GetNetworkSummary(ctx context.Context, p types.QueryP
 	return v, nil
 }
 
-func (s *analyticsService) ListOrchestrators(ctx context.Context, p types.QueryParams) ([]types.Orchestrator, error) {
-	v, err := s.repo.ListOrchestrators(ctx, p)
+func (s *analyticsService) ListOrchestrators(ctx context.Context, p types.QueryParams) ([]types.Orchestrator, types.CursorPageInfo, error) {
+	v, page, err := s.repo.ListOrchestrators(ctx, p)
 	if err != nil {
-		return nil, fmt.Errorf("list orchestrators: %w", err)
+		return nil, types.CursorPageInfo{}, fmt.Errorf("list orchestrators: %w", err)
 	}
-	return v, nil
+	return v, page, nil
 }
 
 func (s *analyticsService) GetGPUSummary(ctx context.Context, p types.QueryParams) (*types.GPUSummary, error) {
@@ -491,36 +491,36 @@ func (s *analyticsService) GetCapacitySummary(ctx context.Context, p types.Query
 	return v, nil
 }
 
-func (s *analyticsService) ListSLACompliance(ctx context.Context, p types.SLAComplianceParams) ([]types.SLAComplianceRow, int, error) {
-	rows, total, err := s.repo.ListSLACompliance(ctx, p)
+func (s *analyticsService) ListSLACompliance(ctx context.Context, p types.SLAComplianceParams) ([]types.SLAComplianceRow, types.CursorPageInfo, error) {
+	rows, page, err := s.repo.ListSLACompliance(ctx, p)
 	if err != nil {
-		return nil, 0, fmt.Errorf("list sla compliance: %w", err)
+		return nil, types.CursorPageInfo{}, fmt.Errorf("list sla compliance: %w", err)
 	}
-	return rows, total, nil
+	return rows, page, nil
 }
 
-func (s *analyticsService) ListNetworkDemand(ctx context.Context, p types.NetworkDemandParams) ([]types.NetworkDemandRow, int, error) {
-	rows, total, err := s.repo.ListNetworkDemand(ctx, p)
+func (s *analyticsService) ListNetworkDemand(ctx context.Context, p types.NetworkDemandParams) ([]types.NetworkDemandRow, types.CursorPageInfo, error) {
+	rows, page, err := s.repo.ListNetworkDemand(ctx, p)
 	if err != nil {
-		return nil, 0, fmt.Errorf("list network demand: %w", err)
+		return nil, types.CursorPageInfo{}, fmt.Errorf("list network demand: %w", err)
 	}
-	return rows, total, nil
+	return rows, page, nil
 }
 
-func (s *analyticsService) ListGPUNetworkDemand(ctx context.Context, p types.GPUNetworkDemandParams) ([]types.GPUNetworkDemandRow, int, error) {
-	rows, total, err := s.repo.ListGPUNetworkDemand(ctx, p)
+func (s *analyticsService) ListGPUNetworkDemand(ctx context.Context, p types.GPUNetworkDemandParams) ([]types.GPUNetworkDemandRow, types.CursorPageInfo, error) {
+	rows, page, err := s.repo.ListGPUNetworkDemand(ctx, p)
 	if err != nil {
-		return nil, 0, fmt.Errorf("list gpu network demand: %w", err)
+		return nil, types.CursorPageInfo{}, fmt.Errorf("list gpu network demand: %w", err)
 	}
-	return rows, total, nil
+	return rows, page, nil
 }
 
-func (s *analyticsService) ListGPUMetrics(ctx context.Context, p types.GPUMetricsParams) ([]types.GPUMetric, int, error) {
-	rows, total, err := s.repo.ListGPUMetrics(ctx, p)
+func (s *analyticsService) ListGPUMetrics(ctx context.Context, p types.GPUMetricsParams) ([]types.GPUMetric, types.CursorPageInfo, error) {
+	rows, page, err := s.repo.ListGPUMetrics(ctx, p)
 	if err != nil {
-		return nil, 0, fmt.Errorf("list gpu metrics: %w", err)
+		return nil, types.CursorPageInfo{}, fmt.Errorf("list gpu metrics: %w", err)
 	}
-	return rows, total, nil
+	return rows, page, nil
 }
 
 func (s *analyticsService) GetDashboardKPI(ctx context.Context, windowHours int, pipeline, modelID string) (*types.DashboardKPI, error) {

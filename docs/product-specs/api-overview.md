@@ -29,7 +29,7 @@ https://analytics.livepeer.cloud/v1/
 |----|-------------|-------------------|
 | API-001 | All endpoints respond within 1 second at P99 under normal load | Load test confirms P99 ≤ 1000ms at 60 req/min per IP |
 | API-002 | Rate limiting: 60 req/min, 1000 req/hour per IP | `HTTP 429` returned with `Retry-After` header when exceeded |
-| API-003 | All responses include `meta.generated_at`, `meta.query_time_ms`, `meta.org` | Integration test validates meta fields on every endpoint |
+| API-003 | Cursor-paginated list endpoints include `meta.generated_at` and `meta.request_id` | Handler tests validate meta fields on each cursor-paginated list route |
 | API-004 | All endpoints accept `?org=daydream\|cloudspe` filter; omit for all orgs | Test: filtered responses contain only events from that org's Kafka topic |
 | API-005 | All time-range params accept ISO 8601 or Unix epoch ms | Invalid values return `HTTP 400` with RFC 7807 error body |
 | API-006 | HTTPS only; HTTP redirects to HTTPS | HTTP → HTTPS redirect verified in integration test |
@@ -58,3 +58,26 @@ https://analytics.livepeer.cloud/v1/
 | Dashboard | `GET /v1/dashboard/pricing` | Built-in |
 | Dashboard | `GET /v1/dashboard/job-feed` | Built-in |
 | Health | `GET /healthz` | Built-in, no spec needed |
+
+## Cursor Pagination Contract
+
+The cursor-paginated public list routes in `v1` use the same envelope:
+
+```json
+{
+  "data": [],
+  "pagination": {
+    "next_cursor": "opaque-string",
+    "has_more": true,
+    "page_size": 50
+  },
+  "meta": {
+    "generated_at": "2026-04-09T12:00:00Z",
+    "request_id": "optional-request-id"
+  }
+}
+```
+
+Clients request the first page with `?limit=<n>` and follow with
+`?limit=<n>&cursor=<pagination.next_cursor>`. Legacy `offset`, `page`, and
+`page_size` parameters are rejected on migrated endpoints.

@@ -147,6 +147,15 @@ func notImplemented(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
+// buildMeta returns the standard meta envelope for list responses that follow
+// the cursor-pagination contract.
+func buildMeta(r *http.Request) map[string]any {
+	return map[string]any{
+		"generated_at": time.Now().UTC(),
+		"request_id":   r.Header.Get("X-Request-Id"),
+	}
+}
+
 func respondJSON(w http.ResponseWriter, status int, v any) {
 	body, err := json.Marshal(v)
 	if err != nil {

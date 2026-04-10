@@ -62,33 +62,35 @@ Events are tagged by source organisation:
 
 ### Response standards
 
-All responses include:
+Cursor-paginated list responses include:
 
 ```json
 {
   "data": { ... },
   "meta": {
-    "org": "daydream | cloudspe | all",
-    "time_range": { "start": "...", "end": "..." },
     "generated_at": "...",
-    "query_time_ms": 42
+    "request_id": "optional-request-id"
   }
 }
 ```
 
-List responses additionally include:
+These responses additionally include:
 
 ```json
 {
   "data": [...],
   "pagination": {
-    "cursor": "opaque-string",
+    "next_cursor": "opaque-string",
     "has_more": true,
-    "total": 1234
+    "page_size": 50
   },
   "meta": { ... }
 }
 ```
+
+For cursor-paginated list endpoints, clients send `?limit=<n>&cursor=<opaque>`.
+The first page omits `cursor`; subsequent pages reuse `pagination.next_cursor`.
+Legacy `offset`, `page`, and `page_size` parameters are rejected with `HTTP 400`.
 
 ---
 

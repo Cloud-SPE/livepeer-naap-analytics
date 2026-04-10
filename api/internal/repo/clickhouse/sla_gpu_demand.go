@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/livepeer/naap-analytics/internal/types"
 )
@@ -13,26 +14,29 @@ import (
 // ---------------------------------------------------------------------------
 
 // ListSLACompliance returns paginated SLA compliance rows from thin api_* read
-// models backed by resolver-published final SLA stores. These are service-facing
-// relations only; downstream derivations must use canonical_* instead.
-func (r *Repo) ListSLACompliance(ctx context.Context, p types.SLAComplianceParams) ([]types.SLAComplianceRow, int, error) {
+// models backed by resolver-published final SLA stores. Stable ordering and
+// cursor tuple: (window_start DESC, orchestrator_address DESC, pipeline_id DESC,
+// model_id DESC, gpu_id DESC, region DESC). These are service-facing relations
+// only; downstream derivations must use canonical_* instead.
+func (r *Repo) ListSLACompliance(ctx context.Context, p types.SLAComplianceParams) ([]types.SLAComplianceRow, types.CursorPageInfo, error) {
 	view := "naap.api_sla_compliance"
 	if p.Org != "" {
 		view = "naap.api_sla_compliance_by_org"
 	}
 
 	where, args := buildSLAWhere(p)
-	offset := (p.Page - 1) * p.PageSize
-
-	// Count query
-	var total uint64
-	countRow := r.conn.QueryRow(ctx, `SELECT count() FROM `+view+` `+where, args...)
-	if err := countRow.Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("clickhouse sla compliance count: %w", err)
+	limit := normalizeLimit(p.Limit)
+	if values, err := decodeCursorValues(p.Cursor, 6); err != nil {
+		return nil, types.CursorPageInfo{}, err
+	} else if len(values) == 6 {
+		cursorWindowStart, parseErr := time.Parse(time.RFC3339Nano, values[0])
+		if parseErr != nil {
+			return nil, types.CursorPageInfo{}, fmt.Errorf("%w: parse window_start", types.ErrInvalidCursor)
+		}
+		where += " AND (window_start, orchestrator_address, pipeline_id, ifNull(model_id, ''), ifNull(gpu_id, ''), ifNull(region, '')) < (?, ?, ?, ?, ?, ?)"
+		args = append(args, cursorWindowStart.UTC(), values[1], values[2], values[3], values[4], values[5])
 	}
 
-	// Data query
-	args = append(args, p.PageSize, offset)
 	rows, err := r.conn.Query(ctx, `
 		SELECT
 			window_start, org, orchestrator_address, pipeline_id,
@@ -49,11 +53,17 @@ func (r *Repo) ListSLACompliance(ctx context.Context, p types.SLAComplianceParam
 			reliability_score, ptff_score, e2e_score, latency_score, fps_score, quality_score,
 			sla_semantics_version, sla_score
 		FROM `+view+` `+where+`
-		ORDER BY window_start DESC
-		LIMIT ? OFFSET ?
-	`, args...)
+		ORDER BY
+			window_start DESC,
+			orchestrator_address DESC,
+			pipeline_id DESC,
+			ifNull(model_id, '') DESC,
+			ifNull(gpu_id, '') DESC,
+			ifNull(region, '') DESC
+		LIMIT ?
+	`, append(args, limit+1)...)
 	if err != nil {
-		return nil, 0, fmt.Errorf("clickhouse sla compliance query: %w", err)
+		return nil, types.CursorPageInfo{}, fmt.Errorf("clickhouse sla compliance query: %w", err)
 	}
 	defer rows.Close()
 
@@ -75,17 +85,33 @@ func (r *Repo) ListSLACompliance(ctx context.Context, p types.SLAComplianceParam
 			&row.ReliabilityScore, &row.PTFFScore, &row.E2EScore, &row.LatencyScore, &row.FPSScore, &row.QualityScore,
 			&row.SLASemanticsVersion, &row.SLAScore,
 		); err != nil {
-			return nil, 0, fmt.Errorf("clickhouse sla compliance scan: %w", err)
+			return nil, types.CursorPageInfo{}, fmt.Errorf("clickhouse sla compliance scan: %w", err)
 		}
 		result = append(result, row)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("clickhouse sla compliance rows: %w", err)
+		return nil, types.CursorPageInfo{}, fmt.Errorf("clickhouse sla compliance rows: %w", err)
+	}
+	hasMore := len(result) > limit
+	if hasMore {
+		result = result[:limit]
 	}
 	if result == nil {
 		result = []types.SLAComplianceRow{}
 	}
-	return result, int(total), nil
+	page := types.CursorPageInfo{HasMore: hasMore, PageSize: len(result)}
+	if hasMore {
+		last := result[len(result)-1]
+		page.NextCursor = encodeCursorValues(
+			last.WindowStart.UTC().Format(time.RFC3339Nano),
+			last.OrchestratorAddress,
+			last.PipelineID,
+			nullableString(last.ModelID),
+			nullableString(last.GPUID),
+			nullableString(last.Region),
+		)
+	}
+	return result, page, nil
 }
 
 func buildSLAWhere(p types.SLAComplianceParams) (string, []any) {
@@ -123,24 +149,28 @@ func buildSLAWhere(p types.SLAComplianceParams) (string, []any) {
 // ---------------------------------------------------------------------------
 
 // ListNetworkDemand returns paginated network demand rows from api_* read
-// models. These are service-facing relations only; downstream derivations must
-// use canonical_* instead.
-func (r *Repo) ListNetworkDemand(ctx context.Context, p types.NetworkDemandParams) ([]types.NetworkDemandRow, int, error) {
+// models. Stable ordering and cursor tuple: (window_start DESC, gateway DESC,
+// region DESC, pipeline_id DESC, model_id DESC). These are service-facing
+// relations only; downstream derivations must use canonical_* instead.
+func (r *Repo) ListNetworkDemand(ctx context.Context, p types.NetworkDemandParams) ([]types.NetworkDemandRow, types.CursorPageInfo, error) {
 	view := "naap.api_network_demand"
 	if p.Org != "" {
 		view = "naap.api_network_demand_by_org"
 	}
 
 	where, args := buildDemandWhere(p)
-	offset := (p.Page - 1) * p.PageSize
-
-	var total uint64
-	countRow := r.conn.QueryRow(ctx, `SELECT count() FROM `+view+` `+where, args...)
-	if err := countRow.Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("clickhouse network demand count: %w", err)
+	limit := normalizeLimit(p.Limit)
+	if values, err := decodeCursorValues(p.Cursor, 5); err != nil {
+		return nil, types.CursorPageInfo{}, err
+	} else if len(values) == 5 {
+		cursorWindowStart, parseErr := time.Parse(time.RFC3339Nano, values[0])
+		if parseErr != nil {
+			return nil, types.CursorPageInfo{}, fmt.Errorf("%w: parse window_start", types.ErrInvalidCursor)
+		}
+		where += " AND (window_start, gateway, ifNull(region, ''), pipeline_id, ifNull(model_id, '')) < (?, ?, ?, ?, ?)"
+		args = append(args, cursorWindowStart.UTC(), values[1], values[2], values[3], values[4])
 	}
 
-	args = append(args, p.PageSize, offset)
 	rows, err := r.conn.Query(ctx, `
 		SELECT
 			window_start, org, gateway, region, pipeline_id, model_id,
@@ -152,11 +182,16 @@ func (r *Repo) ListNetworkDemand(ctx context.Context, p types.NetworkDemandParam
 			health_signal_coverage_ratio, startup_success_rate, excused_failure_rate, effective_success_rate,
 			ticket_face_value_eth
 		FROM `+view+` `+where+`
-		ORDER BY window_start DESC
-		LIMIT ? OFFSET ?
-	`, args...)
+		ORDER BY
+			window_start DESC,
+			gateway DESC,
+			ifNull(region, '') DESC,
+			pipeline_id DESC,
+			ifNull(model_id, '') DESC
+		LIMIT ?
+	`, append(args, limit+1)...)
 	if err != nil {
-		return nil, 0, fmt.Errorf("clickhouse network demand query: %w", err)
+		return nil, types.CursorPageInfo{}, fmt.Errorf("clickhouse network demand query: %w", err)
 	}
 	defer rows.Close()
 
@@ -173,17 +208,32 @@ func (r *Repo) ListNetworkDemand(ctx context.Context, p types.NetworkDemandParam
 			&row.HealthSignalCoverageRatio, &row.StartupSuccessRate, &row.ExcusedFailureRate, &row.EffectiveSuccessRate,
 			&row.TicketFaceValueETH,
 		); err != nil {
-			return nil, 0, fmt.Errorf("clickhouse network demand scan: %w", err)
+			return nil, types.CursorPageInfo{}, fmt.Errorf("clickhouse network demand scan: %w", err)
 		}
 		result = append(result, row)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("clickhouse network demand rows: %w", err)
+		return nil, types.CursorPageInfo{}, fmt.Errorf("clickhouse network demand rows: %w", err)
+	}
+	hasMore := len(result) > limit
+	if hasMore {
+		result = result[:limit]
 	}
 	if result == nil {
 		result = []types.NetworkDemandRow{}
 	}
-	return result, int(total), nil
+	page := types.CursorPageInfo{HasMore: hasMore, PageSize: len(result)}
+	if hasMore {
+		last := result[len(result)-1]
+		page.NextCursor = encodeCursorValues(
+			last.WindowStart.UTC().Format(time.RFC3339Nano),
+			last.Gateway,
+			nullableString(last.Region),
+			last.PipelineID,
+			nullableString(last.ModelID),
+		)
+	}
+	return result, page, nil
 }
 
 func buildDemandWhere(p types.NetworkDemandParams) (string, []any) {
@@ -212,22 +262,29 @@ func buildDemandWhere(p types.NetworkDemandParams) (string, []any) {
 // GPU-Sliced Network Demand  —  GET /v1/gpu/network-demand
 // ---------------------------------------------------------------------------
 
-func (r *Repo) ListGPUNetworkDemand(ctx context.Context, p types.GPUNetworkDemandParams) ([]types.GPUNetworkDemandRow, int, error) {
+// ListGPUNetworkDemand returns paginated GPU-sliced network demand rows using
+// the stable cursor tuple (window_start DESC, gateway DESC,
+// orchestrator_address DESC, region DESC, pipeline_id DESC, model_id DESC,
+// gpu_id DESC, gpu_identity_status DESC).
+func (r *Repo) ListGPUNetworkDemand(ctx context.Context, p types.GPUNetworkDemandParams) ([]types.GPUNetworkDemandRow, types.CursorPageInfo, error) {
 	view := "naap.api_gpu_network_demand"
 	if p.Org != "" {
 		view = "naap.api_gpu_network_demand_by_org"
 	}
 
 	where, args := buildGPUDemandWhere(p)
-	offset := (p.Page - 1) * p.PageSize
-
-	var total uint64
-	countRow := r.conn.QueryRow(ctx, `SELECT count() FROM `+view+` `+where, args...)
-	if err := countRow.Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("clickhouse gpu network demand count: %w", err)
+	limit := normalizeLimit(p.Limit)
+	if values, err := decodeCursorValues(p.Cursor, 8); err != nil {
+		return nil, types.CursorPageInfo{}, err
+	} else if len(values) == 8 {
+		cursorWindowStart, parseErr := time.Parse(time.RFC3339Nano, values[0])
+		if parseErr != nil {
+			return nil, types.CursorPageInfo{}, fmt.Errorf("%w: parse window_start", types.ErrInvalidCursor)
+		}
+		where += " AND (window_start, gateway, orchestrator_address, ifNull(region, ''), pipeline_id, ifNull(model_id, ''), ifNull(gpu_id, ''), gpu_identity_status) < (?, ?, ?, ?, ?, ?, ?, ?)"
+		args = append(args, cursorWindowStart.UTC(), values[1], values[2], values[3], values[4], values[5], values[6], values[7])
 	}
 
-	args = append(args, p.PageSize, offset)
 	rows, err := r.conn.Query(ctx, `
 		SELECT
 			window_start, org, gateway, orchestrator_address, region, pipeline_id, model_id, gpu_id, gpu_identity_status,
@@ -237,11 +294,19 @@ func (r *Repo) ListGPUNetworkDemand(ctx context.Context, p types.GPUNetworkDeman
 			sessions_ending_in_error, error_status_samples, health_signal_count, health_expected_signal_count,
 			health_signal_coverage_ratio, startup_success_rate, excused_failure_rate, effective_success_rate, ticket_face_value_eth
 		FROM `+view+` `+where+`
-		ORDER BY window_start DESC
-		LIMIT ? OFFSET ?
-	`, args...)
+		ORDER BY
+			window_start DESC,
+			gateway DESC,
+			orchestrator_address DESC,
+			ifNull(region, '') DESC,
+			pipeline_id DESC,
+			ifNull(model_id, '') DESC,
+			ifNull(gpu_id, '') DESC,
+			gpu_identity_status DESC
+		LIMIT ?
+	`, append(args, limit+1)...)
 	if err != nil {
-		return nil, 0, fmt.Errorf("clickhouse gpu network demand query: %w", err)
+		return nil, types.CursorPageInfo{}, fmt.Errorf("clickhouse gpu network demand query: %w", err)
 	}
 	defer rows.Close()
 
@@ -256,17 +321,35 @@ func (r *Repo) ListGPUNetworkDemand(ctx context.Context, p types.GPUNetworkDeman
 			&row.SessionsEndingInError, &row.ErrorStatusSamples, &row.HealthSignalCount, &row.HealthExpectedSignalCount,
 			&row.HealthSignalCoverageRatio, &row.StartupSuccessRate, &row.ExcusedFailureRate, &row.EffectiveSuccessRate, &row.TicketFaceValueETH,
 		); err != nil {
-			return nil, 0, fmt.Errorf("clickhouse gpu network demand scan: %w", err)
+			return nil, types.CursorPageInfo{}, fmt.Errorf("clickhouse gpu network demand scan: %w", err)
 		}
 		result = append(result, row)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("clickhouse gpu network demand rows: %w", err)
+		return nil, types.CursorPageInfo{}, fmt.Errorf("clickhouse gpu network demand rows: %w", err)
+	}
+	hasMore := len(result) > limit
+	if hasMore {
+		result = result[:limit]
 	}
 	if result == nil {
 		result = []types.GPUNetworkDemandRow{}
 	}
-	return result, int(total), nil
+	page := types.CursorPageInfo{HasMore: hasMore, PageSize: len(result)}
+	if hasMore {
+		last := result[len(result)-1]
+		page.NextCursor = encodeCursorValues(
+			last.WindowStart.UTC().Format(time.RFC3339Nano),
+			last.Gateway,
+			last.OrchestratorAddress,
+			nullableString(last.Region),
+			last.PipelineID,
+			nullableString(last.ModelID),
+			nullableString(last.GPUID),
+			last.GPUIdentityStatus,
+		)
+	}
+	return result, page, nil
 }
 
 func buildGPUDemandWhere(p types.GPUNetworkDemandParams) (string, []any) {
@@ -304,29 +387,34 @@ func buildGPUDemandWhere(p types.GPUNetworkDemandParams) (string, []any) {
 // ---------------------------------------------------------------------------
 
 // ListGPUMetrics returns paginated GPU performance metrics from api_* read
-// models. These are service-facing relations only; downstream derivations must
-// use canonical_* instead.
+// models using the stable cursor tuple (window_start DESC,
+// orchestrator_address DESC, pipeline_id DESC, model_id DESC, gpu_id DESC,
+// region DESC). These are service-facing relations only; downstream
+// derivations must use canonical_* instead.
 //
 // Field approximations:
 //   - region, runner_version, cuda_version may be NULL when inventory is absent
 //   - fps_jitter_coefficient may be NULL when no jitter rollup is available
 //   - confirmed/inferred swapped may be 0 when no swap evidence exists
-func (r *Repo) ListGPUMetrics(ctx context.Context, p types.GPUMetricsParams) ([]types.GPUMetric, int, error) {
+func (r *Repo) ListGPUMetrics(ctx context.Context, p types.GPUMetricsParams) ([]types.GPUMetric, types.CursorPageInfo, error) {
 	view := "naap.api_gpu_metrics"
 	if p.Org != "" {
 		view = "naap.api_gpu_metrics_by_org"
 	}
 
 	where, args := buildGPUWhere(p)
-	offset := (p.Page - 1) * p.PageSize
-
-	var total uint64
-	countRow := r.conn.QueryRow(ctx, `SELECT count() FROM `+view+` `+where, args...)
-	if err := countRow.Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("clickhouse gpu metrics count: %w", err)
+	limit := normalizeLimit(p.Limit)
+	if values, err := decodeCursorValues(p.Cursor, 6); err != nil {
+		return nil, types.CursorPageInfo{}, err
+	} else if len(values) == 6 {
+		cursorWindowStart, parseErr := time.Parse(time.RFC3339Nano, values[0])
+		if parseErr != nil {
+			return nil, types.CursorPageInfo{}, fmt.Errorf("%w: parse window_start", types.ErrInvalidCursor)
+		}
+		where += " AND (window_start, orchestrator_address, pipeline_id, ifNull(model_id, ''), ifNull(gpu_id, ''), ifNull(region, '')) < (?, ?, ?, ?, ?, ?)"
+		args = append(args, cursorWindowStart.UTC(), values[1], values[2], values[3], values[4], values[5])
 	}
 
-	args = append(args, p.PageSize, offset)
 	// Public gpu metrics views can surface NaN from quantile merges when a
 	// slice has no eligible latency samples. Normalize those to NULL here so
 	// the API contract remains JSON-encodable and consistent with nullable
@@ -359,11 +447,17 @@ func (r *Repo) ListGPUMetrics(ctx context.Context, p types.GPUMetricsParams) ([]
 			total_swapped_sessions, sessions_ending_in_error,
 			startup_failed_rate, swap_rate
 		FROM `+view+` `+where+`
-		ORDER BY window_start DESC
-		LIMIT ? OFFSET ?
-	`, args...)
+		ORDER BY
+			window_start DESC,
+			orchestrator_address DESC,
+			pipeline_id DESC,
+			ifNull(model_id, '') DESC,
+			ifNull(gpu_id, '') DESC,
+			ifNull(region, '') DESC
+		LIMIT ?
+	`, append(args, limit+1)...)
 	if err != nil {
-		return nil, 0, fmt.Errorf("clickhouse gpu metrics query: %w", err)
+		return nil, types.CursorPageInfo{}, fmt.Errorf("clickhouse gpu metrics query: %w", err)
 	}
 	defer rows.Close()
 
@@ -387,19 +481,42 @@ func (r *Repo) ListGPUMetrics(ctx context.Context, p types.GPUMetricsParams) ([]
 			&m.TotalSwappedSessions, &m.SessionsEndingInError,
 			&m.StartupFailedRate, &m.SwapRate,
 		); err != nil {
-			return nil, 0, fmt.Errorf("clickhouse gpu metrics scan: %w", err)
+			return nil, types.CursorPageInfo{}, fmt.Errorf("clickhouse gpu metrics scan: %w", err)
 		}
 		m.GPUModelName = gpuModel
 		m.GPUMemoryBytesTotal = memBytes
 		result = append(result, m)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("clickhouse gpu metrics rows: %w", err)
+		return nil, types.CursorPageInfo{}, fmt.Errorf("clickhouse gpu metrics rows: %w", err)
+	}
+	hasMore := len(result) > limit
+	if hasMore {
+		result = result[:limit]
 	}
 	if result == nil {
 		result = []types.GPUMetric{}
 	}
-	return result, int(total), nil
+	page := types.CursorPageInfo{HasMore: hasMore, PageSize: len(result)}
+	if hasMore {
+		last := result[len(result)-1]
+		page.NextCursor = encodeCursorValues(
+			last.WindowStart.UTC().Format(time.RFC3339Nano),
+			last.OrchestratorAddress,
+			last.PipelineID,
+			nullableString(last.ModelID),
+			nullableString(last.GPUID),
+			nullableString(last.Region),
+		)
+	}
+	return result, page, nil
+}
+
+func nullableString(v *string) string {
+	if v == nil {
+		return ""
+	}
+	return *v
 }
 
 func buildGPUWhere(p types.GPUMetricsParams) (string, []any) {

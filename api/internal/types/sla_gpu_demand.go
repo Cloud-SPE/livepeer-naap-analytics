@@ -2,14 +2,6 @@ package types
 
 import "time"
 
-// Pagination holds paged response metadata, matching the leaderboard-serverless contract.
-type Pagination struct {
-	Page       int `json:"page"`
-	PageSize   int `json:"page_size"`
-	TotalCount int `json:"total_count"`
-	TotalPages int `json:"total_pages"`
-}
-
 // ---------------------------------------------------------------------------
 // SLA Compliance
 // ---------------------------------------------------------------------------
@@ -24,8 +16,8 @@ type SLAComplianceParams struct {
 	Org                 string
 	Start               time.Time
 	End                 time.Time
-	Page                int
-	PageSize            int
+	Limit               int
+	Cursor              string
 }
 
 // SLAComplianceRow is one row in the /v1/sla/compliance response.
@@ -98,8 +90,8 @@ type NetworkDemandParams struct {
 	Org        string
 	Start      time.Time
 	End        time.Time
-	Page       int
-	PageSize   int
+	Limit      int
+	Cursor     string
 }
 
 // NetworkDemandRow is one row in the /v1/network/demand response.
@@ -153,8 +145,8 @@ type GPUNetworkDemandParams struct {
 	Org                 string
 	Start               time.Time
 	End                 time.Time
-	Page                int
-	PageSize            int
+	Limit               int
+	Cursor              string
 }
 
 // GPUNetworkDemandRow is one row in the /v1/gpu/network-demand response.
@@ -213,8 +205,8 @@ type GPUMetricsParams struct {
 	Org                 string
 	Start               time.Time
 	End                 time.Time
-	Page                int
-	PageSize            int
+	Limit               int
+	Cursor              string
 }
 
 // GPUMetric is one row in the /v1/gpu/metrics response.

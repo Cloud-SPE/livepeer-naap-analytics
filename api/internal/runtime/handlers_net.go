@@ -1,15 +1,24 @@
 package runtime
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/livepeer/naap-analytics/internal/types"
 )
 
 func (s *Server) handleListOrchestrators(w http.ResponseWriter, r *http.Request) {
+	if err := rejectLegacyPaginationParams(r); err != nil {
+		writeError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
 	p := parseQueryParams(r)
-	result, err := s.svc.ListOrchestrators(r.Context(), p)
+	result, page, err := s.svc.ListOrchestrators(r.Context(), p)
 	if err != nil {
+		if errors.Is(err, types.ErrInvalidCursor) {
+			writeError(w, http.StatusBadRequest, "Bad Request", err.Error())
+			return
+		}
 		s.providers.Logger.Sugar().Errorw("list orchestrators failed", "error", err)
 		writeError(w, http.StatusInternalServerError, "Internal Server Error", "")
 		return
@@ -17,7 +26,11 @@ func (s *Server) handleListOrchestrators(w http.ResponseWriter, r *http.Request)
 	if result == nil {
 		result = []types.Orchestrator{}
 	}
-	respondJSON(w, http.StatusOK, result)
+	respondJSON(w, http.StatusOK, map[string]any{
+		"data":       result,
+		"pagination": page,
+		"meta":       buildMeta(r),
+	})
 }
 
 func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
@@ -33,4 +46,3 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	}
 	respondJSON(w, http.StatusOK, result)
 }
-

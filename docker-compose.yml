@@ -223,8 +223,7 @@ services:
       GOMODCACHE: /go/pkg/mod
     working_dir: /workspace/api
     volumes:
-      - ./api:/workspace/api
-      - ./warehouse:/workspace/warehouse:ro
+      - .:/workspace:ro
       - /tmp/go-build-cache:/tmp/go-build-cache
       - /tmp/go-mod-cache:/go/pkg/mod
     command: ["go", "test", "-tags=validation", "./internal/validation/...", "-v", "-count=1", "-timeout=240s"]

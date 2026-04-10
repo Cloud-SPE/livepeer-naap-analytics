@@ -3,6 +3,7 @@
 package types
 
 import (
+	"errors"
 	"strconv"
 	"time"
 )
@@ -11,18 +12,30 @@ import (
 // Zero values signal "use default": empty Org means all orgs, zero Start/End means
 // the service layer applies a default window (typically last 24 hours).
 type QueryParams struct {
-	Org          string    // "daydream" | "cloudspe" | "" for all
-	Pipeline     string    // filter by pipeline name
-	ModelID      string    // filter by model ID (e.g. "streamdiffusion-sdxl")
-	OrchAddress  string    // filter by orch ETH address (normalised lowercase)
-	StreamID     string    // filter by stream ID
-	FailureType  string    // "no_orch_available" | "orch_swap" | "inference_restart" | "inference_error"
-	StartTime    time.Time // time window start (zero = service-layer default)
-	EndTime      time.Time // time window end (zero = now)
-	Granularity  string    // "1m" | "5m" | "1h" | "1d"
-	ActiveOnly   bool      // for orch list: return only orchs active within threshold
-	Limit        int       // max results (0 = default 50)
-	Offset       int       // pagination offset
+	Org         string    // "daydream" | "cloudspe" | "" for all
+	Pipeline    string    // filter by pipeline name
+	ModelID     string    // filter by model ID (e.g. "streamdiffusion-sdxl")
+	OrchAddress string    // filter by orch ETH address (normalised lowercase)
+	StreamID    string    // filter by stream ID
+	FailureType string    // "no_orch_available" | "orch_swap" | "inference_restart" | "inference_error"
+	StartTime   time.Time // time window start (zero = service-layer default)
+	EndTime     time.Time // time window end (zero = now)
+	Granularity string    // "1m" | "5m" | "1h" | "1d"
+	ActiveOnly  bool      // for orch list: return only orchs active within threshold
+	Limit       int       // max results (0 = default 50)
+	Offset      int       // pagination offset (legacy — prefer Cursor for public list endpoints)
+	Cursor      string    // stable base64 cursor for keyset pagination (optional)
+}
+
+// ErrInvalidCursor is returned when a cursor token is malformed or incompatible
+// with the endpoint-specific keyset pagination contract.
+var ErrInvalidCursor = errors.New("invalid cursor")
+
+// CursorPageInfo is the pagination metadata returned by cursor-paginated list endpoints.
+type CursorPageInfo struct {
+	NextCursor string `json:"next_cursor"`
+	HasMore    bool   `json:"has_more"`
+	PageSize   int    `json:"page_size"`
 }
 
 // WEI is a value in wei (1e-18 ETH).

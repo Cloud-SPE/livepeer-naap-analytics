@@ -31,7 +31,7 @@ Returns a paginated list of orchestrators ordered by `last_seen` descending.
 
 - `?org=` — optional org filter
 - `?active_only=true` — optional warm-state filter
-- `?limit=` / `?offset=` — pagination controls
+- `?limit=` / `?cursor=` — cursor-pagination controls
 
 **Representative fields:**
 
@@ -47,11 +47,13 @@ Returns a paginated list of orchestrators ordered by `last_seen` descending.
 
 Required behavior:
 
-- supports `org`, `active_only`, `limit`, and `offset`
+- supports `org`, `active_only`, `limit`, and `cursor`
 - returns normalized orchestrator identity and current capability payload
 - lowercases canonical addresses
 - keeps records with missing hardware metadata rather than dropping them
 - orders by most recent `last_seen`
+- returns the shared list envelope `{data, pagination, meta}` with
+  `pagination.next_cursor`, `pagination.has_more`, and `pagination.page_size`
 
 ### NET-002: Model availability
 

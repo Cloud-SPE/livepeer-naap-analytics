@@ -20,11 +20,7 @@ func TestListSLACompliance_HappyPath(t *testing.T) {
 	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
-	for _, field := range []string{"compliance", "pagination"} {
-		if _, ok := body[field]; !ok {
-			t.Errorf("missing field %s", field)
-		}
-	}
+	assertCursorEnvelope(t, body)
 }
 
 func TestListNetworkDemand_HappyPath(t *testing.T) {
@@ -40,11 +36,7 @@ func TestListNetworkDemand_HappyPath(t *testing.T) {
 	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
-	for _, field := range []string{"demand", "pagination"} {
-		if _, ok := body[field]; !ok {
-			t.Errorf("missing field %s", field)
-		}
-	}
+	assertCursorEnvelope(t, body)
 }
 
 func TestListGPUMetrics_HappyPath(t *testing.T) {
@@ -60,11 +52,7 @@ func TestListGPUMetrics_HappyPath(t *testing.T) {
 	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
-	for _, field := range []string{"metrics", "pagination"} {
-		if _, ok := body[field]; !ok {
-			t.Errorf("missing field %s", field)
-		}
-	}
+	assertCursorEnvelope(t, body)
 }
 
 func TestListGPUNetworkDemand_HappyPath(t *testing.T) {
@@ -80,9 +68,53 @@ func TestListGPUNetworkDemand_HappyPath(t *testing.T) {
 	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
-	for _, field := range []string{"demand", "pagination"} {
-		if _, ok := body[field]; !ok {
-			t.Errorf("missing field %s", field)
-		}
+	assertCursorEnvelope(t, body)
+}
+
+func TestListSLACompliance_RejectsLegacyPaginationParams(t *testing.T) {
+	srv := newTestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/v1/sla/compliance?page=1", nil)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
 	}
+	assertProblemDetail(t, rr, `query parameter "page" is no longer supported; use limit and cursor`)
+}
+
+func TestListNetworkDemand_RejectsLegacyPaginationParams(t *testing.T) {
+	srv := newTestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/v1/network/demand?page_size=25", nil)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+	assertProblemDetail(t, rr, `query parameter "page_size" is no longer supported; use limit and cursor`)
+}
+
+func TestListGPUNetworkDemand_RejectsLegacyPaginationParams(t *testing.T) {
+	srv := newTestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/v1/gpu/network-demand?offset=0", nil)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+	assertProblemDetail(t, rr, `query parameter "offset" is no longer supported; use limit and cursor`)
+}
+
+func TestListGPUMetrics_RejectsLegacyPaginationParams(t *testing.T) {
+	srv := newTestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/v1/gpu/metrics?page=1", nil)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+	assertProblemDetail(t, rr, `query parameter "page" is no longer supported; use limit and cursor`)
 }

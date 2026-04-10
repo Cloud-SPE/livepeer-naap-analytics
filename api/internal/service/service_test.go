@@ -35,7 +35,7 @@ func TestGetNetworkSummary_Noop(t *testing.T) {
 
 func TestListOrchestrators_Noop(t *testing.T) {
 	svc := newNoopSvc()
-	_, err := svc.ListOrchestrators(context.Background(), defaultParams())
+	_, _, err := svc.ListOrchestrators(context.Background(), defaultParams())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

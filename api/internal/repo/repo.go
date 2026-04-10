@@ -14,7 +14,7 @@ import (
 type AnalyticsRepo interface {
 	// Network state (R1)
 	GetNetworkSummary(ctx context.Context, p types.QueryParams) (*types.NetworkSummary, error)
-	ListOrchestrators(ctx context.Context, p types.QueryParams) ([]types.Orchestrator, error)
+	ListOrchestrators(ctx context.Context, p types.QueryParams) ([]types.Orchestrator, types.CursorPageInfo, error)
 	GetGPUSummary(ctx context.Context, p types.QueryParams) (*types.GPUSummary, error)
 	ListModels(ctx context.Context, p types.QueryParams) ([]types.ModelAvailability, error)
 
@@ -83,10 +83,10 @@ type AnalyticsRepo interface {
 	GetCapacitySummary(ctx context.Context, p types.QueryParams) (*types.CapacitySummary, error)
 
 	// SLA / GPU / Network Demand (ported from leaderboard-serverless)
-	ListSLACompliance(ctx context.Context, p types.SLAComplianceParams) ([]types.SLAComplianceRow, int, error)
-	ListNetworkDemand(ctx context.Context, p types.NetworkDemandParams) ([]types.NetworkDemandRow, int, error)
-	ListGPUNetworkDemand(ctx context.Context, p types.GPUNetworkDemandParams) ([]types.GPUNetworkDemandRow, int, error)
-	ListGPUMetrics(ctx context.Context, p types.GPUMetricsParams) ([]types.GPUMetric, int, error)
+	ListSLACompliance(ctx context.Context, p types.SLAComplianceParams) ([]types.SLAComplianceRow, types.CursorPageInfo, error)
+	ListNetworkDemand(ctx context.Context, p types.NetworkDemandParams) ([]types.NetworkDemandRow, types.CursorPageInfo, error)
+	ListGPUNetworkDemand(ctx context.Context, p types.GPUNetworkDemandParams) ([]types.GPUNetworkDemandRow, types.CursorPageInfo, error)
+	ListGPUMetrics(ctx context.Context, p types.GPUMetricsParams) ([]types.GPUMetric, types.CursorPageInfo, error)
 
 	// Dashboard — pre-aggregated UI endpoints (R16)
 	GetDashboardKPI(ctx context.Context, windowHours int, pipeline, modelID string) (*types.DashboardKPI, error)
@@ -107,8 +107,8 @@ type NoopAnalyticsRepo struct{}
 func (n *NoopAnalyticsRepo) GetNetworkSummary(_ context.Context, _ types.QueryParams) (*types.NetworkSummary, error) {
 	return &types.NetworkSummary{}, nil
 }
-func (n *NoopAnalyticsRepo) ListOrchestrators(_ context.Context, _ types.QueryParams) ([]types.Orchestrator, error) {
-	return nil, nil
+func (n *NoopAnalyticsRepo) ListOrchestrators(_ context.Context, _ types.QueryParams) ([]types.Orchestrator, types.CursorPageInfo, error) {
+	return []types.Orchestrator{}, types.CursorPageInfo{}, nil
 }
 func (n *NoopAnalyticsRepo) GetGPUSummary(_ context.Context, _ types.QueryParams) (*types.GPUSummary, error) {
 	return &types.GPUSummary{}, nil
@@ -224,17 +224,17 @@ func (n *NoopAnalyticsRepo) ListFailuresByOrch(_ context.Context, _ types.QueryP
 func (n *NoopAnalyticsRepo) GetCapacitySummary(_ context.Context, _ types.QueryParams) (*types.CapacitySummary, error) {
 	return &types.CapacitySummary{Entries: []types.CapacityEntry{}}, nil
 }
-func (n *NoopAnalyticsRepo) ListSLACompliance(_ context.Context, _ types.SLAComplianceParams) ([]types.SLAComplianceRow, int, error) {
-	return nil, 0, nil
+func (n *NoopAnalyticsRepo) ListSLACompliance(_ context.Context, _ types.SLAComplianceParams) ([]types.SLAComplianceRow, types.CursorPageInfo, error) {
+	return []types.SLAComplianceRow{}, types.CursorPageInfo{}, nil
 }
-func (n *NoopAnalyticsRepo) ListNetworkDemand(_ context.Context, _ types.NetworkDemandParams) ([]types.NetworkDemandRow, int, error) {
-	return nil, 0, nil
+func (n *NoopAnalyticsRepo) ListNetworkDemand(_ context.Context, _ types.NetworkDemandParams) ([]types.NetworkDemandRow, types.CursorPageInfo, error) {
+	return []types.NetworkDemandRow{}, types.CursorPageInfo{}, nil
 }
-func (n *NoopAnalyticsRepo) ListGPUNetworkDemand(_ context.Context, _ types.GPUNetworkDemandParams) ([]types.GPUNetworkDemandRow, int, error) {
-	return nil, 0, nil
+func (n *NoopAnalyticsRepo) ListGPUNetworkDemand(_ context.Context, _ types.GPUNetworkDemandParams) ([]types.GPUNetworkDemandRow, types.CursorPageInfo, error) {
+	return []types.GPUNetworkDemandRow{}, types.CursorPageInfo{}, nil
 }
-func (n *NoopAnalyticsRepo) ListGPUMetrics(_ context.Context, _ types.GPUMetricsParams) ([]types.GPUMetric, int, error) {
-	return nil, 0, nil
+func (n *NoopAnalyticsRepo) ListGPUMetrics(_ context.Context, _ types.GPUMetricsParams) ([]types.GPUMetric, types.CursorPageInfo, error) {
+	return []types.GPUMetric{}, types.CursorPageInfo{}, nil
 }
 func (n *NoopAnalyticsRepo) GetDashboardKPI(_ context.Context, _ int, _, _ string) (*types.DashboardKPI, error) {
 	return &types.DashboardKPI{HourlySessions: []types.DashboardHourlyBucket{}, HourlyUsage: []types.DashboardHourlyBucket{}}, nil
