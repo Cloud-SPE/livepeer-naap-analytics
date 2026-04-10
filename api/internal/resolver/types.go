@@ -48,6 +48,8 @@ type RunStats struct {
 	Decisions           int
 	SessionRows         int
 	StatusHourRows      int
+	AIBatchJobRows      int
+	BYOCJobRows         int
 }
 
 type selectionCandidate struct {
@@ -74,23 +76,24 @@ type eventLineage struct {
 }
 
 type SelectionEvent struct {
-	ID                string
-	Org               string
-	SessionKey        string
-	Seq               uint32
-	SelectionTS       time.Time
-	Trigger           string
-	ObservedAddress   string
-	ObservedURL       string
-	ObservedModelHint string
-	ObservedPipeline  string
-	AnchorEventID     string
-	AnchorEventType   string
-	AnchorEventTS     time.Time
-	SourceTopic       string
-	SourcePartition   int32
-	SourceOffset      int64
-	InputHash         string
+	ID                   string
+	Org                  string
+	SessionKey           string
+	Seq                  uint32
+	SelectionTS          time.Time
+	Trigger              string
+	ObservedAddress      string
+	ObservedURL          string
+	ObservedModelHint    string
+	ObservedPipeline     string
+	PipelineHintVerbatim bool
+	AnchorEventID        string
+	AnchorEventType      string
+	AnchorEventTS        time.Time
+	SourceTopic          string
+	SourcePartition      int32
+	SourceOffset         int64
+	InputHash            string
 }
 
 type capabilitySnapshot struct {
@@ -157,6 +160,8 @@ type SelectionDecision struct {
 	CanonicalPipeline     string
 	CanonicalModel        string
 	GPUID                 string
+	GPUModelName          string
+	GPUMemoryBytesTotal   *uint64
 	InputHash             string
 }
 
@@ -311,6 +316,92 @@ type dirtyPartition struct {
 	AttemptCount     uint32
 	LastErrorSummary string
 	UpdatedAt        time.Time
+}
+
+// AIBatchJobRecord holds the raw job data fetched from normalized_ai_batch_job.
+// OrchURL is always sourced from the completed_at event; ReceivedAt is from the
+// received event and is used as SelectionTS when available.
+type AIBatchJobRecord struct {
+	RequestID    string
+	Org          string
+	Gateway      string
+	Pipeline     string
+	ModelID      string
+	OrchURL      string
+	OrchURLNorm  string
+	ReceivedAt   *time.Time
+	CompletedAt  time.Time
+	Success      *uint8
+	Tries        uint16
+	DurationMS   int64
+	LatencyScore float64
+	PricePerUnit float64
+	ErrorType    string
+	Error        string
+}
+
+// AIBatchJobRow is an AIBatchJobRecord enriched with attribution outputs.
+type AIBatchJobRow struct {
+	AIBatchJobRecord
+	AttributionStatus     string
+	AttributionReason     string
+	AttributionMethod     string
+	AttributionConfidence string
+	AttributedOrchURI     string
+	CapabilityVersionID   string
+	AttributionSnapshotTS *time.Time
+	GPUID                 string
+	GPUModelName          string
+	GPUMemoryBytesTotal   *uint64
+	AttributedModel       string
+}
+
+// BYOCJobRecord holds the raw job data fetched from normalized_byoc_job.
+type BYOCJobRecord struct {
+	EventID        string
+	Org            string
+	Gateway        string
+	Capability     string
+	OrchAddress    string
+	OrchURL        string
+	OrchURLNorm    string
+	WorkerURL      string
+	ChargedCompute uint8
+	CompletedAt    time.Time
+	Success        *uint8
+	DurationMS     int64
+	HTTPStatus     uint16
+	Error          string
+}
+
+// BYOCJobRow is a BYOCJobRecord enriched with attribution and model outputs.
+type BYOCJobRow struct {
+	BYOCJobRecord
+	Model                 string
+	PricePerUnit          float64
+	AttributionStatus     string
+	AttributionReason     string
+	AttributionMethod     string
+	AttributionConfidence string
+	AttributedOrchURI     string
+	CapabilityVersionID   string
+	AttributionSnapshotTS *time.Time
+	GPUID                 string
+	GPUModelName          string
+	GPUMemoryBytesTotal   *uint64
+}
+
+// workerLifecycleSnapshot is a point-in-time view of a BYOC worker's model
+// and pricing, used to resolve model identity for BYOC jobs. The most recent
+// snapshot where EventTS <= job.CompletedAt takes precedence.
+type workerLifecycleSnapshot struct {
+	Org          string
+	Capability   string
+	OrchAddress  string
+	EventTS      time.Time
+	Model        string
+	PricePerUnit float64
+	WorkerURL    string
 }
 
 type dirtyScanWatermark struct {

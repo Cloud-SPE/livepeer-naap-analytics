@@ -164,6 +164,8 @@ func (e *Engine) Run(ctx context.Context, req RunRequest) {
 				zap.Int("decisions", stats.Decisions),
 				zap.Int("session_rows", stats.SessionRows),
 				zap.Int("status_hour_rows", stats.StatusHourRows),
+				zap.Int("ai_batch_job_rows", stats.AIBatchJobRows),
+				zap.Int("byoc_job_rows", stats.BYOCJobRows),
 			)
 		}
 		_ = e.Close(context.Background())
@@ -445,6 +447,8 @@ func (e *Engine) executeBootstrap(ctx context.Context, req RunRequest) (RunStats
 		total.Decisions += stats.Decisions
 		total.SessionRows += stats.SessionRows
 		total.StatusHourRows += stats.StatusHourRows
+		total.AIBatchJobRows += stats.AIBatchJobRows
+		total.BYOCJobRows += stats.BYOCJobRows
 	}
 }
 
@@ -616,6 +620,8 @@ func (e *Engine) executePartitions(ctx context.Context, req RunRequest, partitio
 		total.Decisions += stats.Decisions
 		total.SessionRows += stats.SessionRows
 		total.StatusHourRows += stats.StatusHourRows
+		total.AIBatchJobRows += stats.AIBatchJobRows
+		total.BYOCJobRows += stats.BYOCJobRows
 	}
 	return total, nil
 }
@@ -700,7 +706,7 @@ func (e *Engine) executeWindow(ctx context.Context, req RunRequest) (stats RunSt
 	if !req.DryRun {
 		defer func() {
 			finishedAt := time.Now().UTC()
-			rowsProcessed := uint64(stats.SelectionEvents + stats.CapabilityVersions + stats.CapabilityIntervals + stats.Decisions + stats.SessionRows + stats.StatusHourRows)
+			rowsProcessed := uint64(stats.SelectionEvents + stats.CapabilityVersions + stats.CapabilityIntervals + stats.Decisions + stats.SessionRows + stats.StatusHourRows + stats.AIBatchJobRows + stats.BYOCJobRows)
 			if err != nil {
 				runStatus = "failed"
 				errSummary = err.Error()
@@ -905,7 +911,133 @@ func (e *Engine) executeWindow(ctx context.Context, req RunRequest) (stats RunSt
 	logStage("publish_serving_rollups", stageStarted,
 		zap.Int("window_slices", len(windowSlices)),
 	)
+
+	// AI batch attribution phase — independent from the live V2V path above.
+	stageStarted = time.Now()
+	aiBatchRows, err := e.executeAIBatchAttribution(ctx, spec, req, runID)
+	if err != nil {
+		return stats, runStatus, err
+	}
+	stats.AIBatchJobRows = aiBatchRows
+	logStage("ai_batch_attribution", stageStarted,
+		zap.Int("ai_batch_job_rows", aiBatchRows),
+	)
+
+	// BYOC attribution phase — independent from AI batch and live V2V.
+	stageStarted = time.Now()
+	byocRows, err := e.executeBYOCAttribution(ctx, spec, req, runID)
+	if err != nil {
+		return stats, runStatus, err
+	}
+	stats.BYOCJobRows = byocRows
+	logStage("byoc_attribution", stageStarted,
+		zap.Int("byoc_job_rows", byocRows),
+	)
+
 	return stats, runStatus, nil
+}
+
+// executeAIBatchAttribution attributes AI batch jobs in the given window.
+// It fetches candidates, builds an independent capability snapshot set keyed
+// by orch URI (the only identity available in batch events), resolves
+// attribution decisions, and writes the results to canonical_ai_batch_job_store.
+func (e *Engine) executeAIBatchAttribution(ctx context.Context, spec WindowSpec, req RunRequest, runID string) (int, error) {
+	jobs, err := e.repo.fetchAIBatchJobCandidates(ctx, spec)
+	if err != nil {
+		return 0, fmt.Errorf("fetch ai batch job candidates: %w", err)
+	}
+	if len(jobs) == 0 {
+		return 0, nil
+	}
+
+	identities := aiBatchIdentities(jobs)
+	identityStrings := orchIdentitiesToStrings(identities)
+	snapshots, err := e.repo.fetchCapabilitySnapshots(ctx, spec, identityStrings)
+	if err != nil {
+		return 0, fmt.Errorf("fetch ai batch capability snapshots: %w", err)
+	}
+
+	versions := buildCapabilityVersions(snapshots)
+	intervals := buildCapabilityIntervals(versions)
+
+	selections := make([]SelectionEvent, 0, len(jobs))
+	for _, j := range jobs {
+		selections = append(selections, j.toSelectionEvent())
+	}
+	decisions := resolveSelectionDecisions(selections, intervals)
+
+	decisionsByID := make(map[string]SelectionDecision, len(decisions))
+	for _, d := range decisions {
+		decisionsByID[d.SelectionEventID] = d
+	}
+
+	rows := buildAIBatchJobRows(jobs, decisionsByID)
+
+	if !req.Mutates() {
+		return len(rows), nil
+	}
+	if err := e.repo.insertAIBatchJobRows(ctx, runID, rows); err != nil {
+		return 0, fmt.Errorf("insert ai batch job rows: %w", err)
+	}
+	return len(rows), nil
+}
+
+// executeBYOCAttribution attributes BYOC jobs in the given window.
+// It fetches job candidates, builds an independent capability snapshot set
+// keyed by both orch address and URI, resolves worker lifecycle model data,
+// resolves attribution decisions, and writes results to canonical_byoc_job_store.
+func (e *Engine) executeBYOCAttribution(ctx context.Context, spec WindowSpec, req RunRequest, runID string) (int, error) {
+	jobs, err := e.repo.fetchBYOCJobCandidates(ctx, spec)
+	if err != nil {
+		return 0, fmt.Errorf("fetch byoc job candidates: %w", err)
+	}
+	if len(jobs) == 0 {
+		return 0, nil
+	}
+
+	identities := byocIdentities(jobs)
+	identityStrings := orchIdentitiesToStrings(identities)
+	snapshots, err := e.repo.fetchCapabilitySnapshots(ctx, spec, identityStrings)
+	if err != nil {
+		return 0, fmt.Errorf("fetch byoc capability snapshots: %w", err)
+	}
+
+	versions := buildCapabilityVersions(snapshots)
+	intervals := buildCapabilityIntervals(versions)
+
+	// Collect orch addresses for worker lifecycle lookup.
+	orchAddresses := make([]string, 0, len(identities))
+	for _, id := range identities {
+		if id.Address != "" {
+			orchAddresses = append(orchAddresses, id.Address)
+		}
+	}
+	workerSnapshots, err := e.repo.fetchWorkerLifecycleSnapshots(ctx, spec, orchAddresses)
+	if err != nil {
+		return 0, fmt.Errorf("fetch worker lifecycle snapshots: %w", err)
+	}
+	workerModels := resolveWorkerModels(jobs, workerSnapshots)
+
+	selections := make([]SelectionEvent, 0, len(jobs))
+	for _, j := range jobs {
+		selections = append(selections, j.toSelectionEvent())
+	}
+	decisions := resolveSelectionDecisions(selections, intervals)
+
+	decisionsByID := make(map[string]SelectionDecision, len(decisions))
+	for _, d := range decisions {
+		decisionsByID[d.SelectionEventID] = d
+	}
+
+	rows := buildBYOCJobRows(jobs, decisionsByID, workerModels)
+
+	if !req.Mutates() {
+		return len(rows), nil
+	}
+	if err := e.repo.insertBYOCJobRows(ctx, runID, rows); err != nil {
+		return 0, fmt.Errorf("insert byoc job rows: %w", err)
+	}
+	return len(rows), nil
 }
 
 func parseMode(raw string) Mode {

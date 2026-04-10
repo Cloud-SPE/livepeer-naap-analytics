@@ -799,7 +799,7 @@
           "editorType": "sql",
           "format": 2,
           "queryType": "sql",
-          "rawSql": "SELECT ifNull(gpu_model_name, '') AS gpu_model, pipeline, count() AS jobs,\n    round(countIf(attribution_status = 'resolved')*100.0/count(), 1) AS resolved_pct\nFROM naap.api_ai_batch_jobs\nWHERE $__timeFilter(completed_at) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) AND pipeline != ''\nGROUP BY gpu_model, pipeline ORDER BY jobs DESC LIMIT 20",
+          "rawSql": "SELECT ifNull(gpu_model_name, '') AS gpu_model, pipeline, count() AS jobs,\n    round(countIf(attribution_status IN ('resolved', 'hardware_less'))*100.0/count(), 1) AS attributed_pct\nFROM naap.api_ai_batch_jobs\nWHERE $__timeFilter(completed_at) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) AND pipeline != ''\nGROUP BY gpu_model, pipeline ORDER BY jobs DESC LIMIT 20",
           "refId": "A"
         }
       ]

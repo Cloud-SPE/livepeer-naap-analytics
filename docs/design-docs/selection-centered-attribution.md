@@ -24,6 +24,100 @@ This moves the system onto the real business event: orchestrator selection.
 - `canonical_session_current_store` and `canonical_status_hours_store` are
   downstream derivatives, never attribution inputs.
 
+## Job types and attribution paths
+
+Three job types flow through the resolver. All share `resolveSelectionDecision`
+and produce the same five-class attribution status. Only the event source and
+`SelectionEvent` construction differ.
+
+### Live video-to-video (V2V)
+
+- Source: `stream_trace`, `ai_stream_status`, `ai_stream_events`
+- SelectionTS: derived from the candidate event timestamp
+- ObservedURL / ObservedAddress: from stream trace or status events
+- PipelineHintVerbatim: `false` — uses canonical pipeline allow-list
+- Output: `canonical_session_current_store`, `canonical_status_hours_store`
+
+### AI batch
+
+- Source: `normalized_ai_batch_job` (received + completed subtypes)
+- SelectionTS: `received_at` when available (when the gateway chose the
+  orchestrator); `completed_at` as fallback
+- ObservedURL: always from the `completed` event — it is the only event that
+  carries orch identity
+- ObservedAddress: always empty — batch events do not carry orch address
+- ObservedPipeline: canonical pipeline name from the job (e.g. `"text-to-image"`)
+- PipelineHintVerbatim: `false` — uses canonical pipeline allow-list
+- Capability interval source: PerCapability block when `hardware` is null
+  (see three-path capability interval building below)
+- Output: `canonical_ai_batch_job_store`
+
+### BYOC
+
+- Source: `normalized_byoc_job` (`job_gateway_completed` subtype)
+- SelectionTS: `completed_at`
+- ObservedURL / ObservedAddress: both carried in job events
+- ObservedPipeline: BYOC capability string verbatim (e.g.
+  `"openai-chat-completions"`) — never normalized against canonical allow-list
+- PipelineHintVerbatim: `true` — bypasses `compatiblePipelineHint`;
+  `isCompatible` matches `ObservedPipeline` against `interval.Pipeline`
+  case-insensitively and directly
+- Model: resolved from `normalized_worker_lifecycle` snapshot (most recent
+  event where `event_ts <= job.completed_at`); CI `canonical_model` is fallback
+- Output: `canonical_byoc_job_store`
+
+## Capability interval building — three paths
+
+`buildCapabilityIntervalTemplates` dispatches on the structure of each
+orchestrator's capability payload:
+
+**Path 1 — hardware entries present** (live V2V and BYOC orchestrators):
+`hardware[]` contains pipeline, model_id, and gpu_info. One interval template
+per (pipeline, model, gpu) combination. `HardwarePresent = true` when GPU info
+is present.
+
+**Path 2 — no hardware, PerCapability present** (AI batch orchestrators):
+`hardware` is null but `capabilities.constraints.PerCapability` carries a map
+of capability number → model info. The `capabilityNumberToPipeline` map
+translates capability numbers to canonical pipeline names. Creates hardware-less
+intervals (`HardwarePresent = false`) with pipeline and model populated from
+PerCapability. Capability 37 (byoc) is excluded from this map — BYOC uses
+Path 1.
+
+**Path 3 — neither** (fallback): A single hardware-less placeholder interval
+with no pipeline or model. Attribution can still resolve orchestrator identity
+but will produce `hardware_less` status.
+
+## PipelineHintVerbatim flag
+
+`SelectionEvent.PipelineHintVerbatim` controls the pipeline matching path in
+`isCompatible`:
+
+- `false` (live V2V and AI batch): `compatiblePipelineHint` checks the
+  canonical pipeline allow-list. Unrecognized pipeline names produce no filter,
+  allowing any interval pipeline to match.
+- `true` (BYOC): `isCompatible` performs a direct case-insensitive equality
+  comparison between `selection.ObservedPipeline` and `interval.Pipeline`.
+  This is required because BYOC capability strings (e.g.
+  `"openai-chat-completions"`) are not in the canonical allow-list and must not
+  be silently dropped.
+
+## Canonical pipeline allow-list
+
+`normalizeCanonicalPipeline` and `compatiblePipelineHint` both recognize:
+
+```
+live-video-to-video
+text-to-image, image-to-image, image-to-video, text-to-video
+audio-to-text, text-to-speech
+upscale, llm, image-to-text, segment-anything-2
+noop
+```
+
+BYOC capability strings are intentionally excluded. They are matched verbatim
+via `PipelineHintVerbatim` and stored as-is in `ci.canonical_pipeline` within
+BYOC capability intervals.
+
 ## Freshness policy
 
 For a given `selection_ts`, the resolver applies:
@@ -62,6 +156,11 @@ match did exist. This stays `unresolved`; it is not promoted to
 but GPU or hardware metadata was absent. It is a distinct attribution class,
 not a synonym for unresolved alias/URI gaps.
 
+For AI batch specifically: `hardware_less` is the expected outcome for
+orchestrators that report via PerCapability only (Path 2). This is not an
+error; it means orchestrator identity was confirmed but no GPU data was
+available.
+
 Fact-surface obligations:
 
 - unresolved, stale, ambiguous, and hardware-less sessions remain visible in
@@ -81,6 +180,43 @@ Operational measurement rule:
   not a canonicalization failure class
 - the remaining selected-session buckets are `stale`, `ambiguous`, and
   `unresolved`
+
+## Independent identity fetches
+
+AI batch and BYOC attribution phases each call `fetchCapabilitySnapshots`
+independently with their own identity sets:
+
+- **AI batch**: URI-only identities (`orch_url_norm`). Batch events carry no
+  orch address.
+- **BYOC**: both address (`orch_address`) and URI (`orch_url_norm`) identities.
+  Both are available in BYOC completion events.
+
+The live V2V path continues to collect identities from `SelectionEvent` rows
+via `collectSelectionIdentities` — unchanged.
+
+## Worker lifecycle resolution (BYOC)
+
+Model and pricing for BYOC jobs come from `normalized_worker_lifecycle`, not
+from the job event itself. The resolver:
+
+1. Collects unique orch addresses from the BYOC job batch.
+2. Fetches snapshots with a 30-day lookback before the window start — BYOC
+   workers may have registered well before the attribution window.
+3. For each job, picks the most recent snapshot where
+   `snapshot.event_ts <= job.completed_at` matching on
+   `(org, capability, orch_address)`.
+4. `worker_lifecycle` model takes precedence; CI `canonical_model` is fallback.
+
+## Dirty partition tracking
+
+Late-arriving events for any of these event types trigger re-attribution of the
+affected calendar day:
+
+```
+stream_trace, ai_stream_status, ai_stream_events, network_capabilities,
+ai_batch_request, ai_llm_request,
+job_gateway, job_orchestrator, worker_lifecycle
+```
 
 ## Operational seam
 

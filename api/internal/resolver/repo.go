@@ -144,7 +144,11 @@ func (r *repo) upsertDirtyScanWatermark(ctx context.Context, stateKey string, wa
 }
 
 func acceptedRawDirtyScanPredicate() string {
-	return `event_type IN ('stream_trace', 'ai_stream_status', 'ai_stream_events', 'network_capabilities')`
+	return `event_type IN (
+		'stream_trace', 'ai_stream_status', 'ai_stream_events', 'network_capabilities',
+		'ai_batch_request', 'ai_llm_request',
+		'job_gateway', 'job_orchestrator', 'worker_lifecycle'
+	)`
 }
 
 func dirtyWatermarkPredicate(watermark *dirtyScanWatermark) (string, []any) {
@@ -3540,4 +3544,305 @@ func nullableFloat64HashValue(v *float64) float64 {
 		return 0
 	}
 	return *v
+}
+
+// workerLifecycleLookback is how far before a window start we look for
+// worker_lifecycle snapshots. BYOC workers may have registered well before
+// the attribution window; 30 days covers typical deployments.
+const workerLifecycleLookback = 30 * 24 * time.Hour
+
+// orchIdentitiesToStrings converts a slice of orchIdentity to a flat list of
+// normalized identity strings suitable for stageIdentities.
+func orchIdentitiesToStrings(identities []orchIdentity) []string {
+	seen := make(map[string]struct{}, len(identities)*2)
+	out := make([]string, 0, len(identities)*2)
+	for _, id := range identities {
+		if id.Address != "" {
+			if _, ok := seen[id.Address]; !ok {
+				seen[id.Address] = struct{}{}
+				out = append(out, id.Address)
+			}
+		}
+		if id.URINorm != "" {
+			if _, ok := seen[id.URINorm]; !ok {
+				seen[id.URINorm] = struct{}{}
+				out = append(out, id.URINorm)
+			}
+		}
+	}
+	return out
+}
+
+// fetchAIBatchJobCandidates returns AI batch jobs that completed within the
+// window. It LEFT JOINs the received event onto the completed event so that
+// ReceivedAt is populated when available (used as SelectionTS anchor).
+// Jobs with an empty request_id are excluded — those belong to the known gap
+// period before request_id tracking was fixed.
+func (r *repo) fetchAIBatchJobCandidates(ctx context.Context, spec WindowSpec) ([]AIBatchJobRecord, error) {
+	if spec.Start == nil || spec.End == nil {
+		return nil, fmt.Errorf("fetch ai batch job candidates requires bounded window")
+	}
+	orgClause, orgArgs := orgPredicate("c.org", spec.Org, spec.ExcludedOrgPrefixes)
+	args := []any{spec.Start.UTC(), spec.End.UTC()}
+	args = append(args, orgArgs...)
+	rows, err := r.conn.Query(ctx, `
+		SELECT
+			c.request_id,
+			c.org,
+			ifNull(c.gateway, '') AS gateway,
+			ifNull(c.pipeline, '') AS pipeline,
+			ifNull(c.model_id, '') AS model_id,
+			ifNull(c.orch_url, '') AS orch_url,
+			ifNull(lowerUTF8(c.orch_url), '') AS orch_url_norm,
+			received.received_at,
+			c.event_ts AS completed_at,
+			c.success,
+			ifNull(toUInt16OrZero(toString(c.tries)), 0) AS tries,
+			ifNull(c.duration_ms, 0) AS duration_ms,
+			ifNull(c.latency_score, 0.0) AS latency_score,
+			ifNull(c.price_per_unit, 0.0) AS price_per_unit,
+			ifNull(c.error_type, '') AS error_type,
+			ifNull(c.error, '') AS error
+		FROM naap.normalized_ai_batch_job AS c FINAL
+		LEFT JOIN (
+			SELECT request_id, org, event_ts AS received_at
+			FROM naap.normalized_ai_batch_job FINAL
+			WHERE subtype = 'ai_batch_request_received'
+		) received ON received.org = c.org AND received.request_id = c.request_id
+		WHERE c.subtype = 'ai_batch_request_completed'
+		  AND c.event_ts >= ? AND c.event_ts < ?
+		  AND c.request_id != ''
+		  AND `+orgClause+`
+		ORDER BY c.org, c.request_id, c.event_ts
+	`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("fetch ai batch job candidates: %w", err)
+	}
+	defer rows.Close()
+
+	var out []AIBatchJobRecord
+	for rows.Next() {
+		var j AIBatchJobRecord
+		var receivedAt sql.NullTime
+		if err := rows.Scan(
+			&j.RequestID, &j.Org, &j.Gateway, &j.Pipeline, &j.ModelID,
+			&j.OrchURL, &j.OrchURLNorm,
+			&receivedAt,
+			&j.CompletedAt, &j.Success,
+			&j.Tries, &j.DurationMS, &j.LatencyScore, &j.PricePerUnit,
+			&j.ErrorType, &j.Error,
+		); err != nil {
+			return nil, fmt.Errorf("scan ai batch job candidate: %w", err)
+		}
+		if receivedAt.Valid {
+			t := receivedAt.Time.UTC()
+			j.ReceivedAt = &t
+		}
+		j.CompletedAt = j.CompletedAt.UTC()
+		out = append(out, j)
+	}
+	return out, rows.Err()
+}
+
+// fetchBYOCJobCandidates returns BYOC job gateway completion events within
+// the window. The event_id field is used as the stable job key.
+func (r *repo) fetchBYOCJobCandidates(ctx context.Context, spec WindowSpec) ([]BYOCJobRecord, error) {
+	if spec.Start == nil || spec.End == nil {
+		return nil, fmt.Errorf("fetch byoc job candidates requires bounded window")
+	}
+	orgClause, orgArgs := orgPredicate("j.org", spec.Org, spec.ExcludedOrgPrefixes)
+	args := []any{spec.Start.UTC(), spec.End.UTC()}
+	args = append(args, orgArgs...)
+	rows, err := r.conn.Query(ctx, `
+		SELECT
+			j.event_id,
+			j.org,
+			ifNull(j.gateway, '') AS gateway,
+			ifNull(j.capability, '') AS capability,
+			ifNull(lowerUTF8(j.orch_address), '') AS orch_address,
+			ifNull(j.orch_url, '') AS orch_url,
+			ifNull(lowerUTF8(j.orch_url), '') AS orch_url_norm,
+			ifNull(j.worker_url, '') AS worker_url,
+			ifNull(j.charged_compute, 0) AS charged_compute,
+			j.event_ts AS completed_at,
+			j.success,
+			ifNull(j.duration_ms, 0) AS duration_ms,
+			ifNull(j.http_status, 0) AS http_status,
+			ifNull(j.error, '') AS error
+		FROM naap.normalized_byoc_job AS j FINAL
+		WHERE j.subtype = 'job_gateway_completed'
+		  AND j.event_ts >= ? AND j.event_ts < ?
+		  AND `+orgClause+`
+		ORDER BY j.org, j.event_id, j.event_ts
+	`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("fetch byoc job candidates: %w", err)
+	}
+	defer rows.Close()
+
+	var out []BYOCJobRecord
+	for rows.Next() {
+		var j BYOCJobRecord
+		if err := rows.Scan(
+			&j.EventID, &j.Org, &j.Gateway, &j.Capability,
+			&j.OrchAddress, &j.OrchURL, &j.OrchURLNorm,
+			&j.WorkerURL, &j.ChargedCompute,
+			&j.CompletedAt, &j.Success,
+			&j.DurationMS, &j.HTTPStatus, &j.Error,
+		); err != nil {
+			return nil, fmt.Errorf("scan byoc job candidate: %w", err)
+		}
+		j.CompletedAt = j.CompletedAt.UTC()
+		out = append(out, j)
+	}
+	return out, rows.Err()
+}
+
+// fetchWorkerLifecycleSnapshots returns worker_lifecycle events for the given
+// orchestrator addresses, looking back workerLifecycleLookback before the
+// window start. This covers BYOC workers that registered well before the
+// current attribution window.
+func (r *repo) fetchWorkerLifecycleSnapshots(ctx context.Context, spec WindowSpec, orchAddresses []string) ([]workerLifecycleSnapshot, error) {
+	if len(orchAddresses) == 0 {
+		return nil, nil
+	}
+	if spec.Start == nil || spec.End == nil {
+		return nil, fmt.Errorf("fetch worker lifecycle snapshots requires bounded window")
+	}
+	queryID, err := r.stageIdentities(ctx, orchAddresses)
+	if err != nil {
+		return nil, fmt.Errorf("stage identities for worker lifecycle: %w", err)
+	}
+	orgClause, orgArgs := orgPredicate("w.org", spec.Org, spec.ExcludedOrgPrefixes)
+	lookbackStart := spec.Start.UTC().Add(-workerLifecycleLookback)
+	args := []any{queryID, lookbackStart, spec.End.UTC()}
+	args = append(args, orgArgs...)
+	rows, err := r.conn.Query(ctx, `
+		SELECT
+			w.org,
+			ifNull(w.capability, '') AS capability,
+			ifNull(lowerUTF8(w.orch_address), '') AS orch_address,
+			w.event_ts,
+			ifNull(w.model, '') AS model,
+			ifNull(w.price_per_unit, 0.0) AS price_per_unit,
+			ifNull(w.worker_url, '') AS worker_url
+		FROM naap.normalized_worker_lifecycle AS w FINAL
+		INNER JOIN naap.resolver_query_identities i
+			ON i.query_id = ?
+		   AND i.identity = lowerUTF8(ifNull(w.orch_address, ''))
+		WHERE w.event_ts >= ? AND w.event_ts < ?
+		  AND `+orgClause+`
+		ORDER BY w.org, w.capability, w.orch_address, w.event_ts
+	`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("fetch worker lifecycle snapshots: %w", err)
+	}
+	defer rows.Close()
+
+	var out []workerLifecycleSnapshot
+	for rows.Next() {
+		var s workerLifecycleSnapshot
+		if err := rows.Scan(
+			&s.Org, &s.Capability, &s.OrchAddress,
+			&s.EventTS, &s.Model, &s.PricePerUnit, &s.WorkerURL,
+		); err != nil {
+			return nil, fmt.Errorf("scan worker lifecycle snapshot: %w", err)
+		}
+		s.EventTS = s.EventTS.UTC()
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+// insertAIBatchJobRows upserts AI batch job attribution rows into
+// canonical_ai_batch_job_store. The ReplacingMergeTree on materialized_at
+// means a later write for the same (org, request_id, completed_at) supersedes
+// the previous one.
+func (r *repo) insertAIBatchJobRows(ctx context.Context, runID string, rows []AIBatchJobRow) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	batch, err := r.conn.PrepareBatch(ctx, `
+		INSERT INTO naap.canonical_ai_batch_job_store
+		(
+			request_id, org, gateway, pipeline, model_id,
+			received_at, completed_at,
+			success, tries, duration_ms,
+			orch_url, orch_url_norm,
+			latency_score, price_per_unit, error_type, error,
+			attribution_status, attribution_reason, attribution_method, attribution_confidence,
+			attributed_orch_uri, capability_version_id, attribution_snapshot_ts,
+			gpu_id, gpu_model_name, gpu_memory_bytes_total, attributed_model,
+			resolver_run_id, materialized_at
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("prepare ai batch job row batch: %w", err)
+	}
+	now := time.Now().UTC()
+	for _, row := range rows {
+		if err := batch.Append(
+			row.RequestID, row.Org, row.Gateway, row.Pipeline, row.ModelID,
+			nullableTimeValue(row.ReceivedAt), row.CompletedAt.UTC(),
+			row.Success, row.Tries, row.DurationMS,
+			row.OrchURL, row.OrchURLNorm,
+			row.LatencyScore, row.PricePerUnit, row.ErrorType, row.Error,
+			row.AttributionStatus, row.AttributionReason, row.AttributionMethod, row.AttributionConfidence,
+			nullableStringValue(row.AttributedOrchURI), nullableStringValue(row.CapabilityVersionID),
+			nullableTimeValue(row.AttributionSnapshotTS),
+			nullableStringValue(row.GPUID), nullableStringValue(row.GPUModelName),
+			row.GPUMemoryBytesTotal,
+			nullableStringValue(row.AttributedModel),
+			runID, now,
+		); err != nil {
+			return fmt.Errorf("append ai batch job row: %w", err)
+		}
+	}
+	return batch.Send()
+}
+
+// insertBYOCJobRows upserts BYOC job attribution rows into
+// canonical_byoc_job_store. The ReplacingMergeTree on materialized_at
+// means a later write for the same (org, event_id, completed_at) supersedes
+// the previous one.
+func (r *repo) insertBYOCJobRows(ctx context.Context, runID string, rows []BYOCJobRow) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	batch, err := r.conn.PrepareBatch(ctx, `
+		INSERT INTO naap.canonical_byoc_job_store
+		(
+			event_id, org, gateway, capability, completed_at,
+			success, duration_ms, http_status,
+			orch_address, orch_url, orch_url_norm,
+			worker_url, charged_compute, error,
+			model, price_per_unit,
+			attribution_status, attribution_reason, attribution_method, attribution_confidence,
+			attributed_orch_uri, capability_version_id, attribution_snapshot_ts,
+			gpu_id, gpu_model_name, gpu_memory_bytes_total,
+			resolver_run_id, materialized_at
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("prepare byoc job row batch: %w", err)
+	}
+	now := time.Now().UTC()
+	for _, row := range rows {
+		if err := batch.Append(
+			row.EventID, row.Org, row.Gateway, row.Capability, row.CompletedAt.UTC(),
+			row.Success, row.DurationMS, row.HTTPStatus,
+			row.OrchAddress, row.OrchURL, row.OrchURLNorm,
+			row.WorkerURL, row.ChargedCompute, row.Error,
+			nullableStringValue(row.Model), row.PricePerUnit,
+			row.AttributionStatus, row.AttributionReason, row.AttributionMethod, row.AttributionConfidence,
+			nullableStringValue(row.AttributedOrchURI), nullableStringValue(row.CapabilityVersionID),
+			nullableTimeValue(row.AttributionSnapshotTS),
+			nullableStringValue(row.GPUID), nullableStringValue(row.GPUModelName),
+			row.GPUMemoryBytesTotal,
+			runID, now,
+		); err != nil {
+			return fmt.Errorf("append byoc job row: %w", err)
+		}
+	}
+	return batch.Send()
 }

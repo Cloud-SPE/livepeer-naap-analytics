@@ -460,6 +460,63 @@ func TestResolveSelectionDecision_URIPresentWithoutURIMatchDoesNotFallbackToAlia
 	}
 }
 
+func TestIsCompatible_VerbatimPipelineMatchesCaseInsensitive(t *testing.T) {
+	selection := SelectionEvent{
+		ObservedPipeline:     "openai-chat-completions",
+		PipelineHintVerbatim: true,
+	}
+	if !isCompatible(selection, CapabilityInterval{Pipeline: "openai-chat-completions"}) {
+		t.Fatalf("expected verbatim match to be compatible")
+	}
+	if !isCompatible(selection, CapabilityInterval{Pipeline: "OpenAI-Chat-Completions"}) {
+		t.Fatalf("expected case-insensitive verbatim match to be compatible")
+	}
+}
+
+func TestIsCompatible_VerbatimPipelineMismatchReturnsFalse(t *testing.T) {
+	selection := SelectionEvent{
+		ObservedPipeline:     "openai-chat-completions",
+		PipelineHintVerbatim: true,
+	}
+	if isCompatible(selection, CapabilityInterval{Pipeline: "openai-image-generation"}) {
+		t.Fatalf("expected verbatim mismatch to be incompatible")
+	}
+}
+
+func TestIsCompatible_VerbatimEmptyObservedPipelineReturnsFalse(t *testing.T) {
+	selection := SelectionEvent{
+		ObservedPipeline:     "",
+		PipelineHintVerbatim: true,
+	}
+	if isCompatible(selection, CapabilityInterval{Pipeline: "openai-chat-completions"}) {
+		t.Fatalf("expected empty verbatim pipeline to be incompatible")
+	}
+}
+
+func TestIsCompatible_VerbatimEmptyIntervalPipelineReturnsFalse(t *testing.T) {
+	selection := SelectionEvent{
+		ObservedPipeline:     "openai-chat-completions",
+		PipelineHintVerbatim: true,
+	}
+	if isCompatible(selection, CapabilityInterval{Pipeline: ""}) {
+		t.Fatalf("expected empty interval pipeline to be incompatible with verbatim match")
+	}
+}
+
+func TestIsCompatible_AIBatchPipelineUsesCanonicalAllowList(t *testing.T) {
+	// AI batch uses PipelineHintVerbatim = false; pipeline must be in allow-list.
+	selection := SelectionEvent{
+		ObservedPipeline:     "segment-anything-2",
+		PipelineHintVerbatim: false,
+	}
+	if !isCompatible(selection, CapabilityInterval{Pipeline: "segment-anything-2"}) {
+		t.Fatalf("expected segment-anything-2 to be compatible via canonical allow-list")
+	}
+	if isCompatible(selection, CapabilityInterval{Pipeline: "text-to-image"}) {
+		t.Fatalf("expected pipeline mismatch to be incompatible")
+	}
+}
+
 func TestBuildSelectionEvents_UsesExplicitModelHintField(t *testing.T) {
 	rows := []selectionCandidate{{
 		Org:            "daydream",

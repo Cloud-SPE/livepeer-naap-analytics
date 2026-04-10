@@ -667,13 +667,6 @@ components:
 
     # ── SLA / GPU / Network Demand (ported from leaderboard-serverless) ──────
 
-    ResponseMeta:
-      type: object
-      description: Standard response envelope metadata.
-      properties:
-        generated_at: { type: string, format: date-time, description: "UTC timestamp when the response was generated." }
-        request_id:   { type: string, description: "Value of the X-Request-Id request header, if present." }
-
     CursorPagination:
       type: object
       description: Cursor pagination metadata included in list responses.
