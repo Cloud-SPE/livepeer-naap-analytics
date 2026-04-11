@@ -193,6 +193,13 @@ Lifecycle semantics are now split explicitly in current-state outputs:
 - `startup_outcome`: `success | failed | unknown`
 - `excusal_reason`: `none | no_orch | excusable_error`
 
+Request/response job facts now also carry explicit selection lifecycle state:
+
+- `canonical_ai_batch_jobs.selection_outcome`: `selected | no_orch | unknown`
+- `canonical_byoc_jobs.selection_outcome`: `selected | no_orch | unknown`
+- use `selection_outcome = selected` as the denominator for job attribution
+  quality; `no_orch` and `unknown` remain separate lifecycle buckets
+
 Attribution diagnostics are also explicit in current-state outputs:
 
 - `attribution_status`: `resolved | hardware_less | stale | ambiguous | unresolved`

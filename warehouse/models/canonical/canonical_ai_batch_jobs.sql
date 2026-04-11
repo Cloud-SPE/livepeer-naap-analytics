@@ -40,6 +40,7 @@ select
     latest.duration_ms             as duration_ms,
     latest.orch_url                as orch_url,
     latest.orch_url_norm           as orch_url_norm,
+    latest.selection_outcome       as selection_outcome,
     latest.latency_score           as latency_score,
     latest.price_per_unit          as price_per_unit,
     latest.error_type              as error_type,

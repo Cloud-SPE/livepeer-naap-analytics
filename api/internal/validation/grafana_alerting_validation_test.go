@@ -15,7 +15,7 @@ func insertAIBatchStoreRow(t *testing.T, h *harness, org, requestID, pipeline st
 		INSERT INTO naap.canonical_ai_batch_job_store
 		(
 			request_id, org, gateway, pipeline, model_id, received_at, completed_at, success, tries,
-			duration_ms, orch_url, orch_url_norm, latency_score, price_per_unit, error_type, error,
+			duration_ms, orch_url, orch_url_norm, selection_outcome, latency_score, price_per_unit, error_type, error,
 			attribution_status, attribution_reason, attribution_method, attribution_confidence,
 			attributed_orch_uri, capability_version_id, attribution_snapshot_ts, gpu_id, gpu_model_name,
 			gpu_memory_bytes_total, attributed_model, resolver_run_id
@@ -23,7 +23,7 @@ func insertAIBatchStoreRow(t *testing.T, h *harness, org, requestID, pipeline st
 		VALUES
 		(
 			?, ?, 'gw-alerts', ?, 'model-alerts', ?, ?, 1, 1,
-			1000, 'https://orch.example.com', 'https://orch.example.com', 1.0, 0.01, '', '',
+			1000, 'https://orch.example.com', 'https://orch.example.com', 'selected', 1.0, 0.01, '', '',
 			'resolved', 'validation', 'validation', 'high',
 			'https://orch.example.com', NULL, NULL, NULL, NULL,
 			NULL, NULL, 'validation'
@@ -39,7 +39,7 @@ func insertBYOCStoreRow(t *testing.T, h *harness, org, eventID, capability strin
 		INSERT INTO naap.canonical_byoc_job_store
 		(
 			event_id, org, gateway, capability, completed_at, success, duration_ms, http_status,
-			orch_address, orch_url, orch_url_norm, worker_url, charged_compute, error, model,
+			orch_address, orch_url, orch_url_norm, selection_outcome, worker_url, charged_compute, error, model,
 			price_per_unit, attribution_status, attribution_reason, attribution_method,
 			attribution_confidence, attributed_orch_uri, capability_version_id, attribution_snapshot_ts,
 			gpu_id, gpu_model_name, gpu_memory_bytes_total, resolver_run_id
@@ -47,7 +47,7 @@ func insertBYOCStoreRow(t *testing.T, h *harness, org, eventID, capability strin
 		VALUES
 		(
 			?, ?, 'gw-alerts', ?, ?, 1, 1500, 200,
-			'0xbyoc', 'https://byoc.example.com', 'https://byoc.example.com', 'https://worker.example.com', 1, '',
+			'0xbyoc', 'https://byoc.example.com', 'https://byoc.example.com', 'selected', 'https://worker.example.com', 1, '',
 			'model-byoc', 0.02, 'resolved', 'validation', 'validation',
 			'high', 'https://byoc.example.com', NULL, NULL,
 			NULL, NULL, NULL, 'validation'

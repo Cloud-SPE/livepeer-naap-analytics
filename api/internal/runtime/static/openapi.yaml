@@ -305,10 +305,14 @@ components:
       properties:
         pipeline:        { type: string, description: "Fixed pipeline name (e.g. text-to-image, llm)" }
         total_jobs:      { type: integer, format: int64 }
+        selected_jobs:   { type: integer, format: int64, description: "Jobs with explicit orchestrator selection evidence." }
+        no_orch_jobs:    { type: integer, format: int64, description: "Jobs that failed before selection with explicit no_orchestrators evidence." }
+        unknown_jobs:    { type: integer, format: int64, description: "Jobs without enough evidence to classify selection outcome." }
         success_rate:    { type: number, format: double, description: "0.0–1.0" }
         avg_duration_ms: { type: number, format: double }
         avg_latency_score: { type: number, format: double }
-      required: [pipeline, total_jobs, success_rate, avg_duration_ms, avg_latency_score]
+        selected_attribution_worked_rate: { type: number, format: double, description: "Worked attribution rate on selection_outcome = selected, where worked = resolved + hardware_less + stale." }
+      required: [pipeline, total_jobs, selected_jobs, no_orch_jobs, unknown_jobs, success_rate, avg_duration_ms, avg_latency_score, selected_attribution_worked_rate]
 
     AIBatchJobRecord:
       type: object
@@ -323,11 +327,14 @@ components:
         tries:         { type: integer, format: int64 }
         duration_ms:   { type: integer, format: int64 }
         orch_url:      { type: string }
+        selection_outcome: { type: string, enum: [selected, no_orch, unknown] }
         latency_score: { type: number, format: double }
         price_per_unit: { type: number, format: double }
         error_type:    { type: string }
         error:         { type: string }
-      required: [request_id, org, pipeline, completed_at]
+        gpu_model:     { type: string }
+        attribution_status: { type: string, enum: [resolved, hardware_less, stale, ambiguous, unresolved] }
+      required: [request_id, org, gateway, pipeline, model_id, completed_at, tries, duration_ms, orch_url, selection_outcome, latency_score, price_per_unit, error_type, error, attribution_status]
 
     AIBatchLLMSummary:
       type: object
@@ -350,9 +357,13 @@ components:
       properties:
         capability:      { type: string }
         total_jobs:      { type: integer, format: int64 }
+        selected_jobs:   { type: integer, format: int64, description: "Jobs with explicit orchestrator selection evidence." }
+        no_orch_jobs:    { type: integer, format: int64, description: "Jobs that failed before selection with explicit no_orchestrator evidence. Under the current raw contract this is usually zero." }
+        unknown_jobs:    { type: integer, format: int64, description: "Jobs without enough evidence to classify selection outcome." }
         success_rate:    { type: number, format: double, description: "0.0–1.0" }
         avg_duration_ms: { type: number, format: double }
-      required: [capability, total_jobs, success_rate, avg_duration_ms]
+        selected_attribution_worked_rate: { type: number, format: double, description: "Worked attribution rate on selection_outcome = selected, where worked = resolved + hardware_less + stale." }
+      required: [capability, total_jobs, selected_jobs, no_orch_jobs, unknown_jobs, success_rate, avg_duration_ms, selected_attribution_worked_rate]
 
     BYOCJobRecord:
       type: object
@@ -366,9 +377,12 @@ components:
         http_status:  { type: integer, format: int64 }
         orch_address: { type: string }
         orch_url:     { type: string }
+        selection_outcome: { type: string, enum: [selected, no_orch, unknown] }
         worker_url:   { type: string }
         error:        { type: string }
-      required: [request_id, org, capability, completed_at]
+        gpu_model:     { type: string }
+        attribution_status: { type: string, enum: [resolved, hardware_less, stale, ambiguous, unresolved] }
+      required: [request_id, org, capability, completed_at, duration_ms, http_status, orch_address, orch_url, selection_outcome, worker_url, error, attribution_status]
 
     BYOCWorkerSummary:
       type: object
@@ -600,10 +614,14 @@ components:
       description: Aggregate metrics for one job family (AI batch or BYOC).
       properties:
         total_jobs:     { type: integer, format: int64 }
+        selected_jobs:  { type: integer, format: int64 }
+        no_orch_jobs:   { type: integer, format: int64 }
+        unknown_jobs:   { type: integer, format: int64 }
         success_rate:   { type: number, format: double, description: "0.0–1.0" }
         avg_duration_ms: { type: number, format: double }
         p99_duration_ms: { type: number, format: double }
-      required: [total_jobs, success_rate, avg_duration_ms, p99_duration_ms]
+        selected_attribution_worked_rate: { type: number, format: double, description: "Worked attribution rate on selection_outcome = selected." }
+      required: [total_jobs, selected_jobs, no_orch_jobs, unknown_jobs, success_rate, avg_duration_ms, p99_duration_ms, selected_attribution_worked_rate]
 
     DashboardJobsOverview:
       type: object
@@ -619,9 +637,13 @@ components:
       properties:
         pipeline:       { type: string, description: "Pipeline name (e.g. text-to-image, llm)" }
         total_jobs:     { type: integer, format: int64 }
+        selected_jobs:  { type: integer, format: int64 }
+        no_orch_jobs:   { type: integer, format: int64 }
+        unknown_jobs:   { type: integer, format: int64 }
         success_rate:   { type: number, format: double, description: "0.0–1.0" }
         avg_duration_ms: { type: number, format: double }
-      required: [pipeline, total_jobs, success_rate, avg_duration_ms]
+        selected_attribution_worked_rate: { type: number, format: double, description: "Worked attribution rate on selection_outcome = selected." }
+      required: [pipeline, total_jobs, selected_jobs, no_orch_jobs, unknown_jobs, success_rate, avg_duration_ms, selected_attribution_worked_rate]
 
     DashboardJobsByCapabilityRow:
       type: object
@@ -629,9 +651,13 @@ components:
       properties:
         capability:     { type: string, description: "Capability name (e.g. openai-chat-completions)" }
         total_jobs:     { type: integer, format: int64 }
+        selected_jobs:  { type: integer, format: int64 }
+        no_orch_jobs:   { type: integer, format: int64 }
+        unknown_jobs:   { type: integer, format: int64 }
         success_rate:   { type: number, format: double, description: "0.0–1.0" }
         avg_duration_ms: { type: number, format: double }
-      required: [capability, total_jobs, success_rate, avg_duration_ms]
+        selected_attribution_worked_rate: { type: number, format: double, description: "Worked attribution rate on selection_outcome = selected." }
+      required: [capability, total_jobs, selected_jobs, no_orch_jobs, unknown_jobs, success_rate, avg_duration_ms, selected_attribution_worked_rate]
 
     # ── Shared ──────────────────────────────────────────────────────────────
 
@@ -1683,8 +1709,9 @@ paths:
         Returns top-level aggregate statistics for both AI-batch and BYOC jobs in
         the requested time window. Backed by `naap.canonical_ai_batch_jobs` and
         `naap.canonical_byoc_jobs`. The response contains two sub-objects —
-        `ai_batch` and `byoc` — each with total job count, success rate, average
-        duration, and p99 duration.
+        `ai_batch` and `byoc` — each with total job count, selection outcome
+        counts (`selected`, `no_orch`, `unknown`), success rate, average
+        duration, p99 duration, and selected-only attribution worked rate.
 
         This endpoint is the dashboard-level entry point for job health monitoring.
         Unlike streaming KPIs (available at `/v1/dashboard/kpi`), this endpoint
@@ -1719,10 +1746,11 @@ paths:
     get:
       summary: AI batch jobs breakdown by pipeline
       description: |
-        Returns per-pipeline aggregates (job count, success rate, average duration)
-        for AI-batch jobs in the requested time window. Backed by
-        `naap.canonical_ai_batch_jobs`. Each row represents one fixed Livepeer AI
-        pipeline (e.g. `text-to-image`, `llm`, `audio-to-text`).
+        Returns per-pipeline aggregates (job count, selection outcome counts,
+        success rate, average duration, and selected-only attribution worked
+        rate) for AI-batch jobs in the requested time window. Backed by
+        `naap.canonical_ai_batch_jobs`. Each row represents one fixed Livepeer
+        AI pipeline (e.g. `text-to-image`, `llm`, `audio-to-text`).
 
         **This endpoint covers AI-batch jobs only.** BYOC jobs do not appear here.
         For BYOC capability breakdown, use `/v1/dashboard/jobs/by-capability`. For
@@ -1758,10 +1786,12 @@ paths:
     get:
       summary: BYOC jobs breakdown by capability
       description: |
-        Returns per-capability aggregates (job count, success rate, average duration)
-        for BYOC jobs in the requested time window. Backed by
-        `naap.canonical_byoc_jobs`. Each row represents one dynamic BYOC capability
-        string (e.g. `openai-chat-completions`, `openai-image-generation`).
+        Returns per-capability aggregates (job count, selection outcome counts,
+        success rate, average duration, and selected-only attribution worked
+        rate) for BYOC jobs in the requested time window. Backed by
+        `naap.canonical_byoc_jobs`. Each row represents one dynamic BYOC
+        capability string (e.g. `openai-chat-completions`,
+        `openai-image-generation`).
 
         **This endpoint covers BYOC jobs only.** AI-batch jobs do not appear here.
         For AI-batch pipeline breakdown, use `/v1/dashboard/jobs/by-pipeline`. For
@@ -1799,11 +1829,12 @@ paths:
     get:
       summary: AI batch job summary by pipeline
       description: |
-        Returns per-pipeline aggregates — total job count, success rate, average
-        duration, and average latency score — for completed AI-batch jobs in the
-        requested time window. Backed by `naap.canonical_ai_batch_jobs`, which is
-        populated by the Go attribution resolver processing events from the
-        `network_events` Kafka topic.
+        Returns per-pipeline aggregates — total job count, selection outcome
+        counts, success rate, average duration, average latency score, and a
+        selected-only attribution worked rate — for completed AI-batch jobs in
+        the requested time window. Backed by `naap.canonical_ai_batch_jobs`,
+        which is populated by the Go attribution resolver processing events from
+        the `network_events` Kafka topic.
 
         Covers the nine fixed Livepeer AI pipelines: text-to-image,
         image-to-image, image-to-video, upscale, audio-to-text, llm,
@@ -1814,6 +1845,9 @@ paths:
         The default time window is the last 24 hours. `avg_latency_score` is the
         mean of the per-job latency score computed by the resolver based on
         orchestrator response time relative to network benchmarks.
+        `selected_attribution_worked_rate` uses `selection_outcome = selected`
+        as the denominator and treats `resolved + hardware_less + stale` as
+        worked attribution.
       operationId: getAIBatchSummary
       tags: [AIBatch]
       parameters:
@@ -1844,10 +1878,11 @@ paths:
         AI inference request across any of the nine fixed pipelines.
 
         Attribution fields populated by the resolver include `gpu_model`
-        (the GPU hardware model that served the job, if resolved) and
+        (the GPU hardware model that served the job, if resolved),
+        `selection_outcome` (`selected`, `no_orch`, `unknown`), and
         `attribution_status` (one of: `resolved`, `hardware_less`, `stale`,
-        `ambiguous`, `unresolved`). When `attribution_status` is not `resolved`,
-        the GPU information may be absent or uncertain.
+        `ambiguous`, `unresolved`). `selection_outcome` is a job-lifecycle field
+        independent from attribution status.
 
         `success` can be null when the outcome was not deterministically recorded
         in the event stream. `tries` reflects the number of orchestrator attempts
@@ -1925,8 +1960,9 @@ paths:
     get:
       summary: BYOC job summary by capability
       description: |
-        Returns per-capability aggregates — total job count, success rate, and
-        average duration — for completed BYOC jobs in the requested time window.
+        Returns per-capability aggregates — total job count, selection outcome
+        counts, success rate, average duration, and a selected-only attribution
+        worked rate — for completed BYOC jobs in the requested time window.
         Backed by `naap.canonical_byoc_jobs`, which is populated by the Go
         attribution resolver processing `network_events` Kafka events.
 
@@ -1938,6 +1974,9 @@ paths:
         endpoint; use `/v1/ai-batch/summary` for those.
 
         The default time window is the last 24 hours.
+        Under the current raw BYOC contract, `no_orch_jobs` is usually zero
+        because blank-identity failures generally remain `unknown` until explicit
+        pre-selection failure evidence exists.
       operationId: getBYOCSummary
       tags: [BYOC]
       parameters:
@@ -1974,9 +2013,10 @@ paths:
         is the URL of the specific BYOC worker that handled the request; it is
         often empty because not all workers report it in the event payload.
 
-        Attribution fields (`gpu_model`, `attribution_status`) follow the same
-        resolver-written schema as AI-batch jobs. `http_status` reflects the HTTP
-        response code returned by the BYOC worker for the inference request.
+        Attribution fields (`gpu_model`, `selection_outcome`,
+        `attribution_status`) follow the same resolver-written schema as
+        AI-batch jobs. `http_status` reflects the HTTP response code returned by
+        the BYOC worker for the inference request.
 
         Cursor pagination uses base64-encoded JSON position markers.
       operationId: listBYOCJobs

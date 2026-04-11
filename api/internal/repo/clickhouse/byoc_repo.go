@@ -23,8 +23,19 @@ func (r *Repo) GetBYOCSummary(ctx context.Context, p types.QueryParams) ([]types
 		SELECT
 			capability,
 			count()                                              AS total_jobs,
+			countIf(selection_outcome = 'selected')              AS selected_jobs,
+			countIf(selection_outcome = 'no_orch')               AS no_orch_jobs,
+			countIf(selection_outcome = 'unknown')               AS unknown_jobs,
 			toFloat64(countIf(success = 1)) / toFloat64(count()) AS success_rate,
-			avg(duration_ms)                                     AS avg_duration_ms
+			avg(duration_ms)                                     AS avg_duration_ms,
+			if(
+				countIf(selection_outcome = 'selected') > 0,
+				toFloat64(countIf(
+					selection_outcome = 'selected'
+					AND attribution_status IN ('resolved', 'hardware_less', 'stale')
+				)) / toFloat64(countIf(selection_outcome = 'selected')),
+				0.0
+			) AS selected_attribution_worked_rate
 		FROM naap.api_byoc_jobs
 		`+where+`
 		GROUP BY capability
@@ -38,11 +49,23 @@ func (r *Repo) GetBYOCSummary(ctx context.Context, p types.QueryParams) ([]types
 	var result []types.BYOCJobSummary
 	for rows.Next() {
 		var s types.BYOCJobSummary
-		var totalJobs uint64
-		if err := rows.Scan(&s.Capability, &totalJobs, &s.SuccessRate, &s.AvgDurationMs); err != nil {
+		var totalJobs, selectedJobs, noOrchJobs, unknownJobs uint64
+		if err := rows.Scan(
+			&s.Capability,
+			&totalJobs,
+			&selectedJobs,
+			&noOrchJobs,
+			&unknownJobs,
+			&s.SuccessRate,
+			&s.AvgDurationMs,
+			&s.SelectedAttributionWorkedRate,
+		); err != nil {
 			return nil, fmt.Errorf("clickhouse get byoc summary scan: %w", err)
 		}
 		s.TotalJobs = int64(totalJobs)
+		s.SelectedJobs = int64(selectedJobs)
+		s.NoOrchJobs = int64(noOrchJobs)
+		s.UnknownJobs = int64(unknownJobs)
 		result = append(result, s)
 	}
 	if err := rows.Err(); err != nil {
@@ -89,6 +112,7 @@ func (r *Repo) ListBYOCJobs(ctx context.Context, p types.QueryParams) ([]types.B
 			http_status,
 			orch_address,
 			orch_url,
+			selection_outcome,
 			worker_url,
 			error,
 			ifNull(gpu_model_name, '')  AS gpu_model_name,
@@ -119,6 +143,7 @@ func (r *Repo) ListBYOCJobs(ctx context.Context, p types.QueryParams) ([]types.B
 			&httpStatus,
 			&rec.OrchAddress,
 			&rec.OrchURL,
+			&rec.SelectionOutcome,
 			&rec.WorkerURL,
 			&rec.Error,
 			&rec.GPUModel,

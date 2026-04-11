@@ -23,9 +23,20 @@ func (r *Repo) GetAIBatchSummary(ctx context.Context, p types.QueryParams) ([]ty
 		SELECT
 			pipeline,
 			count()                                              AS total_jobs,
+			countIf(selection_outcome = 'selected')              AS selected_jobs,
+			countIf(selection_outcome = 'no_orch')               AS no_orch_jobs,
+			countIf(selection_outcome = 'unknown')               AS unknown_jobs,
 			toFloat64(countIf(success = 1)) / toFloat64(count()) AS success_rate,
 			avg(duration_ms)                                     AS avg_duration_ms,
-			avg(latency_score)                                   AS avg_latency_score
+			avg(latency_score)                                   AS avg_latency_score,
+			if(
+				countIf(selection_outcome = 'selected') > 0,
+				toFloat64(countIf(
+					selection_outcome = 'selected'
+					AND attribution_status IN ('resolved', 'hardware_less', 'stale')
+				)) / toFloat64(countIf(selection_outcome = 'selected')),
+				0.0
+			) AS selected_attribution_worked_rate
 		FROM naap.api_ai_batch_jobs
 		`+where+`
 		GROUP BY pipeline
@@ -39,11 +50,24 @@ func (r *Repo) GetAIBatchSummary(ctx context.Context, p types.QueryParams) ([]ty
 	var result []types.AIBatchJobSummary
 	for rows.Next() {
 		var s types.AIBatchJobSummary
-		var totalJobs uint64
-		if err := rows.Scan(&s.Pipeline, &totalJobs, &s.SuccessRate, &s.AvgDurationMs, &s.AvgLatency); err != nil {
+		var totalJobs, selectedJobs, noOrchJobs, unknownJobs uint64
+		if err := rows.Scan(
+			&s.Pipeline,
+			&totalJobs,
+			&selectedJobs,
+			&noOrchJobs,
+			&unknownJobs,
+			&s.SuccessRate,
+			&s.AvgDurationMs,
+			&s.AvgLatency,
+			&s.SelectedAttributionWorkedRate,
+		); err != nil {
 			return nil, fmt.Errorf("clickhouse get ai batch summary scan: %w", err)
 		}
 		s.TotalJobs = int64(totalJobs)
+		s.SelectedJobs = int64(selectedJobs)
+		s.NoOrchJobs = int64(noOrchJobs)
+		s.UnknownJobs = int64(unknownJobs)
 		result = append(result, s)
 	}
 	if err := rows.Err(); err != nil {
@@ -91,6 +115,7 @@ func (r *Repo) ListAIBatchJobs(ctx context.Context, p types.QueryParams) ([]type
 			tries,
 			duration_ms,
 			orch_url,
+			selection_outcome,
 			latency_score,
 			price_per_unit,
 			error_type,
@@ -124,6 +149,7 @@ func (r *Repo) ListAIBatchJobs(ctx context.Context, p types.QueryParams) ([]type
 			&tries,
 			&durationMs,
 			&rec.OrchURL,
+			&rec.SelectionOutcome,
 			&rec.LatencyScore,
 			&rec.PricePerUnit,
 			&rec.ErrorType,

@@ -875,7 +875,7 @@
       },
       "id": 502,
       "type": "table",
-      "title": "AI Batch Attribution Status",
+      "title": "AI Batch Selected Attribution Status",
       "gridPos": {
         "h": 7,
         "w": 12,
@@ -899,7 +899,7 @@
           "editorType": "sql",
           "format": 2,
           "queryType": "sql",
-          "rawSql": "SELECT attribution_status, count() AS jobs,\n    round(count()*100.0/sum(count()) OVER (), 1) AS pct\nFROM naap.api_ai_batch_jobs\nWHERE $__timeFilter(completed_at) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY attribution_status ORDER BY jobs DESC",
+          "rawSql": "SELECT attribution_status, count() AS jobs,\n    round(count()*100.0/sum(count()) OVER (), 1) AS pct\nFROM naap.api_ai_batch_jobs\nWHERE $__timeFilter(completed_at) AND selection_outcome = 'selected' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY attribution_status ORDER BY jobs DESC",
           "refId": "A"
         }
       ]
@@ -911,7 +911,7 @@
       },
       "id": 503,
       "type": "table",
-      "title": "BYOC Attribution Status",
+      "title": "BYOC Selected Attribution Status",
       "gridPos": {
         "h": 7,
         "w": 12,
@@ -935,7 +935,7 @@
           "editorType": "sql",
           "format": 2,
           "queryType": "sql",
-          "rawSql": "SELECT attribution_status, count() AS jobs,\n    round(count()*100.0/sum(count()) OVER (), 1) AS pct\nFROM naap.api_byoc_jobs\nWHERE $__timeFilter(completed_at) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY attribution_status ORDER BY jobs DESC",
+          "rawSql": "SELECT attribution_status, count() AS jobs,\n    round(count()*100.0/sum(count()) OVER (), 1) AS pct\nFROM naap.api_byoc_jobs\nWHERE $__timeFilter(completed_at) AND selection_outcome = 'selected' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY attribution_status ORDER BY jobs DESC",
           "refId": "A"
         }
       ]
@@ -947,10 +947,10 @@
       },
       "id": 504,
       "type": "table",
-      "title": "GPU Model Coverage (AI Batch)",
+      "title": "AI Batch Selection Outcomes",
       "gridPos": {
-        "h": 8,
-        "w": 24,
+        "h": 7,
+        "w": 12,
         "x": 0,
         "y": 59
       },
@@ -971,7 +971,79 @@
           "editorType": "sql",
           "format": 2,
           "queryType": "sql",
-          "rawSql": "SELECT ifNull(gpu_model_name, '') AS gpu_model, pipeline, count() AS jobs,\n    round(countIf(attribution_status IN ('resolved', 'hardware_less'))*100.0/count(), 1) AS attributed_pct\nFROM naap.api_ai_batch_jobs\nWHERE $__timeFilter(completed_at) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) AND pipeline != ''\nGROUP BY gpu_model, pipeline ORDER BY jobs DESC LIMIT 20",
+          "rawSql": "SELECT selection_outcome, count() AS jobs,\n    round(count()*100.0/sum(count()) OVER (), 1) AS pct\nFROM naap.api_ai_batch_jobs\nWHERE $__timeFilter(completed_at) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY selection_outcome ORDER BY jobs DESC",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "id": 505,
+      "type": "table",
+      "title": "BYOC Selection Outcomes",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 59
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": []
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 2,
+          "queryType": "sql",
+          "rawSql": "SELECT selection_outcome, count() AS jobs,\n    round(count()*100.0/sum(count()) OVER (), 1) AS pct\nFROM naap.api_byoc_jobs\nWHERE $__timeFilter(completed_at) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY selection_outcome ORDER BY jobs DESC",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "id": 506,
+      "type": "table",
+      "title": "GPU Model Coverage (AI Batch Selected Jobs)",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 66
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": []
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 2,
+          "queryType": "sql",
+          "rawSql": "SELECT ifNull(gpu_model_name, '') AS gpu_model, pipeline, count() AS jobs,\n    round(countIf(attribution_status IN ('resolved', 'hardware_less', 'stale'))*100.0/count(), 1) AS attributed_pct\nFROM naap.api_ai_batch_jobs\nWHERE $__timeFilter(completed_at) AND selection_outcome = 'selected' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) AND pipeline != ''\nGROUP BY gpu_model, pipeline ORDER BY jobs DESC LIMIT 20",
           "refId": "A"
         }
       ]
@@ -985,7 +1057,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 72
+        "y": 74
       }
     },
     {
@@ -1000,7 +1072,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 73
+        "y": 75
       },
       "options": {
         "showHeader": true,
@@ -1033,7 +1105,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 81
+        "y": 83
       }
     },
     {
@@ -1048,7 +1120,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 82
+        "y": 84
       },
       "options": {
         "showHeader": true,
@@ -1081,7 +1153,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 90
+        "y": 92
       }
     },
     {
@@ -1096,7 +1168,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 91
+        "y": 93
       },
       "options": {
         "showHeader": true,

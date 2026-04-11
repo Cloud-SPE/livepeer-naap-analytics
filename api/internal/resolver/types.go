@@ -343,6 +343,7 @@ type AIBatchJobRecord struct {
 // AIBatchJobRow is an AIBatchJobRecord enriched with attribution outputs.
 type AIBatchJobRow struct {
 	AIBatchJobRecord
+	SelectionOutcome      string
 	AttributionStatus     string
 	AttributionReason     string
 	AttributionMethod     string
@@ -377,6 +378,7 @@ type BYOCJobRecord struct {
 // BYOCJobRow is a BYOCJobRecord enriched with attribution and model outputs.
 type BYOCJobRow struct {
 	BYOCJobRecord
+	SelectionOutcome      string
 	Model                 string
 	PricePerUnit          float64
 	AttributionStatus     string

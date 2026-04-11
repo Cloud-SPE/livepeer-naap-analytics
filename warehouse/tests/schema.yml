@@ -59,6 +59,12 @@ models:
           - accepted_values:
               arguments:
                 values: ['resolved', 'hardware_less', 'stale', 'ambiguous', 'unresolved']
+      - name: selection_outcome
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['selected', 'no_orch', 'unknown']
   - name: canonical_byoc_jobs
     columns:
       - name: request_id
@@ -76,6 +82,12 @@ models:
           - accepted_values:
               arguments:
                 values: ['resolved', 'hardware_less', 'stale', 'ambiguous', 'unresolved']
+      - name: selection_outcome
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['selected', 'no_orch', 'unknown']
   - name: canonical_byoc_payments
     columns:
       - name: event_id

@@ -44,6 +44,7 @@ select
     latest.orch_address          as orch_address,
     latest.orch_url              as orch_url,
     latest.orch_url_norm         as orch_url_norm,
+    latest.selection_outcome     as selection_outcome,
     latest.worker_url            as worker_url,
     latest.charged_compute       as charged_compute,
     latest.error                 as error,

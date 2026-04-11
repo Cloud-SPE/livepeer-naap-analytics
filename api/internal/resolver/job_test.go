@@ -314,6 +314,9 @@ func TestBuildAIBatchJobRows_PropagatesAttributionDecision(t *testing.T) {
 	if r.AttributedModel != "sdxl-turbo" {
 		t.Fatalf("attributed_model = %q, want sdxl-turbo", r.AttributedModel)
 	}
+	if r.SelectionOutcome != "selected" {
+		t.Fatalf("selection_outcome = %q, want selected", r.SelectionOutcome)
+	}
 }
 
 func TestBuildAIBatchJobRows_DefaultsToUnresolvedWhenNoCandidateDecision(t *testing.T) {
@@ -334,6 +337,49 @@ func TestBuildAIBatchJobRows_DefaultsToUnresolvedWhenNoCandidateDecision(t *test
 	}
 	if rows[0].AttributionReason != "missing_candidate" {
 		t.Fatalf("reason = %q, want missing_candidate", rows[0].AttributionReason)
+	}
+	if rows[0].SelectionOutcome != "selected" {
+		t.Fatalf("selection_outcome = %q, want selected", rows[0].SelectionOutcome)
+	}
+}
+
+func TestBuildAIBatchJobRows_MarksNoOrchWhenFailedWithoutSelection(t *testing.T) {
+	success := uint8(0)
+	job := AIBatchJobRecord{
+		RequestID:   "req-no-orch",
+		Org:         "acme",
+		Pipeline:    "text-to-image",
+		CompletedAt: time.Date(2026, 4, 1, 12, 0, 0, 0, time.UTC),
+		Success:     &success,
+		ErrorType:   "no_orchestrators",
+	}
+
+	rows := buildAIBatchJobRows([]AIBatchJobRecord{job}, map[string]SelectionDecision{})
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows, want 1", len(rows))
+	}
+	if rows[0].SelectionOutcome != "no_orch" {
+		t.Fatalf("selection_outcome = %q, want no_orch", rows[0].SelectionOutcome)
+	}
+}
+
+func TestBuildAIBatchJobRows_MarksUnknownWhenIdentityAndNoOrchEvidenceAreMissing(t *testing.T) {
+	success := uint8(0)
+	job := AIBatchJobRecord{
+		RequestID:   "req-unknown",
+		Org:         "acme",
+		Pipeline:    "text-to-image",
+		CompletedAt: time.Date(2026, 4, 1, 12, 0, 0, 0, time.UTC),
+		Success:     &success,
+		ErrorType:   "capacity_timeout",
+	}
+
+	rows := buildAIBatchJobRows([]AIBatchJobRecord{job}, map[string]SelectionDecision{})
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows, want 1", len(rows))
+	}
+	if rows[0].SelectionOutcome != "unknown" {
+		t.Fatalf("selection_outcome = %q, want unknown", rows[0].SelectionOutcome)
 	}
 }
 
@@ -373,6 +419,9 @@ func TestBuildBYOCJobRows_WorkerLifecycleModelTakesPrecedenceOverCIModel(t *test
 	if rows[0].PricePerUnit != 0.01 {
 		t.Fatalf("price_per_unit = %v, want 0.01", rows[0].PricePerUnit)
 	}
+	if rows[0].SelectionOutcome != "selected" {
+		t.Fatalf("selection_outcome = %q, want selected", rows[0].SelectionOutcome)
+	}
 }
 
 func TestBuildBYOCJobRows_FallsBackToCIModelWhenNoWorkerLifecycle(t *testing.T) {
@@ -400,6 +449,28 @@ func TestBuildBYOCJobRows_FallsBackToCIModelWhenNoWorkerLifecycle(t *testing.T) 
 	}
 	if rows[0].Model != "gpt-4o-from-ci" {
 		t.Fatalf("model = %q, want gpt-4o-from-ci (CI fallback)", rows[0].Model)
+	}
+	if rows[0].SelectionOutcome != "selected" {
+		t.Fatalf("selection_outcome = %q, want selected", rows[0].SelectionOutcome)
+	}
+}
+
+func TestBuildBYOCJobRows_MarksUnknownWhenNoIdentityEvidenceExists(t *testing.T) {
+	success := uint8(0)
+	job := BYOCJobRecord{
+		EventID:     "evt-byoc-unknown",
+		Org:         "acme",
+		Capability:  "openai-chat-completions",
+		CompletedAt: time.Date(2026, 4, 1, 12, 0, 0, 0, time.UTC),
+		Success:     &success,
+	}
+
+	rows := buildBYOCJobRows([]BYOCJobRecord{job}, map[string]SelectionDecision{}, map[string]workerModel{})
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows, want 1", len(rows))
+	}
+	if rows[0].SelectionOutcome != "unknown" {
+		t.Fatalf("selection_outcome = %q, want unknown", rows[0].SelectionOutcome)
 	}
 }
 

@@ -1229,6 +1229,17 @@ The implementation must expose enough information to review:
 - percent stale
 - canonical pipeline coverage when model identity is present
 - explicit hardware-less coverage
+- explicit job/session denominator state before attribution quality is computed
+
+For request/response jobs specifically:
+
+- `canonical_ai_batch_jobs.selection_outcome` and
+  `canonical_byoc_jobs.selection_outcome` must be
+  `selected | no_orch | unknown`
+- job attribution quality metrics use `selection_outcome = selected` as the
+  denominator
+- `no_orch` and `unknown` remain visible as lifecycle outcomes and must not be
+  silently folded into attribution failure percentages
 
 Current readiness expectation: for attributable rows where model identity is known, canonical pipeline should be non-empty for at least 99% of rows over a rolling 24-hour window, unless the rows are intentionally pipeline-empty because pipeline text duplicated the model id.
 

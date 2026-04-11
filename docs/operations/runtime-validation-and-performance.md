@@ -87,6 +87,9 @@ Measure attribution on the correct denominator.
 - session counts by `selection_outcome`, broken out by org
 - attribution subtype breakdown within `selection_outcome = 'selected'`
 - primary success metric: `resolved + hardware_less` on selected sessions
+- request/response job counts by `selection_outcome`
+- request/response attribution subtype breakdown within `selection_outcome = 'selected'`
+- request/response worked attribution: `resolved + hardware_less + stale` on selected jobs
 - supporting subtype counts:
   - `resolved`
   - `hardware_less`
@@ -96,6 +99,9 @@ Measure attribution on the correct denominator.
 
 Do not judge attribution quality from all sessions combined. Sessions with
 `selection_outcome = 'no_orch'` are not expected to resolve to an orchestrator.
+Do not judge request/response attribution quality from all jobs combined either.
+Jobs with `selection_outcome = 'no_orch'` or `selection_outcome = 'unknown'`
+must stay visible, but they are not part of the selected-job denominator.
 
 Operational interpretation:
 
@@ -110,6 +116,8 @@ Operational interpretation:
 Primary sources:
 
 - `canonical_session_current`
+- `canonical_ai_batch_jobs`
+- `canonical_byoc_jobs`
 - `scripts/measure_job_baseline.py`
 
 For SLA-specific inspection, include representative low / medium / high rows for

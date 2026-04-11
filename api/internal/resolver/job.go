@@ -58,6 +58,23 @@ type orchIdentity struct {
 	URINorm string
 }
 
+func deriveAIBatchSelectionOutcome(j AIBatchJobRecord) string {
+	if normalizeURL(j.OrchURLNorm) != "" || normalizeURL(j.OrchURL) != "" {
+		return "selected"
+	}
+	if j.Success != nil && *j.Success == 0 && strings.EqualFold(strings.TrimSpace(j.ErrorType), "no_orchestrators") {
+		return "no_orch"
+	}
+	return "unknown"
+}
+
+func deriveBYOCSelectionOutcome(j BYOCJobRecord) string {
+	if normalizeAddress(j.OrchAddress) != "" || normalizeURL(j.OrchURLNorm) != "" || normalizeURL(j.OrchURL) != "" {
+		return "selected"
+	}
+	return "unknown"
+}
+
 // toSelectionEvent converts an AIBatchJobRecord into a SelectionEvent suitable
 // for the standard attribution resolver.
 //
@@ -217,6 +234,7 @@ func buildAIBatchJobRows(jobs []AIBatchJobRecord, decisionsByID map[string]Selec
 		se := j.toSelectionEvent()
 		row := AIBatchJobRow{
 			AIBatchJobRecord:      j,
+			SelectionOutcome:      deriveAIBatchSelectionOutcome(j),
 			AttributionStatus:     "unresolved",
 			AttributionReason:     "missing_candidate",
 			AttributionMethod:     "missing",
@@ -251,6 +269,7 @@ func buildBYOCJobRows(jobs []BYOCJobRecord, decisionsByID map[string]SelectionDe
 		se := j.toSelectionEvent()
 		row := BYOCJobRow{
 			BYOCJobRecord:         j,
+			SelectionOutcome:      deriveBYOCSelectionOutcome(j),
 			AttributionStatus:     "unresolved",
 			AttributionReason:     "missing_candidate",
 			AttributionMethod:     "missing",

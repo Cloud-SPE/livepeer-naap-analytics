@@ -188,6 +188,18 @@ Operational measurement rule:
 - the remaining selected-session buckets are `stale`, `ambiguous`, and
   `unresolved`
 
+Job-level selection outcome rule:
+
+- `canonical_ai_batch_jobs` and `canonical_byoc_jobs` now carry
+  `selection_outcome = selected | no_orch | unknown`
+- `selection_outcome` is a job lifecycle field, not an attribution field
+- AI-batch uses URI presence as `selected`, failed `error_type = no_orchestrators`
+  as `no_orch`, and falls back to `unknown` otherwise
+- BYOC uses address/URI presence as `selected`; blank-identity failures remain
+  `unknown` until explicit pre-selection failure evidence exists
+- request/response attribution quality must be judged on
+  `selection_outcome = selected`, not on all jobs combined
+
 ## Independent identity fetches
 
 AI batch and BYOC attribution phases each call `fetchCapabilitySnapshots`
@@ -222,6 +234,9 @@ from the job event itself. The resolver:
 - `canonical_ai_batch_jobs` must be one row per `(org, request_id)`.
 - `canonical_byoc_jobs` must be one row per `(org, event_id)`; the view exposes
   `event_id` as `request_id` only for downstream contract reuse.
+- both canonical job facts must project `selection_outcome` directly from the
+  resolver-owned job stores so API, dashboards, and scripts share one
+  denominator contract
 - `canonical_ai_llm_requests` must be one row per `(org, request_id)` before it
   is joined into `canonical_ai_batch_jobs`.
 - Direct one-to-many enrichment joins into canonical job fact views are
