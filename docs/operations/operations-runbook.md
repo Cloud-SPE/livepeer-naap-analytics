@@ -121,7 +121,7 @@ make warehouse-run
 ```
 [ ] docker logs naap-kafka — no ERROR lines
 [ ] docker logs naap-analytics-clickhouse — "bootstrap complete" or "migrations applied"
-[ ] SELECT count() FROM system.kafka_consumers — returns 2 active consumers
+[ ] SELECT table, count() FROM system.kafka_consumers GROUP BY table — active consumers exist for both Kafka engine tables
 [ ] SELECT count() FROM naap.accepted_raw_events — growing over time
 [ ] curl https://naap-api.livepeer.cloud/healthz — 200 OK
 [ ] Grafana dashboards loading — `naap-overview` (NaaP: Live AI Video) and `infra/naap-system-health` show data

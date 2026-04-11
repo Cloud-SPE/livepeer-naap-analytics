@@ -17,7 +17,7 @@ CREATE USER IF NOT EXISTS naap_reader
 GRANT SELECT ON naap.* TO naap_reader;
 
 
-CREATE TABLE naap.kafka_network_events (`id` String, `type` String, `timestamp` String, `gateway` String, `data` String) ENGINE = Kafka SETTINGS kafka_broker_list = '${KAFKA_BROKER_LIST}', kafka_topic_list = 'network_events', kafka_group_name = '${KAFKA_NETWORK_GROUP}', kafka_format = 'JSONEachRow', kafka_skip_broken_messages = 100, kafka_num_consumers = 2;
+CREATE TABLE naap.kafka_network_events (`id` String, `type` String, `timestamp` String, `gateway` String, `data` String) ENGINE = Kafka SETTINGS kafka_broker_list = '${KAFKA_BROKER_LIST}', kafka_topic_list = 'network_events', kafka_group_name = '${KAFKA_NETWORK_GROUP}', kafka_format = 'JSONEachRow', kafka_skip_broken_messages = 100, kafka_num_consumers = 6;
 
 CREATE TABLE naap.kafka_streaming_events (`id` String, `type` String, `timestamp` String, `gateway` String, `data` String) ENGINE = Kafka SETTINGS kafka_broker_list = '${KAFKA_BROKER_LIST}', kafka_topic_list = 'streaming_events', kafka_group_name = '${KAFKA_STREAMING_GROUP}', kafka_format = 'JSONEachRow', kafka_skip_broken_messages = 100, kafka_num_consumers = 1;
 

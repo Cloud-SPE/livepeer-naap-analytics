@@ -230,8 +230,8 @@ make ch-smoke
 # 3. Consumer groups are active
 docker compose exec clickhouse clickhouse-client \
   --user default --password changeme \
-  --query "SELECT status, count() FROM system.kafka_consumers GROUP BY status"
-# Expected: active   2
+  --query "SELECT table, count() FROM system.kafka_consumers GROUP BY table"
+# Expected: active consumer rows for both kafka_network_events and kafka_streaming_events
 
 # 4. Recent events visible
 docker compose exec clickhouse clickhouse-client \
@@ -325,6 +325,11 @@ After any Grafana deploy or provisioning change, validate the alerting surface:
 |---|---|---|
 | `clickhouse-naap-network` | `network_events` | naap-clickhouse (infra1/infra2) |
 | `clickhouse-naap-streaming` | `streaming_events` | naap-clickhouse (infra1/infra2) |
+
+Current reader counts on the ClickHouse Kafka engine:
+
+- `network_events` uses `6` readers (`kafka_num_consumers = 6`) to match the current remote topic partition count.
+- `streaming_events` uses `1` reader because the topic is keeping up without added parallelism; increase it only if that topic develops sustained lag.
 
 ### When to reset offsets vs use resolver backfill
 
