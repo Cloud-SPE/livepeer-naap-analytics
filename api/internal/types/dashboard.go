@@ -108,16 +108,17 @@ type DashboardPipelineCatalogEntry struct {
 	Regions []string `json:"regions"`
 }
 
-// DashboardPipelinePricing carries raw wei pricing per pipeline+model so the UI
-// can apply its own unit conversion and formatting.
+// DashboardPipelinePricing carries raw wei pricing per orchestrator per
+// pipeline+model so the UI can see per-orch market structure and apply its own
+// unit conversion and formatting.
 type DashboardPipelinePricing struct {
-	Pipeline           string  `json:"pipeline"`
-	Model              string  `json:"model,omitempty"`
-	OrchCount          int64   `json:"orchCount"`
-	PriceMinWeiPerUnit int64   `json:"priceMinWeiPerUnit"`
-	PriceMaxWeiPerUnit int64   `json:"priceMaxWeiPerUnit"`
-	PriceAvgWeiPerUnit float64 `json:"priceAvgWeiPerUnit"`
-	PixelsPerUnit      int64   `json:"pixelsPerUnit"`
+	OrchAddress      string `json:"orchAddress"`
+	OrchName         string `json:"orchName,omitempty"`
+	Pipeline         string `json:"pipeline"`
+	Model            string `json:"model,omitempty"`
+	PriceWeiPerUnit  int64  `json:"priceWeiPerUnit"`
+	PixelsPerUnit    int64  `json:"pixelsPerUnit"`
+	IsWarm           bool   `json:"isWarm"`
 }
 
 // DashboardJobFeedItem is one active stream in the live job feed widget

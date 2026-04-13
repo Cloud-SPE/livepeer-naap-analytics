@@ -583,13 +583,13 @@ components:
     DashboardPipelinePricing:
       type: object
       properties:
-        pipeline:           { type: string }
-        model:              { type: string }
-        orchCount:          { type: integer, format: int64 }
-        priceMinWeiPerUnit: { type: integer, format: int64 }
-        priceMaxWeiPerUnit: { type: integer, format: int64 }
-        priceAvgWeiPerUnit: { type: number, format: double }
-        pixelsPerUnit:      { type: integer, format: int64 }
+        orchAddress:     { type: string }
+        orchName:        { type: string }
+        pipeline:        { type: string }
+        model:           { type: string }
+        priceWeiPerUnit: { type: integer, format: int64 }
+        pixelsPerUnit:   { type: integer, format: int64 }
+        isWarm:          { type: boolean }
 
     DashboardJobFeedItem:
       type: object
@@ -1626,22 +1626,26 @@ paths:
 
   /v1/dashboard/pricing:
     get:
-      summary: Pipeline pricing (raw wei)
+      summary: Per-orchestrator pipeline pricing (raw wei)
       description: |
-        Returns raw wei-per-unit pricing for each (pipeline, model) combination,
-        aggregated across all active orchestrators (seen within the last 10 minutes).
-        Suitable for the pricing widget. Prices are sourced directly from orchestrator
-        capability heartbeats stored in `naap.api_latest_orchestrator_state`.
+        Returns one pricing row per (orchAddress, pipeline, model) combination for
+        all active orchestrators (seen within the last 10 minutes). Prices are
+        sourced directly from orchestrator capability heartbeats stored in
+        `naap.api_latest_orchestrator_state`.
 
-        `priceAvgWeiPerUnit` is the unweighted mean across orchestrators that
-        advertise a price for that (pipeline, model) pair. To convert to a more
-        human-readable scale: `price_in_gwei = avg / 1e9`.
-        `orchCount` is the number of active orchestrators contributing to the price
-        aggregation for that row.
+        Each row includes the real `pixelsPerUnit` from the orchestrator's
+        advertisement. To convert to a human-readable scale:
+        `price_in_gwei_per_megapixel = priceWeiPerUnit * 1e6 / pixelsPerUnit / 1e9`.
+        `isWarm` indicates whether the orchestrator currently has the model loaded
+        in GPU memory.
 
         **Coverage is sparse.** Most orchestrators do not advertise explicit prices
-        in their capability heartbeats, so many (pipeline, model) pairs will have
-        `orchCount = 0` or will simply not appear in the response.
+        in their capability heartbeats, so many (pipeline, model) pairs will simply
+        not appear in the response.
+
+        **Breaking change (v1.8):** Previously returned one aggregated row per
+        (pipeline, model) with min/max/avg prices. Now returns per-orchestrator
+        rows so the UI can display market structure.
 
         **Response format note:** This endpoint returns a plain JSON array — there
         is no `data` wrapper object and no `meta` envelope.

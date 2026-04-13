@@ -606,10 +606,10 @@
       },
       "id": 9,
       "type": "table",
-      "title": "p50 / p99 Duration by Model",
+      "title": "AI Batch: p50 / p99 Duration by Model",
       "gridPos": {
         "h": 12,
-        "w": 24,
+        "w": 12,
         "x": 0,
         "y": 26
       },
@@ -630,7 +630,43 @@
           "editorType": "sql",
           "format": 2,
           "queryType": "sql",
-          "rawSql": "SELECT ifNull(model_id,'') AS model, ifNull(pipeline,'') AS pipeline, 'ai-batch' AS job_type, count() AS job_count, round(quantile(0.5)(toFloat64(duration_ms)), 1) AS p50_ms, round(quantile(0.99)(toFloat64(duration_ms)), 1) AS p99_ms, round(countIf(success=1)*100.0/count(), 1) AS success_pct FROM naap.api_ai_batch_jobs WHERE $__timeFilter(completed_at) AND pipeline != '' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) GROUP BY model, pipeline ORDER BY job_count DESC LIMIT 30 UNION ALL SELECT ifNull(model,'') AS model, ifNull(capability,'') AS pipeline, 'byoc' AS job_type, count() AS job_count, round(quantile(0.5)(toFloat64(duration_ms)), 1) AS p50_ms, round(quantile(0.99)(toFloat64(duration_ms)), 1) AS p99_ms, round(countIf(success=1)*100.0/count(), 1) AS success_pct FROM naap.api_byoc_jobs WHERE $__timeFilter(completed_at) AND capability != '' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) GROUP BY model, capability ORDER BY job_count DESC LIMIT 30",
+          "rawSql": "SELECT ifNull(model_id,'') AS model, ifNull(pipeline,'') AS pipeline, count() AS job_count, round(quantile(0.5)(toFloat64(duration_ms)), 1) AS p50_ms, round(quantile(0.99)(toFloat64(duration_ms)), 1) AS p99_ms, round(countIf(success=1)*100.0/count(), 1) AS success_pct FROM naap.api_ai_batch_jobs WHERE $__timeFilter(completed_at) AND pipeline != '' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) GROUP BY model, pipeline ORDER BY job_count DESC LIMIT 30",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "id": 91,
+      "type": "table",
+      "title": "BYOC: p50 / p99 Duration by Model",
+      "gridPos": {
+        "h": 12,
+        "w": 12,
+        "x": 12,
+        "y": 26
+      },
+      "options": {
+        "sortBy": [],
+        "showHeader": true
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 2,
+          "queryType": "sql",
+          "rawSql": "SELECT ifNull(model,'') AS model, ifNull(capability,'') AS capability, count() AS job_count, round(quantile(0.5)(toFloat64(duration_ms)), 1) AS p50_ms, round(quantile(0.99)(toFloat64(duration_ms)), 1) AS p99_ms, round(countIf(success=1)*100.0/count(), 1) AS success_pct FROM naap.api_byoc_jobs WHERE $__timeFilter(completed_at) AND capability != '' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) GROUP BY model, capability ORDER BY job_count DESC LIMIT 30",
           "refId": "A"
         }
       ]

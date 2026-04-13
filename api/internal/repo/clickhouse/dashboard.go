@@ -132,45 +132,6 @@ func (r *Repo) GetDashboardKPI(ctx context.Context, windowHours int, pipeline, m
 		return nil, fmt.Errorf("clickhouse get dashboard kpi mins rows: %w", err)
 	}
 
-	// Query 3: non-streaming job counts and minutes from api_unified_demand
-	unifiedRows, err := r.conn.Query(ctx, `
-		SELECT
-			toStartOfHour(window_start) AS ts,
-			sum(job_count)              AS jobs,
-			sum(success_count)          AS successes,
-			sum(total_minutes)          AS mins
-		FROM naap.api_unified_demand
-		WHERE window_start >= now() - INTERVAL ? HOUR
-		GROUP BY ts
-		ORDER BY ts ASC
-	`, windowHours)
-	if err != nil {
-		return nil, fmt.Errorf("clickhouse get dashboard kpi unified: %w", err)
-	}
-	defer unifiedRows.Close()
-
-	for unifiedRows.Next() {
-		var ts time.Time
-		var jobs, successes uint64
-		var mins float64
-		if err := unifiedRows.Scan(&ts, &jobs, &successes, &mins); err != nil {
-			return nil, fmt.Errorf("clickhouse get dashboard kpi unified scan: %w", err)
-		}
-		ts = ts.UTC().Truncate(time.Hour)
-		if b, ok := bucketMap[ts]; ok {
-			b.sessions += jobs
-			b.successes += successes
-			b.mins += mins
-		} else {
-			nb := &kpiBucket{ts: ts, sessions: jobs, successes: successes, mins: mins}
-			bucketMap[ts] = nb
-			orderedTS = append(orderedTS, ts)
-		}
-	}
-	if err := unifiedRows.Err(); err != nil {
-		return nil, fmt.Errorf("clickhouse get dashboard kpi unified rows: %w", err)
-	}
-
 	// Sort by timestamp
 	sortTimeSlice(orderedTS)
 
@@ -300,61 +261,7 @@ func (r *Repo) GetDashboardPipelines(ctx context.Context, limit int) ([]types.Da
 		return nil, fmt.Errorf("clickhouse get dashboard pipelines rows: %w", err)
 	}
 
-	// Second query: non-streaming pipelines from api_unified_demand (last 24h)
-	uRows, err := r.conn.Query(ctx, `
-		SELECT
-			pipeline_id,
-			job_type,
-			sum(job_count)    AS jobs,
-			sum(total_minutes) AS total_mins
-		FROM naap.api_unified_demand
-		WHERE window_start >= now() - INTERVAL 24 HOUR
-		  AND pipeline_id != ''
-		GROUP BY pipeline_id, job_type
-		ORDER BY jobs DESC
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("clickhouse get dashboard pipelines unified: %w", err)
-	}
-	defer uRows.Close()
-
-	// Build a map keyed by pipeline+job_type to merge or append
-	type pipelineJobKey struct{ pipeline, jobType string }
-	pipelineMap := map[pipelineJobKey]*types.DashboardPipelineUsage{}
-	for _, entry := range result {
-		key := pipelineJobKey{entry.Name, "stream"}
-		pipelineMap[key] = &result[len(result)-1]
-	}
-	// Rebuild pipelineMap properly
-	pipelineMap = map[pipelineJobKey]*types.DashboardPipelineUsage{}
-	resultPtrs := make([]*types.DashboardPipelineUsage, len(result))
-	for i := range result {
-		resultPtrs[i] = &result[i]
-		pipelineMap[pipelineJobKey{result[i].Name, "stream"}] = resultPtrs[i]
-	}
-
-	var nonStreamEntries []types.DashboardPipelineUsage
-	for uRows.Next() {
-		var pipeline, jobType string
-		var jobs uint64
-		var mins float64
-		if err := uRows.Scan(&pipeline, &jobType, &jobs, &mins); err != nil {
-			return nil, fmt.Errorf("clickhouse get dashboard pipelines unified scan: %w", err)
-		}
-		nonStreamEntries = append(nonStreamEntries, types.DashboardPipelineUsage{
-			Name:     pipeline,
-			Sessions: int64(jobs),
-			Mins:     math.Round(mins*10) / 10,
-			AvgFps:   0,
-			JobType:  jobType,
-		})
-	}
-	if err := uRows.Err(); err != nil {
-		return nil, fmt.Errorf("clickhouse get dashboard pipelines unified rows: %w", err)
-	}
-	result = append(result, nonStreamEntries...)
-
-	// Sort all by sessions DESC and apply limit
+	// Sort by sessions DESC and apply limit
 	sort.Slice(result, func(i, j int) bool { return result[i].Sessions > result[j].Sessions })
 	if len(result) > limit {
 		result = result[:limit]
@@ -382,13 +289,13 @@ func (r *Repo) GetDashboardOrchestrators(ctx context.Context, windowHours int) (
 	// serving rows, while supporting counts and reliability ratios still
 	// aggregate across the full dashboard window.
 	type slaRow struct {
-		address        string
-		known          uint64
-		successes      uint64
-		unexcused      int64
-		swaps          uint64
-		slaScore       *float64
-		slaWindowStart *time.Time
+		address              string
+		known                uint64
+		successes            uint64
+		slaScore             *float64
+		slaWindowStart       *time.Time
+		effectiveSuccessRate float64
+		noSwapRate           float64
 	}
 
 	slaRows, err := r.conn.Query(ctx, `
@@ -398,11 +305,10 @@ func (r *Repo) GetDashboardOrchestrators(ctx context.Context, windowHours int) (
 				window_start,
 				known_sessions_count,
 				startup_success_sessions,
-				startup_failed_sessions,
-				startup_excused_sessions,
-				total_swapped_sessions,
 				sla_score,
 				requested_sessions,
+				effective_success_rate,
+				no_swap_rate,
 				pipeline_id,
 				ifNull(model_id, '') AS model_id,
 				ifNull(gpu_id, '') AS gpu_id
@@ -421,17 +327,16 @@ func (r *Repo) GetDashboardOrchestrators(ctx context.Context, windowHours int) (
 			w.orchestrator_address,
 			sum(w.known_sessions_count) AS known,
 			sum(w.startup_success_sessions) AS successes,
-			greatest(
-				toInt64(sum(w.startup_failed_sessions)) - toInt64(sum(w.startup_excused_sessions)),
-				0
-			) AS unexcused,
-			sum(w.total_swapped_sessions) AS swaps,
 			argMaxIf(
 				w.sla_score,
 				tuple(w.window_start, w.requested_sessions, w.pipeline_id, w.model_id, w.gpu_id),
 				w.window_start = h.latest_window_start
 			) AS sla_score,
-			max(h.latest_window_start) AS sla_window_start
+			max(h.latest_window_start) AS sla_window_start,
+			sum(w.effective_success_rate * w.requested_sessions)
+				/ nullIf(sum(w.requested_sessions), 0) AS effective_success_rate,
+			sum(w.no_swap_rate * w.requested_sessions)
+				/ nullIf(sum(w.requested_sessions), 0) AS no_swap_rate
 		FROM windowed w
 		INNER JOIN latest_hour h
 			ON w.orchestrator_address = h.orchestrator_address
@@ -447,7 +352,7 @@ func (r *Repo) GetDashboardOrchestrators(ctx context.Context, windowHours int) (
 	var slaData []slaRow
 	for slaRows.Next() {
 		var s slaRow
-		if err := slaRows.Scan(&s.address, &s.known, &s.successes, &s.unexcused, &s.swaps, &s.slaScore, &s.slaWindowStart); err != nil {
+		if err := slaRows.Scan(&s.address, &s.known, &s.successes, &s.slaScore, &s.slaWindowStart, &s.effectiveSuccessRate, &s.noSwapRate); err != nil {
 			return nil, fmt.Errorf("clickhouse get dashboard orchestrators sla scan: %w", err)
 		}
 		slaData = append(slaData, s)
@@ -556,8 +461,8 @@ func (r *Repo) GetDashboardOrchestrators(ctx context.Context, windowHours int) (
 	for _, s := range slaData {
 		known := float64(s.known)
 		successRatio := divSafe(float64(s.successes), known)
-		effectiveRate := divSafe(known-float64(s.unexcused), known)
-		noSwapRatio := divSafe(known-float64(s.swaps), known)
+		effectiveRate := s.effectiveSuccessRate
+		noSwapRatio := s.noSwapRate
 
 		// Clamp to [0, 1]
 		if effectiveRate < 0 {
@@ -781,40 +686,6 @@ func (r *Repo) GetDashboardPipelineCatalog(ctx context.Context) ([]types.Dashboa
 		return nil, fmt.Errorf("clickhouse get dashboard pipeline catalog rows: %w", err)
 	}
 
-	uCatalogRows, err := r.conn.Query(ctx, `
-		SELECT DISTINCT pipeline_id, model_id
-		FROM naap.api_unified_demand
-		WHERE window_start >= now() - INTERVAL 168 HOUR
-		  AND pipeline_id != ''
-		  AND model_id != ''
-		ORDER BY pipeline_id, model_id
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("clickhouse get dashboard pipeline catalog unified: %w", err)
-	}
-	defer uCatalogRows.Close()
-
-	for uCatalogRows.Next() {
-		var pipeline, model string
-		if err := uCatalogRows.Scan(&pipeline, &model); err != nil {
-			return nil, fmt.Errorf("clickhouse get dashboard pipeline catalog unified scan: %w", err)
-		}
-		existing := catalogMap[pipeline]
-		found := false
-		for _, candidate := range existing {
-			if candidate == model {
-				found = true
-				break
-			}
-		}
-		if !found {
-			catalogMap[pipeline] = append(existing, model)
-		}
-	}
-	if err := uCatalogRows.Err(); err != nil {
-		return nil, fmt.Errorf("clickhouse get dashboard pipeline catalog unified rows: %w", err)
-	}
-
 	result := make([]types.DashboardPipelineCatalogEntry, 0, len(catalogMap))
 	for pipeline, models := range catalogMap {
 		result = append(result, types.DashboardPipelineCatalogEntry{
@@ -828,57 +699,49 @@ func (r *Repo) GetDashboardPipelineCatalog(ctx context.Context) ([]types.Dashboa
 	return result, nil
 }
 
-// GetDashboardPricing returns raw wei pricing per pipeline+model (R16-6).
-// Reuses the JSON-parsing approach from ListModels (network.go).
-// Source: naap.api_latest_orchestrator_state.
+// GetDashboardPricing returns per-orchestrator pricing rows (R16-6).
+// One row per (orch_address, pipeline, model_id) with real PixelsPerUnit.
+// Source: naap.api_latest_orchestrator_state via parsePricingFromCapabilities.
 func (r *Repo) GetDashboardPricing(ctx context.Context) ([]types.DashboardPipelinePricing, error) {
 	rows, err := r.conn.Query(ctx,
-		"SELECT raw_capabilities FROM naap.api_latest_orchestrator_state WHERE last_seen > now() - INTERVAL ? MINUTE",
+		"SELECT orch_address, name, raw_capabilities FROM naap.api_latest_orchestrator_state WHERE last_seen > now() - INTERVAL ? MINUTE",
 		activeOrchMinutes)
 	if err != nil {
 		return nil, fmt.Errorf("clickhouse get dashboard pricing: %w", err)
 	}
 	defer rows.Close()
 
-	agg := map[modelKey]*modelAgg{}
+	var result []types.DashboardPipelinePricing
 	for rows.Next() {
-		var raw string
-		if err := rows.Scan(&raw); err != nil {
+		var address, name, raw string
+		if err := rows.Scan(&address, &name, &raw); err != nil {
 			return nil, fmt.Errorf("clickhouse get dashboard pricing scan: %w", err)
 		}
-		parseModelsFromCapabilities(raw, agg)
+		for _, e := range parsePricingFromCapabilities(address, name, raw) {
+			result = append(result, types.DashboardPipelinePricing{
+				OrchAddress:     address,
+				OrchName:        name,
+				Pipeline:        e.Pipeline,
+				Model:           e.ModelID,
+				PriceWeiPerUnit: e.PricePerUnit,
+				PixelsPerUnit:   e.PixelsPerUnit,
+				IsWarm:          e.IsWarm,
+			})
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("clickhouse get dashboard pricing rows: %w", err)
 	}
 
-	result := make([]types.DashboardPipelinePricing, 0, len(agg))
-	for k, a := range agg {
-		if len(a.prices) == 0 {
-			continue
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Pipeline != result[j].Pipeline {
+			return result[i].Pipeline < result[j].Pipeline
 		}
-		var sum int64
-		mn, mx := a.prices[0], a.prices[0]
-		for _, p := range a.prices {
-			sum += p
-			if p < mn {
-				mn = p
-			}
-			if p > mx {
-				mx = p
-			}
+		if result[i].Model != result[j].Model {
+			return result[i].Model < result[j].Model
 		}
-		result = append(result, types.DashboardPipelinePricing{
-			Pipeline:           k.pipeline,
-			Model:              k.model,
-			OrchCount:          a.warmCount,
-			PriceMinWeiPerUnit: mn,
-			PriceMaxWeiPerUnit: mx,
-			PriceAvgWeiPerUnit: float64(sum) / float64(len(a.prices)),
-			PixelsPerUnit:      1,
-		})
-	}
-	sort.Slice(result, func(i, j int) bool { return result[i].OrchCount > result[j].OrchCount })
+		return result[i].PriceWeiPerUnit < result[j].PriceWeiPerUnit
+	})
 	return result, nil
 }
 
