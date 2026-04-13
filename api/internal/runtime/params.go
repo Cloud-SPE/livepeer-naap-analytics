@@ -46,6 +46,7 @@ func parseQueryParams(r *http.Request) types.QueryParams {
 		OrchAddress: strings.ToLower(q.Get("orch_address")),
 		StreamID:    q.Get("stream_id"),
 		FailureType: q.Get("failure_type"),
+		JobType:     q.Get("job_type"),
 		StartTime:   start,
 		EndTime:     end,
 		Granularity: q.Get("granularity"),

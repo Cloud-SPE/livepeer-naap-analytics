@@ -1,5 +1,5 @@
--- Unified view of all three job types: streaming sessions, AI-batch jobs, BYOC jobs.
--- Provides a common schema for cross-type analytics endpoints. The unified
+-- Combined view of all three job types: streaming sessions, AI-batch jobs, BYOC jobs.
+-- Provides a common schema for cross-type analytics endpoints. The requests
 -- non-streaming identity field is orchestrator_uri; address fields remain only
 -- where a true on-chain address exists.
 

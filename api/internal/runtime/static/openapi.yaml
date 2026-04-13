@@ -11,16 +11,16 @@ info:
 
     **Three job types co-exist in this system:**
     - `stream` — persistent live video-to-video streaming sessions tracked in
-      `streaming_events`. Metrics for this type appear in the `/v1/net/`, `/v1/perf/`,
-      `/v1/sla/`, `/v1/network/`, `/v1/gpu/`, and most `/v1/dashboard/` endpoints.
+      `streaming_events`. Metrics for this type appear in the `/v1/network/` and
+      `/v1/streaming/` endpoints, and in most `/v1/dashboard/` endpoints.
     - `ai-batch` — fixed-pipeline discrete AI inference calls (text-to-image,
       image-to-image, image-to-video, upscale, audio-to-text, llm, segment-anything-2,
       image-to-text, text-to-speech) tracked in `network_events`. Metrics appear in
-      `/v1/ai-batch/`, `/v1/jobs/`, and `/v1/dashboard/jobs/` endpoints.
+      `/v1/requests/` endpoints.
     - `byoc` — Bring Your Own Capability jobs with dynamic capability names
       (e.g. `openai-chat-completions`, `openai-image-generation`,
       `openai-text-embeddings`) also tracked in `network_events`. Metrics appear in
-      `/v1/byoc/`, `/v1/jobs/`, and `/v1/dashboard/jobs/` endpoints.
+      `/v1/requests/` endpoints.
 
     **Streaming data and job data are fully separate namespaces.** No endpoint
     mixes streaming sessions with AI-batch or BYOC jobs. When in doubt, read the
@@ -67,79 +67,24 @@ tags:
   - name: Health
   - name: Network
     description: |
-      Orchestrator network state and model availability for the standard Livepeer
-      AI protocol. All endpoints in this tag are sourced from orchestrator
-      capability heartbeats and cover only Livepeer-protocol orchestrators. BYOC
-      workers — which register via `worker_lifecycle` Kafka events and do not use
-      the capability heartbeat protocol — do NOT appear in any Network endpoint.
-      For BYOC worker availability, use `/v1/byoc/workers`.
-  - name: Capacity
+      Orchestrator network state, model availability, and capacity. Supports
+      job_type, org, and pipeline query filters to scope results by capability
+      type. Sourced from orchestrator capability heartbeats.
+  - name: Streaming
     description: |
-      GPU supply versus active stream demand per (pipeline, model), sourced from
-      `naap.canonical_capability_hardware_inventory` joined with
-      `naap.canonical_active_stream_state_latest_store`. BYOC pipelines appear in
-      capacity data because BYOC workers do register capability snapshots, but
-      their `ActiveStreams` count is always zero because BYOC jobs are discrete
-      request/response calls — not persistent streaming sessions — and are never
-      reflected in the stream state table.
-  - name: SLA
+      Live streaming session analytics: SLA compliance, network demand,
+      GPU demand/metrics, and per-model performance. All endpoints cover
+      streaming sessions (live-video-to-video) only.
+  - name: Requests
     description: |
-      SLA compliance metrics for live streaming sessions per
-      (orchestrator, pipeline, model, gpu, hour). Sourced from
-      `naap.api_sla_compliance_store`. This tag covers streaming sessions only —
-      AI-batch and BYOC job SLA is available at `/v1/jobs/sla`.
-  - name: Demand
-    description: |
-      Network demand metrics for live streaming sessions per
-      (gateway, pipeline, model, hour) and GPU-sliced variants. All endpoints
-      under this tag are sourced from streaming-session tables (`naap.api_network_demand`
-      and `naap.api_gpu_network_demand`) and cover streaming sessions only.
-      AI-batch and BYOC demand is tracked separately at `/v1/jobs/demand`.
-  - name: GPUMetrics
-    description: |
-      Per-GPU streaming performance metrics per (orchestrator, pipeline, model, gpu, hour),
-      sourced from `naap.api_sla_compliance_store` (SLA hourly buckets). Covers streaming
-      sessions only — not AI-batch or BYOC jobs. Several fields (`runner_version`,
-      `cuda_version`, `fps_jitter_coefficient`, `region`) are always null because
-      they are not captured in the current event schema.
-  - name: AIBatch
-    description: |
-      AI batch job analytics for the nine fixed Livepeer AI pipelines:
-      text-to-image, image-to-image, image-to-video, upscale, audio-to-text, llm,
-      segment-anything-2, image-to-text, and text-to-speech. Data is sourced from
-      `naap.canonical_ai_batch_jobs`, which is populated by the Go attribution
-      resolver processing events from the `network_events` Kafka topic. Job records
-      include attribution fields (`gpu_model`, `attribution_status`) written by the
-      resolver. BYOC capabilities do NOT appear in any AIBatch endpoint.
-  - name: BYOC
-    description: |
-      BYOC (Bring Your Own Capability) job analytics for dynamic capabilities such
-      as `openai-chat-completions`, `openai-image-generation`, and
-      `openai-text-embeddings`. Data is sourced from `naap.canonical_byoc_jobs` and
-      `naap.canonical_byoc_workers`, populated by the resolver from `network_events`
-      Kafka events. BYOC workers register via `worker_lifecycle` events rather than
-      the standard Livepeer capability heartbeat, so they do not appear in
-      `/v1/net/models` or `/v1/net/orchestrators`. The set of capability names is
-      fully dynamic and never hardcoded in the API. In `/v1/jobs/sla`, BYOC rows
-      use `orchestrator_uri` for the orchestrator service URL (e.g.
-      `https://livepeer-ai.xodeapp.xyz:18935`) because BYOC jobs are identified
-      by URL rather than on-chain address.
-  - name: Jobs
-    description: |
-      Cross-type demand, SLA, and model-performance endpoints that cover both
-      AI-batch and BYOC jobs. None of the Jobs endpoints include streaming session
-      data. The `job_type` field in every response distinguishes `ai-batch` from
-      `byoc` rows. `/v1/jobs/by-model` is the only endpoint in the entire API that
-      shows AI-batch and BYOC model performance side by side in a single response.
+      AI Batch and BYOC request/response job analytics. Includes per-type
+      summaries, job lists, cross-type demand/SLA, and model performance.
   - name: Dashboard
     description: |
-      Pre-aggregated, UI-ready endpoints for the NAAP dashboard widgets. KPI,
-      pipeline usage, orchestrator table, GPU capacity, pipeline catalog, pricing,
-      and live job feed widgets are all sourced from streaming-session data. The
-      jobs sub-group (`/v1/dashboard/jobs/*`) covers AI-batch and BYOC jobs.
-      Several dashboard endpoints return a plain JSON array (no `data` wrapper):
-      `/v1/dashboard/pipeline-catalog`, `/v1/dashboard/pricing`, and
-      `/v1/dashboard/job-feed`.
+      Pre-aggregated, UI-ready endpoints for NAAP dashboard widgets. KPI and
+      pipeline endpoints return combined payloads with streaming and requests
+      sections. Other endpoints (orchestrators, gpu-capacity, pipeline-catalog,
+      pricing, job-feed) return their existing shapes.
 
 # ── Common parameter definitions ──────────────────────────────────────────────
 
@@ -246,7 +191,7 @@ components:
       description: Filter by non-streaming orchestrator service URI (lowercased).
       schema:
         type: string
-        example: "https://orch.example.com:8935"
+        example: ""
     pipeline_id:
       name: pipeline_id
       in: query
@@ -1108,7 +1053,7 @@ paths:
 
   # ── Network ────────────────────────────────────────────────────────────────
 
-  /v1/net/orchestrators:
+  /v1/network/orchestrators:
     get:
       tags: [Network]
       summary: List orchestrators
@@ -1133,13 +1078,20 @@ paths:
         **BYOC workers do not appear here.** BYOC workers register via
         `worker_lifecycle` Kafka events rather than the Livepeer capability heartbeat
         protocol, so they are never written to `api_latest_orchestrator_state`. Use
-        `/v1/byoc/workers` for BYOC worker inventory.
+        `/v1/requests/byoc/workers` for BYOC worker inventory.
       operationId: listOrchestrators
       parameters:
         - $ref: "#/components/parameters/org"
         - $ref: "#/components/parameters/active_only"
         - $ref: "#/components/parameters/limit"
         - $ref: "#/components/parameters/cursor"
+        - name: job_type
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [stream, ai-batch, byoc]
+          description: Filter by job type category. "stream" returns only streaming orchestrators/models, "ai-batch" or "byoc" returns non-streaming ones.
       responses:
         "200":
           description: OK
@@ -1153,7 +1105,7 @@ paths:
         "500":
           $ref: "#/components/responses/500"
 
-  /v1/net/models:
+  /v1/network/models:
     get:
       tags: [Network]
       summary: Model availability
@@ -1171,7 +1123,7 @@ paths:
         **BYOC models (e.g. `openai-chat-completions`) do NOT appear here.** BYOC
         workers register via `worker_lifecycle` Kafka events and never write to the
         capability heartbeat table that backs this endpoint. To see which BYOC
-        capabilities and models are currently available, use `/v1/byoc/workers`.
+        capabilities and models are currently available, use `/v1/requests/byoc/workers`.
 
         `WarmOrchCount` reflects orchestrators seen within the last 15 minutes at
         query time. Prices are in wei per pixel as advertised in the capability
@@ -1181,6 +1133,13 @@ paths:
         - $ref: "#/components/parameters/org"
         - $ref: "#/components/parameters/pipeline"
         - $ref: "#/components/parameters/limit"
+        - name: job_type
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [stream, ai-batch, byoc]
+          description: Filter by job type category. "stream" returns only streaming orchestrators/models, "ai-batch" or "byoc" returns non-streaming ones.
       responses:
         "200":
           description: OK
@@ -1198,7 +1157,7 @@ paths:
 
   # ── Model Performance (R12) ──────────────────────────────────────────────
 
-  /v1/perf/by-model:
+  /v1/streaming/perf-by-model:
     get:
       summary: Streaming performance by AI model
       description: |
@@ -1218,10 +1177,10 @@ paths:
         the millisecond range. They do not produce continuous video streams, they
         generate no FPS measurements, and they are never written to
         `api_fps_hourly`. To compare AI-batch and BYOC model performance by
-        duration (p50/p99 latency), use `/v1/jobs/by-model`, which is the
+        duration (p50/p99 latency), use `/v1/requests/perf-by-model`, which is the
         dedicated cross-type model performance endpoint.
       operationId: listModelPerformance
-      tags: [Network]
+      tags: [Streaming]
       parameters:
         - $ref: "#/components/parameters/org"
         - $ref: "#/components/parameters/start"
@@ -1239,7 +1198,7 @@ paths:
 
   # ── Capacity (R15) ───────────────────────────────────────────────────────
 
-  /v1/net/capacity:
+  /v1/network/capacity:
     get:
       summary: Network capacity vs. demand
       description: |
@@ -1264,7 +1223,7 @@ paths:
         was taken. This endpoint does not accept time-range parameters; it always
         reflects the latest available snapshot.
       operationId: getCapacitySummary
-      tags: [Capacity, Network]
+      tags: [Network]
       parameters:
         - $ref: "#/components/parameters/org"
       responses:
@@ -1277,7 +1236,7 @@ paths:
 
   # ── SLA / GPU / Network Demand (ported from leaderboard-serverless) ────────
 
-  /v1/sla/compliance:
+  /v1/streaming/sla:
     get:
       summary: SLA compliance metrics
       description: |
@@ -1285,7 +1244,7 @@ paths:
         buckets, grouped by (orchestrator_address, pipeline_id, model_id, gpu_id).
         Backed by `naap.api_sla_compliance_store`. This endpoint covers live
         streaming sessions only — AI-batch and BYOC job SLA is tracked separately
-        at `/v1/jobs/sla`.
+        at `/v1/requests/sla`.
 
         The `sla_score` field is the primary composite quality metric: it equals
         `100 × health_signal_coverage_ratio × ((0.7 × reliability_score) + (0.3 ×
@@ -1301,7 +1260,7 @@ paths:
 
         **Window:** default 3h, min 1m, max 30d.
       operationId: listSLACompliance
-      tags: [SLA]
+      tags: [Streaming]
       parameters:
         - $ref: "#/components/parameters/org"
         - $ref: "#/components/parameters/window"
@@ -1321,14 +1280,14 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "500": { $ref: "#/components/responses/500" }
 
-  /v1/network/demand:
+  /v1/streaming/demand:
     get:
       summary: Network demand metrics
       description: |
         Returns gateway-level streaming demand aggregated into hourly buckets,
         grouped by (gateway, pipeline_id, model_id). Backed by
         `naap.api_network_demand`. This endpoint covers live streaming sessions
-        only — AI-batch and BYOC demand is tracked separately at `/v1/jobs/demand`.
+        only — AI-batch and BYOC demand is tracked separately at `/v1/requests/demand`.
 
         Each row captures session counts, FPS statistics, stream-minutes, and
         detailed session lifecycle counters (startup success, swaps, errors) for
@@ -1342,7 +1301,7 @@ paths:
 
         **Window:** default 3h, min 1m, max 30d.
       operationId: listNetworkDemand
-      tags: [Demand]
+      tags: [Streaming]
       parameters:
         - $ref: "#/components/parameters/org"
         - $ref: "#/components/parameters/window"
@@ -1361,14 +1320,14 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "500": { $ref: "#/components/responses/500" }
 
-  /v1/gpu/network-demand:
+  /v1/streaming/gpu-demand:
     get:
       summary: GPU-sliced network demand metrics
       description: |
         Returns GPU-sliced gateway streaming demand aggregated into hourly buckets,
         grouped by (gateway, orchestrator_address, pipeline_id, model_id, gpu_id).
         Backed by `naap.api_gpu_network_demand`. This is the GPU-attributed view
-        of the same streaming session data as `/v1/network/demand` — it adds
+        of the same streaming session data as `/v1/streaming/demand` — it adds
         per-GPU granularity at the cost of additional attribution uncertainty.
 
         Rows where GPU identity could not be resolved carry
@@ -1381,7 +1340,7 @@ paths:
 
         **Window:** default 3h, min 1m, max 30d.
       operationId: listGPUNetworkDemand
-      tags: [Demand]
+      tags: [Streaming]
       parameters:
         - $ref: "#/components/parameters/org"
         - $ref: "#/components/parameters/window"
@@ -1402,7 +1361,7 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "500": { $ref: "#/components/responses/500" }
 
-  /v1/gpu/metrics:
+  /v1/streaming/gpu-metrics:
     get:
       summary: GPU performance metrics
       description: |
@@ -1427,7 +1386,7 @@ paths:
 
         **Window:** default 24h, min 1m, max 72h.
       operationId: listGPUMetrics
-      tags: [GPUMetrics]
+      tags: [Streaming]
       parameters:
         - $ref: "#/components/parameters/org"
         - $ref: "#/components/parameters/window"
@@ -1462,11 +1421,9 @@ paths:
         `naap.api_network_demand` (for session and usage metrics) and
         `naap.api_latest_orchestrator_state` (for `orchestratorsOnline`).
 
-        **This endpoint covers streaming sessions only.** AI-batch and BYOC job
-        counts are NOT included in any KPI field here. The `dailySessionCount`
-        and `dailyUsageMins` metrics reflect live video streaming sessions
-        exclusively. For AI-batch and BYOC job overview metrics, use
-        `/v1/dashboard/jobs/overview`.
+        **This endpoint returns a combined payload with `streaming` and `requests`
+        sections.** The streaming section covers live video streaming sessions;
+        the requests section covers AI-batch and BYOC job overview metrics.
 
         `dailyNetworkFeesEth` is always 0 — fees are not tracked in the current
         event schema and this field is reserved for future use.
@@ -1503,12 +1460,11 @@ paths:
         contains total sessions, total usage minutes, average FPS, and a per-model
         breakdown (`modelMins`).
 
-        **This endpoint covers streaming session pipelines only.** AI-batch and
-        BYOC pipelines do not appear here. The data is sourced from
-        `naap.api_network_demand` and reflects the last 24 hours regardless of any
-        other time filter. For AI-batch pipeline breakdown, use
-        `/v1/dashboard/jobs/by-pipeline`. For BYOC capability breakdown, use
-        `/v1/dashboard/jobs/by-capability`.
+        **This endpoint returns a combined payload with `streaming` and `requests`
+        sections.** The streaming section covers streaming session pipelines; the
+        requests section covers AI-batch and BYOC pipeline/capability breakdowns.
+        The data is sourced from `naap.api_network_demand` (streaming) and
+        canonical job tables (requests).
 
         The `limit` parameter controls how many top pipelines are returned
         (1–20, default 5).
@@ -1706,130 +1662,9 @@ paths:
                 items: { $ref: "#/components/schemas/DashboardJobFeedItem" }
         "500": { $ref: "#/components/responses/500" }
 
-  /v1/dashboard/jobs/overview:
-    get:
-      summary: Jobs overview (AI batch + BYOC)
-      description: |
-        Returns top-level aggregate statistics for both AI-batch and BYOC jobs in
-        the requested time window. Backed by `naap.canonical_ai_batch_jobs` and
-        `naap.canonical_byoc_jobs`. The response contains two sub-objects —
-        `ai_batch` and `byoc` — each with total job count, selection outcome
-        counts (`selected`, `no_orch`, `unknown`), success rate, average
-        duration, p99 duration, and selected-only attribution worked rate.
-
-        This endpoint is the dashboard-level entry point for job health monitoring.
-        Unlike streaming KPIs (available at `/v1/dashboard/kpi`), this endpoint
-        covers only discrete request/response job types. Streaming sessions do not
-        contribute to any field here.
-
-        Optional `pipeline` and `model_id` filters scope both sub-aggregates to a
-        specific pipeline or model. When filtered, rows that do not match are
-        excluded from both counts and rates, so the resulting success rate reflects
-        only the filtered subset.
-      operationId: getDashboardJobsOverview
-      tags: [Dashboard]
-      parameters:
-        - $ref: "#/components/parameters/org"
-        - $ref: "#/components/parameters/start"
-        - $ref: "#/components/parameters/end"
-        - $ref: "#/components/parameters/pipeline"
-        - $ref: "#/components/parameters/model_id"
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data: { $ref: "#/components/schemas/DashboardJobsOverview" }
-                  meta: { $ref: "#/components/schemas/ResponseMeta" }
-        "500": { $ref: "#/components/responses/500" }
-
-  /v1/dashboard/jobs/by-pipeline:
-    get:
-      summary: AI batch jobs breakdown by pipeline
-      description: |
-        Returns per-pipeline aggregates (job count, selection outcome counts,
-        success rate, average duration, and selected-only attribution worked
-        rate) for AI-batch jobs in the requested time window. Backed by
-        `naap.canonical_ai_batch_jobs`. Each row represents one fixed Livepeer
-        AI pipeline (e.g. `text-to-image`, `llm`, `audio-to-text`).
-
-        **This endpoint covers AI-batch jobs only.** BYOC jobs do not appear here.
-        For BYOC capability breakdown, use `/v1/dashboard/jobs/by-capability`. For
-        a combined AI-batch + BYOC overview, use `/v1/dashboard/jobs/overview`.
-
-        The optional `pipeline` filter scopes results to a single pipeline. The
-        optional `model_id` filter further scopes to a specific model within a
-        pipeline, producing a single row (or no rows if the model has no jobs in
-        the window).
-      operationId: getDashboardJobsByPipeline
-      tags: [Dashboard]
-      parameters:
-        - $ref: "#/components/parameters/org"
-        - $ref: "#/components/parameters/start"
-        - $ref: "#/components/parameters/end"
-        - $ref: "#/components/parameters/pipeline"
-        - $ref: "#/components/parameters/model_id"
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: array
-                    items: { $ref: "#/components/schemas/DashboardJobsByPipelineRow" }
-                  meta: { $ref: "#/components/schemas/ResponseMeta" }
-        "500": { $ref: "#/components/responses/500" }
-
-  /v1/dashboard/jobs/by-capability:
-    get:
-      summary: BYOC jobs breakdown by capability
-      description: |
-        Returns per-capability aggregates (job count, selection outcome counts,
-        success rate, average duration, and selected-only attribution worked
-        rate) for BYOC jobs in the requested time window. Backed by
-        `naap.canonical_byoc_jobs`. Each row represents one dynamic BYOC
-        capability string (e.g. `openai-chat-completions`,
-        `openai-image-generation`).
-
-        **This endpoint covers BYOC jobs only.** AI-batch jobs do not appear here.
-        For AI-batch pipeline breakdown, use `/v1/dashboard/jobs/by-pipeline`. For
-        a combined overview, use `/v1/dashboard/jobs/overview`.
-
-        The optional `pipeline` filter (which maps to `capability` in the BYOC
-        context) scopes results to a single capability. The optional `model_id`
-        filter scopes to a specific model within a capability. Capability names
-        are stored and matched verbatim — they are never normalised or hardcoded.
-      operationId: getDashboardJobsByCapability
-      tags: [Dashboard]
-      parameters:
-        - $ref: "#/components/parameters/org"
-        - $ref: "#/components/parameters/start"
-        - $ref: "#/components/parameters/end"
-        - $ref: "#/components/parameters/pipeline"
-        - $ref: "#/components/parameters/model_id"
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: array
-                    items: { $ref: "#/components/schemas/DashboardJobsByCapabilityRow" }
-                  meta: { $ref: "#/components/schemas/ResponseMeta" }
-        "500": { $ref: "#/components/responses/500" }
-
   # ── AI Batch Jobs (R17) ───────────────────────────────────────────────────
 
-  /v1/ai-batch/summary:
+  /v1/requests/ai-batch/summary:
     get:
       summary: AI batch job summary by pipeline
       description: |
@@ -1844,7 +1679,7 @@ paths:
         image-to-image, image-to-video, upscale, audio-to-text, llm,
         segment-anything-2, image-to-text, and text-to-speech. BYOC capabilities
         never appear here. For LLM-specific metrics (tokens/sec, TTFT, total
-        tokens), use `/v1/ai-batch/llm/summary`.
+        tokens), use `/v1/requests/ai-batch/llm-summary`.
 
         The default time window is the last 24 hours. `avg_latency_score` is the
         mean of the per-job latency score computed by the resolver based on
@@ -1853,7 +1688,7 @@ paths:
         as the denominator and treats `resolved + hardware_less + stale` as
         worked attribution.
       operationId: getAIBatchSummary
-      tags: [AIBatch]
+      tags: [Requests]
       parameters:
         - { $ref: "#/components/parameters/org" }
         - { $ref: "#/components/parameters/start" }
@@ -1872,7 +1707,7 @@ paths:
                   meta: { $ref: "#/components/schemas/ResponseMeta" }
         "500": { $ref: "#/components/responses/500" }
 
-  /v1/ai-batch/jobs:
+  /v1/requests/ai-batch/jobs:
     get:
       summary: Paginated AI batch job records
       description: |
@@ -1896,7 +1731,7 @@ paths:
         Cursor pagination uses base64-encoded JSON position markers. Pass the
         `next_cursor` from the previous response as `?cursor=` on the next request.
       operationId: listAIBatchJobs
-      tags: [AIBatch]
+      tags: [Requests]
       parameters:
         - { $ref: "#/components/parameters/org" }
         - { $ref: "#/components/parameters/start" }
@@ -1916,10 +1751,10 @@ paths:
                     items: { $ref: "#/components/schemas/AIBatchJobRecord" }
                   pagination: { $ref: "#/components/schemas/CursorPagination" }
                   meta: { $ref: "#/components/schemas/ResponseMeta" }
-        "400": { $ref: "#/components/responses/400" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "500": { $ref: "#/components/responses/500" }
 
-  /v1/ai-batch/llm/summary:
+  /v1/requests/ai-batch/llm-summary:
     get:
       summary: LLM performance summary by model
       description: |
@@ -1939,7 +1774,7 @@ paths:
         corresponding telemetry events; jobs with missing telemetry contribute to
         request counts but not to token or latency averages.
       operationId: getAIBatchLLMSummary
-      tags: [AIBatch]
+      tags: [Requests]
       parameters:
         - { $ref: "#/components/parameters/org" }
         - { $ref: "#/components/parameters/start" }
@@ -1960,7 +1795,7 @@ paths:
 
   # ── BYOC Jobs (R18) ───────────────────────────────────────────────────────
 
-  /v1/byoc/summary:
+  /v1/requests/byoc/summary:
     get:
       summary: BYOC job summary by capability
       description: |
@@ -1975,14 +1810,14 @@ paths:
         `openai-text-embeddings`). The set of capabilities is fully dynamic and
         never hardcoded in the API — new capabilities appear automatically as BYOC
         workers register them. Fixed AI-batch pipelines never appear in this
-        endpoint; use `/v1/ai-batch/summary` for those.
+        endpoint; use `/v1/requests/ai-batch/summary` for those.
 
         The default time window is the last 24 hours.
         Under the current raw BYOC contract, `no_orch_jobs` is usually zero
         because blank-identity failures generally remain `unknown` until explicit
         pre-selection failure evidence exists.
       operationId: getBYOCSummary
-      tags: [BYOC]
+      tags: [Requests]
       parameters:
         - { $ref: "#/components/parameters/org" }
         - { $ref: "#/components/parameters/start" }
@@ -2001,7 +1836,7 @@ paths:
                   meta: { $ref: "#/components/schemas/ResponseMeta" }
         "500": { $ref: "#/components/responses/500" }
 
-  /v1/byoc/jobs:
+  /v1/requests/byoc/jobs:
     get:
       summary: Paginated BYOC job records
       description: |
@@ -2024,7 +1859,7 @@ paths:
 
         Cursor pagination uses base64-encoded JSON position markers.
       operationId: listBYOCJobs
-      tags: [BYOC]
+      tags: [Requests]
       parameters:
         - { $ref: "#/components/parameters/org" }
         - { $ref: "#/components/parameters/start" }
@@ -2044,10 +1879,10 @@ paths:
                     items: { $ref: "#/components/schemas/BYOCJobRecord" }
                   pagination: { $ref: "#/components/schemas/CursorPagination" }
                   meta: { $ref: "#/components/schemas/ResponseMeta" }
-        "400": { $ref: "#/components/responses/400" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "500": { $ref: "#/components/responses/500" }
 
-  /v1/byoc/workers:
+  /v1/requests/byoc/workers:
     get:
       summary: BYOC worker inventory by capability
       description: |
@@ -2059,7 +1894,7 @@ paths:
 
         **This is the canonical source for BYOC model availability.** Because BYOC
         workers do not use the Livepeer capability heartbeat protocol, they never
-        appear in `/v1/net/models` or `/v1/net/orchestrators`. This endpoint is
+        appear in `/v1/network/models` or `/v1/network/orchestrators`. This endpoint is
         the only place in the API where BYOC model names (e.g.
         `Qwen/Qwen2.5-14B-Instruct-AWQ`) are directly enumerated per capability.
 
@@ -2069,7 +1904,7 @@ paths:
         `avg_price_per_unit` is the mean price across registrations that included
         pricing information.
       operationId: getBYOCWorkers
-      tags: [BYOC]
+      tags: [Requests]
       parameters:
         - { $ref: "#/components/parameters/org" }
         - { $ref: "#/components/parameters/start" }
@@ -2088,7 +1923,7 @@ paths:
                   meta: { $ref: "#/components/schemas/ResponseMeta" }
         "500": { $ref: "#/components/responses/500" }
 
-  /v1/byoc/auth:
+  /v1/requests/byoc/auth:
     get:
       summary: BYOC auth event summary by capability
       description: |
@@ -2107,7 +1942,7 @@ paths:
         Capability names are stored verbatim. The default time window is the last
         24 hours.
       operationId: getBYOCAuthSummary
-      tags: [BYOC]
+      tags: [Requests]
       parameters:
         - { $ref: "#/components/parameters/org" }
         - { $ref: "#/components/parameters/start" }
@@ -2128,18 +1963,18 @@ paths:
 
   # ── Jobs — request/response job types (R19) ──────────────────────────────
 
-  /v1/jobs/demand:
+  /v1/requests/demand:
     get:
       summary: Hourly demand for request/response jobs
       description: |
         Returns hourly demand metrics — job counts, success counts, success rate,
         average duration, and total minutes — for AI-batch and BYOC jobs grouped
         by (window_start, org, gateway, pipeline_id, model_id, job_type). Backed
-        by `naap.api_unified_demand`. The `job_type` field distinguishes `ai-batch`
+        by `naap.api_requests_demand`. The `job_type` field distinguishes `ai-batch`
         from `byoc` rows within the same response.
 
         **This endpoint covers AI-batch and BYOC jobs only — not streaming
-        sessions.** Streaming demand is available at `/v1/network/demand`.
+        sessions.** Streaming demand is available at `/v1/streaming/demand`.
 
         For BYOC rows, `pipeline_id` holds the dynamic capability name (e.g.
         `openai-chat-completions`) and `model_id` holds the worker-resolved model
@@ -2152,7 +1987,7 @@ paths:
 
         **Window:** default 24h. Cursor-paginated.
       operationId: listJobsDemand
-      tags: [Jobs]
+      tags: [Requests]
       parameters:
         - { $ref: "#/components/parameters/org" }
         - { $ref: "#/components/parameters/window" }
@@ -2189,33 +2024,33 @@ paths:
                     items: { $ref: "#/components/schemas/JobsDemandRow" }
                   pagination: { $ref: "#/components/schemas/CursorPagination" }
                   meta: { $ref: "#/components/schemas/ResponseMeta" }
-        "400": { $ref: "#/components/responses/400" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "500": { $ref: "#/components/responses/500" }
 
-  /v1/jobs/sla:
+  /v1/requests/sla:
     get:
       summary: SLA compliance for request/response jobs
       description: |
         Returns hourly per-orchestrator SLA metrics — job counts, success rates,
         and SLA scores — for AI-batch and BYOC jobs grouped by
         (window_start, org, orchestrator_uri, pipeline_id, model_id, gpu_id,
-        job_type). Backed by `naap.api_unified_sla`. The `job_type` field
+        job_type). Backed by `naap.api_requests_sla`. The `job_type` field
         distinguishes `ai-batch` from `byoc` rows.
 
         **This endpoint covers AI-batch and BYOC jobs only.** Streaming session
-        SLA is tracked separately at `/v1/sla/compliance`.
+        SLA is tracked separately at `/v1/streaming/sla`.
 
         `orchestrator_uri` is always a service URI, not an on-chain address.
         BYOC jobs are identified by orchestrator URL rather than Ethereum
         address because BYOC orchestrators are not required to be registered
-        on-chain. Do not attempt to look up BYOC URIs in `/v1/net/orchestrators`.
+        on-chain. Do not attempt to look up BYOC URIs in `/v1/network/orchestrators`.
 
         `sla_score` is nullable — it may be null for rows where the scoring model
         could not produce a score (e.g. insufficient data in the window).
 
         **Window:** default 24h. Cursor-paginated.
       operationId: listJobsSLA
-      tags: [Jobs]
+      tags: [Requests]
       parameters:
         - { $ref: "#/components/parameters/org" }
         - { $ref: "#/components/parameters/window" }
@@ -2249,10 +2084,10 @@ paths:
                     items: { $ref: "#/components/schemas/JobsSLARow" }
                   pagination: { $ref: "#/components/schemas/CursorPagination" }
                   meta: { $ref: "#/components/schemas/ResponseMeta" }
-        "400": { $ref: "#/components/responses/400" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "500": { $ref: "#/components/responses/500" }
 
-  /v1/jobs/by-model:
+  /v1/requests/perf-by-model:
     get:
       summary: Request/response job performance by model
       description: |
@@ -2276,11 +2111,11 @@ paths:
         they are null when no completed jobs with duration data exist for that
         (pipeline, model, job_type) combination in the window.
 
-        For streaming FPS performance (not duration), use `/v1/perf/by-model`.
+        For streaming FPS performance (not duration), use `/v1/streaming/perf-by-model`.
 
         **Window:** default 24h.
       operationId: listJobsByModel
-      tags: [Jobs]
+      tags: [Requests]
       parameters:
         - { $ref: "#/components/parameters/org" }
         - { $ref: "#/components/parameters/window" }

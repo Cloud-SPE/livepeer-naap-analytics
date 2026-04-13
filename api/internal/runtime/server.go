@@ -99,44 +99,50 @@ func (s *Server) buildRouter() chi.Router {
 	r.Get("/docs/openapi.yaml", handleOpenAPISpec)
 
 	r.Route("/v1", func(r chi.Router) {
-		r.Get("/net/orchestrators", s.handleListOrchestrators)
-		r.Get("/net/models", s.handleListModels)
-		r.Get("/net/capacity", s.handleGetCapacitySummary)
-		r.Get("/perf/by-model", s.handleListModelPerformance)
-		r.Get("/sla/compliance", s.handleListSLACompliance)
-		r.Get("/network/demand", s.handleListNetworkDemand)
-		r.Get("/gpu/network-demand", s.handleListGPUNetworkDemand)
-		r.Get("/gpu/metrics", s.handleListGPUMetrics)
+		// Network — capability-based orchestrator and model inventory.
+		r.Route("/network", func(r chi.Router) {
+			r.Get("/orchestrators", s.handleListOrchestrators)
+			r.Get("/models", s.handleListModels)
+			r.Get("/capacity", s.handleGetCapacitySummary)
+		})
 
-		// Jobs — request/response job types (R19)
-		r.Get("/jobs/demand", s.handleListJobsDemand)
-		r.Get("/jobs/sla", s.handleListJobsSLA)
-		r.Get("/jobs/by-model", s.handleListJobsByModel)
+		// Streaming — live-video-to-video session analytics.
+		r.Route("/streaming", func(r chi.Router) {
+			r.Get("/sla", s.handleListSLACompliance)
+			r.Get("/demand", s.handleListNetworkDemand)
+			r.Get("/gpu-demand", s.handleListGPUNetworkDemand)
+			r.Get("/gpu-metrics", s.handleListGPUMetrics)
+			r.Get("/perf-by-model", s.handleListModelPerformance)
+		})
 
-		// AI Batch Jobs (R17)
-		r.Get("/ai-batch/summary", s.handleGetAIBatchSummary)
-		r.Get("/ai-batch/jobs", s.handleListAIBatchJobs)
-		r.Get("/ai-batch/llm/summary", s.handleGetAIBatchLLMSummary)
+		// Requests — AI Batch + BYOC request/response job analytics.
+		r.Route("/requests", func(r chi.Router) {
+			r.Get("/demand", s.handleListJobsDemand)
+			r.Get("/sla", s.handleListJobsSLA)
+			r.Get("/perf-by-model", s.handleListJobsByModel)
+			r.Route("/ai-batch", func(r chi.Router) {
+				r.Get("/summary", s.handleGetAIBatchSummary)
+				r.Get("/jobs", s.handleListAIBatchJobs)
+				r.Get("/llm-summary", s.handleGetAIBatchLLMSummary)
+			})
+			r.Route("/byoc", func(r chi.Router) {
+				r.Get("/summary", s.handleGetBYOCSummary)
+				r.Get("/jobs", s.handleListBYOCJobs)
+				r.Get("/workers", s.handleGetBYOCWorkers)
+				r.Get("/auth", s.handleGetBYOCAuthSummary)
+			})
+		})
 
-		// BYOC Jobs (R18)
-		r.Get("/byoc/summary", s.handleGetBYOCSummary)
-		r.Get("/byoc/jobs", s.handleListBYOCJobs)
-		r.Get("/byoc/workers", s.handleGetBYOCWorkers)
-		r.Get("/byoc/auth", s.handleGetBYOCAuthSummary)
-
-		// Dashboard — request-job overview (R17/R18)
-		r.Get("/dashboard/jobs/overview", s.handleGetDashboardJobsOverview)
-		r.Get("/dashboard/jobs/by-pipeline", s.handleGetDashboardJobsByPipeline)
-		r.Get("/dashboard/jobs/by-capability", s.handleGetDashboardJobsByCapability)
-
-		// Dashboard — pre-aggregated UI endpoints (R16)
-		r.Get("/dashboard/kpi", s.handleGetDashboardKPI)
-		r.Get("/dashboard/pipelines", s.handleGetDashboardPipelines)
-		r.Get("/dashboard/orchestrators", s.handleGetDashboardOrchestrators)
-		r.Get("/dashboard/gpu-capacity", s.handleGetDashboardGPUCapacity)
-		r.Get("/dashboard/pipeline-catalog", s.handleGetDashboardPipelineCatalog)
-		r.Get("/dashboard/pricing", s.handleGetDashboardPricing)
-		r.Get("/dashboard/job-feed", s.handleGetDashboardJobFeed)
+		// Dashboard — pre-aggregated UI endpoints with combined streaming + requests payloads.
+		r.Route("/dashboard", func(r chi.Router) {
+			r.Get("/kpi", s.handleGetDashboardKPI)
+			r.Get("/pipelines", s.handleGetDashboardPipelines)
+			r.Get("/orchestrators", s.handleGetDashboardOrchestrators)
+			r.Get("/gpu-capacity", s.handleGetDashboardGPUCapacity)
+			r.Get("/pipeline-catalog", s.handleGetDashboardPipelineCatalog)
+			r.Get("/pricing", s.handleGetDashboardPricing)
+			r.Get("/job-feed", s.handleGetDashboardJobFeed)
+		})
 	})
 
 	return r

@@ -42,14 +42,14 @@ https://analytics.livepeer.cloud/v1/
 
 | Domain | Endpoint | Spec |
 |--------|---------|------|
-| Network state | `GET /v1/net/orchestrators` | `r1-network-state.md` |
-| Network state | `GET /v1/net/models` | `r1-network-state.md` |
-| Network state | `GET /v1/net/capacity` | `r1-network-state.md` |
-| Performance | `GET /v1/perf/by-model` | `r3-performance-quality.md` |
-| SLA | `GET /v1/sla/compliance` | Built-in |
-| Network demand | `GET /v1/network/demand` | Built-in |
-| GPU | `GET /v1/gpu/network-demand` | Built-in |
-| GPU | `GET /v1/gpu/metrics` | Built-in |
+| Network | `GET /v1/network/orchestrators` | `r1-network-state.md` |
+| Network | `GET /v1/network/models` | `r1-network-state.md` |
+| Network | `GET /v1/network/capacity` | `r1-network-state.md` |
+| Streaming | `GET /v1/streaming/perf-by-model` | `r3-performance-quality.md` |
+| Streaming | `GET /v1/streaming/sla` | Built-in |
+| Streaming | `GET /v1/streaming/demand` | Built-in |
+| Streaming | `GET /v1/streaming/gpu-demand` | Built-in |
+| Streaming | `GET /v1/streaming/gpu-metrics` | Built-in |
 | Dashboard | `GET /v1/dashboard/kpi` | Built-in |
 | Dashboard | `GET /v1/dashboard/pipelines` | Built-in |
 | Dashboard | `GET /v1/dashboard/orchestrators` | Built-in |
@@ -57,19 +57,16 @@ https://analytics.livepeer.cloud/v1/
 | Dashboard | `GET /v1/dashboard/pipeline-catalog` | Built-in |
 | Dashboard | `GET /v1/dashboard/pricing` | Built-in |
 | Dashboard | `GET /v1/dashboard/job-feed` | Built-in |
-| Dashboard (jobs) | `GET /v1/dashboard/jobs/overview` | Built-in |
-| Dashboard (jobs) | `GET /v1/dashboard/jobs/by-pipeline` | Built-in |
-| Dashboard (jobs) | `GET /v1/dashboard/jobs/by-capability` | Built-in |
-| Jobs (request/response) | `GET /v1/jobs/demand` | Built-in |
-| Jobs (request/response) | `GET /v1/jobs/sla` | Built-in |
-| Jobs (request/response) | `GET /v1/jobs/by-model` | Built-in |
-| AI Batch | `GET /v1/ai-batch/summary` | Built-in |
-| AI Batch | `GET /v1/ai-batch/jobs` | Built-in |
-| AI Batch | `GET /v1/ai-batch/llm/summary` | Built-in |
-| BYOC | `GET /v1/byoc/summary` | Built-in |
-| BYOC | `GET /v1/byoc/jobs` | Built-in |
-| BYOC | `GET /v1/byoc/workers` | Built-in |
-| BYOC | `GET /v1/byoc/auth` | Built-in |
+| Requests | `GET /v1/requests/demand` | Built-in |
+| Requests | `GET /v1/requests/sla` | Built-in |
+| Requests | `GET /v1/requests/perf-by-model` | Built-in |
+| Requests | `GET /v1/requests/ai-batch/summary` | Built-in |
+| Requests | `GET /v1/requests/ai-batch/jobs` | Built-in |
+| Requests | `GET /v1/requests/ai-batch/llm-summary` | Built-in |
+| Requests | `GET /v1/requests/byoc/summary` | Built-in |
+| Requests | `GET /v1/requests/byoc/jobs` | Built-in |
+| Requests | `GET /v1/requests/byoc/workers` | Built-in |
+| Requests | `GET /v1/requests/byoc/auth` | Built-in |
 | Health | `GET /healthz` | Built-in, no spec needed |
 
 ## Cursor Pagination Contract
@@ -95,5 +92,5 @@ Clients request the first page with `?limit=<n>` and follow with
 `?limit=<n>&cursor=<pagination.next_cursor>`. Legacy `offset`, `page`, and
 `page_size` parameters are rejected on migrated endpoints.
 
-For `GET /v1/jobs/sla`, the non-streaming identity field is `orchestrator_uri`.
+For `GET /v1/requests/sla`, the non-streaming identity field is `orchestrator_uri`.
 It is always a service URI, not an Ethereum address.

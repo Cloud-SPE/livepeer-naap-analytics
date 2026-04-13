@@ -424,7 +424,7 @@ groups:
                     job_type,
                     pipeline_id,
                     sum(job_count) AS current_jobs
-                  FROM naap.api_unified_demand
+                  FROM naap.api_requests_demand
                   WHERE window_start = (SELECT window_start FROM current_bucket)
                   GROUP BY job_type, pipeline_id
                 ),
@@ -434,7 +434,7 @@ groups:
                     pipeline_id,
                     window_start,
                     sum(job_count) AS hourly_jobs
-                  FROM naap.api_unified_demand
+                  FROM naap.api_requests_demand
                   WHERE window_start >= (SELECT window_start FROM current_bucket) - INTERVAL 24 HOUR
                     AND window_start < (SELECT window_start FROM current_bucket)
                   GROUP BY job_type, pipeline_id, window_start

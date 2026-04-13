@@ -11,11 +11,11 @@ import (
 // Run with: cd api && go test ./internal/runtime/... -bench=. -benchmem -run='^$'
 
 func BenchmarkListOrchestrators(b *testing.B) {
-	benchHandler(b, "/v1/net/orchestrators")
+	benchHandler(b, "/v1/network/orchestrators")
 }
 
 func BenchmarkListModels(b *testing.B) {
-	benchHandler(b, "/v1/net/models")
+	benchHandler(b, "/v1/network/models")
 }
 
 // benchHandler is the shared benchmark helper.

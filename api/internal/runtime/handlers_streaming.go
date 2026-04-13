@@ -51,7 +51,7 @@ func trimStr(s string, maxLen int) string {
 }
 
 // ---------------------------------------------------------------------------
-// GET /v1/sla/compliance
+// GET /v1/streaming/sla
 // ---------------------------------------------------------------------------
 
 func (s *Server) handleListSLACompliance(w http.ResponseWriter, r *http.Request) {
@@ -98,7 +98,7 @@ func parseSLAComplianceParams(r *http.Request) (types.SLAComplianceParams, error
 }
 
 // ---------------------------------------------------------------------------
-// GET /v1/network/demand
+// GET /v1/streaming/demand
 // ---------------------------------------------------------------------------
 
 func (s *Server) handleListNetworkDemand(w http.ResponseWriter, r *http.Request) {
@@ -144,7 +144,7 @@ func parseNetworkDemandParams(r *http.Request) (types.NetworkDemandParams, error
 }
 
 // ---------------------------------------------------------------------------
-// GET /v1/gpu/network-demand
+// GET /v1/streaming/gpu-demand
 // ---------------------------------------------------------------------------
 
 func (s *Server) handleListGPUNetworkDemand(w http.ResponseWriter, r *http.Request) {
@@ -191,7 +191,7 @@ func parseGPUNetworkDemandParams(r *http.Request) (types.GPUNetworkDemandParams,
 }
 
 // ---------------------------------------------------------------------------
-// GET /v1/gpu/metrics
+// GET /v1/streaming/gpu-metrics
 // ---------------------------------------------------------------------------
 
 func (s *Server) handleListGPUMetrics(w http.ResponseWriter, r *http.Request) {
@@ -238,4 +238,22 @@ func parseGPUMetricsParams(r *http.Request) (types.GPUMetricsParams, error) {
 		Limit:               parseListLimit(q, defaultCursorLimit),
 		Cursor:              strings.TrimSpace(q.Get("cursor")),
 	}, nil
+}
+
+// ---------------------------------------------------------------------------
+// GET /v1/streaming/perf-by-model
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleListModelPerformance(w http.ResponseWriter, r *http.Request) {
+	p := parseQueryParams(r)
+	result, err := s.svc.ListModelPerformance(r.Context(), p)
+	if err != nil {
+		s.providers.Logger.Sugar().Errorw("list model performance failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "Internal Server Error", "")
+		return
+	}
+	if result == nil {
+		result = []types.ModelPerformance{}
+	}
+	respondJSON(w, http.StatusOK, result)
 }

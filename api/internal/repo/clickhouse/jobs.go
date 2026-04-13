@@ -10,7 +10,7 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// GET /v1/jobs/demand
+// GET /v1/requests/demand
 // ---------------------------------------------------------------------------
 
 // ListJobsDemand returns cursor-paginated hourly demand rows for non-streaming
@@ -33,7 +33,7 @@ func (r *Repo) ListJobsDemand(ctx context.Context, p types.JobsParams) ([]types.
 		SELECT
 			window_start, org, gateway, pipeline_id, model_id, job_type,
 			job_count, success_count, success_rate, avg_duration_ms, total_minutes
-		FROM naap.api_unified_demand `+where+`
+		FROM naap.api_requests_demand `+where+`
 		ORDER BY window_start DESC, gateway DESC, pipeline_id DESC, ifNull(model_id, '') DESC, job_type DESC
 		LIMIT ?
 	`, append(args, limit+1)...)
@@ -107,7 +107,7 @@ func buildJobsDemandWhere(p types.JobsParams) (string, []any) {
 }
 
 // ---------------------------------------------------------------------------
-// GET /v1/jobs/sla
+// GET /v1/requests/sla
 // ---------------------------------------------------------------------------
 
 // ListJobsSLA returns cursor-paginated SLA rows for non-streaming jobs ordered
@@ -130,7 +130,7 @@ func (r *Repo) ListJobsSLA(ctx context.Context, p types.JobsParams) ([]types.Job
 		SELECT
 			window_start, org, orchestrator_uri, pipeline_id, model_id, gpu_id, job_type,
 			job_count, success_count, success_rate, avg_duration_ms, sla_score
-		FROM naap.api_unified_sla `+where+`
+		FROM naap.api_requests_sla `+where+`
 		ORDER BY window_start DESC, orchestrator_uri DESC, pipeline_id DESC, ifNull(model_id, '') DESC, ifNull(gpu_id, '') DESC, job_type DESC
 		LIMIT ?
 	`, append(args, limit+1)...)
@@ -206,7 +206,7 @@ func buildJobsSLAWhere(p types.JobsParams) (string, []any) {
 }
 
 // ---------------------------------------------------------------------------
-// GET /v1/jobs/by-model
+// GET /v1/requests/perf-by-model
 // ---------------------------------------------------------------------------
 
 // ListJobsByModel returns performance stats per (pipeline, model) for non-streaming jobs.

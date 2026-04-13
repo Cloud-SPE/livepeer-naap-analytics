@@ -10,7 +10,7 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// GET /v1/jobs/demand
+// GET /v1/requests/demand
 // ---------------------------------------------------------------------------
 
 func (s *Server) handleListJobsDemand(w http.ResponseWriter, r *http.Request) {
@@ -36,7 +36,7 @@ func (s *Server) handleListJobsDemand(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---------------------------------------------------------------------------
-// GET /v1/jobs/sla
+// GET /v1/requests/sla
 // ---------------------------------------------------------------------------
 
 func (s *Server) handleListJobsSLA(w http.ResponseWriter, r *http.Request) {
@@ -62,7 +62,7 @@ func (s *Server) handleListJobsSLA(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---------------------------------------------------------------------------
-// GET /v1/jobs/by-model
+// GET /v1/requests/perf-by-model
 // ---------------------------------------------------------------------------
 
 func (s *Server) handleListJobsByModel(w http.ResponseWriter, r *http.Request) {

@@ -7,7 +7,7 @@ import (
 	"github.com/livepeer/naap-analytics/internal/types"
 )
 
-// ListModelPerformance returns active PERF-001 rows for GET /v1/perf/by-model.
+// ListModelPerformance returns active PERF-001 rows for GET /v1/streaming/perf-by-model.
 func (r *Repo) ListModelPerformance(ctx context.Context, p types.QueryParams) ([]types.ModelPerformance, error) {
 	start, end := effectiveWindow(p)
 

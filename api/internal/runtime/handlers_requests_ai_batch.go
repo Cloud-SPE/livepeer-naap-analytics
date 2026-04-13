@@ -8,7 +8,7 @@ import (
 )
 
 // handleGetAIBatchSummary returns per-pipeline aggregates for AI batch jobs.
-// GET /v1/ai-batch/summary
+// GET /v1/requests/ai-batch/summary
 func (s *Server) handleGetAIBatchSummary(w http.ResponseWriter, r *http.Request) {
 	p := parseQueryParams(r)
 	result, err := s.svc.GetAIBatchSummary(r.Context(), p)
@@ -24,7 +24,7 @@ func (s *Server) handleGetAIBatchSummary(w http.ResponseWriter, r *http.Request)
 }
 
 // handleListAIBatchJobs returns cursor-paginated completed AI batch job records.
-// GET /v1/ai-batch/jobs
+// GET /v1/requests/ai-batch/jobs
 func (s *Server) handleListAIBatchJobs(w http.ResponseWriter, r *http.Request) {
 	if err := rejectLegacyPaginationParams(r); err != nil {
 		writeError(w, http.StatusBadRequest, "Bad Request", err.Error())
@@ -49,7 +49,7 @@ func (s *Server) handleListAIBatchJobs(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleGetAIBatchLLMSummary returns per-model LLM performance aggregates.
-// GET /v1/ai-batch/llm/summary
+// GET /v1/requests/ai-batch/llm-summary
 func (s *Server) handleGetAIBatchLLMSummary(w http.ResponseWriter, r *http.Request) {
 	p := parseQueryParams(r)
 	result, err := s.svc.GetAIBatchLLMSummary(r.Context(), p)

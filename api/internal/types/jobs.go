@@ -2,9 +2,9 @@ package types
 
 import "time"
 
-// JobsParams holds validated query parameters for /v1/jobs/* endpoints.
+// JobsParams holds validated query parameters for /v1/requests/* endpoints.
 type JobsParams struct {
-	// OrchestratorURI applies only to /v1/jobs/sla. Non-streaming jobs are
+	// OrchestratorURI applies only to /v1/requests/sla. Non-streaming jobs are
 	// keyed by service URI, not by on-chain address.
 	OrchestratorURI string
 	Gateway         string
@@ -18,7 +18,7 @@ type JobsParams struct {
 	Cursor          string
 }
 
-// JobsDemandRow is one row in the /v1/jobs/demand response.
+// JobsDemandRow is one row in the /v1/requests/demand response.
 type JobsDemandRow struct {
 	WindowStart   time.Time `json:"window_start"`
 	Org           *string   `json:"org,omitempty"`
@@ -33,7 +33,7 @@ type JobsDemandRow struct {
 	TotalMinutes  float64   `json:"total_minutes"`
 }
 
-// JobsSLARow is one row in the /v1/jobs/sla response.
+// JobsSLARow is one row in the /v1/requests/sla response.
 type JobsSLARow struct {
 	WindowStart     time.Time `json:"window_start"`
 	Org             *string   `json:"org,omitempty"`

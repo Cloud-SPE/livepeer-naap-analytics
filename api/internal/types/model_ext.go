@@ -9,7 +9,7 @@ type OrchModelStats struct {
 }
 
 // ModelPerformance is one row for active requirement PERF-001 served by
-// GET /v1/perf/by-model.
+// GET /v1/streaming/perf-by-model.
 type ModelPerformance struct {
 	ModelID       string  `json:"ModelID"`
 	Pipeline      string  `json:"Pipeline"`
@@ -33,7 +33,7 @@ type ModelDetail struct {
 	Orchs         []OrchModelStats
 }
 
-// JobModelPerformance is one row for GET /v1/jobs/by-model.
+// JobModelPerformance is one row for GET /v1/requests/perf-by-model.
 // Request/response job types only (ai-batch, byoc) — duration-based metrics.
 type JobModelPerformance struct {
 	ModelID       string   `json:"model_id"`

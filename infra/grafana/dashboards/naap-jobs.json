@@ -165,7 +165,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "sql",
-          "rawSql": "SELECT toFloat64(sum(job_count)) FROM naap.api_unified_demand WHERE $__timeFilter(window_start) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))",
+          "rawSql": "SELECT toFloat64(sum(job_count)) FROM naap.api_requests_demand WHERE $__timeFilter(window_start) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))",
           "refId": "A"
         }
       ]
@@ -228,7 +228,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "sql",
-          "rawSql": "SELECT toFloat64(sum(job_count)) FROM naap.api_unified_demand WHERE $__timeFilter(window_start) AND job_type = 'ai-batch' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))",
+          "rawSql": "SELECT toFloat64(sum(job_count)) FROM naap.api_requests_demand WHERE $__timeFilter(window_start) AND job_type = 'ai-batch' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))",
           "refId": "A"
         }
       ]
@@ -291,7 +291,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "sql",
-          "rawSql": "SELECT toFloat64(sum(job_count)) FROM naap.api_unified_demand WHERE $__timeFilter(window_start) AND job_type = 'byoc' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))",
+          "rawSql": "SELECT toFloat64(sum(job_count)) FROM naap.api_requests_demand WHERE $__timeFilter(window_start) AND job_type = 'byoc' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))",
           "refId": "A"
         }
       ]
@@ -358,7 +358,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "sql",
-          "rawSql": "SELECT toFloat64(sum(success_count)) / nullIf(toFloat64(sum(job_count)), 0) FROM naap.api_unified_demand WHERE $__timeFilter(window_start) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))",
+          "rawSql": "SELECT toFloat64(sum(success_count)) / nullIf(toFloat64(sum(job_count)), 0) FROM naap.api_requests_demand WHERE $__timeFilter(window_start) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))",
           "refId": "A"
         }
       ]
@@ -425,7 +425,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "sql",
-          "rawSql": "SELECT toFloat64(sum(avg_duration_ms * job_count)) / nullIf(toFloat64(sum(job_count)), 0) FROM naap.api_unified_demand WHERE $__timeFilter(window_start) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))",
+          "rawSql": "SELECT toFloat64(sum(avg_duration_ms * job_count)) / nullIf(toFloat64(sum(job_count)), 0) FROM naap.api_requests_demand WHERE $__timeFilter(window_start) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))",
           "refId": "A"
         }
       ]
@@ -485,7 +485,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "sql",
-          "rawSql": "SELECT toStartOfHour(window_start) AS time, job_type, sum(job_count) AS jobs FROM naap.api_unified_demand WHERE $__timeFilter(window_start) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) GROUP BY time, job_type ORDER BY time",
+          "rawSql": "SELECT toStartOfHour(window_start) AS time, job_type, sum(job_count) AS jobs FROM naap.api_requests_demand WHERE $__timeFilter(window_start) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) GROUP BY time, job_type ORDER BY time",
           "refId": "A"
         }
       ]
@@ -532,7 +532,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "sql",
-          "rawSql": "SELECT toStartOfHour(window_start) AS time, job_type, toFloat64(sum(success_count)) / nullIf(toFloat64(sum(job_count)), 0) AS success_rate FROM naap.api_unified_demand WHERE $__timeFilter(window_start) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) GROUP BY time, job_type ORDER BY time",
+          "rawSql": "SELECT toStartOfHour(window_start) AS time, job_type, toFloat64(sum(success_count)) / nullIf(toFloat64(sum(job_count)), 0) AS success_rate FROM naap.api_requests_demand WHERE $__timeFilter(window_start) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) GROUP BY time, job_type ORDER BY time",
           "refId": "A"
         }
       ]
@@ -581,7 +581,7 @@
           "editorType": "sql",
           "format": 2,
           "queryType": "sql",
-          "rawSql": "SELECT pipeline_id, job_type, sum(job_count) AS total_jobs, toFloat64(sum(success_count)) / nullIf(toFloat64(sum(job_count)), 0) AS success_rate, round(toFloat64(sum(avg_duration_ms * job_count)) / nullIf(toFloat64(sum(job_count)), 0), 1) AS avg_duration_ms FROM naap.api_unified_demand WHERE $__timeFilter(window_start) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) AND pipeline_id != '' GROUP BY pipeline_id, job_type ORDER BY total_jobs DESC LIMIT 20",
+          "rawSql": "SELECT pipeline_id, job_type, sum(job_count) AS total_jobs, toFloat64(sum(success_count)) / nullIf(toFloat64(sum(job_count)), 0) AS success_rate, round(toFloat64(sum(avg_duration_ms * job_count)) / nullIf(toFloat64(sum(job_count)), 0), 1) AS avg_duration_ms FROM naap.api_requests_demand WHERE $__timeFilter(window_start) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) AND pipeline_id != '' GROUP BY pipeline_id, job_type ORDER BY total_jobs DESC LIMIT 20",
           "refId": "A"
         }
       ]
@@ -715,7 +715,7 @@
           "editorType": "sql",
           "format": 2,
           "queryType": "sql",
-          "rawSql": "SELECT orchestrator_uri, pipeline_id, job_type, sum(job_count) AS total_jobs, sum(success_count) AS success_jobs, round(toFloat64(sum(success_count)) / nullIf(toFloat64(sum(job_count)), 0) * 100, 1) AS success_pct, round(toFloat64(sum(avg_duration_ms * job_count)) / nullIf(toFloat64(sum(job_count)), 0), 1) AS avg_duration_ms FROM naap.api_unified_sla WHERE $__timeFilter(window_start) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) AND orchestrator_uri != '' GROUP BY orchestrator_uri, pipeline_id, job_type ORDER BY total_jobs DESC LIMIT 50",
+          "rawSql": "SELECT orchestrator_uri, pipeline_id, job_type, sum(job_count) AS total_jobs, sum(success_count) AS success_jobs, round(toFloat64(sum(success_count)) / nullIf(toFloat64(sum(job_count)), 0) * 100, 1) AS success_pct, round(toFloat64(sum(avg_duration_ms * job_count)) / nullIf(toFloat64(sum(job_count)), 0), 1) AS avg_duration_ms FROM naap.api_requests_sla WHERE $__timeFilter(window_start) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) AND orchestrator_uri != '' GROUP BY orchestrator_uri, pipeline_id, job_type ORDER BY total_jobs DESC LIMIT 50",
           "refId": "A"
         }
       ]

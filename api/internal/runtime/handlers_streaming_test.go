@@ -9,7 +9,7 @@ import (
 
 func TestListSLACompliance_HappyPath(t *testing.T) {
 	srv := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/v1/sla/compliance", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/streaming/sla", nil)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
@@ -25,7 +25,7 @@ func TestListSLACompliance_HappyPath(t *testing.T) {
 
 func TestListNetworkDemand_HappyPath(t *testing.T) {
 	srv := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/v1/network/demand", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/streaming/demand", nil)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
@@ -41,7 +41,7 @@ func TestListNetworkDemand_HappyPath(t *testing.T) {
 
 func TestListGPUMetrics_HappyPath(t *testing.T) {
 	srv := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/v1/gpu/metrics", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/streaming/gpu-metrics", nil)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
@@ -57,7 +57,7 @@ func TestListGPUMetrics_HappyPath(t *testing.T) {
 
 func TestListGPUNetworkDemand_HappyPath(t *testing.T) {
 	srv := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/v1/gpu/network-demand", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/streaming/gpu-demand", nil)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
@@ -73,7 +73,7 @@ func TestListGPUNetworkDemand_HappyPath(t *testing.T) {
 
 func TestListSLACompliance_RejectsLegacyPaginationParams(t *testing.T) {
 	srv := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/v1/sla/compliance?page=1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/streaming/sla?page=1", nil)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
@@ -85,7 +85,7 @@ func TestListSLACompliance_RejectsLegacyPaginationParams(t *testing.T) {
 
 func TestListNetworkDemand_RejectsLegacyPaginationParams(t *testing.T) {
 	srv := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/v1/network/demand?page_size=25", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/streaming/demand?page_size=25", nil)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
@@ -97,7 +97,7 @@ func TestListNetworkDemand_RejectsLegacyPaginationParams(t *testing.T) {
 
 func TestListGPUNetworkDemand_RejectsLegacyPaginationParams(t *testing.T) {
 	srv := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/v1/gpu/network-demand?offset=0", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/streaming/gpu-demand?offset=0", nil)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
@@ -109,7 +109,7 @@ func TestListGPUNetworkDemand_RejectsLegacyPaginationParams(t *testing.T) {
 
 func TestListGPUMetrics_RejectsLegacyPaginationParams(t *testing.T) {
 	srv := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/v1/gpu/metrics?page=1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/streaming/gpu-metrics?page=1", nil)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 

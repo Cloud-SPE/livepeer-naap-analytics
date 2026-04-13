@@ -7,7 +7,7 @@ import (
 )
 
 func TestParseSLAComplianceParams_DefaultWindowMatchesDemandPeriod(t *testing.T) {
-	req := httptest.NewRequest("GET", "/v1/sla/compliance", nil)
+	req := httptest.NewRequest("GET", "/v1/streaming/sla", nil)
 
 	params, err := parseSLAComplianceParams(req)
 	if err != nil {

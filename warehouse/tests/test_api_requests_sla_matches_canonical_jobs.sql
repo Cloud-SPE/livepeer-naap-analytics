@@ -9,7 +9,7 @@ with expected as (
         job_type,
         count() as expected_job_count,
         countIf(success = 1) as expected_success_count
-    from {{ ref('canonical_unified_jobs') }}
+    from {{ ref('canonical_requests_jobs') }}
     where job_type != 'stream'
       and event_ts is not null
     group by window_start, org, orchestrator_uri, pipeline_id, model_id, gpu_id, job_type
@@ -25,7 +25,7 @@ actual as (
         job_type,
         job_count,
         success_count
-    from {{ ref('api_unified_sla') }}
+    from {{ ref('api_requests_sla') }}
 )
 select
     coalesce(e.window_start, a.window_start) as window_start,

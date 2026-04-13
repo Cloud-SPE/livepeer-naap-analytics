@@ -13,7 +13,7 @@ type NetworkSummary struct {
 }
 
 // Orchestrator is one row for active requirement NET-001 served by
-// GET /v1/net/orchestrators.
+// GET /v1/network/orchestrators.
 // RawCapabilities is the full JSON blob from the capabilities snapshot — the service
 // layer parses GPU, model, and pricing detail from it for the HTTP response.
 type Orchestrator struct {
@@ -44,7 +44,7 @@ type GPUSummary struct {
 }
 
 // ModelAvailability is one row for active requirement NET-002 served by
-// GET /v1/net/models.
+// GET /v1/network/models.
 type ModelAvailability struct {
 	Pipeline            string
 	Model               string

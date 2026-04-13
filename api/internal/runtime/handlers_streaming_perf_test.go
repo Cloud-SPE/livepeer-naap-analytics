@@ -9,7 +9,7 @@ import (
 
 func TestListModelPerformance_HappyPath(t *testing.T) {
 	srv := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/v1/perf/by-model", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/streaming/perf-by-model", nil)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {

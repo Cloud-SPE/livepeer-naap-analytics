@@ -43,7 +43,7 @@ func (r *Repo) GetNetworkSummary(ctx context.Context, p types.QueryParams) (*typ
 }
 
 // ListOrchestrators returns active NET-001 orchestrator rows for
-// GET /v1/net/orchestrators using stable cursor pagination ordered by
+// GET /v1/network/orchestrators using stable cursor pagination ordered by
 // (last_seen DESC, orch_address DESC).
 func (r *Repo) ListOrchestrators(ctx context.Context, p types.QueryParams) ([]types.Orchestrator, types.CursorPageInfo, error) {
 	where := "WHERE 1=1"
@@ -111,6 +111,18 @@ func (r *Repo) ListOrchestrators(ctx context.Context, p types.QueryParams) ([]ty
 	if hasMore {
 		orchs = orchs[:limit]
 	}
+
+	// Post-filter by pipeline and/or job_type if requested.
+	if p.Pipeline != "" || p.JobType != "" {
+		filtered := orchs[:0]
+		for _, o := range orchs {
+			if orchMatchesFilter(o.RawCapabilities, p.Pipeline, p.JobType) {
+				filtered = append(filtered, o)
+			}
+		}
+		orchs = filtered
+	}
+
 	if orchs == nil {
 		orchs = []types.Orchestrator{}
 	}
@@ -184,7 +196,7 @@ func (r *Repo) GetGPUSummary(ctx context.Context, p types.QueryParams) (*types.G
 }
 
 // ListModels returns active NET-002 model-availability rows for
-// GET /v1/net/models.
+// GET /v1/network/models.
 func (r *Repo) ListModels(ctx context.Context, p types.QueryParams) ([]types.ModelAvailability, error) {
 	where := fmt.Sprintf("WHERE last_seen > now() - INTERVAL %d MINUTE", activeOrchMinutes)
 	args := []any{}
@@ -214,6 +226,16 @@ func (r *Repo) ListModels(ctx context.Context, p types.QueryParams) ([]types.Mod
 
 	result := make([]types.ModelAvailability, 0, len(agg))
 	for k, a := range agg {
+		// Filter by pipeline if requested.
+		if p.Pipeline != "" && k.pipeline != p.Pipeline {
+			continue
+		}
+		// Filter by job_type: "stream" matches only live-video-to-video,
+		// "ai-batch"/"byoc"/"request" matches non-streaming pipelines.
+		if p.JobType != "" && !pipelineMatchesJobType(k.pipeline, p.JobType) {
+			continue
+		}
+
 		ma := types.ModelAvailability{
 			Pipeline:      k.pipeline,
 			Model:         k.model,
@@ -312,6 +334,42 @@ func parseGPUsFromCapabilities(raw string, seen map[string]gpuEntry) {
 			}
 		}
 	}
+}
+
+// streamingPipeline is the pipeline name used for live streaming sessions.
+const streamingPipeline = "live-video-to-video"
+
+// pipelineMatchesJobType returns true if a pipeline name matches the requested job type.
+// "stream" matches only live-video-to-video; "ai-batch", "byoc", or "request" match
+// all other pipelines.
+func pipelineMatchesJobType(pipeline, jobType string) bool {
+	switch jobType {
+	case "stream":
+		return pipeline == streamingPipeline
+	case "ai-batch", "byoc", "request":
+		return pipeline != streamingPipeline
+	default:
+		return true
+	}
+}
+
+// orchMatchesFilter returns true if an orchestrator's capabilities contain at
+// least one pipeline matching the pipeline and/or job_type filter.
+func orchMatchesFilter(rawCapabilities, pipeline, jobType string) bool {
+	var caps rawCaps
+	if err := json.Unmarshal([]byte(rawCapabilities), &caps); err != nil {
+		return false
+	}
+	for _, hw := range caps.Hardware {
+		if pipeline != "" && hw.Pipeline != pipeline {
+			continue
+		}
+		if jobType != "" && !pipelineMatchesJobType(hw.Pipeline, jobType) {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 func parseModelsFromCapabilities(raw string, agg map[modelKey]*modelAgg) {

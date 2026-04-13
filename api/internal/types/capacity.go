@@ -3,7 +3,7 @@ package types
 import "time"
 
 // CapacityEntry is one row for active requirement NET-003 served by
-// GET /v1/net/capacity.
+// GET /v1/network/capacity.
 type CapacityEntry struct {
 	Pipeline       string
 	ModelID        string
@@ -14,7 +14,7 @@ type CapacityEntry struct {
 }
 
 // CapacitySummary is the response shape for active requirement NET-003 served by
-// GET /v1/net/capacity.
+// GET /v1/network/capacity.
 type CapacitySummary struct {
 	SnapshotTime time.Time
 	Entries      []CapacityEntry

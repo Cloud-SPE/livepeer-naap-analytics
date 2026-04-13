@@ -9,7 +9,7 @@ import (
 
 // handleGetBYOCSummary returns per-capability aggregates for BYOC jobs.
 // Capabilities are dynamic (e.g. "openai-chat-completions") and stored verbatim.
-// GET /v1/byoc/summary
+// GET /v1/requests/byoc/summary
 func (s *Server) handleGetBYOCSummary(w http.ResponseWriter, r *http.Request) {
 	p := parseQueryParams(r)
 	result, err := s.svc.GetBYOCSummary(r.Context(), p)
@@ -25,7 +25,7 @@ func (s *Server) handleGetBYOCSummary(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleListBYOCJobs returns cursor-paginated completed BYOC job records.
-// GET /v1/byoc/jobs
+// GET /v1/requests/byoc/jobs
 func (s *Server) handleListBYOCJobs(w http.ResponseWriter, r *http.Request) {
 	if err := rejectLegacyPaginationParams(r); err != nil {
 		writeError(w, http.StatusBadRequest, "Bad Request", err.Error())
@@ -50,7 +50,7 @@ func (s *Server) handleListBYOCJobs(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleGetBYOCWorkers returns per-capability worker inventory.
-// GET /v1/byoc/workers
+// GET /v1/requests/byoc/workers
 func (s *Server) handleGetBYOCWorkers(w http.ResponseWriter, r *http.Request) {
 	p := parseQueryParams(r)
 	result, err := s.svc.GetBYOCWorkers(r.Context(), p)
@@ -66,7 +66,7 @@ func (s *Server) handleGetBYOCWorkers(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleGetBYOCAuthSummary returns per-capability auth event success/failure rates.
-// GET /v1/byoc/auth
+// GET /v1/requests/byoc/auth
 func (s *Server) handleGetBYOCAuthSummary(w http.ResponseWriter, r *http.Request) {
 	p := parseQueryParams(r)
 	result, err := s.svc.GetBYOCAuthSummary(r.Context(), p)

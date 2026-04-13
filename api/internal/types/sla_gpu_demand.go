@@ -6,7 +6,7 @@ import "time"
 // SLA Compliance
 // ---------------------------------------------------------------------------
 
-// SLAComplianceParams holds validated query parameters for GET /v1/sla/compliance.
+// SLAComplianceParams holds validated query parameters for GET /v1/streaming/sla.
 type SLAComplianceParams struct {
 	OrchestratorAddress string
 	Region              string
@@ -20,7 +20,7 @@ type SLAComplianceParams struct {
 	Cursor              string
 }
 
-// SLAComplianceRow is one row in the /v1/sla/compliance response.
+// SLAComplianceRow is one row in the /v1/streaming/sla response.
 // `sla_score` is the contracted quality-aware composite score. Rows come from
 // precomputed final SLA serving stores, and component fields are exposed
 // alongside additive support inputs so downstream consumers do not have to
@@ -81,7 +81,7 @@ type SLAComplianceRow struct {
 // Network Demand
 // ---------------------------------------------------------------------------
 
-// NetworkDemandParams holds validated query parameters for GET /v1/network/demand.
+// NetworkDemandParams holds validated query parameters for GET /v1/streaming/demand.
 type NetworkDemandParams struct {
 	Gateway    string
 	Region     string
@@ -94,7 +94,7 @@ type NetworkDemandParams struct {
 	Cursor     string
 }
 
-// NetworkDemandRow is one row in the /v1/network/demand response.
+// NetworkDemandRow is one row in the /v1/streaming/demand response.
 type NetworkDemandRow struct {
 	WindowStart               time.Time `json:"window_start"`
 	Org                       *string   `json:"org,omitempty"`
@@ -134,7 +134,7 @@ type NetworkDemandRow struct {
 // GPU-Sliced Network Demand
 // ---------------------------------------------------------------------------
 
-// GPUNetworkDemandParams holds validated query parameters for GET /v1/gpu/network-demand.
+// GPUNetworkDemandParams holds validated query parameters for GET /v1/streaming/gpu-demand.
 type GPUNetworkDemandParams struct {
 	Gateway             string
 	OrchestratorAddress string
@@ -149,7 +149,7 @@ type GPUNetworkDemandParams struct {
 	Cursor              string
 }
 
-// GPUNetworkDemandRow is one row in the /v1/gpu/network-demand response.
+// GPUNetworkDemandRow is one row in the /v1/streaming/gpu-demand response.
 type GPUNetworkDemandRow struct {
 	WindowStart               time.Time `json:"window_start"`
 	Org                       *string   `json:"org,omitempty"`
@@ -192,7 +192,7 @@ type GPUNetworkDemandRow struct {
 // GPU Metrics
 // ---------------------------------------------------------------------------
 
-// GPUMetricsParams holds validated query parameters for GET /v1/gpu/metrics.
+// GPUMetricsParams holds validated query parameters for GET /v1/streaming/gpu-metrics.
 type GPUMetricsParams struct {
 	OrchestratorAddress string
 	GPUID               string
@@ -209,7 +209,7 @@ type GPUMetricsParams struct {
 	Cursor              string
 }
 
-// GPUMetric is one row in the /v1/gpu/metrics response.
+// GPUMetric is one row in the /v1/streaming/gpu-metrics response.
 type GPUMetric struct {
 	WindowStart               time.Time `json:"window_start"`
 	Org                       *string   `json:"org,omitempty"`

@@ -14,7 +14,7 @@ import (
 
 func TestListAIBatchJobs_HappyPath(t *testing.T) {
 	srv := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/v1/ai-batch/jobs?limit=2", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/requests/ai-batch/jobs?limit=2", nil)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
@@ -30,7 +30,7 @@ func TestListAIBatchJobs_HappyPath(t *testing.T) {
 
 func TestListAIBatchJobs_RejectsLegacyPaginationParams(t *testing.T) {
 	srv := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/v1/ai-batch/jobs?offset=1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/requests/ai-batch/jobs?offset=1", nil)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
@@ -42,7 +42,7 @@ func TestListAIBatchJobs_RejectsLegacyPaginationParams(t *testing.T) {
 
 func TestListAIBatchJobs_InvalidCursor(t *testing.T) {
 	srv := newTestServerWithRepo(t, &invalidCursorJobRepo{})
-	req := httptest.NewRequest(http.MethodGet, "/v1/ai-batch/jobs?cursor=bad-token", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/requests/ai-batch/jobs?cursor=bad-token", nil)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
@@ -54,7 +54,7 @@ func TestListAIBatchJobs_InvalidCursor(t *testing.T) {
 
 func TestListBYOCJobs_HappyPath(t *testing.T) {
 	srv := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/v1/byoc/jobs?limit=2", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/requests/byoc/jobs?limit=2", nil)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
@@ -76,10 +76,10 @@ func TestJobAPIs_ExposeSelectionOutcomeFields(t *testing.T) {
 		dataField string
 		kind      string
 	}{
-		{path: "/v1/ai-batch/jobs", dataField: "selection_outcome", kind: "list"},
-		{path: "/v1/byoc/jobs", dataField: "selection_outcome", kind: "list"},
-		{path: "/v1/ai-batch/summary", dataField: "selected_attribution_worked_rate", kind: "summary"},
-		{path: "/v1/byoc/summary", dataField: "selected_attribution_worked_rate", kind: "summary"},
+		{path: "/v1/requests/ai-batch/jobs", dataField: "selection_outcome", kind: "list"},
+		{path: "/v1/requests/byoc/jobs", dataField: "selection_outcome", kind: "list"},
+		{path: "/v1/requests/ai-batch/summary", dataField: "selected_attribution_worked_rate", kind: "summary"},
+		{path: "/v1/requests/byoc/summary", dataField: "selected_attribution_worked_rate", kind: "summary"},
 	}
 
 	for _, tc := range tests {
@@ -115,9 +115,9 @@ func TestJobAPIs_ExposeSelectionOutcomeFields(t *testing.T) {
 	}
 }
 
-func TestDashboardJobsOverview_ExposesSelectionOutcomeBreakdown(t *testing.T) {
+func TestDashboardKPI_ExposesRequestsSelectionOutcomeBreakdown(t *testing.T) {
 	srv := newTestServerWithRepo(t, &jobSelectionOutcomeRepo{})
-	req := httptest.NewRequest(http.MethodGet, "/v1/dashboard/jobs/overview", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/dashboard/kpi", nil)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
@@ -128,14 +128,15 @@ func TestDashboardJobsOverview_ExposesSelectionOutcomeBreakdown(t *testing.T) {
 	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
-	data, ok := body["data"].(map[string]any)
+	// Combined payload: check requests section
+	requests, ok := body["requests"].(map[string]any)
 	if !ok {
-		t.Fatalf("expected data object, got %T", body["data"])
+		t.Fatalf("expected requests object, got %T", body["requests"])
 	}
 	for _, family := range []string{"ai_batch", "byoc"} {
-		stats, ok := data[family].(map[string]any)
+		stats, ok := requests[family].(map[string]any)
 		if !ok {
-			t.Fatalf("expected %s object, got %T", family, data[family])
+			t.Fatalf("expected %s object, got %T", family, requests[family])
 		}
 		for _, field := range []string{"selected_jobs", "no_orch_jobs", "unknown_jobs", "selected_attribution_worked_rate"} {
 			if _, ok := stats[field]; !ok {
@@ -143,11 +144,15 @@ func TestDashboardJobsOverview_ExposesSelectionOutcomeBreakdown(t *testing.T) {
 			}
 		}
 	}
+	// Check streaming section exists
+	if _, ok := body["streaming"]; !ok {
+		t.Fatal("expected streaming section in combined KPI payload")
+	}
 }
 
 func TestJobsDemand_HappyPath(t *testing.T) {
 	srv := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/v1/jobs/demand?limit=5", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/requests/demand?limit=5", nil)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
@@ -163,7 +168,7 @@ func TestJobsDemand_HappyPath(t *testing.T) {
 
 func TestJobsDemand_RejectsLegacyPaginationParams(t *testing.T) {
 	srv := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/v1/jobs/demand?page=1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/requests/demand?page=1", nil)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
@@ -175,7 +180,7 @@ func TestJobsDemand_RejectsLegacyPaginationParams(t *testing.T) {
 
 func TestJobsSLA_InvalidCursor(t *testing.T) {
 	srv := newTestServerWithRepo(t, &invalidCursorJobRepo{})
-	req := httptest.NewRequest(http.MethodGet, "/v1/jobs/sla?cursor=bad-token", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/requests/sla?cursor=bad-token", nil)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
@@ -188,7 +193,7 @@ func TestJobsSLA_InvalidCursor(t *testing.T) {
 func TestJobsSLA_UsesOrchestratorURIQueryParam(t *testing.T) {
 	repoSpy := &jobParamCaptureRepo{}
 	srv := newTestServerWithRepo(t, repoSpy)
-	req := httptest.NewRequest(http.MethodGet, "/v1/jobs/sla?orchestrator_uri=HTTPS://ORCH.EXAMPLE.COM:8935", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/requests/sla?orchestrator_uri=HTTPS://ORCH.EXAMPLE.COM:8935", nil)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 

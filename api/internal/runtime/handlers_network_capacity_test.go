@@ -9,7 +9,7 @@ import (
 
 func TestGetCapacitySummary_HappyPath(t *testing.T) {
 	srv := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/v1/net/capacity", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/network/capacity", nil)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
@@ -29,7 +29,7 @@ func TestGetCapacitySummary_HappyPath(t *testing.T) {
 
 func TestGetCapacitySummary_WithOrg(t *testing.T) {
 	srv := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/v1/net/capacity?org=daydream", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/network/capacity?org=daydream", nil)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {

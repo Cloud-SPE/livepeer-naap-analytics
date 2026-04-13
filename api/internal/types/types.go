@@ -18,6 +18,7 @@ type QueryParams struct {
 	OrchAddress string    // filter by orch ETH address (normalised lowercase)
 	StreamID    string    // filter by stream ID
 	FailureType string    // "no_orch_available" | "orch_swap" | "inference_restart" | "inference_error"
+	JobType     string    // "stream" | "ai-batch" | "byoc" | "" for all
 	StartTime   time.Time // time window start (zero = service-layer default)
 	EndTime     time.Time // time window end (zero = now)
 	Granularity string    // "1m" | "5m" | "1h" | "1d"

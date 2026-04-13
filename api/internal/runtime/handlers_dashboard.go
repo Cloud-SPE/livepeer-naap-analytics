@@ -4,24 +4,55 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
+
+	"github.com/livepeer/naap-analytics/internal/types"
 )
 
 // handleGetDashboardKPI serves GET /v1/dashboard/kpi
+// Returns a combined payload with streaming KPI and request-job overview.
 // Query params: window=24h (default) or window=7d — capped at 168 h.
 func (s *Server) handleGetDashboardKPI(w http.ResponseWriter, r *http.Request) {
 	hours := parseDashboardWindow(r, 24, 168)
 	p := parseQueryParams(r)
 
-	result, err := s.svc.GetDashboardKPI(r.Context(), hours, p.Pipeline, p.ModelID)
-	if err != nil {
-		s.providers.Logger.Sugar().Errorw("get dashboard kpi failed", "error", err)
+	var (
+		streaming *types.DashboardKPI
+		requests  *types.DashboardJobsOverview
+		errS, errR error
+		wg         sync.WaitGroup
+	)
+
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		streaming, errS = s.svc.GetDashboardKPI(r.Context(), hours, p.Pipeline, p.ModelID)
+	}()
+	go func() {
+		defer wg.Done()
+		requests, errR = s.svc.GetDashboardJobsOverview(r.Context(), p)
+	}()
+	wg.Wait()
+
+	if errS != nil {
+		s.providers.Logger.Sugar().Errorw("get dashboard kpi (streaming) failed", "error", errS)
 		writeError(w, http.StatusInternalServerError, "Internal Server Error", "")
 		return
 	}
-	respondJSON(w, http.StatusOK, result)
+	if errR != nil {
+		s.providers.Logger.Sugar().Errorw("get dashboard kpi (requests) failed", "error", errR)
+		writeError(w, http.StatusInternalServerError, "Internal Server Error", "")
+		return
+	}
+
+	respondJSON(w, http.StatusOK, types.DashboardKPICombined{
+		Streaming: streaming,
+		Requests:  requests,
+	})
 }
 
 // handleGetDashboardPipelines serves GET /v1/dashboard/pipelines
+// Returns a combined payload with streaming pipeline usage and request-job breakdowns.
 // Query params: limit=5 (default, max 20).
 func (s *Server) handleGetDashboardPipelines(w http.ResponseWriter, r *http.Request) {
 	limit := 5
@@ -33,14 +64,54 @@ func (s *Server) handleGetDashboardPipelines(w http.ResponseWriter, r *http.Requ
 			limit = n
 		}
 	}
+	p := parseQueryParams(r)
 
-	result, err := s.svc.GetDashboardPipelines(r.Context(), limit)
-	if err != nil {
-		s.providers.Logger.Sugar().Errorw("get dashboard pipelines failed", "error", err)
+	var (
+		streaming    []types.DashboardPipelineUsage
+		byPipeline   []types.DashboardJobsByPipelineRow
+		byCapability []types.DashboardJobsByCapabilityRow
+		errS, errP, errC error
+		wg               sync.WaitGroup
+	)
+
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		streaming, errS = s.svc.GetDashboardPipelines(r.Context(), limit)
+	}()
+	go func() {
+		defer wg.Done()
+		byPipeline, errP = s.svc.GetDashboardJobsByPipeline(r.Context(), p)
+	}()
+	go func() {
+		defer wg.Done()
+		byCapability, errC = s.svc.GetDashboardJobsByCapability(r.Context(), p)
+	}()
+	wg.Wait()
+
+	if errS != nil {
+		s.providers.Logger.Sugar().Errorw("get dashboard pipelines (streaming) failed", "error", errS)
 		writeError(w, http.StatusInternalServerError, "Internal Server Error", "")
 		return
 	}
-	respondJSON(w, http.StatusOK, result)
+	if errP != nil {
+		s.providers.Logger.Sugar().Errorw("get dashboard pipelines (by-pipeline) failed", "error", errP)
+		writeError(w, http.StatusInternalServerError, "Internal Server Error", "")
+		return
+	}
+	if errC != nil {
+		s.providers.Logger.Sugar().Errorw("get dashboard pipelines (by-capability) failed", "error", errC)
+		writeError(w, http.StatusInternalServerError, "Internal Server Error", "")
+		return
+	}
+
+	respondJSON(w, http.StatusOK, types.DashboardPipelinesCombined{
+		Streaming: streaming,
+		Requests: &types.DashboardPipelinesRequestsSection{
+			ByPipeline:   byPipeline,
+			ByCapability: byCapability,
+		},
+	})
 }
 
 // handleGetDashboardOrchestrators serves GET /v1/dashboard/orchestrators

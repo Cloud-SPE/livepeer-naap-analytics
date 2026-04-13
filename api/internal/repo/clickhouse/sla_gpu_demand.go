@@ -10,7 +10,7 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// SLA Compliance  —  GET /v1/sla/compliance
+// SLA Compliance  —  GET /v1/streaming/sla
 // ---------------------------------------------------------------------------
 
 // ListSLACompliance returns paginated SLA compliance rows from thin api_* read
@@ -150,7 +150,7 @@ func buildSLAWhere(p types.SLAComplianceParams) (string, []any) {
 }
 
 // ---------------------------------------------------------------------------
-// Network Demand  —  GET /v1/network/demand
+// Network Demand  —  GET /v1/streaming/demand
 // ---------------------------------------------------------------------------
 
 // ListNetworkDemand returns paginated network demand rows from api_* read
@@ -268,7 +268,7 @@ func buildDemandWhere(p types.NetworkDemandParams) (string, []any) {
 }
 
 // ---------------------------------------------------------------------------
-// GPU-Sliced Network Demand  —  GET /v1/gpu/network-demand
+// GPU-Sliced Network Demand  —  GET /v1/streaming/gpu-demand
 // ---------------------------------------------------------------------------
 
 // ListGPUNetworkDemand returns paginated GPU-sliced network demand rows using
@@ -392,7 +392,7 @@ func buildGPUDemandWhere(p types.GPUNetworkDemandParams) (string, []any) {
 }
 
 // ---------------------------------------------------------------------------
-// GPU Metrics  —  GET /v1/gpu/metrics
+// GPU Metrics  —  GET /v1/streaming/gpu-metrics
 // ---------------------------------------------------------------------------
 
 // ListGPUMetrics returns paginated GPU performance metrics from api_* read

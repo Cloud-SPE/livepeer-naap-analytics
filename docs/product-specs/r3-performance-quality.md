@@ -15,7 +15,7 @@ history.
 
 Serve model-level performance from the published semantic layer through:
 
-- `GET /v1/perf/by-model`
+- `GET /v1/streaming/perf-by-model`
 
 The active product contract for R3 is intentionally limited to the live route
 set. Supporting semantics and lower-layer historical context are preserved in
@@ -25,7 +25,7 @@ set. Supporting semantics and lower-layer historical context are preserved in
 
 ### PERF-001: Performance by model
 
-`GET /v1/perf/by-model`
+`GET /v1/streaming/perf-by-model`
 
 Returns one row per `(pipeline, model)` for the requested window.
 

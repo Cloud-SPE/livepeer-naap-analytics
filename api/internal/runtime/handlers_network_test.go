@@ -14,7 +14,7 @@ import (
 
 func TestListOrchestrators_HappyPath(t *testing.T) {
 	srv := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/v1/net/orchestrators", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/network/orchestrators", nil)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
@@ -37,7 +37,7 @@ func TestListOrchestrators_HappyPath(t *testing.T) {
 
 func TestListOrchestrators_WithCursorParams(t *testing.T) {
 	srv := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/v1/net/orchestrators?org=daydream&active_only=true&limit=10&cursor=opaque-token", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/network/orchestrators?org=daydream&active_only=true&limit=10&cursor=opaque-token", nil)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
@@ -47,7 +47,7 @@ func TestListOrchestrators_WithCursorParams(t *testing.T) {
 
 func TestListOrchestrators_RejectsLegacyPaginationParams(t *testing.T) {
 	srv := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/v1/net/orchestrators?limit=10&offset=0", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/network/orchestrators?limit=10&offset=0", nil)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 	if rr.Code != http.StatusBadRequest {
@@ -58,7 +58,7 @@ func TestListOrchestrators_RejectsLegacyPaginationParams(t *testing.T) {
 
 func TestListOrchestrators_InvalidCursor(t *testing.T) {
 	srv := newTestServerWithRepo(t, &invalidCursorRepo{})
-	req := httptest.NewRequest(http.MethodGet, "/v1/net/orchestrators?cursor=not-a-real-token", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/network/orchestrators?cursor=not-a-real-token", nil)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 	if rr.Code != http.StatusBadRequest {
@@ -70,7 +70,7 @@ func TestListOrchestrators_InvalidCursor(t *testing.T) {
 func TestListOrchestrators_BadLimit_SilentFallback(t *testing.T) {
 	// parseQueryParams silently falls back to default limit for non-numeric values.
 	srv := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/v1/net/orchestrators?limit=notanumber", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/network/orchestrators?limit=notanumber", nil)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
@@ -80,7 +80,7 @@ func TestListOrchestrators_BadLimit_SilentFallback(t *testing.T) {
 
 func TestListModels_HappyPath(t *testing.T) {
 	srv := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/v1/net/models", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/network/models", nil)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 

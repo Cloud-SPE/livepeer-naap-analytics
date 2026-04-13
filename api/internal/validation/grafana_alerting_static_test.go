@@ -458,7 +458,7 @@ func TestAffectedDashboardPanelsUseCollisionAwareLabelsAndStreamingSLA(t *testin
 					if !strings.Contains(sql, "FROM naap.api_sla_compliance") {
 						t.Fatalf("panel %q in %s should read from streaming SLA source", panel.Title, path)
 					}
-					if strings.Contains(sql, "api_unified_sla") {
+					if strings.Contains(sql, "api_requests_sla") {
 						t.Fatalf("panel %q in %s should not reference request/response SLA source", panel.Title, path)
 					}
 					if !strings.Contains(sql, "argMax(sla_score") {
@@ -471,7 +471,7 @@ func TestAffectedDashboardPanelsUseCollisionAwareLabelsAndStreamingSLA(t *testin
 					if !strings.Contains(sql, "FROM naap.api_sla_compliance") {
 						t.Fatalf("panel %q in %s should join streaming SLA data", panel.Title, path)
 					}
-					if strings.Contains(sql, "api_unified_sla") {
+					if strings.Contains(sql, "api_requests_sla") {
 						t.Fatalf("panel %q in %s should not reference request/response SLA source", panel.Title, path)
 					}
 					if !strings.Contains(sql, "\"SLA Score\"") {
