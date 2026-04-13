@@ -838,7 +838,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "WITH ens AS (SELECT orch_address AS addr, name AS ens_name FROM naap.api_latest_orchestrator_state),\nactive_paths AS (\n    SELECT orch_address AS addr, gateway,\n        ifNull(nullIf(pipeline, ''), 'unknown') AS pipeline,\n        countDistinct(stream_id) AS active_streams,\n        round(avg(output_fps), 2) AS avg_fps\n    FROM naap.api_active_stream_state\n    WHERE last_seen > now() - INTERVAL 15 MINUTE\n    AND stream_id != ''\n    AND attribution_status = 'resolved'\n    AND orch_address IS NOT NULL AND orch_address != ''\n    AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n    GROUP BY addr, gateway, pipeline\n)\nSELECT ifNull(gateway, 'unknown') AS \"From\",\n    if(ifNull(ens.ens_name, '') != '' AND NOT startsWith(lower(ens.ens_name), '0x'), ens.ens_name, a.addr) AS \"Orchestrator\",\n    a.pipeline AS \"Pipeline\",\n    toUInt64(a.active_streams) AS \"Active Streams (15m)\",\n    toFloat64(a.avg_fps) AS \"Avg FPS\"\nFROM active_paths a\nLEFT JOIN ens e ON e.addr = a.addr\nWHERE ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), a.addr))\nORDER BY \"Active Streams (15m)\" DESC, \"Avg FPS\" DESC\nLIMIT 50",
+          "rawSql": "WITH identity AS (\n    SELECT addr, ens_name\n    FROM (\n        SELECT orch_address AS addr,\n            name AS ens_name,\n            row_number() OVER (PARTITION BY orch_address ORDER BY last_seen DESC, org DESC) AS rn\n        FROM naap.api_latest_orchestrator_state\n    )\n    WHERE rn = 1\n),\nlabel_meta AS (\n    SELECT addr,\n        ens_name,\n        count() OVER (PARTITION BY lower(ens_name)) AS name_collision_count\n    FROM identity\n),\nlabels AS (\n    SELECT addr,\n        if(ifNull(ens_name, '') != '' AND NOT startsWith(lower(ens_name), '0x'), if(name_collision_count > 1, concat(ens_name, ' (', left(addr, 8), '...', right(addr, 4), ')'), ens_name), concat(left(addr, 8), '...', right(addr, 4))) AS orch_label\n    FROM label_meta\n),\nactive_paths AS (\n    SELECT orch_address AS addr, gateway,\n        ifNull(nullIf(pipeline, ''), 'unknown') AS pipeline,\n        countDistinct(stream_id) AS active_streams,\n        round(avg(output_fps), 2) AS avg_fps\n    FROM naap.api_active_stream_state\n    WHERE last_seen > now() - INTERVAL 15 MINUTE\n    AND stream_id != ''\n    AND attribution_status = 'resolved'\n    AND orch_address IS NOT NULL AND orch_address != ''\n    AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n    GROUP BY addr, gateway, pipeline\n)\nSELECT ifNull(gateway, 'unknown') AS \"From\",\n    ifNull(labels.orch_label, concat(left(a.addr, 8), '...', right(a.addr, 4))) AS \"Orchestrator\",\n    a.addr AS \"Orchestrator Address\",\n    a.pipeline AS \"Pipeline\",\n    toUInt64(a.active_streams) AS \"Active Streams (15m)\",\n    toFloat64(a.avg_fps) AS \"Avg FPS\"\nFROM active_paths a\nLEFT JOIN labels ON labels.addr = a.addr\nWHERE ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), a.addr))\nORDER BY \"Active Streams (15m)\" DESC, \"Avg FPS\" DESC\nLIMIT 50",
           "refId": "A"
         }
       ],
@@ -905,7 +905,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Orchestrator ENS"
+              "options": "Orchestrator"
             },
             "properties": [
               {
@@ -917,12 +917,12 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Avg FPS"
+              "options": "SLA Score"
             },
             "properties": [
               {
                 "id": "unit",
-                "value": "fps"
+                "value": "none"
               }
             ]
           }
@@ -954,7 +954,7 @@
           "mode": "single",
           "sort": "none"
         },
-        "xField": "Orchestrator ENS",
+        "xField": "Orchestrator",
         "xTickLabelRotation": -45,
         "xTickLabelSpacing": 0
       },
@@ -967,11 +967,11 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "WITH ens AS (SELECT orch_address AS addr, name AS ens_name FROM naap.api_latest_orchestrator_state)\nSELECT\n    if(ifNull(ens.ens_name, '') != '' AND NOT startsWith(lower(ens.ens_name), '0x'),\n       ens.ens_name, concat(left(fps.orch_address, 8), '...', right(fps.orch_address, 4))) AS \"Orchestrator ENS\",\n    fps.avg_fps AS \"Avg FPS\"\nFROM (\n    SELECT orch_address,\n        sum(inference_fps_sum) / nullIf(sum(sample_count), 0) AS avg_fps\n    FROM naap.api_fps_hourly\n    WHERE $__timeFilter(hour)\n      AND orch_address != ''\n      AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n      AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address))\n    GROUP BY orch_address\n) AS fps\nLEFT JOIN ens ON ens.addr = fps.orch_address\nORDER BY \"Avg FPS\" DESC\nLIMIT 10",
+          "rawSql": "WITH identity AS (\n    SELECT addr, ens_name\n    FROM (\n        SELECT orch_address AS addr,\n            name AS ens_name,\n            row_number() OVER (PARTITION BY orch_address ORDER BY last_seen DESC, org DESC) AS rn\n        FROM naap.api_latest_orchestrator_state\n    )\n    WHERE rn = 1\n),\nlabel_meta AS (\n    SELECT addr,\n        ens_name,\n        count() OVER (PARTITION BY lower(ens_name)) AS name_collision_count\n    FROM identity\n),\nlabels AS (\n    SELECT addr,\n        if(ifNull(ens_name, '') != '' AND NOT startsWith(lower(ens_name), '0x'), if(name_collision_count > 1, concat(ens_name, ' (', left(addr, 8), '...', right(addr, 4), ')'), ens_name), concat(left(addr, 8), '...', right(addr, 4))) AS orch_label\n    FROM label_meta\n),\neligible_orch AS (\n    SELECT DISTINCT orch_address\n    FROM naap.api_latest_orchestrator_state\n    WHERE orch_address != ''\n      AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n      AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address))\n),\nwindowed_sla AS (\n    SELECT s.orchestrator_address,\n        s.window_start,\n        s.requested_sessions,\n        s.pipeline_id,\n        ifNull(s.model_id, '') AS model_id_key,\n        ifNull(s.gpu_id, '') AS gpu_id_key,\n        s.sla_score\n    FROM naap.api_sla_compliance s\n    INNER JOIN eligible_orch eo ON eo.orch_address = s.orchestrator_address\n    WHERE $__timeFilter(s.window_start)\n      AND s.orchestrator_address != ''\n      AND s.sla_score IS NOT NULL\n),\nranked AS (\n    SELECT orchestrator_address,\n        argMax(sla_score, tuple(window_start, requested_sessions, pipeline_id, model_id_key, gpu_id_key)) AS latest_sla_score\n    FROM windowed_sla\n    GROUP BY orchestrator_address\n)\nSELECT ifNull(labels.orch_label, concat(left(ranked.orchestrator_address, 8), '...', right(ranked.orchestrator_address, 4))) AS \"Orchestrator\",\n    toFloat64(round(assumeNotNull(ranked.latest_sla_score), 2)) AS \"SLA Score\"\nFROM ranked\nLEFT JOIN labels ON labels.addr = ranked.orchestrator_address\nORDER BY \"SLA Score\" DESC\nLIMIT 10",
           "refId": "A"
         }
       ],
-      "title": "Top 10 Orchestrators by Avg FPS (Bar Chart)",
+      "title": "Top 10 Orchestrators by SLA Score (Bar Chart)",
       "type": "barchart"
     },
     {
@@ -1017,7 +1017,7 @@
         "sortBy": [
           {
             "desc": true,
-            "displayName": "Avg FPS"
+            "displayName": "SLA Score"
           }
         ]
       },
@@ -1030,7 +1030,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "WITH ens AS (SELECT orch_address AS addr, name AS ens_name FROM naap.api_latest_orchestrator_state),\nagg AS (\n    SELECT\n        orch_address,\n        ifNull(nullIf(canonical_pipeline, ''), 'unknown') AS pipeline,\n        countDistinct(canonical_session_key) AS active_streams,\n        sum(avg_output_fps * status_samples) / nullIf(sum(status_samples), 0) AS avg_fps,\n        ifNull(sum(avg_e2e_latency_ms * status_samples) / nullIf(sum(status_samples), 0), 0) / 1000.0 AS avg_e2e_latency_s\n    FROM naap.canonical_status_hours\n    WHERE $__timeFilter(hour)\n      AND orch_address != ''\n      AND is_terminal_tail_artifact = 0\n      AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n      AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address))\n    GROUP BY orch_address, pipeline\n)\nSELECT\n    if(ifNull(ens.ens_name, '') != '' AND NOT startsWith(lower(ens.ens_name), '0x'), ens.ens_name, a.orch_address) AS \"Orchestrator\",\n    a.pipeline AS \"Pipeline\",\n    a.active_streams AS \"Active Streams\",\n    round(a.avg_fps, 2) AS \"Avg FPS\",\n    round(a.avg_e2e_latency_s, 3) AS \"Avg E2E Latency (s)\"\nFROM agg a\nLEFT JOIN ens ON ens.addr = a.orch_address\nORDER BY a.active_streams DESC, a.avg_fps DESC\nLIMIT 20",
+          "rawSql": "WITH identity AS (\n    SELECT addr, ens_name\n    FROM (\n        SELECT orch_address AS addr,\n            name AS ens_name,\n            row_number() OVER (PARTITION BY orch_address ORDER BY last_seen DESC, org DESC) AS rn\n        FROM naap.api_latest_orchestrator_state\n    )\n    WHERE rn = 1\n),\nlabel_meta AS (\n    SELECT addr,\n        ens_name,\n        count() OVER (PARTITION BY lower(ens_name)) AS name_collision_count\n    FROM identity\n),\nlabels AS (\n    SELECT addr,\n        if(ifNull(ens_name, '') != '' AND NOT startsWith(lower(ens_name), '0x'), if(name_collision_count > 1, concat(ens_name, ' (', left(addr, 8), '...', right(addr, 4), ')'), ens_name), concat(left(addr, 8), '...', right(addr, 4))) AS orch_label\n    FROM label_meta\n),\nagg AS (\n    SELECT orch_address,\n        ifNull(nullIf(canonical_pipeline, ''), 'unknown') AS pipeline,\n        countDistinct(canonical_session_key) AS active_streams,\n        sum(avg_output_fps * status_samples) / nullIf(sum(status_samples), 0) AS avg_fps,\n        ifNull(sum(avg_e2e_latency_ms * status_samples) / nullIf(sum(status_samples), 0), 0) / 1000.0 AS avg_e2e_latency_s\n    FROM naap.canonical_status_hours\n    WHERE $__timeFilter(hour)\n      AND orch_address IS NOT NULL AND orch_address != ''\n      AND is_terminal_tail_artifact = 0\n      AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n      AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address))\n    GROUP BY orch_address, pipeline\n),\neligible_pairs AS (\n    SELECT DISTINCT orch_address, pipeline\n    FROM agg\n),\nlatest_sla AS (\n    SELECT s.orchestrator_address,\n        ifNull(nullIf(s.pipeline_id, ''), 'unknown') AS pipeline,\n        argMax(s.sla_score, tuple(s.window_start, s.requested_sessions, ifNull(s.model_id, ''), ifNull(s.gpu_id, ''))) AS latest_sla_score\n    FROM naap.api_sla_compliance s\n    INNER JOIN eligible_pairs ep\n        ON ep.orch_address = s.orchestrator_address\n       AND ep.pipeline = ifNull(nullIf(s.pipeline_id, ''), 'unknown')\n    WHERE $__timeFilter(s.window_start)\n      AND s.orchestrator_address != ''\n      AND s.sla_score IS NOT NULL\n    GROUP BY s.orchestrator_address, pipeline\n)\nSELECT ifNull(labels.orch_label, concat(left(a.orch_address, 8), '...', right(a.orch_address, 4))) AS \"Orchestrator\",\n    a.orch_address AS \"Orchestrator Address\",\n    a.pipeline AS \"Pipeline\",\n    a.active_streams AS \"Active Streams\",\n    round(a.avg_fps, 2) AS \"Avg FPS\",\n    round(a.avg_e2e_latency_s, 3) AS \"Avg E2E Latency (s)\",\n    round(latest_sla.latest_sla_score, 2) AS \"SLA Score\"\nFROM agg a\nLEFT JOIN latest_sla ON latest_sla.orchestrator_address = a.orch_address AND latest_sla.pipeline = a.pipeline\nLEFT JOIN labels ON labels.addr = a.orch_address\nORDER BY isNull(latest_sla.latest_sla_score) ASC, latest_sla.latest_sla_score DESC, a.active_streams DESC, a.avg_fps DESC\nLIMIT 20",
           "refId": "A"
         }
       ],
@@ -1106,7 +1106,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "WITH ens AS (SELECT orch_address AS addr, name AS ens_name FROM naap.api_latest_orchestrator_state)\nSELECT s.stream_id AS \"Stream ID\",\n    if(ifNull(e.ens_name, '') != '' AND NOT startsWith(lower(e.ens_name), '0x'), e.ens_name, ifNull(nullIf(s.orch_address, ''), 'unresolved')) AS \"Orchestrator\",\n    ifNull(s.pipeline, 'unknown') AS \"Pipeline\",\n    s.attribution_status AS \"Attribution Status\",\n    round(ifNull(s.output_fps, 0), 2) AS \"FPS\",\n    s.state AS \"State\",\n    toUInt64(greatest(dateDiff('second', s.sample_ts, now()), 0)) AS \"Last Sample Age (s)\"\nFROM naap.api_active_stream_state s\nLEFT JOIN ens e ON e.addr = s.orch_address\nWHERE s.last_seen > now() - INTERVAL 120 SECOND\nAND s.stream_id != ''\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), s.org))\nAND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), s.orch_address))\nORDER BY \"Last Sample Age (s)\" ASC, \"FPS\" DESC\nLIMIT 20",
+          "rawSql": "WITH identity AS (\n    SELECT addr, ens_name\n    FROM (\n        SELECT orch_address AS addr,\n            name AS ens_name,\n            row_number() OVER (PARTITION BY orch_address ORDER BY last_seen DESC, org DESC) AS rn\n        FROM naap.api_latest_orchestrator_state\n    )\n    WHERE rn = 1\n),\nlabel_meta AS (\n    SELECT addr,\n        ens_name,\n        count() OVER (PARTITION BY lower(ens_name)) AS name_collision_count\n    FROM identity\n),\nlabels AS (\n    SELECT addr,\n        if(ifNull(ens_name, '') != '' AND NOT startsWith(lower(ens_name), '0x'), if(name_collision_count > 1, concat(ens_name, ' (', left(addr, 8), '...', right(addr, 4), ')'), ens_name), concat(left(addr, 8), '...', right(addr, 4))) AS orch_label\n    FROM label_meta\n)\nSELECT s.stream_id AS \"Stream ID\",\n    s.orch_address AS \"Orchestrator Address\",\n    if(ifNull(labels.orch_label, '') != '', labels.orch_label, ifNull(nullIf(s.orch_address, ''), 'unresolved')) AS \"Orchestrator\",\n    ifNull(s.pipeline, 'unknown') AS \"Pipeline\",\n    s.attribution_status AS \"Attribution Status\",\n    round(ifNull(s.output_fps, 0), 2) AS \"FPS\",\n    s.state AS \"State\",\n    toUInt64(greatest(dateDiff('second', s.sample_ts, now()), 0)) AS \"Last Sample Age (s)\"\nFROM naap.api_active_stream_state s\nLEFT JOIN labels ON labels.addr = s.orch_address\nWHERE s.last_seen > now() - INTERVAL 120 SECOND\nAND s.stream_id != ''\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), s.org))\nAND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), s.orch_address))\nORDER BY \"Last Sample Age (s)\" ASC, \"FPS\" DESC\nLIMIT 20",
           "refId": "A"
         }
       ],

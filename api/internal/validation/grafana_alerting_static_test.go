@@ -52,9 +52,16 @@ type grafanaDashboardFile struct {
 	Panels []grafanaDashboardPanel `json:"panels"`
 }
 
+type grafanaDashboardTarget struct {
+	RawSQL string `json:"rawSql"`
+}
+
 type grafanaDashboardPanel struct {
-	ID     int                     `json:"id"`
-	Panels []grafanaDashboardPanel `json:"panels"`
+	ID      int                      `json:"id"`
+	Title   string                   `json:"title"`
+	Type    string                   `json:"type"`
+	Targets []grafanaDashboardTarget `json:"targets"`
+	Panels  []grafanaDashboardPanel  `json:"panels"`
 }
 
 func alertingFilePaths(t *testing.T) []string {
@@ -157,6 +164,15 @@ func collectDashboardPanelIDs(panels []grafanaDashboardPanel, out map[int]struct
 		}
 		if len(panel.Panels) > 0 {
 			collectDashboardPanelIDs(panel.Panels, out)
+		}
+	}
+}
+
+func walkDashboardPanels(panels []grafanaDashboardPanel, visit func(panel grafanaDashboardPanel)) {
+	for _, panel := range panels {
+		visit(panel)
+		if len(panel.Panels) > 0 {
+			walkDashboardPanels(panel.Panels, visit)
 		}
 	}
 }
@@ -284,15 +300,15 @@ func TestGrafanaAlertTemplateIncludesActionableTargetsAndGrafanaLink(t *testing.
 
 func TestGrafanaMultiDimensionalAlertsUseMathExpressions(t *testing.T) {
 	expectedMathRules := map[string]string{
-		"naap_scrape_target_down":  "$A < 1",
-		"naap_host_disk_high":      "$A > 85",
-		"naap_kafka_lag_high":      "$A > 50000",
-		"naap_rr_dup_rows":         "$A > 0",
-		"naap_rr_canon_cov_low":    "$A < 98",
-		"naap_rr_density_drop":     "$A < 20",
-		"naap_stream_sig_cov_low":  "$A < 60",
-		"naap_stream_unserved_high":"$A > 40",
-		"naap_stream_density_drop": "$A < 20",
+		"naap_scrape_target_down":   "$A < 1",
+		"naap_host_disk_high":       "$A > 85",
+		"naap_kafka_lag_high":       "$A > 50000",
+		"naap_rr_dup_rows":          "$A > 0",
+		"naap_rr_canon_cov_low":     "$A < 98",
+		"naap_rr_density_drop":      "$A < 20",
+		"naap_stream_sig_cov_low":   "$A < 60",
+		"naap_stream_unserved_high": "$A > 40",
+		"naap_stream_density_drop":  "$A < 20",
 	}
 
 	for uid, wantExpression := range expectedMathRules {
@@ -313,5 +329,163 @@ func TestGrafanaMultiDimensionalAlertsUseMathExpressions(t *testing.T) {
 		if !found {
 			t.Fatalf("rule %s missing refId B expression", uid)
 		}
+	}
+}
+
+func TestAffectedDashboardPanelsDeduplicateOrchestratorStateLookups(t *testing.T) {
+	root := repoRoot(t)
+	paths := []string{
+		filepath.Join(root, "infra", "grafana", "dashboards", "naap-overview.json"),
+		filepath.Join(root, "infra", "grafana", "dashboards", "naap-live-operations.json"),
+		filepath.Join(root, "infra", "grafana", "dashboards", "naap-performance-drilldown.json"),
+		filepath.Join(root, "infra", "grafana", "dashboards", "naap-supply-inventory.json"),
+		filepath.Join(root, "infra", "grafana", "dashboards", "naap-economics.json"),
+	}
+
+	affectedTitles := map[string]struct{}{
+		"Gateway -> Orchestrator -> Pipeline Paths (15m)":        {},
+		"Top 10 Orchestrators by SLA Score (Bar Chart)":          {},
+		"Top Orchestrators (24h: Streams, FPS, Latency)":         {},
+		"Current Active Streams":                                 {},
+		"Current Known Live Streams":                             {},
+		"Current Streams by Orchestrator (includes zero-active)": {},
+		"Current Gateway -> Orchestrator -> Pipeline Paths":      {},
+		"FPS Average by Orchestrator (1h intervals)":             {},
+		"Jitter Coefficient by Orchestrator":                     {},
+		"GPU Inventory (Latest Snapshots)":                       {},
+		"Latest Quoted Prices by Orchestrator":                   {},
+	}
+
+	unsafeSnippets := []string{
+		"WITH ens AS (SELECT orch_address AS addr, name AS ens_name FROM naap.api_latest_orchestrator_state)",
+		"WITH ens AS (SELECT orch_address AS addr, name AS ens_name FROM naap.api_latest_orchestrator_state),",
+		"LEFT JOIN naap.api_latest_orchestrator_state o ON o.orch_address = so.orch_address",
+	}
+
+	for _, path := range paths {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("ReadFile %s: %v", path, err)
+		}
+
+		var dashboard grafanaDashboardFile
+		if err := json.Unmarshal(body, &dashboard); err != nil {
+			t.Fatalf("json.Unmarshal %s: %v", path, err)
+		}
+
+		walkDashboardPanels(dashboard.Panels, func(panel grafanaDashboardPanel) {
+			if _, ok := affectedTitles[panel.Title]; !ok {
+				return
+			}
+			if panel.Title == "Current Active Streams" && panel.Type != "table" {
+				return
+			}
+			for _, target := range panel.Targets {
+				sql := strings.TrimSpace(target.RawSQL)
+				if sql == "" {
+					continue
+				}
+				for _, snippet := range unsafeSnippets {
+					if strings.Contains(sql, snippet) {
+						t.Fatalf("panel %q in %s still contains unsafe orchestrator-state lookup %q", panel.Title, path, snippet)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestAffectedDashboardPanelsUseCollisionAwareLabelsAndStreamingSLA(t *testing.T) {
+	root := repoRoot(t)
+	paths := []string{
+		filepath.Join(root, "infra", "grafana", "dashboards", "naap-overview.json"),
+		filepath.Join(root, "infra", "grafana", "dashboards", "naap-live-operations.json"),
+		filepath.Join(root, "infra", "grafana", "dashboards", "naap-performance-drilldown.json"),
+		filepath.Join(root, "infra", "grafana", "dashboards", "naap-supply-inventory.json"),
+		filepath.Join(root, "infra", "grafana", "dashboards", "naap-economics.json"),
+	}
+
+	labelTitles := map[string]struct{}{
+		"Gateway -> Orchestrator -> Pipeline Paths (15m)":        {},
+		"Top 10 Orchestrators by SLA Score (Bar Chart)":          {},
+		"Top Orchestrators (24h: Streams, FPS, Latency)":         {},
+		"Current Active Streams":                                 {},
+		"Current Known Live Streams":                             {},
+		"Current Streams by Orchestrator (includes zero-active)": {},
+		"Current Gateway -> Orchestrator -> Pipeline Paths":      {},
+		"FPS Average by Orchestrator (1h intervals)":             {},
+		"Jitter Coefficient by Orchestrator":                     {},
+		"GPU Inventory (Latest Snapshots)":                       {},
+		"Latest Quoted Prices by Orchestrator":                   {},
+	}
+
+	var slaChartCount int
+
+	for _, path := range paths {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("ReadFile %s: %v", path, err)
+		}
+
+		var dashboard grafanaDashboardFile
+		if err := json.Unmarshal(body, &dashboard); err != nil {
+			t.Fatalf("json.Unmarshal %s: %v", path, err)
+		}
+
+		walkDashboardPanels(dashboard.Panels, func(panel grafanaDashboardPanel) {
+			if panel.Title == "Top 10 Orchestrators by Avg FPS (Bar Chart)" {
+				t.Fatalf("panel %q in %s should have been renamed to SLA Score", panel.Title, path)
+			}
+			if _, ok := labelTitles[panel.Title]; !ok {
+				return
+			}
+			if panel.Title == "Current Active Streams" && panel.Type != "table" {
+				return
+			}
+			for _, target := range panel.Targets {
+				sql := strings.TrimSpace(target.RawSQL)
+				if sql == "" {
+					continue
+				}
+				for _, required := range []string{"label_meta AS (", "name_collision_count", "labels AS ("} {
+					if !strings.Contains(sql, required) {
+						t.Fatalf("panel %q in %s missing collision-aware label snippet %q", panel.Title, path, required)
+					}
+				}
+				switch panel.Title {
+				case "Top 10 Orchestrators by SLA Score (Bar Chart)":
+					slaChartCount++
+					if !strings.Contains(sql, "FROM naap.api_sla_compliance") {
+						t.Fatalf("panel %q in %s should read from streaming SLA source", panel.Title, path)
+					}
+					if strings.Contains(sql, "api_unified_sla") {
+						t.Fatalf("panel %q in %s should not reference request/response SLA source", panel.Title, path)
+					}
+					if !strings.Contains(sql, "argMax(sla_score") {
+						t.Fatalf("panel %q in %s should rank by latest SLA score", panel.Title, path)
+					}
+					if !strings.Contains(sql, "eligible_orch AS (") || !strings.Contains(sql, "INNER JOIN eligible_orch") {
+						t.Fatalf("panel %q in %s should filter SLA rows through eligible orchestrators", panel.Title, path)
+					}
+				case "Top Orchestrators (24h: Streams, FPS, Latency)":
+					if !strings.Contains(sql, "FROM naap.api_sla_compliance") {
+						t.Fatalf("panel %q in %s should join streaming SLA data", panel.Title, path)
+					}
+					if strings.Contains(sql, "api_unified_sla") {
+						t.Fatalf("panel %q in %s should not reference request/response SLA source", panel.Title, path)
+					}
+					if !strings.Contains(sql, "\"SLA Score\"") {
+						t.Fatalf("panel %q in %s should expose an SLA Score column", panel.Title, path)
+					}
+					if !strings.Contains(sql, "eligible_pairs AS (") || !strings.Contains(sql, "INNER JOIN eligible_pairs") {
+						t.Fatalf("panel %q in %s should filter SLA rows through eligible address/pipeline pairs", panel.Title, path)
+					}
+				}
+			}
+		})
+	}
+
+	if slaChartCount != 2 {
+		t.Fatalf("expected 2 SLA chart panels, found %d", slaChartCount)
 	}
 }
