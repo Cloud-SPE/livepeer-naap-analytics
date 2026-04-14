@@ -259,10 +259,12 @@ job_gateway, job_orchestrator, worker_lifecycle
 ## Operational seam
 
 - `auto` owns the production scheduler:
-  - visible closed historical backlog first
+  - live lateness-window `tail` first
+  - latest eligible same-day closed-hour repair second
+  - queued explicit bounded repair requests third
   - dirty closed historical `(org, event_date)` partitions from late accepted
-    raw arrivals second
-  - live lateness-window `tail` third
+    raw arrivals fourth
+  - visible closed historical backlog fifth
 - `bootstrap` is a bounded/operator backlog catch-up mode
 - `backfill` owns deterministic manual historical replays
 - `tail` owns `event_ts > cutoff - lateness_window` when run directly

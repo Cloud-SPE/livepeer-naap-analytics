@@ -69,10 +69,15 @@ flowchart LR
     CUR[canonical_session_current_store]
     ROLL[canonical_status_hours_store / demand inputs / serving stores]
     DIRTY[resolver_dirty_partitions]
+    WINDOWS[resolver_dirty_windows]
+    REQUESTS[resolver_repair_requests]
     CLAIMS[resolver_window_claims]
 
     RAW --> DIRTY
+    RAW --> WINDOWS
     DIRTY --> CLAIMS
+    WINDOWS --> CLAIMS
+    REQUESTS --> CLAIMS
     CLAIMS --> SEL
     SEL --> ATTR
     ATTR --> CUR

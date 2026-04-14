@@ -2,6 +2,7 @@ package resolver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	ch "github.com/ClickHouse/clickhouse-go/v2"
 	"go.uber.org/zap"
 
 	"github.com/livepeer/naap-analytics/internal/config"
@@ -43,7 +45,7 @@ func New(cfg *config.Config, log *zap.Logger) (*Engine, error) {
 			Phase:  "idle",
 		},
 	}
-	engine.httpSrv = newMetricsServer(cfg.ResolverPort, engine.healthSnapshot)
+	engine.httpSrv = newMetricsServer(cfg.ResolverPort, engine.healthSnapshot, engine.registerAdminRoutes)
 	setResolverSchedulerPhase("idle")
 	return engine, nil
 }
@@ -53,6 +55,20 @@ func (m Mode) String() string {
 		return string(ModeTail)
 	}
 	return string(m)
+}
+
+func repairRequestExecutionContext(parent context.Context) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithTimeout(parent, 5*time.Minute)
+	return ch.Context(ctx, ch.WithSettings(ch.Settings{
+		"max_execution_time": int((5 * time.Minute).Seconds()) + 5,
+	})), cancel
+}
+
+func normalizeRepairRequestError(err error) error {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("repair request exceeded 5m execution timeout; narrow the window or use resolver-repair-window/backfill")
+	}
+	return err
 }
 
 func (e *Engine) healthSnapshot() schedulerHealthState {
@@ -71,6 +87,10 @@ func (e *Engine) healthSnapshot() schedulerHealthState {
 		copyClaim := *e.health.ActiveClaim
 		snapshot.ActiveClaim = &copyClaim
 	}
+	if e.health.ActiveRepairRequest != nil {
+		copyRequest := *e.health.ActiveRepairRequest
+		snapshot.ActiveRepairRequest = &copyRequest
+	}
 	if snapshot.Status == "" {
 		snapshot.Status = "ok"
 	}
@@ -86,15 +106,29 @@ func (e *Engine) setPhase(mode Mode, phase string) {
 	setResolverSchedulerPhase(phase)
 }
 
-func (e *Engine) setDirtyQueueDepth(depth uint64) {
+func (e *Engine) setHistoricalDirtyQueueDepth(depth uint64) {
 	e.mu.Lock()
-	e.health.DirtyQueueDepth = depth
+	e.health.HistoricalDirtyQueueDepth = depth
 	e.mu.Unlock()
 	resolverDirtyQueueDepth.WithLabelValues("historical_repair").Set(float64(depth))
 }
 
 func (e *Engine) setBootstrapBacklogDepth(depth uint64) {
 	resolverDirtyQueueDepth.WithLabelValues("bootstrap_backlog").Set(float64(depth))
+}
+
+func (e *Engine) setSameDayDirtyQueueDepth(depth uint64) {
+	e.mu.Lock()
+	e.health.SameDayDirtyQueueDepth = depth
+	e.mu.Unlock()
+	resolverDirtyQueueDepth.WithLabelValues("same_day_repair").Set(float64(depth))
+}
+
+func (e *Engine) setRepairRequestQueueDepth(depth uint64) {
+	e.mu.Lock()
+	e.health.RepairRequestQueueDepth = depth
+	e.mu.Unlock()
+	resolverDirtyQueueDepth.WithLabelValues("repair_request").Set(float64(depth))
 }
 
 func (e *Engine) setAcceptedRawScanWatermark(mark *dirtyScanWatermark) {
@@ -141,6 +175,24 @@ func (e *Engine) setActiveClaim(claim *windowClaim) {
 	e.mu.Unlock()
 }
 
+func (e *Engine) setActiveRepairRequest(request *repairRequest) {
+	e.mu.Lock()
+	if request == nil {
+		e.health.ActiveRepairRequest = nil
+		e.mu.Unlock()
+		return
+	}
+	e.health.ActiveRepairRequest = &schedulerRepairRequest{
+		RequestID:   request.RequestID,
+		Org:         request.Org,
+		WindowStart: request.WindowStart.UTC(),
+		WindowEnd:   request.WindowEnd.UTC(),
+		Status:      request.Status,
+		DryRun:      request.DryRun,
+	}
+	e.mu.Unlock()
+}
+
 func (e *Engine) Run(ctx context.Context, req RunRequest) {
 	if !e.cfg.ResolverEnabled {
 		e.log.Info("resolver disabled")
@@ -171,12 +223,6 @@ func (e *Engine) Run(ctx context.Context, req RunRequest) {
 		_ = e.Close(context.Background())
 		return
 	}
-	go func() {
-		e.log.Info("resolver metrics server started", zap.String("addr", e.httpSrv.Addr))
-		if err := e.httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			e.log.Warn("resolver metrics server stopped", zap.Error(err))
-		}
-	}()
 	if mode != ModeTail && mode != ModeBootstrap && mode != ModeAuto {
 		if _, err := e.Execute(ctx, req); err != nil {
 			e.log.Error("resolver execution failed", zap.Error(err))
@@ -184,6 +230,12 @@ func (e *Engine) Run(ctx context.Context, req RunRequest) {
 		_ = e.Close(context.Background())
 		return
 	}
+	go func() {
+		e.log.Info("resolver metrics server started", zap.String("addr", e.httpSrv.Addr))
+		if err := e.httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			e.log.Warn("resolver metrics server stopped", zap.Error(err))
+		}
+	}()
 
 	if mode == ModeBootstrap {
 		if _, err := e.Execute(ctx, req); err != nil {
@@ -254,12 +306,25 @@ func (e *Engine) executeAutoOnce(ctx context.Context, req RunRequest) (RunStats,
 
 func (e *Engine) executeAutoCycle(ctx context.Context, req RunRequest, nextTailAt time.Time) (RunStats, time.Time, error) {
 	req = e.boundedWindowRequest(req)
-	watermark, dirtyDepth, err := e.scanAndEnqueueDirtyPartitions(ctx, req)
+	if !req.DryRun {
+		if _, err := e.repo.requeueExpiredDirtyPartitions(ctx, req.Org, req.ExcludedOrgPrefixes); err != nil {
+			return RunStats{}, nextTailAt, err
+		}
+		if _, err := e.repo.requeueExpiredDirtyWindows(ctx, req.Org, req.ExcludedOrgPrefixes); err != nil {
+			return RunStats{}, nextTailAt, err
+		}
+		if _, err := e.repo.requeueExpiredRepairRequests(ctx, req.Org, req.ExcludedOrgPrefixes); err != nil {
+			return RunStats{}, nextTailAt, err
+		}
+	}
+	watermark, historicalDirtyDepth, sameDayDirtyDepth, repairRequestDepth, err := e.scanAndEnqueueDirtyWork(ctx, req)
 	if err != nil {
 		return RunStats{}, nextTailAt, err
 	}
 	e.setAcceptedRawScanWatermark(watermark)
-	e.setDirtyQueueDepth(dirtyDepth)
+	e.setHistoricalDirtyQueueDepth(historicalDirtyDepth)
+	e.setSameDayDirtyQueueDepth(sameDayDirtyDepth)
+	e.setRepairRequestQueueDepth(repairRequestDepth)
 
 	now := time.Now().UTC()
 	tailDue := !now.Before(nextTailAt)
@@ -269,22 +334,63 @@ func (e *Engine) executeAutoCycle(ctx context.Context, req RunRequest, nextTailA
 		return RunStats{}, nextTailAt, err
 	}
 	e.setBootstrapBacklogDepth(uint64(len(plan.PendingPartitions)))
-	// Keep one explicit scheduler order: visible backlog, then closed dirty-day
-	// repair, then live tail. Tail preempts the historical lanes once due.
-	phase := chooseAutoPhase(len(plan.PendingPartitions) > 0, dirtyDepth > 0, tailDue)
-	if phase == "bootstrap_backlog" {
+	// Keep one explicit scheduler order: live tail first, then the latest
+	// eligible same-day hour, then queued operator-triggered repairs, then
+	// historical dirty-day repair, and finally any remaining bootstrap backlog.
+	phase := chooseAutoPhase(len(plan.PendingPartitions) > 0, historicalDirtyDepth > 0, repairRequestDepth > 0, sameDayDirtyDepth > 0, tailDue)
+	if tailDue {
+		phase = "tail"
 		e.setPhase(ModeAuto, phase)
-		stats, _, err := e.executeHistoricalPartition(ctx, req, plan.PendingPartitions[0], "bootstrap_backlog")
+		tailReq := req
+		tailReq.Mode = ModeTail
+		tailReq.Start = nil
+		tailReq.End = nil
+		stats, _, err := e.executeWindow(ctx, e.boundedWindowRequest(tailReq))
 		if err != nil {
 			return stats, nextTailAt, err
 		}
-		if time.Now().UTC().Before(nextTailAt) {
-			return stats, nextTailAt, nil
-		}
-		tailDue = true
+		nextTailAt = time.Now().UTC().Add(e.cfg.ResolverInterval)
+		return stats, nextTailAt, nil
 	}
 
-	if chooseAutoPhase(false, dirtyDepth > 0, tailDue) == "historical_repair" {
+	if chooseAutoPhase(len(plan.PendingPartitions) > 0, historicalDirtyDepth > 0, repairRequestDepth > 0, sameDayDirtyDepth > 0, false) == "same_day_repair" {
+		repairCutoff := time.Now().UTC().Add(-e.cfg.ResolverLatenessWindow)
+		quietCutoff := time.Now().UTC().Add(-e.cfg.ResolverDirtyQuietPeriod)
+		window, ok, listErr := e.repo.nextEligiblePendingDirtyWindow(ctx, req.Org, req.ExcludedOrgPrefixes, repairCutoff, quietCutoff)
+		if listErr != nil {
+			return RunStats{}, nextTailAt, listErr
+		}
+		if ok {
+			phase = "same_day_repair"
+			e.setPhase(ModeAuto, phase)
+			stats, err := e.executeSameDayRepair(ctx, req, window)
+			if err != nil {
+				return stats, nextTailAt, err
+			}
+			return stats, nextTailAt, nil
+		}
+		if sameDayDirtyDepth > 0 {
+			e.setPhase(ModeAuto, "same_day_repair_wait")
+		}
+	}
+
+	if chooseAutoPhase(len(plan.PendingPartitions) > 0, historicalDirtyDepth > 0, repairRequestDepth > 0, false, false) == "repair_request" {
+		request, ok, listErr := e.repo.nextPendingRepairRequest(ctx, req.Org, req.ExcludedOrgPrefixes)
+		if listErr != nil {
+			return RunStats{}, nextTailAt, listErr
+		}
+		if ok {
+			phase = "repair_request"
+			e.setPhase(ModeAuto, phase)
+			stats, err := e.executeRepairRequest(ctx, req, request)
+			if err != nil {
+				return stats, nextTailAt, err
+			}
+			return stats, nextTailAt, nil
+		}
+	}
+
+	if chooseAutoPhase(len(plan.PendingPartitions) > 0, historicalDirtyDepth > 0, false, false, false) == "historical_repair" {
 		part, ok, listErr := e.repo.nextPendingDirtyPartition(ctx, req.Org, req.ExcludedOrgPrefixes)
 		if listErr != nil {
 			return RunStats{}, nextTailAt, listErr
@@ -300,25 +406,16 @@ func (e *Engine) executeAutoCycle(ctx context.Context, req RunRequest, nextTailA
 			if err != nil {
 				return stats, nextTailAt, err
 			}
-			if time.Now().UTC().Before(nextTailAt) {
-				return stats, nextTailAt, nil
-			}
-			tailDue = true
+			return stats, nextTailAt, nil
 		}
 	}
 
-	if tailDue {
-		phase = "tail"
-		e.setPhase(ModeAuto, phase)
-		tailReq := req
-		tailReq.Mode = ModeTail
-		tailReq.Start = nil
-		tailReq.End = nil
-		stats, _, err := e.executeWindow(ctx, e.boundedWindowRequest(tailReq))
+	if chooseAutoPhase(len(plan.PendingPartitions) > 0, false, false, false, false) == "bootstrap_backlog" {
+		e.setPhase(ModeAuto, "bootstrap_backlog")
+		stats, _, err := e.executeHistoricalPartition(ctx, req, plan.PendingPartitions[0], "bootstrap_backlog")
 		if err != nil {
 			return stats, nextTailAt, err
 		}
-		nextTailAt = time.Now().UTC().Add(e.cfg.ResolverInterval)
 		return stats, nextTailAt, nil
 	}
 
@@ -341,6 +438,17 @@ func dirtyPartitionReady(part dirtyPartition, now time.Time, quietPeriod time.Du
 		return true
 	}
 	return !part.LastDirtyAt.UTC().After(now.UTC().Add(-quietPeriod))
+}
+
+func dirtyWindowReady(window dirtyWindow, now time.Time, latenessWindow, quietPeriod time.Duration) bool {
+	repairCutoff := now.UTC().Add(-latenessWindow)
+	if window.WindowEnd.UTC().After(repairCutoff) {
+		return false
+	}
+	if quietPeriod <= 0 {
+		return true
+	}
+	return !window.LastDirtyAt.UTC().After(now.UTC().Add(-quietPeriod))
 }
 
 func (e *Engine) Close(ctx context.Context) error {
@@ -459,39 +567,56 @@ type bootstrapPlan struct {
 	PendingPartitions []backfillPartition
 }
 
-func (e *Engine) scanAndEnqueueDirtyPartitions(ctx context.Context, req RunRequest) (*dirtyScanWatermark, uint64, error) {
-	cutoff := truncateUTCDate(time.Now().UTC().Add(-e.cfg.ResolverLatenessWindow))
+func (e *Engine) scanAndEnqueueDirtyWork(ctx context.Context, req RunRequest) (*dirtyScanWatermark, uint64, uint64, uint64, error) {
+	now := time.Now().UTC()
+	historicalCutoff := truncateUTCDate(now.Add(-e.cfg.ResolverLatenessWindow))
+	currentDayStart := truncateUTCDate(now)
 	stateKey := dirtyScanStateKey(req.Org, req.ExcludedOrgPrefixes)
 	currentWatermark, err := e.repo.dirtyScanWatermark(ctx, stateKey)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, 0, 0, err
 	}
-	partitions, nextWatermark, err := e.repo.scanDirtyAcceptedRawPartitions(ctx, req.Org, req.ExcludedOrgPrefixes, cutoff, currentWatermark)
+	scanResult, err := e.repo.scanDirtyAcceptedRawPartitions(ctx, req.Org, req.ExcludedOrgPrefixes, historicalCutoff, currentDayStart, currentWatermark)
 	if err != nil {
-		return currentWatermark, 0, err
+		return currentWatermark, 0, 0, 0, err
 	}
 	// Persist a tuple watermark, not just a timestamp, so accepted raw rows with
 	// identical ingested_at values cannot be skipped across scheduler loops.
-	if nextWatermark != nil && !req.DryRun {
-		if err := e.repo.upsertDirtyScanWatermark(ctx, stateKey, *nextWatermark); err != nil {
-			return currentWatermark, 0, err
+	if scanResult.Watermark != nil && !req.DryRun {
+		if err := e.repo.upsertDirtyScanWatermark(ctx, stateKey, *scanResult.Watermark); err != nil {
+			return currentWatermark, 0, 0, 0, err
 		}
 	}
-	if nextWatermark != nil {
-		currentWatermark = nextWatermark
+	if scanResult.Watermark != nil {
+		currentWatermark = scanResult.Watermark
 	}
-	if len(partitions) > 0 && !req.DryRun {
-		enqueued, enqueueErr := e.repo.enqueueDirtyPartitions(ctx, partitions, time.Now().UTC())
+	if len(scanResult.HistoricalPartitions) > 0 && !req.DryRun {
+		enqueued, enqueueErr := e.repo.enqueueDirtyPartitions(ctx, scanResult.HistoricalPartitions, now)
 		if enqueueErr != nil {
-			return currentWatermark, 0, enqueueErr
+			return currentWatermark, 0, 0, 0, enqueueErr
 		}
 		resolverDirtyPartitionsEnqueued.Add(float64(enqueued))
 	}
-	depth, err := e.repo.pendingDirtyPartitionCount(ctx, req.Org, req.ExcludedOrgPrefixes)
-	if err != nil {
-		return currentWatermark, 0, err
+	if len(scanResult.SameDayWindows) > 0 && !req.DryRun {
+		enqueued, enqueueErr := e.repo.enqueueDirtyWindows(ctx, scanResult.SameDayWindows, now)
+		if enqueueErr != nil {
+			return currentWatermark, 0, 0, 0, enqueueErr
+		}
+		resolverDirtyWindowsEnqueued.Add(float64(enqueued))
 	}
-	return currentWatermark, depth, nil
+	historicalDepth, err := e.repo.pendingDirtyPartitionCount(ctx, req.Org, req.ExcludedOrgPrefixes)
+	if err != nil {
+		return currentWatermark, 0, 0, 0, err
+	}
+	sameDayDepth, err := e.repo.pendingDirtyWindowCount(ctx, req.Org, req.ExcludedOrgPrefixes)
+	if err != nil {
+		return currentWatermark, 0, 0, 0, err
+	}
+	repairRequestDepth, err := e.repo.pendingRepairRequestCount(ctx, req.Org, req.ExcludedOrgPrefixes)
+	if err != nil {
+		return currentWatermark, 0, 0, 0, err
+	}
+	return currentWatermark, historicalDepth, sameDayDepth, repairRequestDepth, nil
 }
 
 func (e *Engine) bootstrapPlan(ctx context.Context, req RunRequest) (bootstrapPlan, error) {
@@ -579,14 +704,18 @@ func dirtyScanStateKey(org string, excludedPrefixes []string) string {
 	return stableHash("dirty_scan_watermark", org, strings.Join(prefixes, ","))
 }
 
-func chooseAutoPhase(backlogPending, dirtyPending, tailDue bool) string {
+func chooseAutoPhase(backlogPending, dirtyPending, repairRequestPending, sameDayPending, tailDue bool) string {
 	switch {
-	case backlogPending && !tailDue:
-		return "bootstrap_backlog"
-	case dirtyPending && !tailDue:
-		return "historical_repair"
 	case tailDue:
 		return "tail"
+	case sameDayPending:
+		return "same_day_repair"
+	case repairRequestPending:
+		return "repair_request"
+	case dirtyPending:
+		return "historical_repair"
+	case backlogPending:
+		return "bootstrap_backlog"
 	default:
 		return "idle"
 	}
@@ -689,6 +818,80 @@ func (e *Engine) executeDirtyHistoricalRepair(ctx context.Context, req RunReques
 	return stats, nil
 }
 
+func (e *Engine) executeSameDayRepair(ctx context.Context, req RunRequest, window dirtyWindow) (RunStats, error) {
+	claimed, err := e.repo.claimDirtyWindow(ctx, window.Org, window.WindowStart, window.WindowEnd, e.ownerID, e.cfg.ResolverClaimTTL)
+	if err != nil {
+		return RunStats{}, err
+	}
+	if !claimed {
+		return RunStats{}, nil
+	}
+	windowReq := RunRequest{
+		Mode:                ModeAuto,
+		Org:                 window.Org,
+		ExcludedOrgPrefixes: req.ExcludedOrgPrefixes,
+		Start:               ptrTime(window.WindowStart.UTC()),
+		End:                 ptrTime(window.WindowEnd.UTC()),
+		Step:                time.Hour,
+		DryRun:              req.DryRun,
+	}
+	stats, runStatus, repairErr := e.executeWindow(ctx, windowReq)
+	if repairErr != nil {
+		_ = e.repo.failDirtyWindow(context.Background(), window.Org, window.WindowStart, window.WindowEnd, e.ownerID, repairErr.Error())
+		return stats, repairErr
+	}
+	if runStatus == "skipped_claimed" {
+		_ = e.repo.releaseDirtyWindow(context.Background(), window.Org, window.WindowStart, window.WindowEnd, e.ownerID)
+		return RunStats{}, nil
+	}
+	if err := e.repo.completeDirtyWindow(ctx, window.Org, window.WindowStart, window.WindowEnd, e.ownerID); err != nil {
+		return stats, err
+	}
+	resolverDirtyWindowsRepaired.Inc()
+	return stats, nil
+}
+
+func (e *Engine) executeRepairRequest(ctx context.Context, req RunRequest, request repairRequest) (RunStats, error) {
+	claimed, err := e.repo.claimRepairRequest(ctx, request.RequestID, e.ownerID, e.cfg.ResolverClaimTTL)
+	if err != nil {
+		return RunStats{}, err
+	}
+	if !claimed {
+		return RunStats{}, nil
+	}
+	request.Status = "claimed"
+	e.setActiveRepairRequest(&request)
+	defer e.setActiveRepairRequest(nil)
+	windowReq := RunRequest{
+		Mode:                ModeRepairWindow,
+		Org:                 request.Org,
+		ExcludedOrgPrefixes: req.ExcludedOrgPrefixes,
+		Start:               ptrTime(request.WindowStart.UTC()),
+		End:                 ptrTime(request.WindowEnd.UTC()),
+		Step:                req.Step,
+		DryRun:              request.DryRun,
+	}
+	repairCtx, cancel := repairRequestExecutionContext(ctx)
+	defer cancel()
+	stats, runStatus, repairErr := e.executeWindow(repairCtx, e.boundedWindowRequest(windowReq))
+	if repairErr != nil {
+		repairErr = normalizeRepairRequestError(repairErr)
+		_ = e.repo.failRepairRequest(context.Background(), request.RequestID, e.ownerID, repairErr.Error())
+		resolverRepairRequestsTotal.WithLabelValues("failed").Inc()
+		return stats, repairErr
+	}
+	if runStatus == "skipped_claimed" {
+		_ = e.repo.releaseRepairRequest(context.Background(), request.RequestID)
+		resolverRepairRequestsTotal.WithLabelValues("requeued").Inc()
+		return RunStats{}, nil
+	}
+	if err := e.repo.completeRepairRequest(ctx, request.RequestID, e.ownerID); err != nil {
+		return stats, err
+	}
+	resolverRepairRequestsTotal.WithLabelValues("success").Inc()
+	return stats, nil
+}
+
 func (e *Engine) executeWindow(ctx context.Context, req RunRequest) (stats RunStats, runStatus string, err error) {
 	runStatus = "success"
 	startedAt := time.Now().UTC()
@@ -711,7 +914,9 @@ func (e *Engine) executeWindow(ctx context.Context, req RunRequest) (stats RunSt
 				runStatus = "failed"
 				errSummary = err.Error()
 			}
-			_ = e.repo.recordRun(ctx, runID, req, runStatus, startedAt, finishedAt, rowsProcessed, 0, errSummary)
+			recordCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = e.repo.recordRun(recordCtx, runID, req, runStatus, startedAt, finishedAt, rowsProcessed, 0, errSummary)
 			resolverRunsTotal.WithLabelValues(string(req.Mode), runStatus).Inc()
 			resolverRunDuration.WithLabelValues(string(req.Mode)).Observe(finishedAt.Sub(startedAt).Seconds())
 			if req.End != nil {

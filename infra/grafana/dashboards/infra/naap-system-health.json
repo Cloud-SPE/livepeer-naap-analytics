@@ -327,7 +327,7 @@
     },
     {
       "id": 5,
-      "title": "Dirty Repairs (24h)",
+      "title": "Eligible Same-Day Repairs",
       "type": "stat",
       "gridPos": {
         "h": 5,
@@ -348,7 +348,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "sql",
-          "rawSql": "SELECT toFloat64(count()) AS value FROM naap.resolver_dirty_partitions FINAL WHERE status = 'success' AND updated_at >= now() - INTERVAL 24 HOUR AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))",
+          "rawSql": "WITH cfg AS (SELECT ifNull(argMax(lateness_window_seconds, started_at), 600) AS lateness_window_seconds, ifNull(argMax(dirty_quiet_period_seconds, started_at), 120) AS dirty_quiet_period_seconds FROM naap.resolver_runs) SELECT toFloat64(count()) AS value FROM naap.resolver_dirty_windows FINAL CROSS JOIN cfg WHERE status = 'pending' AND dateDiff('second', window_end, now()) >= toInt64(cfg.lateness_window_seconds) AND dateDiff('second', last_dirty_at, now()) >= toInt64(cfg.dirty_quiet_period_seconds) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))",
           "refId": "A"
         }
       ],
@@ -396,7 +396,7 @@
     },
     {
       "id": 6,
-      "title": "Claim Conflicts (1h)",
+      "title": "Repair Requests Pending",
       "type": "stat",
       "gridPos": {
         "h": 5,
@@ -417,7 +417,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "sql",
-          "rawSql": "SELECT toFloat64(count()) AS value FROM naap.resolver_runs WHERE status = 'skipped_claimed' AND finished_at >= now() - INTERVAL 1 HOUR AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), ifNull(org, '')))",
+          "rawSql": "SELECT toFloat64(count()) AS value FROM (SELECT * FROM (SELECT request_id, ifNull(org, '') AS org, status, updated_at, row_number() OVER (PARTITION BY request_id ORDER BY updated_at DESC) AS rn FROM naap.resolver_repair_requests) WHERE rn = 1) WHERE status = 'pending' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))",
           "refId": "A"
         }
       ],
@@ -625,7 +625,7 @@
     },
     {
       "id": 9,
-      "title": "Dirty Repair Throughput (24h)",
+      "title": "Repair Throughput (24h)",
       "type": "timeseries",
       "gridPos": {
         "h": 8,
@@ -646,7 +646,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT toStartOfInterval(updated_at, INTERVAL 1 HOUR) AS time, status, count() AS partitions FROM naap.resolver_dirty_partitions FINAL WHERE updated_at >= now() - INTERVAL 24 HOUR AND status IN ('success', 'failed') AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) GROUP BY time, status ORDER BY time",
+          "rawSql": "SELECT time, series, repairs FROM (\n    SELECT toStartOfInterval(updated_at, INTERVAL 1 HOUR) AS time,\n        concat('historical_', status) AS series,\n        count() AS repairs\n    FROM naap.resolver_dirty_partitions FINAL\n    WHERE updated_at >= now() - INTERVAL 24 HOUR\n      AND status IN ('success', 'failed')\n      AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n    GROUP BY time, series\n\n    UNION ALL\n\n    SELECT toStartOfInterval(updated_at, INTERVAL 1 HOUR) AS time,\n        concat('same_day_', status) AS series,\n        count() AS repairs\n    FROM naap.resolver_dirty_windows FINAL\n    WHERE updated_at >= now() - INTERVAL 24 HOUR\n      AND status IN ('success', 'failed')\n      AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n    GROUP BY time, series\n)\nORDER BY time, series",
           "refId": "A"
         }
       ],
@@ -722,7 +722,7 @@
     },
     {
       "id": 10,
-      "title": "Pending Historical Repairs By Day",
+      "title": "Pending Repair Work",
       "type": "table",
       "gridPos": {
         "h": 8,
@@ -743,7 +743,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "WITH pending AS (\n    SELECT org,\n        toString(event_date) AS event_date,\n        status,\n        reason,\n        toString(first_dirty_at) AS first_dirty,\n        toString(last_dirty_at) AS last_dirty,\n        toUInt64(attempt_count) AS attempts\n    FROM naap.resolver_dirty_partitions FINAL\n    WHERE status IN ('pending', 'failed')\n    AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n)\nSELECT *\nFROM (\n    SELECT org AS \"Org\",\n        event_date AS \"Event Date\",\n        status AS \"Status\",\n        reason AS \"Reason\",\n        first_dirty AS \"First Dirty\",\n        last_dirty AS \"Last Dirty\",\n        attempts AS \"Attempts\"\n    FROM pending\n    UNION ALL\n    SELECT 'all' AS \"Org\",\n        '' AS \"Event Date\",\n        'none' AS \"Status\",\n        'no pending or failed historical repairs' AS \"Reason\",\n        '' AS \"First Dirty\",\n        '' AS \"Last Dirty\",\n        toUInt64(0) AS \"Attempts\"\n    WHERE NOT EXISTS (SELECT 1 FROM pending)\n)\nORDER BY \"Event Date\" ASC, \"Org\" ASC\nLIMIT 100",
+          "rawSql": "WITH latest_requests AS (\n    SELECT *\n    FROM (\n        SELECT request_id,\n            ifNull(org, '') AS org,\n            window_start,\n            window_end,\n            status,\n            reason,\n            created_at,\n            updated_at,\n            attempt_count,\n            row_number() OVER (PARTITION BY request_id ORDER BY updated_at DESC) AS rn\n        FROM naap.resolver_repair_requests\n    )\n    WHERE rn = 1\n), pending AS (\n    SELECT 'historical_day' AS queue,\n        org,\n        toString(event_date) AS window_start,\n        '' AS window_end,\n        status,\n        reason,\n        toString(first_dirty_at) AS first_dirty,\n        toString(last_dirty_at) AS last_dirty,\n        toUInt64(attempt_count) AS attempts\n    FROM naap.resolver_dirty_partitions FINAL\n    WHERE status IN ('pending', 'failed')\n      AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n\n    UNION ALL\n\n    SELECT 'same_day_hour' AS queue,\n        org,\n        toString(window_start) AS window_start,\n        toString(window_end) AS window_end,\n        status,\n        reason,\n        toString(first_dirty_at) AS first_dirty,\n        toString(last_dirty_at) AS last_dirty,\n        toUInt64(attempt_count) AS attempts\n    FROM naap.resolver_dirty_windows FINAL\n    WHERE status IN ('pending', 'failed')\n      AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n\n    UNION ALL\n\n    SELECT 'repair_request' AS queue,\n        if(org = '', 'all', org) AS org,\n        toString(window_start) AS window_start,\n        toString(window_end) AS window_end,\n        status,\n        reason,\n        toString(created_at) AS first_dirty,\n        toString(updated_at) AS last_dirty,\n        toUInt64(attempt_count) AS attempts\n    FROM latest_requests\n    WHERE status IN ('pending', 'failed')\n      AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n)\nSELECT *\nFROM (\n    SELECT queue AS \"Queue\",\n        org AS \"Org\",\n        window_start AS \"Window Start\",\n        window_end AS \"Window End\",\n        status AS \"Status\",\n        reason AS \"Reason\",\n        first_dirty AS \"First Dirty\",\n        last_dirty AS \"Last Dirty\",\n        attempts AS \"Attempts\"\n    FROM pending\n    UNION ALL\n    SELECT 'all' AS \"Queue\",\n        'all' AS \"Org\",\n        '' AS \"Window Start\",\n        '' AS \"Window End\",\n        'none' AS \"Status\",\n        'no pending or failed repair work' AS \"Reason\",\n        '' AS \"First Dirty\",\n        '' AS \"Last Dirty\",\n        toUInt64(0) AS \"Attempts\"\n    WHERE NOT EXISTS (SELECT 1 FROM pending)\n)\nORDER BY \"Queue\" ASC, \"Window Start\" ASC, \"Org\" ASC\nLIMIT 100",
           "refId": "A"
         }
       ],
@@ -1467,6 +1467,144 @@
       ],
       "title": "Streaming Demand Density",
       "type": "table"
+    },
+    {
+      "id": 26,
+      "title": "Tail Success Lag (s)",
+      "type": "stat",
+      "gridPos": {
+        "h": 5,
+        "w": 12,
+        "x": 0,
+        "y": 60
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "WITH tail AS (SELECT max(finished_at) AS last_success_at FROM naap.resolver_runs WHERE mode = 'tail' AND status = 'success') SELECT if(isNull(last_success_at), 31536000.0, toFloat64(greatest(dateDiff('second', last_success_at, now()), 0))) AS value FROM tail",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 300
+              },
+              {
+                "color": "red",
+                "value": 900
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 27,
+      "title": "Oldest Historical Pending Age (h)",
+      "type": "stat",
+      "gridPos": {
+        "h": 5,
+        "w": 12,
+        "x": 12,
+        "y": 60
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "WITH pending AS (SELECT min(updated_at) AS oldest_pending_at FROM naap.resolver_dirty_partitions FINAL WHERE status = 'pending' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))) SELECT if(isNull(oldest_pending_at), 0.0, toFloat64(greatest(dateDiff('hour', oldest_pending_at, now()), 0))) AS value FROM pending",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 3
+              },
+              {
+                "color": "red",
+                "value": 6
+              }
+            ]
+          },
+          "unit": "h"
+        },
+        "overrides": []
+      }
     }
   ],
   "refresh": "1m",
@@ -1497,14 +1635,14 @@
           "text": "All",
           "value": "__all"
         },
-        "definition": "SELECT DISTINCT org FROM (SELECT org FROM naap.accepted_raw_events WHERE org != '' UNION ALL SELECT org FROM naap.api_status_samples WHERE org != '' UNION ALL SELECT org FROM naap.api_active_stream_state WHERE org != '' UNION ALL SELECT ifNull(org, '') AS org FROM naap.resolver_dirty_partitions FINAL WHERE ifNull(org, '') != '' UNION ALL SELECT ifNull(org, '') AS org FROM naap.resolver_runs WHERE ifNull(org, '') != '') AS orgs WHERE org != '' ORDER BY org",
+        "definition": "SELECT DISTINCT org FROM (SELECT org FROM naap.accepted_raw_events WHERE org != '' UNION ALL SELECT org FROM naap.api_status_samples WHERE org != '' UNION ALL SELECT org FROM naap.api_active_stream_state WHERE org != '' UNION ALL SELECT ifNull(org, '') AS org FROM naap.resolver_dirty_partitions FINAL WHERE ifNull(org, '') != '' UNION ALL SELECT org FROM naap.resolver_dirty_windows FINAL WHERE org != '' UNION ALL SELECT ifNull(org, '') AS org FROM naap.resolver_repair_requests FINAL WHERE ifNull(org, '') != '' UNION ALL SELECT ifNull(org, '') AS org FROM naap.resolver_runs WHERE ifNull(org, '') != '') AS orgs WHERE org != '' ORDER BY org",
         "hide": 0,
         "includeAll": true,
         "label": "Org",
         "multi": true,
         "name": "org",
         "options": [],
-        "query": "SELECT DISTINCT org FROM (SELECT org FROM naap.accepted_raw_events WHERE org != '' UNION ALL SELECT org FROM naap.api_status_samples WHERE org != '' UNION ALL SELECT org FROM naap.api_active_stream_state WHERE org != '' UNION ALL SELECT ifNull(org, '') AS org FROM naap.resolver_dirty_partitions FINAL WHERE ifNull(org, '') != '' UNION ALL SELECT ifNull(org, '') AS org FROM naap.resolver_runs WHERE ifNull(org, '') != '') AS orgs WHERE org != '' ORDER BY org",
+        "query": "SELECT DISTINCT org FROM (SELECT org FROM naap.accepted_raw_events WHERE org != '' UNION ALL SELECT org FROM naap.api_status_samples WHERE org != '' UNION ALL SELECT org FROM naap.api_active_stream_state WHERE org != '' UNION ALL SELECT ifNull(org, '') AS org FROM naap.resolver_dirty_partitions FINAL WHERE ifNull(org, '') != '' UNION ALL SELECT org FROM naap.resolver_dirty_windows FINAL WHERE org != '' UNION ALL SELECT ifNull(org, '') AS org FROM naap.resolver_repair_requests FINAL WHERE ifNull(org, '') != '' UNION ALL SELECT ifNull(org, '') AS org FROM naap.resolver_runs WHERE ifNull(org, '') != '') AS orgs WHERE org != '' ORDER BY org",
         "refresh": 1,
         "sort": 1,
         "type": "query",

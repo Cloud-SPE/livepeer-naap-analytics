@@ -42,6 +42,7 @@ type Config struct {
 	ResolverDirtyQuietPeriod time.Duration `envconfig:"RESOLVER_DIRTY_QUIET_PERIOD" default:"2m"`
 	ResolverClaimTTL         time.Duration `envconfig:"RESOLVER_CLAIM_TTL" default:"2m"`
 	ResolverPort             string        `envconfig:"RESOLVER_PORT" default:"9102"`
+	ResolverAdminToken       string        `envconfig:"RESOLVER_ADMIN_TOKEN" default:""`
 	ResolverVersion          string        `envconfig:"RESOLVER_VERSION" default:"selection-centered-v1"`
 	ResolverBatchSize        int           `envconfig:"RESOLVER_BATCH_SIZE" default:"10000"`
 }

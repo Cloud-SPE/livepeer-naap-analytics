@@ -11,7 +11,8 @@ A standard deployment runs ClickHouse, the resolver, the API, and the Grafana/Pr
 That split matters because it keeps responsibilities clear:
 
 - ClickHouse handles ingestion, storage, and materialized-view fanout.
-- The resolver handles bounded repair, dirty partition ownership, and current-store publication.
+- The resolver handles bounded repair, historical dirty-day ownership,
+  same-day dirty-hour ownership, and current-store publication.
 - `dbt` publishes semantic read models after SQL changes or during scheduled warehouse refresh runs.
 - The API stays read-only against serving contracts.
 
@@ -48,7 +49,11 @@ Use the `infra2` deployment guide in [`../../deploy/infra2/README.md`](../../dep
 `auto`
 
 - Standard always-on production mode.
-- Bootstraps visible backlog, repairs dirty historical partitions, then tails continuously.
+- Bootstraps visible backlog, repairs dirty historical partitions, executes
+  queued repair requests, heals closed same-day dirty hours, then tails continuously.
+- Alert-backed health gates for this mode live on `infra/naap-system-health`:
+  `NaapResolverTailStale`, `NaapResolverSameDayRepairStalled`,
+  `NaapDirtyHistoricalQueueBacklog`, and `NaapResolverHistoricalRepairAgeHigh`.
 
 `bootstrap`
 
@@ -120,8 +125,7 @@ ClickHouse instance remains a separate operator step.
 If the change introduced or modified resolver-owned job stores, do not stop at
 bootstrap extraction. Fresh and existing environments both still need a
 resolver bootstrap or bounded backfill so those stores contain historical job
-rows before `/v1/jobs/*`, `/v1/ai-batch/*`, `/v1/byoc/*`, and the jobs
-dashboard are treated as healthy.
+rows before `/v1/requests/*` and the jobs dashboard are treated as healthy.
 
 ## Failure Recovery
 
@@ -172,6 +176,43 @@ If partitions remain dirty after the quiet period:
 1. confirm accepted raw data is still arriving
 2. check resolver logs for repeated claim or publish errors
 3. run `make resolver-repair-window` for the affected org/date window
+
+### Same-Day Dirty Windows Blocking Progress
+
+Inspect the same-day queue:
+
+```sql
+SELECT org, window_start, window_end, claim_owner, lease_expires_at, attempt_count, updated_at
+FROM naap.resolver_dirty_windows FINAL
+ORDER BY updated_at DESC;
+```
+
+If current-day hours remain dirty after the lateness window and quiet period:
+
+1. confirm accepted raw data is still arriving late for those hours
+2. check resolver logs for repeated claim or publish errors
+3. if needed, submit a bounded repair request through the resolver admin API or run `make resolver-repair-window`
+
+If Grafana fires `NaapResolverSameDayRepairStalled`, treat that as a freshness
+incident even if historical backlog is still draining. Tail plus latest
+eligible same-day repair are the highest-priority lanes now.
+
+### Explicit Repair Requests
+
+Inspect the async request queue:
+
+```sql
+SELECT request_id, ifNull(org, 'all') AS org, window_start, window_end, status, requested_by, attempt_count, updated_at
+FROM naap.resolver_repair_requests FINAL
+ORDER BY updated_at DESC;
+```
+
+Policy:
+
+1. all-org repair requests are limited to `1h`
+2. org-scoped repair requests are limited to `6h`
+3. queued repair requests run with a fixed `5m` timeout
+4. larger or slower windows should use `make resolver-repair-window` or `make resolver-backfill`
 
 ### Warehouse Publication Drift
 

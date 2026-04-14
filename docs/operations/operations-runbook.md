@@ -5,7 +5,7 @@
 | **Status** | Active |
 | **Effective date** | 2026-04-02 |
 | **Ticket** | TASK 7.6 / [#273](https://github.com/livepeer/livepeer-naap-analytics-deployment/issues/273) |
-| **Last reviewed** | 2026-04-09 |
+| **Last reviewed** | 2026-04-14 |
 
 ---
 
@@ -195,7 +195,10 @@ Alertmanager path.
 | System | `NaapResolverClaimConflictsHigh` | Resolver claim conflicts `> 3` over 15m | `warning` | Inspect resolver ownership churn |
 | System | `NaapAcceptedRawFreshnessStale` | accepted raw freshness `> 300s` for 5m | `critical` | Check ingest path end to end |
 | System | `NaapDirtyScanLagHigh` | resolver watermark lag `> 300s` for 10m | `critical` | See `run-modes-and-recovery.md` |
+| System | `NaapResolverTailStale` | no successful tail run for `> 900s` for 10m | `critical` | Check resolver runtime, `resolver_runs`, and claim churn immediately |
+| System | `NaapResolverSameDayRepairStalled` | eligible same-day repairs, using the resolver's recorded lateness and quiet-period config, remain pending for 15m | `critical` | Inspect `resolver_dirty_windows`, `resolver_runs`, and tail freshness |
 | System | `NaapDirtyHistoricalQueueBacklog` | pending dirty partitions `> 25` for 15m | `degraded` | See `run-modes-and-recovery.md` |
+| System | `NaapResolverHistoricalRepairAgeHigh` | oldest pending historical dirty partition age `> 6h` for 30m | `degraded` | Inspect `resolver_dirty_partitions` and repair throughput |
 | Streaming | `NaapStreamingAttributionRateLow` | attribution rate `< 75%` after 500-sample guard | `warning` | Check attribution inputs and resolver freshness |
 | Request / response | `NaapRequestResponseDuplicateRowsPresent` | duplicate canonical job rows `> 0` | `critical` | Check canonical job uniqueness and resolver publication |
 | Request / response | `NaapRequestResponseCanonicalCoverageLow` | canonical coverage `< 98%` after 20-source-job guard | `critical` | Check normalized vs canonical job publication |

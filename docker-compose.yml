@@ -109,9 +109,10 @@ services:
       CLICKHOUSE_WRITER_PASSWORD: naap_writer_changeme
       RESOLVER_ENABLED: "true"
       # auto = single-service production mode:
-      #   bootstrap visible closed backlog,
-      #   repair dirty historical partitions from late accepted raw arrivals,
-      #   then keep tail current continuously
+      #   keep tail current first,
+      #   repair the latest eligible same-day dirty hour next,
+      #   execute queued bounded repair requests after that,
+      #   then drain historical dirty partitions and any remaining bootstrap backlog
       # bootstrap = bounded backlog catch-up only, then enter tail automatically
       # tail = steady-state tail only
       RESOLVER_MODE: ${RESOLVER_MODE:-auto}
@@ -122,6 +123,7 @@ services:
       RESOLVER_VERSION: selection-centered-v1
       RESOLVER_BATCH_SIZE: "500"
       RESOLVER_PORT: "9102"
+      RESOLVER_ADMIN_TOKEN: ${RESOLVER_ADMIN_TOKEN:-}
     restart: unless-stopped
 
   warehouse:

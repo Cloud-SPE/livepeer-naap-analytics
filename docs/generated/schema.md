@@ -69,6 +69,7 @@ The documented `raw_*`, `normalized_*`, `canonical_*`, `operational_*`, `api_bas
 | `resolver_dead_letters` | `ReplacingMergeTree` |
 | `resolver_dirty_orchestrators` | `ReplacingMergeTree` |
 | `resolver_dirty_partitions` | `ReplacingMergeTree` |
+| `resolver_dirty_windows` | `ReplacingMergeTree` |
 | `resolver_dirty_selection_events` | `ReplacingMergeTree` |
 | `resolver_dirty_sessions` | `ReplacingMergeTree` |
 | `resolver_query_event_ids` | `MergeTree` |
@@ -76,6 +77,7 @@ The documented `raw_*`, `normalized_*`, `canonical_*`, `operational_*`, `api_bas
 | `resolver_query_selection_event_ids` | `MergeTree` |
 | `resolver_query_session_keys` | `MergeTree` |
 | `resolver_query_window_slices` | `MergeTree` |
+| `resolver_repair_requests` | `ReplacingMergeTree` |
 | `resolver_runs` | `MergeTree` |
 | `resolver_runtime_state` | `ReplacingMergeTree` |
 | `resolver_window_claims` | `ReplacingMergeTree` |

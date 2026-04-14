@@ -15,15 +15,15 @@ are available, and how current supply compares to observed demand.
 Use the latest capability and inventory state published into the semantic
 serving layer to expose three current network-state surfaces:
 
-- `GET /v1/network/orchestrators`
-- `GET /v1/network/models`
-- `GET /v1/network/capacity`
+- `GET /v1/streaming/orchestrators`
+- `GET /v1/streaming/models`
+- `GET /v1/streaming/demand`
 
 ## Requirements
 
 ### NET-001: Orchestrator list
 
-`GET /v1/network/orchestrators`
+`GET /v1/streaming/orchestrators`
 
 Returns a paginated list of orchestrators ordered by `last_seen` descending.
 
@@ -57,7 +57,7 @@ Required behavior:
 
 ### NET-002: Model availability
 
-`GET /v1/network/models`
+`GET /v1/streaming/models`
 
 Returns model availability per pipeline, including warm orchestrator count and
 price range.
@@ -87,7 +87,7 @@ Required behavior:
 
 ### NET-003: Network capacity
 
-`GET /v1/network/capacity`
+`GET /v1/streaming/demand`
 
 Returns current GPU supply versus active demand grouped by `(pipeline, model)`.
 
@@ -136,4 +136,4 @@ Required behavior:
 - historical GPU inventory trend analysis
 - per-GPU utilization telemetry
 - geographic placement or geolocation enrichment
-- separate public network-summary or GPU-inventory endpoints outside the live `/v1/network/*` route set
+- separate public network-summary or GPU-inventory endpoints outside the live `/v1/streaming/*` route set

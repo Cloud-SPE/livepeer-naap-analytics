@@ -84,6 +84,8 @@ These tables store all accepted AI batch, BYOC, and payment events after normali
 |---|---|---|
 | `naap.agg_stream_status_samples` | `sample_ts` | 30 days |
 | `naap.resolver_dirty_partitions` | `event_date` | 30 days |
+| `naap.resolver_dirty_windows` | `window_start` | 30 days |
+| `naap.resolver_repair_requests` | `created_at` | 30 days |
 
 This tier is intentionally longer-lived than Kafka replay. These tables support
 validation, debugging, and bounded forensic review after the 7-day Kafka window

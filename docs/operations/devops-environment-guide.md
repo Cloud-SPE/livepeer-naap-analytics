@@ -5,7 +5,7 @@
 | **Status** | Active |
 | **Effective date** | 2026-04-02 |
 | **Ticket** | TASK-24 / [#303](https://github.com/livepeer/livepeer-naap-analytics-deployment/issues/303) |
-| **Last reviewed** | 2026-04-09 |
+| **Last reviewed** | 2026-04-14 |
 
 Related docs:
 - [`run-modes-and-recovery.md`](run-modes-and-recovery.md) — resolver modes, dbt publication, failure recovery
@@ -53,7 +53,7 @@ Grafana-managed alerting is grouped into three operator surfaces:
 
 | Surface | Datasource | Examples |
 |---|---|---|
-| Infrastructure / system | Prometheus + ClickHouse | scrape target down, disk high, raw freshness stale, dirty queue backlog |
+| Infrastructure / system | Prometheus + ClickHouse | scrape target down, disk high, raw freshness stale, resolver tail stale, dirty queue backlog |
 | Request / response | ClickHouse | duplicate canonical rows, canonical coverage low, demand density collapse |
 | Streaming / live video | ClickHouse | health-signal coverage low, unserved demand high, demand density collapse |
 
@@ -74,7 +74,9 @@ rule, including `component`, `surface`, `pipeline_type`, and when present
 |---|---|---|---|
 | ClickHouse insert rate | `clickhouse-overview` | Consistent, matches Kafka produce rate | Drops to 0 — Kafka engine stalled |
 | Consumer group lag | `kafka-exporter-overview` | Near 0 for `clickhouse-naap-*` groups | Growing lag — ClickHouse falling behind |
-| Resolver dirty partitions | `infra/naap-system-health` | Drains to 0 over time | Stuck at non-zero — resolver blocked |
+| Resolver tail success lag | `infra/naap-system-health` | Recent successful tail run within 15 minutes | Growing past 15 minutes — live publication stalled |
+| Eligible same-day repairs | `infra/naap-system-health` | Usually 0; clears quickly after outages | Stays non-zero for 15 minutes — current-day recovery is stuck |
+| Resolver dirty partitions | `infra/naap-system-health` | Drains to 0 over time | Oldest pending age exceeds 6 hours — historical repair is stuck |
 | API p99 latency | `infra/naap-system-health` | < 100ms | Spikes > 500ms |
 | `accepted_raw_events` insert rate | `clickhouse-overview` | Matches raw Kafka produce rate | Zero — ingest pipeline stalled |
 
@@ -168,7 +170,7 @@ docker compose logs -f clickhouse | grep -E "bootstrap|migration|ready"
 # 6. Verify everything is healthy
 make ch-smoke          # confirms events flowing Kafka → ClickHouse
 make test-integration  # integration tests against running ClickHouse
-curl -s http://localhost:8000/v1/jobs/sla?limit=5
+curl -s http://localhost:8000/v1/streaming/sla?limit=5
 ```
 
 ### Service endpoints (local)

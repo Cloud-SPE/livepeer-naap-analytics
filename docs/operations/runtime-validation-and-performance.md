@@ -67,12 +67,12 @@ Use these to judge runtime cost and user-visible responsiveness.
   - `/healthz`
   - `/v1/dashboard/kpi`
   - `/v1/dashboard/orchestrators`
-  - `/v1/sla/compliance`
-  - `/v1/jobs/demand`
-  - `/v1/jobs/sla`
-  - `/v1/network/demand`
-  - `/v1/gpu/network-demand`
-  - `/v1/gpu/metrics`
+  - `/v1/streaming/sla`
+  - `/v1/streaming/demand`
+  - `/v1/streaming/gpu-metrics`
+  - `/v1/requests/models`
+  - `/v1/requests/ai-batch/summary`
+  - `/v1/requests/byoc/summary`
 
 Primary tools:
 

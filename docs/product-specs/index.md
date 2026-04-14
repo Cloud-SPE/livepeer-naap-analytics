@@ -34,7 +34,7 @@ surface.
 
 | Req ID | Endpoint | Spec |
 |--------|----------|------|
-| NET-001 | `GET /v1/network/orchestrators` | `r1-network-state.md` |
-| NET-002 | `GET /v1/network/models` | `r1-network-state.md` |
-| NET-003 | `GET /v1/network/capacity` | `r1-network-state.md` |
-| PERF-001 | `GET /v1/streaming/perf-by-model` | `r3-performance-quality.md` |
+| NET-001 | `GET /v1/streaming/orchestrators` | `r1-network-state.md` |
+| NET-002 | `GET /v1/streaming/models` | `r1-network-state.md` |
+| NET-003 | `GET /v1/streaming/demand` | `r1-network-state.md` |
+| PERF-001 | `GET /v1/streaming/models` | `r3-performance-quality.md` |

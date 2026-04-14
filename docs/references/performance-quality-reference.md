@@ -31,7 +31,7 @@ layers rather than request-time scans of raw events:
 2. [`../../warehouse/models/canonical/canonical_status_hours.sql`](../../warehouse/models/canonical/canonical_status_hours.sql) materializes canonical hourly session status
 3. [`../../warehouse/models/api/api_fps_hourly.sql`](../../warehouse/models/api/api_fps_hourly.sql) publishes hourly FPS aggregates and excludes terminal-tail artifacts
 4. current capability inventory and warm state are joined through `api_gpu_inventory`
-5. [`../../api/internal/repo/clickhouse/model_ext.go`](../../api/internal/repo/clickhouse/model_ext.go) serves the final model-level rows
+5. [`../../api/internal/repo/clickhouse/streaming.go`](../../api/internal/repo/clickhouse/streaming.go) serves the final model-level rows
 
 ### Field semantics
 
@@ -68,9 +68,6 @@ older performance surfaces that were once drafted as:
 - discovery latency
 - WebRTC quality
 
-Those queries remain in:
-
-- [`../../api/internal/repo/clickhouse/performance.go`](../../api/internal/repo/clickhouse/performance.go)
-
-They are not part of the active router or OpenAPI contract. Treat them as
-engineering artifacts or future starting points, not as shipped API surfaces.
+Those older query shapes are no longer shipped as dedicated public endpoints in
+the current API contract. Treat references to them in older plans or notes as
+historical context, not as active API surface.

@@ -1755,9 +1755,11 @@ Tests skip automatically when `CLICKHOUSE_ADDR` is not set.
 
 The production resolver deployment now runs in `auto` mode:
 
-- visible closed historical backlog is processed first
-- late accepted raw rows can enqueue exact dirty historical `(org, event_date)` repairs
-- live lateness-window tail updates continue in the same service
+- live lateness-window tail updates run first
+- the latest eligible same-day dirty hour is repaired next
+- queued explicit repair requests run ahead of historical dirty-day replay
+- late accepted raw rows can still enqueue exact dirty historical `(org, event_date)` repairs
+- remaining closed historical backlog is processed last
 
 Manual `backfill` and `repair-window` remain operator tools, but they are no
 longer the normal steady-state path.

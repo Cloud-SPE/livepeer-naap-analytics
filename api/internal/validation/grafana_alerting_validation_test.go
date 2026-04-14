@@ -138,6 +138,49 @@ func ratioOrZero(num, denom uint64) float64 {
 	return float64(num) / float64(denom)
 }
 
+func insertResolverRunRow(t *testing.T, h *harness, runID, mode, status string, startedAt, finishedAt time.Time) {
+	t.Helper()
+	if err := h.conn.Exec(context.Background(), `
+		INSERT INTO naap.resolver_runs
+		(
+			run_id, mode, status, owner_id, org, window_start, window_end, cutoff_ts,
+			lateness_window_seconds, dirty_quiet_period_seconds, rows_processed, mismatch_count, error_summary,
+			resolver_version, started_at, finished_at
+		)
+		VALUES (?, ?, ?, 'validation-owner', NULL, NULL, NULL, NULL, 600, 120, 0, 0, NULL, 'validation', ?, ?)
+	`, runID, mode, status, startedAt, finishedAt); err != nil {
+		t.Fatalf("insert resolver run: %v", err)
+	}
+}
+
+func insertDirtyWindowRow(t *testing.T, h *harness, org string, windowStart, windowEnd time.Time, status string, firstDirtyAt, lastDirtyAt, updatedAt time.Time) {
+	t.Helper()
+	if err := h.conn.Exec(context.Background(), `
+		INSERT INTO naap.resolver_dirty_windows
+		(
+			org, window_start, window_end, status, reason, first_dirty_at, last_dirty_at,
+			claim_owner, lease_expires_at, attempt_count, last_error_summary, updated_at
+		)
+		VALUES (?, ?, ?, ?, 'validation', ?, ?, NULL, NULL, 0, NULL, ?)
+	`, org, windowStart, windowEnd, status, firstDirtyAt, lastDirtyAt, updatedAt); err != nil {
+		t.Fatalf("insert dirty window: %v", err)
+	}
+}
+
+func insertDirtyPartitionRow(t *testing.T, h *harness, org string, eventDate time.Time, status string, firstDirtyAt, lastDirtyAt, updatedAt time.Time) {
+	t.Helper()
+	if err := h.conn.Exec(context.Background(), `
+		INSERT INTO naap.resolver_dirty_partitions
+		(
+			org, event_date, status, reason, first_dirty_at, last_dirty_at,
+			claim_owner, lease_expires_at, attempt_count, last_error_summary, updated_at
+		)
+		VALUES (?, ?, ?, 'validation', ?, ?, NULL, NULL, 0, NULL, ?)
+	`, org, eventDate, status, firstDirtyAt, lastDirtyAt, updatedAt); err != nil {
+		t.Fatalf("insert dirty partition: %v", err)
+	}
+}
+
 func TestGrafanaAlertSQL_RequestResponseDuplicateRowsTriggersForAIBatch(t *testing.T) {
 	h := newHarness(t)
 	sql := firstRuleSQL(t, "naap_rr_dup_rows")
@@ -235,5 +278,41 @@ func TestGrafanaAlertSQL_StreamingDensityCollapseTriggersOnDrop(t *testing.T) {
 
 	if got := h.queryInt(t, fmt.Sprintf(`SELECT count() FROM (%s) WHERE pipeline_id = 'stream-density'`, sql)); got != 1 {
 		t.Fatalf("expected streaming density collapse alert row, got %d", got)
+	}
+}
+
+func TestGrafanaAlertSQL_ResolverTailStaleTriggersWhenTailHasNotSucceededRecently(t *testing.T) {
+	h := newHarness(t)
+	sql := firstRuleSQL(t, "naap_resolver_tail_stale")
+	now := time.Now().UTC()
+	insertResolverRunRow(t, h, "tail-stale-validation", "tail", "success", now.Add(-21*time.Minute), now.Add(-20*time.Minute))
+
+	if got := h.queryFloat(t, sql); got <= 900 {
+		t.Fatalf("expected stale tail lag above 900 seconds, got %.2f", got)
+	}
+}
+
+func TestGrafanaAlertSQL_SameDayRepairStalledTriggersWhenEligibleWindowsPersist(t *testing.T) {
+	h := newHarness(t)
+	sql := firstRuleSQL(t, "naap_same_day_repair_stalled")
+	now := time.Now().UTC()
+	windowStart := now.Truncate(time.Hour).Add(-2 * time.Hour)
+	windowEnd := windowStart.Add(time.Hour)
+	insertDirtyWindowRow(t, h, h.org, windowStart, windowEnd, "pending", now.Add(-40*time.Minute), now.Add(-35*time.Minute), now.Add(-35*time.Minute))
+
+	if got := h.queryInt(t, sql); got != 1 {
+		t.Fatalf("expected same-day stalled repair alert count 1, got %d", got)
+	}
+}
+
+func TestGrafanaAlertSQL_HistoricalRepairAgeHighTriggersWhenOldestPendingKeepsAging(t *testing.T) {
+	h := newHarness(t)
+	sql := firstRuleSQL(t, "naap_hist_repair_age_high")
+	now := time.Now().UTC()
+	eventDate := now.Add(-48 * time.Hour).Truncate(24 * time.Hour)
+	insertDirtyPartitionRow(t, h, h.org, eventDate, "pending", now.Add(-9*time.Hour), now.Add(-8*time.Hour), now.Add(-8*time.Hour))
+
+	if got := h.queryFloat(t, sql); got <= 6 {
+		t.Fatalf("expected historical pending age above 6 hours, got %.2f", got)
 	}
 }

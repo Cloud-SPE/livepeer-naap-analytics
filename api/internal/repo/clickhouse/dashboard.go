@@ -232,7 +232,6 @@ func (r *Repo) GetDashboardOrchestrators(ctx context.Context, windowHours int) (
 		totalRequested   int64
 		weightedSuccess  float64
 		weightedNoSwap   float64
-		weightedSLA      float64
 		pipelineModelMap map[string]map[string]bool // pipeline -> set of models
 	}
 	orchMap := map[string]*orchData{}
@@ -260,15 +259,57 @@ func (r *Repo) GetDashboardOrchestrators(ctx context.Context, windowHours int) (
 		if noSwap != nil {
 			o.weightedNoSwap += *noSwap * float64(requested)
 		}
-		if sla != nil {
-			o.weightedSLA += *sla * float64(requested)
-		}
 		o.orch.KnownSessions += int64(requested)
 
 		if _, ok := o.pipelineModelMap[pipelineID]; !ok {
 			o.pipelineModelMap[pipelineID] = map[string]bool{}
 		}
 		o.pipelineModelMap[pipelineID][modelID] = true
+	}
+
+	latestSLARows, err := r.conn.Query(ctx, `
+		SELECT orchestrator_address,
+		       window_start,
+		       sum(ifNull(sla_score, 0) * requested_sessions) / nullIf(sum(requested_sessions), 0) AS sla
+		FROM naap.api_sla_compliance
+		WHERE window_start >= ?
+		  AND orchestrator_address != ''
+		  AND sla_score IS NOT NULL
+		GROUP BY orchestrator_address, window_start
+		ORDER BY orchestrator_address ASC, window_start DESC
+	`, windowStart)
+	if err != nil {
+		return nil, fmt.Errorf("dashboard orchestrators latest sla: %w", err)
+	}
+	defer latestSLARows.Close()
+
+	seenLatestSLA := map[string]bool{}
+	for latestSLARows.Next() {
+		var addr string
+		var slaWindowStart time.Time
+		var sla *float64
+		if err := latestSLARows.Scan(&addr, &slaWindowStart, &sla); err != nil {
+			return nil, fmt.Errorf("dashboard orchestrators latest sla scan: %w", err)
+		}
+		if seenLatestSLA[addr] {
+			continue
+		}
+		seenLatestSLA[addr] = true
+
+		o, ok := orchMap[addr]
+		if !ok {
+			o = &orchData{
+				orch:             types.DashboardOrchestrator{Address: addr},
+				pipelineModelMap: map[string]map[string]bool{},
+			}
+			orchMap[addr] = o
+		}
+		if sla != nil {
+			slaValue := *sla
+			slaWindowStartText := slaWindowStart.UTC().Format(time.RFC3339)
+			o.orch.SLAScore = &slaValue
+			o.orch.SLAWindowStart = &slaWindowStartText
+		}
 	}
 
 	// Enrich with orchestrator state (URI, pipeline models)
@@ -341,10 +382,8 @@ func (r *Repo) GetDashboardOrchestrators(ctx context.Context, windowHours int) (
 		if o.totalRequested > 0 {
 			eff := divSafe(o.weightedSuccess, float64(o.totalRequested))
 			noSwap := divSafe(o.weightedNoSwap, float64(o.totalRequested))
-			sla := divSafe(o.weightedSLA, float64(o.totalRequested))
 			orch.EffectiveSuccessRate = &eff
 			orch.NoSwapRatio = &noSwap
-			orch.SLAScore = &sla
 			orch.SuccessRatio = eff * 100
 		}
 
@@ -397,9 +436,9 @@ func (r *Repo) GetDashboardGPUCapacity(ctx context.Context) (*types.DashboardGPU
 	defer rows.Close()
 
 	// Track unique (orch, gpu) for totalGPUs, per-pipeline for breakdown
-	uniqueGPUs := map[string]string{} // "orch|gpu" -> gpuModel (deduped for total)
+	uniqueGPUs := map[string]string{}                  // "orch|gpu" -> gpuModel (deduped for total)
 	pipelineGPUModels := map[string]map[string]int64{} // pipeline -> gpuModel -> count
-	pipelineGPUIDs := map[string]map[string]bool{}      // pipeline -> set of "orch|gpu" (dedup per pipeline)
+	pipelineGPUIDs := map[string]map[string]bool{}     // pipeline -> set of "orch|gpu" (dedup per pipeline)
 
 	for rows.Next() {
 		var orchAddr, pipelineID, gpuID, gpuModel string

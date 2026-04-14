@@ -138,7 +138,7 @@ Violations are caught by repo validation and contract checks. See [`design-docs/
 ## Key design decisions
 
 - **ClickHouse Kafka Engine for ingest**: no application-layer consumer; ClickHouse reads Kafka directly and routes each record into `accepted_raw_events` or `ignored_raw_events`.
-- **Single-service resolver scheduling**: the resolver owns backlog catch-up, historical late-arrival repair, and tail updates in one `auto` scheduler, with manual `backfill` / `repair-window` retained for operator intervention.
+- **Single-service resolver scheduling**: the resolver owns backlog catch-up, historical late-arrival repair, same-day closed-hour auto-healing, queued bounded repair requests, and tail updates in one `auto` scheduler, with manual `backfill` / `repair-window` retained for operator intervention.
 - **Canonical-first serving**: physical ingest tables stay in ClickHouse; dbt owns semantic SQL; the API reads `api_*` while downstream derivations and parity logic must use `canonical_*`.
 - **Enrichment as a sidecar**: ENS name resolution and stake data come from the Livepeer public API via a background goroutine; kept separate from the ingest path so a slow or down enrichment API does not affect event processing.
 - **Prometheus-native observability**: `/metrics` endpoint on the Go API; ClickHouse built-in endpoint on port 9363; Kafka Exporter as a sidecar. No custom instrumentation library.

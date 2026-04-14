@@ -162,7 +162,7 @@ func dirtyWatermarkPredicate(watermark *dirtyScanWatermark) (string, []any) {
 	}
 }
 
-func (r *repo) scanDirtyAcceptedRawPartitions(ctx context.Context, org string, excludedPrefixes []string, historicalCutoff time.Time, watermark *dirtyScanWatermark) ([]backfillPartition, *dirtyScanWatermark, error) {
+func (r *repo) scanDirtyAcceptedRawPartitions(ctx context.Context, org string, excludedPrefixes []string, historicalCutoff, currentDayStart time.Time, watermark *dirtyScanWatermark) (dirtyScanResult, error) {
 	orgClause, orgArgs := orgPredicate("org", org, excludedPrefixes)
 	watermarkClause, watermarkArgs := dirtyWatermarkPredicate(watermark)
 
@@ -178,7 +178,7 @@ func (r *repo) scanDirtyAcceptedRawPartitions(ctx context.Context, org string, e
 		LIMIT 1
 	`, maxArgs...)
 	if err != nil {
-		return nil, watermark, fmt.Errorf("query dirty accepted raw watermark: %w", err)
+		return dirtyScanResult{}, fmt.Errorf("query dirty accepted raw watermark: %w", err)
 	}
 	defer maxRows.Close()
 
@@ -186,17 +186,19 @@ func (r *repo) scanDirtyAcceptedRawPartitions(ctx context.Context, org string, e
 	if maxRows.Next() {
 		var mark dirtyScanWatermark
 		if err := maxRows.Scan(&mark.IngestedAt, &mark.EventID); err != nil {
-			return nil, watermark, fmt.Errorf("scan dirty accepted raw watermark: %w", err)
+			return dirtyScanResult{}, fmt.Errorf("scan dirty accepted raw watermark: %w", err)
 		}
 		mark.IngestedAt = mark.IngestedAt.UTC()
 		nextWatermark = &mark
 	}
 	if err := maxRows.Err(); err != nil {
-		return nil, watermark, err
+		return dirtyScanResult{}, err
 	}
 	if nextWatermark == nil {
-		return nil, watermark, nil
+		return dirtyScanResult{Watermark: watermark}, nil
 	}
+
+	result := dirtyScanResult{Watermark: nextWatermark}
 
 	args := []any{historicalCutoff.UTC()}
 	args = append(args, orgArgs...)
@@ -212,22 +214,59 @@ func (r *repo) scanDirtyAcceptedRawPartitions(ctx context.Context, org string, e
 		ORDER BY org, event_date
 	`, args...)
 	if err != nil {
-		return nil, nextWatermark, fmt.Errorf("query dirty accepted raw partitions: %w", err)
+		return dirtyScanResult{}, fmt.Errorf("query dirty accepted raw partitions: %w", err)
 	}
 	defer rows.Close()
 
-	var parts []backfillPartition
 	for rows.Next() {
 		var part backfillPartition
 		if err := rows.Scan(&part.Org, &part.EventDate); err != nil {
-			return nil, nextWatermark, fmt.Errorf("scan dirty accepted raw partition: %w", err)
+			return dirtyScanResult{}, fmt.Errorf("scan dirty accepted raw partition: %w", err)
 		}
 		part.EventDate = truncateUTCDate(part.EventDate)
 		part.Start = part.EventDate
 		part.End = part.EventDate.Add(24 * time.Hour)
-		parts = append(parts, part)
+		result.HistoricalPartitions = append(result.HistoricalPartitions, part)
 	}
-	return parts, nextWatermark, rows.Err()
+	if err := rows.Err(); err != nil {
+		return dirtyScanResult{}, err
+	}
+
+	sameDayArgs := []any{currentDayStart.UTC(), currentDayStart.UTC().Add(24 * time.Hour)}
+	sameDayArgs = append(sameDayArgs, orgArgs...)
+	sameDayArgs = append(sameDayArgs, watermarkArgs...)
+	sameDayRows, err := r.conn.Query(ctx, `
+		SELECT
+			org,
+			toStartOfHour(event_ts) AS window_start,
+			toStartOfHour(event_ts) + toIntervalHour(1) AS window_end
+		FROM naap.accepted_raw_events
+		WHERE event_ts >= ?
+		  AND event_ts < ?
+		  AND `+acceptedRawDirtyScanPredicate()+`
+		  AND `+orgClause+`
+		  AND `+watermarkClause+`
+		GROUP BY org, window_start, window_end
+		ORDER BY org, window_start
+	`, sameDayArgs...)
+	if err != nil {
+		return dirtyScanResult{}, fmt.Errorf("query dirty accepted raw windows: %w", err)
+	}
+	defer sameDayRows.Close()
+
+	for sameDayRows.Next() {
+		var window dirtyWindow
+		if err := sameDayRows.Scan(&window.Org, &window.WindowStart, &window.WindowEnd); err != nil {
+			return dirtyScanResult{}, fmt.Errorf("scan dirty accepted raw window: %w", err)
+		}
+		window.WindowStart = window.WindowStart.UTC()
+		window.WindowEnd = window.WindowEnd.UTC()
+		result.SameDayWindows = append(result.SameDayWindows, window)
+	}
+	if err := sameDayRows.Err(); err != nil {
+		return dirtyScanResult{}, err
+	}
+	return result, nil
 }
 
 func (r *repo) pendingDirtyPartitionCount(ctx context.Context, org string, excludedPrefixes []string) (uint64, error) {
@@ -277,6 +316,307 @@ func (r *repo) nextPendingDirtyPartition(ctx context.Context, org string, exclud
 		return dirtyPartition{}, false, err
 	}
 	return part, true, rows.Err()
+}
+
+func (r *repo) requeueExpiredDirtyPartitions(ctx context.Context, org string, excludedPrefixes []string) (int, error) {
+	orgClause, orgArgs := orgPredicate("ifNull(org, '')", org, excludedPrefixes)
+	rows, err := r.conn.Query(ctx, `
+		SELECT
+			ifNull(org, '') AS org,
+			event_date,
+			status,
+			reason,
+			first_dirty_at,
+			last_dirty_at,
+			ifNull(claim_owner, '') AS claim_owner,
+			lease_expires_at,
+			attempt_count,
+			ifNull(last_error_summary, '') AS last_error_summary,
+			updated_at
+		FROM naap.resolver_dirty_partitions FINAL
+		WHERE status = 'claimed'
+		  AND lease_expires_at <= now64(3)
+		  AND `+orgClause+`
+	`, orgArgs...)
+	if err != nil {
+		return 0, fmt.Errorf("query expired dirty partitions: %w", err)
+	}
+	defer rows.Close()
+
+	now := time.Now().UTC()
+	requeued := 0
+	for rows.Next() {
+		part, scanErr := scanDirtyPartition(rows)
+		if scanErr != nil {
+			return requeued, scanErr
+		}
+		state, ok := requeueDirtyPartitionState(part, now)
+		if !ok {
+			continue
+		}
+		if err := r.insertDirtyPartitionState(ctx, state); err != nil {
+			return requeued, fmt.Errorf("requeue expired dirty partition: %w", err)
+		}
+		requeued++
+	}
+	return requeued, rows.Err()
+}
+
+func (r *repo) pendingDirtyWindowCount(ctx context.Context, org string, excludedPrefixes []string) (uint64, error) {
+	orgClause, orgArgs := orgPredicate("org", org, excludedPrefixes)
+	var count uint64
+	if err := r.conn.QueryRow(ctx, `
+		SELECT count()
+		FROM naap.resolver_dirty_windows FINAL
+		WHERE status = 'pending'
+		  AND `+orgClause+`
+	`, orgArgs...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count pending dirty windows: %w", err)
+	}
+	return count, nil
+}
+
+func (r *repo) nextEligiblePendingDirtyWindow(ctx context.Context, org string, excludedPrefixes []string, repairCutoff, quietCutoff time.Time) (dirtyWindow, bool, error) {
+	orgClause, orgArgs := orgPredicate("org", org, excludedPrefixes)
+	args := []any{repairCutoff.UTC(), quietCutoff.UTC()}
+	args = append(args, orgArgs...)
+	rows, err := r.conn.Query(ctx, `
+		SELECT
+			org,
+			window_start,
+			window_end,
+			status,
+			reason,
+			first_dirty_at,
+			last_dirty_at,
+			ifNull(claim_owner, '') AS claim_owner,
+			lease_expires_at,
+			attempt_count,
+			ifNull(last_error_summary, '') AS last_error_summary,
+			updated_at
+		FROM naap.resolver_dirty_windows FINAL
+		WHERE status = 'pending'
+		  AND window_end <= ?
+		  AND last_dirty_at <= ?
+		  AND `+orgClause+`
+		ORDER BY window_start DESC, last_dirty_at DESC, org
+		LIMIT 1
+	`, args...)
+	if err != nil {
+		return dirtyWindow{}, false, fmt.Errorf("query next eligible pending dirty window: %w", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return dirtyWindow{}, false, nil
+	}
+	window, err := scanDirtyWindow(rows)
+	if err != nil {
+		return dirtyWindow{}, false, err
+	}
+	return window, true, rows.Err()
+}
+
+func (r *repo) requeueExpiredDirtyWindows(ctx context.Context, org string, excludedPrefixes []string) (int, error) {
+	orgClause, orgArgs := orgPredicate("org", org, excludedPrefixes)
+	rows, err := r.conn.Query(ctx, `
+		SELECT
+			org,
+			window_start,
+			window_end,
+			status,
+			reason,
+			first_dirty_at,
+			last_dirty_at,
+			ifNull(claim_owner, '') AS claim_owner,
+			lease_expires_at,
+			attempt_count,
+			ifNull(last_error_summary, '') AS last_error_summary,
+			updated_at
+		FROM naap.resolver_dirty_windows FINAL
+		WHERE status = 'claimed'
+		  AND lease_expires_at <= now64(3)
+		  AND `+orgClause+`
+	`, orgArgs...)
+	if err != nil {
+		return 0, fmt.Errorf("query expired dirty windows: %w", err)
+	}
+	defer rows.Close()
+
+	now := time.Now().UTC()
+	requeued := 0
+	for rows.Next() {
+		window, scanErr := scanDirtyWindow(rows)
+		if scanErr != nil {
+			return requeued, scanErr
+		}
+		state, ok := requeueDirtyWindowState(window, now)
+		if !ok {
+			continue
+		}
+		if err := r.insertDirtyWindowState(ctx, state); err != nil {
+			return requeued, fmt.Errorf("requeue expired dirty window: %w", err)
+		}
+		requeued++
+	}
+	return requeued, rows.Err()
+}
+
+func (r *repo) pendingRepairRequestCount(ctx context.Context, org string, excludedPrefixes []string) (uint64, error) {
+	orgClause, orgArgs := orgPredicate("ifNull(org, '')", org, excludedPrefixes)
+	var count uint64
+	if err := r.conn.QueryRow(ctx, `
+		SELECT count()
+		FROM (
+			SELECT *
+			FROM (
+				SELECT
+					request_id,
+					ifNull(org, '') AS org,
+					status,
+					updated_at,
+					row_number() OVER (PARTITION BY request_id ORDER BY updated_at DESC) AS rn
+				FROM naap.resolver_repair_requests
+			)
+			WHERE rn = 1
+		)
+		WHERE status = 'pending'
+		  AND `+orgClause+`
+	`, orgArgs...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count pending repair requests: %w", err)
+	}
+	return count, nil
+}
+
+func latestRepairRequestStatesQuery(innerWhere string) string {
+	query := `
+		SELECT
+			request_id,
+			org,
+			window_start,
+			window_end,
+			status,
+			requested_by,
+			reason,
+			dry_run,
+			claim_owner,
+			lease_expires_at,
+			attempt_count,
+			started_at,
+			finished_at,
+			last_error_summary,
+			created_at,
+			updated_at
+		FROM (
+			SELECT *
+			FROM (
+				SELECT
+					request_id,
+					ifNull(org, '') AS org,
+					window_start,
+					window_end,
+					status,
+					requested_by,
+					reason,
+					dry_run,
+					ifNull(claim_owner, '') AS claim_owner,
+					lease_expires_at,
+					attempt_count,
+					started_at,
+					finished_at,
+					ifNull(last_error_summary, '') AS last_error_summary,
+					created_at,
+					updated_at,
+					row_number() OVER (PARTITION BY request_id ORDER BY updated_at DESC) AS rn
+				FROM naap.resolver_repair_requests`
+	if innerWhere != "" {
+		query += `
+				WHERE ` + innerWhere
+	}
+	query += `
+			)
+			WHERE rn = 1
+		)
+	`
+	return query
+}
+
+func (r *repo) nextPendingRepairRequest(ctx context.Context, org string, excludedPrefixes []string) (repairRequest, bool, error) {
+	orgClause, orgArgs := orgPredicate("ifNull(org, '')", org, excludedPrefixes)
+	rows, err := r.conn.Query(ctx, latestRepairRequestStatesQuery("")+`
+		WHERE status = 'pending'
+		  AND `+orgClause+`
+		ORDER BY created_at, request_id
+		LIMIT 1
+	`, orgArgs...)
+	if err != nil {
+		return repairRequest{}, false, fmt.Errorf("query next pending repair request: %w", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return repairRequest{}, false, nil
+	}
+	request, err := scanRepairRequest(rows)
+	if err != nil {
+		return repairRequest{}, false, err
+	}
+	return request, true, rows.Err()
+}
+
+func (r *repo) requeueExpiredRepairRequests(ctx context.Context, org string, excludedPrefixes []string) (int, error) {
+	orgClause, orgArgs := orgPredicate("ifNull(org, '')", org, excludedPrefixes)
+	rows, err := r.conn.Query(ctx, latestRepairRequestStatesQuery("")+`
+		WHERE status = 'claimed'
+		  AND lease_expires_at <= now64(3)
+		  AND `+orgClause+`
+	`, orgArgs...)
+	if err != nil {
+		return 0, fmt.Errorf("query expired repair requests: %w", err)
+	}
+	defer rows.Close()
+
+	now := time.Now().UTC()
+	requeued := 0
+	for rows.Next() {
+		request, scanErr := scanRepairRequest(rows)
+		if scanErr != nil {
+			return requeued, scanErr
+		}
+		state, ok := requeueRepairRequestState(request, now)
+		if !ok {
+			continue
+		}
+		if err := r.insertRepairRequestState(ctx, state); err != nil {
+			return requeued, fmt.Errorf("requeue expired repair request: %w", err)
+		}
+		requeued++
+	}
+	return requeued, rows.Err()
+}
+
+func (r *repo) listRepairRequests(ctx context.Context, org string, excludedPrefixes []string, status string, limit uint64) ([]repairRequest, error) {
+	orgClause, orgArgs := orgPredicate("ifNull(org, '')", org, excludedPrefixes)
+	args := []any{status, status}
+	args = append(args, orgArgs...)
+	args = append(args, limit)
+	rows, err := r.conn.Query(ctx, latestRepairRequestStatesQuery("")+`
+		WHERE (? = '' OR status = ?)
+		  AND `+orgClause+`
+		ORDER BY created_at DESC, request_id DESC
+		LIMIT ?
+	`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list repair requests: %w", err)
+	}
+	defer rows.Close()
+	var out []repairRequest
+	for rows.Next() {
+		request, scanErr := scanRepairRequest(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		out = append(out, request)
+	}
+	return out, rows.Err()
 }
 
 func (r *repo) successfulBackfillPartitions(ctx context.Context, org string, excludedPrefixes []string) (map[string]struct{}, error) {
@@ -1229,17 +1569,20 @@ func (r *repo) fetchCurrentDecisionHashes(ctx context.Context, selectionEventIDs
 }
 
 func (r *repo) recordRun(ctx context.Context, runID string, req RunRequest, status string, startedAt, finishedAt time.Time, rowsProcessed, mismatchCount uint64, errSummary string) error {
+	// Persist both timing knobs with each run so dashboards and alert rules can
+	// evaluate same-day repair eligibility from the live resolver config rather
+	// than assuming fixed interval literals.
 	return r.conn.Exec(ctx, `
 		INSERT INTO naap.resolver_runs
 		(
 			run_id, mode, status, owner_id, org, window_start, window_end, cutoff_ts,
-			lateness_window_seconds, rows_processed, mismatch_count, error_summary,
+			lateness_window_seconds, dirty_quiet_period_seconds, rows_processed, mismatch_count, error_summary,
 			resolver_version, started_at, finished_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		runID, string(req.Mode), status, r.ownerID(), nullableStringValue(req.Org), nullableTimeValue(req.Start), nullableTimeValue(req.End), nullableTimeValue(req.End),
-		uint64(r.cfg.ResolverLatenessWindow.Seconds()), rowsProcessed, mismatchCount, nullableStringValue(errSummary),
+		uint64(r.cfg.ResolverLatenessWindow.Seconds()), uint64(r.cfg.ResolverDirtyQuietPeriod.Seconds()), rowsProcessed, mismatchCount, nullableStringValue(errSummary),
 		r.cfg.ResolverVersion, startedAt.UTC(), finishedAt.UTC(),
 	)
 }
@@ -1375,6 +1718,99 @@ func scanDirtyPartition(scanner interface{ Scan(dest ...any) error }) (dirtyPart
 	return part, nil
 }
 
+func scanDirtyWindow(scanner interface{ Scan(dest ...any) error }) (dirtyWindow, error) {
+	var window dirtyWindow
+	var claimOwner sql.NullString
+	var leaseExpiresAt sql.NullTime
+	var lastError sql.NullString
+	if err := scanner.Scan(
+		&window.Org,
+		&window.WindowStart,
+		&window.WindowEnd,
+		&window.Status,
+		&window.Reason,
+		&window.FirstDirtyAt,
+		&window.LastDirtyAt,
+		&claimOwner,
+		&leaseExpiresAt,
+		&window.AttemptCount,
+		&lastError,
+		&window.UpdatedAt,
+	); err != nil {
+		return dirtyWindow{}, fmt.Errorf("scan dirty window: %w", err)
+	}
+	window.WindowStart = window.WindowStart.UTC()
+	window.WindowEnd = window.WindowEnd.UTC()
+	window.FirstDirtyAt = window.FirstDirtyAt.UTC()
+	window.LastDirtyAt = window.LastDirtyAt.UTC()
+	window.UpdatedAt = window.UpdatedAt.UTC()
+	if claimOwner.Valid {
+		window.ClaimOwner = claimOwner.String
+	}
+	if leaseExpiresAt.Valid {
+		ts := leaseExpiresAt.Time.UTC()
+		window.LeaseExpiresAt = &ts
+	}
+	if lastError.Valid {
+		window.LastErrorSummary = lastError.String
+	}
+	return window, nil
+}
+
+func scanRepairRequest(scanner interface{ Scan(dest ...any) error }) (repairRequest, error) {
+	var request repairRequest
+	var dryRun uint8
+	var claimOwner sql.NullString
+	var leaseExpiresAt sql.NullTime
+	var startedAt sql.NullTime
+	var finishedAt sql.NullTime
+	var lastError sql.NullString
+	if err := scanner.Scan(
+		&request.RequestID,
+		&request.Org,
+		&request.WindowStart,
+		&request.WindowEnd,
+		&request.Status,
+		&request.RequestedBy,
+		&request.Reason,
+		&dryRun,
+		&claimOwner,
+		&leaseExpiresAt,
+		&request.AttemptCount,
+		&startedAt,
+		&finishedAt,
+		&lastError,
+		&request.CreatedAt,
+		&request.UpdatedAt,
+	); err != nil {
+		return repairRequest{}, fmt.Errorf("scan repair request: %w", err)
+	}
+	request.WindowStart = request.WindowStart.UTC()
+	request.WindowEnd = request.WindowEnd.UTC()
+	request.CreatedAt = request.CreatedAt.UTC()
+	request.UpdatedAt = request.UpdatedAt.UTC()
+	request.DryRun = dryRun != 0
+	if claimOwner.Valid {
+		request.ClaimOwner = claimOwner.String
+	}
+	if leaseExpiresAt.Valid {
+		ts := leaseExpiresAt.Time.UTC()
+		request.LeaseExpiresAt = &ts
+	}
+	if startedAt.Valid {
+		ts := startedAt.Time.UTC()
+		request.StartedAt = &ts
+	}
+	if finishedAt.Valid {
+		ts := finishedAt.Time.UTC()
+		request.FinishedAt = &ts
+	}
+	if lastError.Valid {
+		request.LastErrorSummary = lastError.String
+	}
+	return request, nil
+}
+
 func (r *repo) dirtyPartitionState(ctx context.Context, org string, eventDate time.Time) (*dirtyPartition, error) {
 	rows, err := r.conn.Query(ctx, `
 		SELECT
@@ -1407,6 +1843,57 @@ func (r *repo) dirtyPartitionState(ctx context.Context, org string, eventDate ti
 	return &part, rows.Err()
 }
 
+func (r *repo) dirtyWindowState(ctx context.Context, org string, windowStart, windowEnd time.Time) (*dirtyWindow, error) {
+	rows, err := r.conn.Query(ctx, `
+		SELECT
+			org,
+			window_start,
+			window_end,
+			status,
+			reason,
+			first_dirty_at,
+			last_dirty_at,
+			claim_owner,
+			lease_expires_at,
+			attempt_count,
+			last_error_summary,
+			updated_at
+		FROM naap.resolver_dirty_windows FINAL
+		WHERE org = ? AND window_start = ? AND window_end = ?
+		LIMIT 1
+	`, org, windowStart.UTC(), windowEnd.UTC())
+	if err != nil {
+		return nil, fmt.Errorf("query dirty window state: %w", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return nil, nil
+	}
+	window, err := scanDirtyWindow(rows)
+	if err != nil {
+		return nil, err
+	}
+	return &window, rows.Err()
+}
+
+func (r *repo) repairRequestState(ctx context.Context, requestID string) (*repairRequest, error) {
+	rows, err := r.conn.Query(ctx, latestRepairRequestStatesQuery("request_id = ?")+`
+		LIMIT 1
+	`, requestID)
+	if err != nil {
+		return nil, fmt.Errorf("query repair request state: %w", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return nil, nil
+	}
+	request, err := scanRepairRequest(rows)
+	if err != nil {
+		return nil, err
+	}
+	return &request, rows.Err()
+}
+
 func (r *repo) insertDirtyPartitionState(ctx context.Context, part dirtyPartition) error {
 	return r.conn.Exec(ctx, `
 		INSERT INTO naap.resolver_dirty_partitions
@@ -1430,6 +1917,59 @@ func (r *repo) insertDirtyPartitionState(ctx context.Context, part dirtyPartitio
 	)
 }
 
+func (r *repo) insertDirtyWindowState(ctx context.Context, window dirtyWindow) error {
+	return r.conn.Exec(ctx, `
+		INSERT INTO naap.resolver_dirty_windows
+		(
+			org, window_start, window_end, status, reason, first_dirty_at, last_dirty_at,
+			claim_owner, lease_expires_at, attempt_count, last_error_summary, updated_at
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		window.Org,
+		window.WindowStart.UTC(),
+		window.WindowEnd.UTC(),
+		window.Status,
+		window.Reason,
+		window.FirstDirtyAt.UTC(),
+		window.LastDirtyAt.UTC(),
+		nullableStringValue(window.ClaimOwner),
+		nullableTimeValue(window.LeaseExpiresAt),
+		window.AttemptCount,
+		nullableStringValue(window.LastErrorSummary),
+		window.UpdatedAt.UTC(),
+	)
+}
+
+func (r *repo) insertRepairRequestState(ctx context.Context, request repairRequest) error {
+	return r.conn.Exec(ctx, `
+		INSERT INTO naap.resolver_repair_requests
+		(
+			request_id, org, window_start, window_end, status, requested_by, reason, dry_run,
+			claim_owner, lease_expires_at, attempt_count, started_at, finished_at,
+			last_error_summary, created_at, updated_at
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		request.RequestID,
+		nullableStringValue(request.Org),
+		request.WindowStart.UTC(),
+		request.WindowEnd.UTC(),
+		request.Status,
+		request.RequestedBy,
+		request.Reason,
+		boolToUInt8(request.DryRun),
+		nullableStringValue(request.ClaimOwner),
+		nullableTimeValue(request.LeaseExpiresAt),
+		request.AttemptCount,
+		nullableTimeValue(request.StartedAt),
+		nullableTimeValue(request.FinishedAt),
+		nullableStringValue(request.LastErrorSummary),
+		request.CreatedAt.UTC(),
+		request.UpdatedAt.UTC(),
+	)
+}
+
 func (r *repo) enqueueDirtyPartitions(ctx context.Context, parts []backfillPartition, dirtyAt time.Time) (int, error) {
 	enqueued := 0
 	for _, part := range parts {
@@ -1444,6 +1984,39 @@ func (r *repo) enqueueDirtyPartitions(ctx context.Context, parts []backfillParti
 		enqueued++
 	}
 	return enqueued, nil
+}
+
+func (r *repo) enqueueDirtyWindows(ctx context.Context, windows []dirtyWindow, dirtyAt time.Time) (int, error) {
+	enqueued := 0
+	for _, window := range windows {
+		current, err := r.dirtyWindowState(ctx, window.Org, window.WindowStart, window.WindowEnd)
+		if err != nil {
+			return enqueued, err
+		}
+		state := nextDirtyWindowState(current, window, dirtyAt)
+		if err := r.insertDirtyWindowState(ctx, state); err != nil {
+			return enqueued, fmt.Errorf("insert dirty window pending state: %w", err)
+		}
+		enqueued++
+	}
+	return enqueued, nil
+}
+
+func (r *repo) createRepairRequest(ctx context.Context, request repairRequest) error {
+	now := time.Now().UTC()
+	if request.RequestID == "" {
+		request.RequestID = stableHash("repair-request", request.Org, request.WindowStart.UTC().Format(time.RFC3339Nano), request.WindowEnd.UTC().Format(time.RFC3339Nano), request.RequestedBy, request.Reason, now.Format(time.RFC3339Nano))
+	}
+	request.Status = "pending"
+	request.ClaimOwner = ""
+	request.LeaseExpiresAt = nil
+	request.AttemptCount = 0
+	request.StartedAt = nil
+	request.FinishedAt = nil
+	request.LastErrorSummary = ""
+	request.CreatedAt = now
+	request.UpdatedAt = now
+	return r.insertRepairRequestState(ctx, request)
 }
 
 func nextDirtyPartitionState(current *dirtyPartition, part backfillPartition, dirtyAt time.Time) dirtyPartition {
@@ -1476,6 +2049,77 @@ func nextDirtyPartitionState(current *dirtyPartition, part backfillPartition, di
 		state.Status = "pending"
 	}
 	return state
+}
+
+func requeueDirtyPartitionState(current dirtyPartition, now time.Time) (dirtyPartition, bool) {
+	if current.Status != "claimed" || current.LeaseExpiresAt == nil || current.LeaseExpiresAt.UTC().After(now.UTC()) {
+		return dirtyPartition{}, false
+	}
+	current.Status = "pending"
+	current.ClaimOwner = ""
+	current.LeaseExpiresAt = nil
+	current.UpdatedAt = now.UTC()
+	return current, true
+}
+
+func nextDirtyWindowState(current *dirtyWindow, window dirtyWindow, dirtyAt time.Time) dirtyWindow {
+	state := dirtyWindow{
+		Org:          window.Org,
+		WindowStart:  window.WindowStart.UTC(),
+		WindowEnd:    window.WindowEnd.UTC(),
+		Status:       "pending",
+		Reason:       "late_accepted_raw",
+		FirstDirtyAt: dirtyAt.UTC(),
+		LastDirtyAt:  dirtyAt.UTC(),
+		UpdatedAt:    dirtyAt.UTC(),
+	}
+	if current == nil {
+		return state
+	}
+	state.FirstDirtyAt = current.FirstDirtyAt.UTC()
+	state.AttemptCount = current.AttemptCount
+	switch current.Status {
+	case "claimed":
+		state.Status = "claimed"
+		state.ClaimOwner = current.ClaimOwner
+		state.LeaseExpiresAt = current.LeaseExpiresAt
+		state.LastErrorSummary = current.LastErrorSummary
+	case "pending":
+		state.Status = "pending"
+	case "failed", "success":
+		state.Status = "pending"
+	}
+	return state
+}
+
+func requeueDirtyWindowState(current dirtyWindow, now time.Time) (dirtyWindow, bool) {
+	if current.Status != "claimed" || current.LeaseExpiresAt == nil || current.LeaseExpiresAt.UTC().After(now.UTC()) {
+		return dirtyWindow{}, false
+	}
+	current.Status = "pending"
+	current.ClaimOwner = ""
+	current.LeaseExpiresAt = nil
+	current.UpdatedAt = now.UTC()
+	return current, true
+}
+
+func requeueRepairRequestState(current repairRequest, now time.Time) (repairRequest, bool) {
+	if current.Status != "claimed" || current.LeaseExpiresAt == nil || current.LeaseExpiresAt.UTC().After(now.UTC()) {
+		return repairRequest{}, false
+	}
+	current = pendingRepairRequestState(current, now)
+	return current, true
+}
+
+func pendingRepairRequestState(current repairRequest, now time.Time) repairRequest {
+	current.Status = "pending"
+	current.ClaimOwner = ""
+	current.LeaseExpiresAt = nil
+	current.StartedAt = nil
+	current.FinishedAt = nil
+	current.LastErrorSummary = ""
+	current.UpdatedAt = now.UTC()
+	return current
 }
 
 func (r *repo) claimDirtyPartition(ctx context.Context, org string, eventDate time.Time, ownerID string, ttl time.Duration) (bool, error) {
@@ -1548,6 +2192,149 @@ func (r *repo) failDirtyPartition(ctx context.Context, org string, eventDate tim
 	current.LastErrorSummary = errSummary
 	current.UpdatedAt = now
 	return r.insertDirtyPartitionState(ctx, *current)
+}
+
+func (r *repo) claimDirtyWindow(ctx context.Context, org string, windowStart, windowEnd time.Time, ownerID string, ttl time.Duration) (bool, error) {
+	current, err := r.dirtyWindowState(ctx, org, windowStart, windowEnd)
+	if err != nil {
+		return false, err
+	}
+	if current == nil || current.Status != "pending" {
+		return false, nil
+	}
+	now := time.Now().UTC()
+	current.Status = "claimed"
+	current.ClaimOwner = ownerID
+	lease := now.Add(ttl)
+	current.LeaseExpiresAt = &lease
+	current.AttemptCount++
+	current.LastErrorSummary = ""
+	current.UpdatedAt = now
+	if err := r.insertDirtyWindowState(ctx, *current); err != nil {
+		return false, fmt.Errorf("claim dirty window: %w", err)
+	}
+	return true, nil
+}
+
+func (r *repo) releaseDirtyWindow(ctx context.Context, org string, windowStart, windowEnd time.Time, ownerID string) error {
+	current, err := r.dirtyWindowState(ctx, org, windowStart, windowEnd)
+	if err != nil {
+		return err
+	}
+	if current == nil {
+		return nil
+	}
+	now := time.Now().UTC()
+	current.Status = "pending"
+	current.ClaimOwner = ""
+	current.LeaseExpiresAt = nil
+	current.UpdatedAt = now
+	return r.insertDirtyWindowState(ctx, *current)
+}
+
+func (r *repo) completeDirtyWindow(ctx context.Context, org string, windowStart, windowEnd time.Time, ownerID string) error {
+	current, err := r.dirtyWindowState(ctx, org, windowStart, windowEnd)
+	if err != nil {
+		return err
+	}
+	if current == nil {
+		return nil
+	}
+	now := time.Now().UTC()
+	current.Status = "success"
+	current.ClaimOwner = ownerID
+	current.LeaseExpiresAt = nil
+	current.LastErrorSummary = ""
+	current.UpdatedAt = now
+	return r.insertDirtyWindowState(ctx, *current)
+}
+
+func (r *repo) failDirtyWindow(ctx context.Context, org string, windowStart, windowEnd time.Time, ownerID, errSummary string) error {
+	current, err := r.dirtyWindowState(ctx, org, windowStart, windowEnd)
+	if err != nil {
+		return err
+	}
+	if current == nil {
+		return nil
+	}
+	now := time.Now().UTC()
+	current.Status = "failed"
+	current.ClaimOwner = ownerID
+	current.LeaseExpiresAt = nil
+	current.LastErrorSummary = errSummary
+	current.UpdatedAt = now
+	return r.insertDirtyWindowState(ctx, *current)
+}
+
+func (r *repo) claimRepairRequest(ctx context.Context, requestID, ownerID string, ttl time.Duration) (bool, error) {
+	current, err := r.repairRequestState(ctx, requestID)
+	if err != nil {
+		return false, err
+	}
+	if current == nil || current.Status != "pending" {
+		return false, nil
+	}
+	now := time.Now().UTC()
+	current.Status = "claimed"
+	current.ClaimOwner = ownerID
+	lease := now.Add(ttl)
+	current.LeaseExpiresAt = &lease
+	current.AttemptCount++
+	current.StartedAt = &now
+	current.LastErrorSummary = ""
+	current.UpdatedAt = now
+	if err := r.insertRepairRequestState(ctx, *current); err != nil {
+		return false, fmt.Errorf("claim repair request: %w", err)
+	}
+	return true, nil
+}
+
+func (r *repo) completeRepairRequest(ctx context.Context, requestID, ownerID string) error {
+	current, err := r.repairRequestState(ctx, requestID)
+	if err != nil {
+		return err
+	}
+	if current == nil {
+		return nil
+	}
+	now := time.Now().UTC()
+	current.Status = "success"
+	current.ClaimOwner = ownerID
+	current.LeaseExpiresAt = nil
+	current.LastErrorSummary = ""
+	current.FinishedAt = &now
+	current.UpdatedAt = now
+	return r.insertRepairRequestState(ctx, *current)
+}
+
+func (r *repo) releaseRepairRequest(ctx context.Context, requestID string) error {
+	current, err := r.repairRequestState(ctx, requestID)
+	if err != nil {
+		return err
+	}
+	if current == nil {
+		return nil
+	}
+	state := pendingRepairRequestState(*current, time.Now().UTC())
+	return r.insertRepairRequestState(ctx, state)
+}
+
+func (r *repo) failRepairRequest(ctx context.Context, requestID, ownerID, errSummary string) error {
+	current, err := r.repairRequestState(ctx, requestID)
+	if err != nil {
+		return err
+	}
+	if current == nil {
+		return nil
+	}
+	now := time.Now().UTC()
+	current.Status = "failed"
+	current.ClaimOwner = ownerID
+	current.LeaseExpiresAt = nil
+	current.LastErrorSummary = errSummary
+	current.FinishedAt = &now
+	current.UpdatedAt = now
+	return r.insertRepairRequestState(ctx, *current)
 }
 
 func (r *repo) insertSelectionEvents(ctx context.Context, runID string, rows []SelectionEvent) error {

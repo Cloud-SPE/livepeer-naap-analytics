@@ -318,6 +318,21 @@ type dirtyPartition struct {
 	UpdatedAt        time.Time
 }
 
+type dirtyWindow struct {
+	Org              string
+	WindowStart      time.Time
+	WindowEnd        time.Time
+	Status           string
+	Reason           string
+	FirstDirtyAt     time.Time
+	LastDirtyAt      time.Time
+	ClaimOwner       string
+	LeaseExpiresAt   *time.Time
+	AttemptCount     uint32
+	LastErrorSummary string
+	UpdatedAt        time.Time
+}
+
 // AIBatchJobRecord holds the raw job data fetched from normalized_ai_batch_job.
 // OrchURL is always sourced from the completed_at event; ReceivedAt is from the
 // received event and is used as SelectionTS when available.
@@ -411,14 +426,42 @@ type dirtyScanWatermark struct {
 	EventID    string
 }
 
+type dirtyScanResult struct {
+	HistoricalPartitions []backfillPartition
+	SameDayWindows       []dirtyWindow
+	Watermark            *dirtyScanWatermark
+}
+
+type repairRequest struct {
+	RequestID        string
+	Org              string
+	WindowStart      time.Time
+	WindowEnd        time.Time
+	Status           string
+	RequestedBy      string
+	Reason           string
+	DryRun           bool
+	ClaimOwner       string
+	LeaseExpiresAt   *time.Time
+	AttemptCount     uint32
+	StartedAt        *time.Time
+	FinishedAt       *time.Time
+	LastErrorSummary string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
 type schedulerHealthState struct {
-	Status                   string                `json:"status"`
-	Mode                     string                `json:"mode,omitempty"`
-	Phase                    string                `json:"phase,omitempty"`
-	DirtyQueueDepth          uint64                `json:"dirty_queue_depth,omitempty"`
-	AcceptedRawScanWatermark *dirtyScanWatermark   `json:"accepted_raw_scan_watermark,omitempty"`
-	TailWatermark            *time.Time            `json:"tail_watermark,omitempty"`
-	ActiveClaim              *schedulerActiveClaim `json:"active_claim,omitempty"`
+	Status                    string                  `json:"status"`
+	Mode                      string                  `json:"mode,omitempty"`
+	Phase                     string                  `json:"phase,omitempty"`
+	HistoricalDirtyQueueDepth uint64                  `json:"historical_dirty_queue_depth,omitempty"`
+	SameDayDirtyQueueDepth    uint64                  `json:"same_day_dirty_queue_depth,omitempty"`
+	RepairRequestQueueDepth   uint64                  `json:"repair_request_queue_depth,omitempty"`
+	AcceptedRawScanWatermark  *dirtyScanWatermark     `json:"accepted_raw_scan_watermark,omitempty"`
+	TailWatermark             *time.Time              `json:"tail_watermark,omitempty"`
+	ActiveClaim               *schedulerActiveClaim   `json:"active_claim,omitempty"`
+	ActiveRepairRequest       *schedulerRepairRequest `json:"active_repair_request,omitempty"`
 }
 
 type schedulerActiveClaim struct {
@@ -427,6 +470,15 @@ type schedulerActiveClaim struct {
 	WindowStart time.Time `json:"window_start"`
 	WindowEnd   time.Time `json:"window_end"`
 	OwnerID     string    `json:"owner_id"`
+}
+
+type schedulerRepairRequest struct {
+	RequestID   string    `json:"request_id"`
+	Org         string    `json:"org,omitempty"`
+	WindowStart time.Time `json:"window_start"`
+	WindowEnd   time.Time `json:"window_end"`
+	Status      string    `json:"status"`
+	DryRun      bool      `json:"dry_run"`
 }
 
 func stableHash(parts ...string) string {

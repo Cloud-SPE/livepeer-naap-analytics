@@ -47,9 +47,11 @@ Recommended production mode for a single long-lived resolver service.
 
 `auto` runs one scheduler loop with fixed priority:
 
-1. visible closed historical backlog from `naap.accepted_raw_events`
-2. closed historical days dirtied later by newly accepted raw arrivals
-3. the live lateness-window `tail`
+1. the live lateness-window `tail`
+2. the latest eligible closed same-day hourly window dirtied later by newly accepted raw arrivals
+3. queued bounded repair requests from the resolver admin API
+4. closed historical days dirtied later by newly accepted raw arrivals
+5. visible closed historical backlog from `naap.accepted_raw_events`
 
 The service executes one owned slice at a time and keeps the existing
 window-claim safety model. It does not run these lanes concurrently inside the
@@ -61,18 +63,34 @@ Dirty historical repair is driven by:
   `(last_ingested_at, last_event_id)`
 - `naap.resolver_dirty_partitions` as the durable queue of closed historical
   `(org, event_date)` repairs
+- `naap.resolver_dirty_windows` as the durable queue of current-day closed
+  `(org, window_start, window_end)` hourly repairs
+- `naap.resolver_repair_requests` as the durable async queue for explicit
+  operator-requested bounded repairs
 
 Automatic repair is intentionally stabilized during active replay:
 
 - newly accepted late rows for a closed historical day update that day's dirty
   state rather than creating duplicate work
+- newly accepted late rows for a closed same-day hour update that hour's dirty
+  state rather than creating duplicate work
 - if a dirty day is already `claimed`, new late arrivals are coalesced onto the
   in-flight claim instead of flipping the day back to `pending`
+- if a same-day dirty hour is already `claimed`, new late arrivals are
+  coalesced onto the in-flight claim instead of flipping the hour back to
+  `pending`
 - a pending dirty day is only eligible for automatic replay once it has been
   quiet for `RESOLVER_DIRTY_QUIET_PERIOD`
+- a pending same-day dirty hour is only eligible once the hour is closed,
+  `window_end <= now - RESOLVER_LATENESS_WINDOW`, and it has been quiet for
+  `RESOLVER_DIRTY_QUIET_PERIOD`
 
-This avoids repeatedly replaying the same historical day while accepted raw
-backfill is still actively delivering more rows for that day.
+System-health dashboard queries and same-day stalled alerts derive those timing
+thresholds from the latest successful resolver runtime config recorded in
+`naap.resolver_runs`, rather than assuming fixed interval literals.
+
+This avoids repeatedly replaying the same historical day or same-day hour while
+accepted raw backfill is still actively delivering more rows for that slice.
 
 Only resolver-relevant accepted raw families enqueue dirty historical work:
 
@@ -80,6 +98,11 @@ Only resolver-relevant accepted raw families enqueue dirty historical work:
 - `ai_stream_status`
 - `ai_stream_events`
 - `network_capabilities`
+- `ai_batch_request`
+- `ai_llm_request`
+- `job_gateway`
+- `job_orchestrator`
+- `worker_lifecycle`
 
 `create_new_payment`, `discovery_results`, and `stream_ingest_metrics` do not
 dirty resolver history.
@@ -182,6 +205,29 @@ repair state:
 - `success`: the dirty day has been repaired successfully
 - `failed`: automatic repair hit an error and needs inspection
 
+Use `naap.resolver_dirty_windows FINAL` to inspect same-day hourly late-arrival
+repair state:
+
+- `pending`: closed same-day hour is waiting to be replayed
+- `claimed`: the `auto` lane has taken that hour for repair
+- `success`: the dirty hour has been repaired successfully
+- `failed`: automatic repair hit an error and needs inspection
+
+Use `naap.resolver_repair_requests FINAL` to inspect explicit bounded repair
+requests submitted through the resolver admin API:
+
+- `pending`: queued and waiting
+- `claimed`: currently being executed
+- `success`: completed successfully
+- `failed`: execution failed, timed out, or could not acquire the bounded window
+
+Resolver admin repair request policy:
+
+- all-org requests are limited to `1h`
+- org-scoped requests are limited to `6h`
+- queued requests run with a fixed `5m` execution timeout
+- use `make resolver-repair-window` or `make resolver-backfill` for larger windows
+
 Use `naap.resolver_runtime_state FINAL` to inspect the accepted-raw dirty-scan
 watermark for the active scheduler scope.
 
@@ -223,13 +269,40 @@ Resolver `/healthz` on the metrics port now includes:
 
 - `mode`
 - `phase`
-- `dirty_queue_depth`
+- `historical_dirty_queue_depth`
+- `same_day_dirty_queue_depth`
+- `repair_request_queue_depth`
 - `accepted_raw_scan_watermark`
 - `tail_watermark`
+
+Grafana alerting should track the same control points:
+
+- `NaapResolverTailStale`: no successful tail completion for more than 15 minutes
+- `NaapResolverSameDayRepairStalled`: eligible same-day dirty hours stay pending for 15 minutes
+- `NaapDirtyHistoricalQueueBacklog`: historical pending count stays elevated
+- `NaapResolverHistoricalRepairAgeHigh`: the oldest pending historical dirty partition keeps aging
 - `active_claim`
+- `active_repair_request`
 
 Resolver scheduler phase may temporarily report `historical_repair_wait` when a
 closed dirty day exists but has not yet satisfied the quiet-period gate.
+
+Resolver scheduler phase may temporarily report `same_day_repair_wait` when a
+closed current-day hour exists but has not yet satisfied the lateness-window or
+quiet-period gate.
+
+## Resolver Admin API
+
+The resolver service exposes an authenticated internal API on the resolver
+metrics port:
+
+- `POST /internal/v1/repair-requests`
+- `GET /internal/v1/repair-requests`
+- `GET /internal/v1/repair-requests/{request_id}`
+
+All `/internal/v1/*` routes require `Authorization: Bearer <RESOLVER_ADMIN_TOKEN>`.
+These endpoints are async and queue-backed. The public analytics API remains
+read-only and does not expose repair controls.
 
 Use heavy attribution-gap views only on bounded slices. Broad all-org runs can
 be expensive enough to restart a local ClickHouse. For wide investigations,
