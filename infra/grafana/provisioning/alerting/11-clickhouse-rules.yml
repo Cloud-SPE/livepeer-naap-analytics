@@ -24,7 +24,7 @@ groups:
               intervalMs: 1000
               maxDataPoints: 43200
               queryType: sql
-              rawSql: SELECT toFloat64(greatest(dateDiff('second', max(ingested_at), now()), 0)) AS value FROM naap.accepted_raw_events
+              rawSql: WITH raw AS (SELECT count() AS row_count, max(ingested_at) AS max_ingested_at FROM naap.accepted_raw_events) SELECT if(row_count = 0, 0.0, toFloat64(greatest(dateDiff('second', max_ingested_at, now()), 0))) AS value FROM raw
               refId: A
           - refId: B
             datasourceUid: __expr__
@@ -86,7 +86,7 @@ groups:
               intervalMs: 1000
               maxDataPoints: 43200
               queryType: sql
-              rawSql: WITH raw AS (SELECT max(ingested_at) AS raw_max FROM naap.accepted_raw_events WHERE event_type IN ('stream_trace', 'ai_stream_status', 'ai_stream_events', 'network_capabilities')), wm AS (SELECT max(last_ingested_at) AS wm_max FROM naap.resolver_runtime_state FINAL) SELECT toFloat64(greatest(dateDiff('second', ifNull(wm_max, raw_max), raw_max), 0)) AS value FROM raw CROSS JOIN wm
+              rawSql: WITH raw AS (SELECT max(ingested_at) AS raw_max FROM naap.accepted_raw_events WHERE event_type IN ('stream_trace', 'ai_stream_status', 'ai_stream_events', 'network_capabilities', 'ai_batch_request', 'ai_llm_request', 'job_gateway', 'job_orchestrator', 'worker_lifecycle')), wm AS (SELECT max(last_ingested_at) AS wm_max FROM naap.resolver_runtime_state FINAL) SELECT if(isNull(raw_max), 0.0, toFloat64(greatest(dateDiff('second', ifNull(wm_max, raw_max), raw_max), 0))) AS value FROM raw CROSS JOIN wm
               refId: A
           - refId: B
             datasourceUid: __expr__
@@ -346,7 +346,7 @@ groups:
               intervalMs: 1000
               maxDataPoints: 43200
               queryType: sql
-              rawSql: WITH pending AS (SELECT min(updated_at) AS oldest_pending_at FROM naap.resolver_dirty_partitions FINAL WHERE status = 'pending') SELECT if(isNull(oldest_pending_at), 0.0, toFloat64(greatest(dateDiff('hour', oldest_pending_at, now()), 0))) AS value FROM pending
+              rawSql: WITH pending AS (SELECT count() AS pending_count, min(updated_at) AS oldest_pending_at FROM naap.resolver_dirty_partitions FINAL WHERE status = 'pending') SELECT if(pending_count = 0, 0.0, toFloat64(greatest(dateDiff('hour', oldest_pending_at, now()), 0))) AS value FROM pending
               refId: A
           - refId: B
             datasourceUid: __expr__
