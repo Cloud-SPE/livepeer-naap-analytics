@@ -15,7 +15,7 @@
 |---|---|
 | Monitoring, local setup, offset reset, ClickHouse reload | [`devops-environment-guide.md`](devops-environment-guide.md) |
 | Runtime validation and performance checklist | [`runtime-validation-and-performance.md`](runtime-validation-and-performance.md) |
-| Resolver modes, failure recovery, full rebuild | [`run-modes-and-recovery.md`](run-modes-and-recovery.md) |
+| Resolver modes, failure recovery, full rebuild, retained-raw rebuild | [`run-modes-and-recovery.md`](run-modes-and-recovery.md) |
 | Security posture, credential rotation, UFW rules | [`infra-hardening-runbook.md`](infra-hardening-runbook.md) |
 | Kafka and ClickHouse retention windows | [`data-retention-policy.md`](data-retention-policy.md) |
 | Per-service Compose responsibilities | [`compose-services.md`](compose-services.md) |
@@ -130,6 +130,13 @@ make warehouse-run
 [ ] Kafka UI — naap cluster shows connected, consumer groups visible
 [ ] MM2 logs — "Successfully joined group", no SASL errors
 ```
+
+### Retained-raw recovery
+
+If Kafka is unavailable but ClickHouse still retains the raw event history, use
+the retained-raw rebuild workflow in
+[`run-modes-and-recovery.md`](run-modes-and-recovery.md#rebuild-from-retained-raw).
+It is dry-run by default and becomes destructive only with `APPLY=1`.
 
 ---
 

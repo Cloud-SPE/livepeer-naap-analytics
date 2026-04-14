@@ -1,4 +1,4 @@
-.PHONY: up up-tooling down build test test-integration bench load-test lint dev-api setup fmt ch-smoke ch-query push push-api push-clickhouse push-dbt push-resolver push-mcp warehouse-run warehouse-test warehouse-compile test-validation test-validation-host test-validation-docker test-validation-clean measure-baseline measure-refactor-replay migrate-status migrate-validate migrate-up bootstrap-extract resolver-logs resolver-auto resolver-bootstrap resolver-tail resolver-backfill resolver-repair-window parity-verify backfill-rollups backfill-raw-mv-views
+.PHONY: up up-tooling down build test test-integration bench load-test lint dev-api setup fmt ch-smoke ch-query push push-api push-clickhouse push-dbt push-resolver push-mcp warehouse-run warehouse-test warehouse-compile test-validation test-validation-host test-validation-docker test-validation-clean measure-baseline measure-refactor-replay migrate-status migrate-validate migrate-up bootstrap-extract resolver-logs resolver-auto resolver-bootstrap resolver-tail resolver-backfill resolver-repair-window parity-verify backfill-rollups backfill-raw-mv-views backfill-normalized-from-retained-raw backfill-legacy-session-attribution-compat rebuild-from-retained-raw
 
 REGISTRY  ?= tztcloud
 IMAGE_TAG ?= latest
@@ -188,6 +188,15 @@ backfill-rollups:
 
 backfill-raw-mv-views:
 	docker compose exec -T clickhouse clickhouse-client --user naap_admin --password changeme --multiquery < scripts/backfill_repointed_raw_views.sql
+
+backfill-normalized-from-retained-raw:
+	docker compose exec -T clickhouse clickhouse-client --user naap_admin --password changeme --multiquery < scripts/backfill_normalized_from_retained_raw.sql
+
+backfill-legacy-session-attribution-compat:
+	docker compose exec -T clickhouse clickhouse-client --user naap_admin --password changeme --multiquery < scripts/backfill_legacy_session_attribution_compat.sql
+
+rebuild-from-retained-raw:
+	./scripts/rebuild_from_retained_raw.sh
 
 # ── Inspector ─────────────────────────────────────────────────────────────────
 

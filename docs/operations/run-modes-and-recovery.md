@@ -31,6 +31,7 @@ Useful commands:
 make logs
 make up-tooling
 make warehouse-run
+make rebuild-from-retained-raw
 make test-validation-clean
 make bootstrap-extract
 ```
@@ -49,8 +50,9 @@ Use the `infra2` deployment guide in [`../../deploy/infra2/README.md`](../../dep
 `auto`
 
 - Standard always-on production mode.
-- Bootstraps visible backlog, repairs dirty historical partitions, executes
-  queued repair requests, heals closed same-day dirty hours, then tails continuously.
+- Tails first, then heals the latest eligible same-day dirty hours, executes
+  queued repair requests, repairs dirty historical partitions, and finally
+  works visible bootstrap backlog.
 - Alert-backed health gates for this mode live on `infra/naap-system-health`:
   `NaapResolverTailStale`, `NaapResolverSameDayRepairStalled`,
   `NaapDirtyHistoricalQueueBacklog`, and `NaapResolverHistoricalRepairAgeHigh`.
@@ -140,7 +142,7 @@ make resolver-logs
 Inspect recent run state:
 
 ```sql
-SELECT run_id, mode, status, owner_id, org, started_at, completed_at, last_error_summary
+SELECT run_id, mode, status, owner_id, org, started_at, finished_at, error_summary
 FROM naap.resolver_runs
 ORDER BY started_at DESC
 LIMIT 20;
@@ -237,6 +239,53 @@ Use this when the volume is disposable or the safest path is a clean rebuild:
 5. verify that AI-batch/BYOC canonical job stores are populated, not just that
    the views exist
 6. verify with validation and parity checks
+
+### Rebuild From Retained Raw
+
+Use this when Kafka is unavailable or you want to republish supported
+downstream state from retained ClickHouse raw history instead of replaying the
+upstream transport.
+
+Dry-run first:
+
+```bash
+make rebuild-from-retained-raw
+```
+
+Execute the destructive rebuild:
+
+```bash
+APPLY=1 make rebuild-from-retained-raw
+```
+
+Optional overrides:
+
+```bash
+APPLY=1 FROM=2026-04-01T00:00:00Z TO=2026-04-08T00:00:00Z \
+EXCLUDE_ORG_PREFIXES=vtest_ CLICKHOUSE_TIMEOUT=300s \
+make rebuild-from-retained-raw
+```
+
+This workflow preserves:
+
+- `accepted_raw_events` and `ignored_raw_events`
+- worker-populated metadata tables such as `agg_gpu_inventory`,
+  `orch_metadata`, and `gateway_metadata`
+
+This workflow rebuilds:
+
+- raw-derived normalized event-family tables
+- raw-derived AI batch / BYOC normalized tables
+- raw-derived aggregate tables
+- normalized session and capability rollups from retained normalized history
+- resolver-owned canonical/current/serving stores
+- legacy `canonical_session_attribution_*` compatibility tables from the
+  selection-centered attribution outputs
+- dbt semantic views after the resolver replay
+
+It is intentionally not a wildcard purge of every non-raw table. Worker-managed
+metadata tables remain preserved because they are not part of the retained-raw
+replay spine.
 
 ## Validation And Post-Recovery Checks
 
