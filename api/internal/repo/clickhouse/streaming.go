@@ -20,7 +20,7 @@ func (r *Repo) GetStreamingModels(ctx context.Context) ([]types.StreamingModel, 
 		FROM (
 		    SELECT pipeline_id AS s_pipeline, model_id AS s_model,
 		           toInt64(count(DISTINCT orch_address)) AS warm_orch_count,
-		           toInt64(count(DISTINCT ifNull(gpu_id, ''))) AS gpu_slots
+		           toInt64(countDistinctIf(gpu_id, gpu_id IS NOT NULL AND gpu_id != '')) AS gpu_slots
 		    FROM naap.api_latest_orchestrator_pipeline_models
 		    WHERE pipeline_id = 'live-video-to-video'
 		      AND last_seen > now() - INTERVAL 30 MINUTE AND model_id != ''
@@ -33,7 +33,7 @@ func (r *Repo) GetStreamingModels(ctx context.Context) ([]types.StreamingModel, 
 		) d ON s.s_pipeline = d.d_pipeline AND s.s_model = d.d_model
 		LEFT JOIN (
 		    SELECT pipeline_id AS f_pipeline, ifNull(model_id, '') AS f_model,
-		           sum(ifNull(avg_output_fps, 0) * requested_sessions) / nullIf(sum(requested_sessions), 0) AS avg_fps
+		           sum(ifNull(output_fps_sum, 0)) / nullIf(sum(ifNull(status_samples, 0)), 0) AS avg_fps
 		    FROM naap.api_sla_compliance
 		    WHERE window_start >= now() - INTERVAL 24 HOUR AND pipeline_id = 'live-video-to-video'
 		    GROUP BY f_pipeline, f_model

@@ -282,8 +282,9 @@ paths:
           in: query
           required: false
           description: |
-            Repeatable capability filter in `pipeline/model` form. When supplied,
-            only orchestrators advertising every listed capability are returned.
+            Repeatable capability filter in `pipeline/model` form. Uses **OR
+            semantics**: an orchestrator matches when it advertises at least one
+            of the listed `pipeline/model` entries.
             Example: `?caps=live-video-to-video/streamdiffusion-sdxl&caps=llm/glm-4.7-flash`
           schema:
             type: array
@@ -331,6 +332,11 @@ components:
         value: { type: number }
         delta: { type: number }
 
+    MetricValue:
+      type: object
+      properties:
+        value: { type: number }
+
     HourlyBucket:
       type: object
       properties:
@@ -340,8 +346,8 @@ components:
     DashboardKPI:
       type: object
       properties:
-        successRate: { $ref: "#/components/schemas/MetricDelta" }
-        orchestratorsOnline: { $ref: "#/components/schemas/MetricDelta" }
+        successRate: { $ref: "#/components/schemas/MetricValue" }
+        orchestratorsOnline: { $ref: "#/components/schemas/MetricValue" }
         dailyUsageMins: { $ref: "#/components/schemas/MetricDelta" }
         dailySessionCount: { $ref: "#/components/schemas/MetricDelta" }
         dailyNetworkFeesEth: { $ref: "#/components/schemas/MetricDelta" }
@@ -442,6 +448,7 @@ components:
         effectiveSuccessRate: { type: number, nullable: true }
         noSwapRatio: { type: number, nullable: true }
         slaScore: { type: number, nullable: true }
+        slaWindowStart: { type: string, format: date-time, nullable: true }
         pipelines:
           type: array
           items: { type: string }
@@ -460,8 +467,6 @@ components:
       type: object
       properties:
         totalGPUs: { type: integer }
-        activeGPUs: { type: integer }
-        availableCapacity: { type: number }
         models:
           type: array
           items:
@@ -514,9 +519,9 @@ components:
         pipeline: { type: string }
         model: { type: string }
         gateway: { type: string }
+        orchestratorAddress: { type: string }
         orchestratorUrl: { type: string }
         state: { type: string }
-        job_type: { type: string }
         inputFps: { type: number }
         outputFps: { type: number }
         firstSeen: { type: string, format: date-time }
@@ -558,7 +563,7 @@ components:
           maximum: 1
           description: |
             Fitness score; higher is better. When `recent_work` is true, this is
-            a measured value derived from the last 1-hour SLA. When `recent_work`
+            a measured value derived from the last 2-hour SLA. When `recent_work`
             is false, this is `0.0` (placeholder — there's no measurement yet).
         capabilities:
           type: array

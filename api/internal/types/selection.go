@@ -24,6 +24,7 @@ type DiscoverOrchestratorRow struct {
 // DiscoverOrchestratorsParams filters the discover/orchestrators result.
 type DiscoverOrchestratorsParams struct {
 	// Caps is an optional list of "pipeline/model" strings. If non-empty,
-	// only orchestrators advertising ALL listed caps are returned.
+	// orchestrators are matched with OR semantics: a row is returned when it
+	// advertises at least one of the listed caps.
 	Caps []string
 }

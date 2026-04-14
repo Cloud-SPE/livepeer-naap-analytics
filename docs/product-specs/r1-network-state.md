@@ -15,15 +15,15 @@ are available, and how current supply compares to observed demand.
 Use the latest capability and inventory state published into the semantic
 serving layer to expose three current network-state surfaces:
 
-- `GET /v1/streaming/orchestrators`
+- `GET /v1/dashboard/orchestrators`
 - `GET /v1/streaming/models`
-- `GET /v1/streaming/demand`
+- `GET /v1/streaming/models`
 
 ## Requirements
 
 ### NET-001: Orchestrator list
 
-`GET /v1/streaming/orchestrators`
+`GET /v1/dashboard/orchestrators`
 
 Returns a paginated list of orchestrators ordered by `last_seen` descending.
 
@@ -87,7 +87,7 @@ Required behavior:
 
 ### NET-003: Network capacity
 
-`GET /v1/streaming/demand`
+`GET /v1/streaming/models`
 
 Returns current GPU supply versus active demand grouped by `(pipeline, model)`.
 

@@ -42,14 +42,9 @@ https://analytics.livepeer.cloud/v1/
 
 | Domain | Endpoint | Spec |
 |--------|---------|------|
-| Network | `GET /v1/streaming/orchestrators` | `r1-network-state.md` |
+| Network | `GET /v1/dashboard/orchestrators` | `r1-network-state.md` |
 | Network | `GET /v1/streaming/models` | `r1-network-state.md` |
-| Network | `GET /v1/streaming/demand` | `r1-network-state.md` |
 | Streaming | `GET /v1/streaming/models` | `r3-performance-quality.md` |
-| Streaming | `GET /v1/streaming/sla` | Built-in |
-| Streaming | `GET /v1/streaming/demand` | Built-in |
-| Streaming | `GET /v1/streaming/demand` | Built-in |
-| Streaming | `GET /v1/streaming/gpu-metrics` | Built-in |
 | Dashboard | `GET /v1/dashboard/kpi` | Built-in |
 | Dashboard | `GET /v1/dashboard/pipelines` | Built-in |
 | Dashboard | `GET /v1/dashboard/orchestrators` | Built-in |
@@ -58,14 +53,7 @@ https://analytics.livepeer.cloud/v1/
 | Dashboard | `GET /v1/dashboard/pricing` | Built-in |
 | Dashboard | `GET /v1/dashboard/job-feed` | Built-in |
 | Requests | `GET /v1/requests/models` | Built-in |
-| Requests | `GET /v1/requests/orchestrators` | Built-in |
-| Requests | `GET /v1/requests/ai-batch/summary` | Built-in |
-| Requests | `GET /v1/requests/ai-batch/jobs` | Built-in |
-| Requests | `GET /v1/requests/ai-batch/llm-summary` | Built-in |
-| Requests | `GET /v1/requests/byoc/summary` | Built-in |
-| Requests | `GET /v1/requests/byoc/jobs` | Built-in |
-| Requests | `GET /v1/requests/byoc/workers` | Built-in |
-| Requests | `GET /v1/requests/byoc/auth` | Built-in |
+| Discover | `GET /v1/discover/orchestrators` | Built-in |
 | Health | `GET /healthz` | Built-in, no spec needed |
 
 ## Cursor Pagination Contract

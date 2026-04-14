@@ -9,14 +9,18 @@ type MetricDelta struct {
 	Delta float64 `json:"delta"`
 }
 
+type MetricValue struct {
+	Value float64 `json:"value"`
+}
+
 type HourlyBucket struct {
 	Hour  string  `json:"hour"` // RFC 3339
 	Value float64 `json:"value"`
 }
 
 type DashboardKPI struct {
-	SuccessRate         MetricDelta    `json:"successRate"`
-	OrchestratorsOnline MetricDelta    `json:"orchestratorsOnline"`
+	SuccessRate         MetricValue    `json:"successRate"`
+	OrchestratorsOnline MetricValue    `json:"orchestratorsOnline"`
 	DailyUsageMins      MetricDelta    `json:"dailyUsageMins"`
 	DailySessionCount   MetricDelta    `json:"dailySessionCount"`
 	DailyNetworkFeesEth MetricDelta    `json:"dailyNetworkFeesEth"`
@@ -135,11 +139,9 @@ type DashboardGPUCapacityPipeline struct {
 }
 
 type DashboardGPUCapacity struct {
-	TotalGPUs         int64                          `json:"totalGPUs"`
-	ActiveGPUs        int64                          `json:"activeGPUs"`
-	AvailableCapacity float64                        `json:"availableCapacity"`
-	Models            []DashboardGPUModelCapacity    `json:"models"`
-	PipelineGPUs      []DashboardGPUCapacityPipeline `json:"pipelineGPUs"`
+	TotalGPUs    int64                          `json:"totalGPUs"`
+	Models       []DashboardGPUModelCapacity    `json:"models"`
+	PipelineGPUs []DashboardGPUCapacityPipeline `json:"pipelineGPUs"`
 }
 
 // ---------------------------------------------------------------------------
@@ -172,16 +174,16 @@ type DashboardPipelinePricing struct {
 // ---------------------------------------------------------------------------
 
 type DashboardJobFeedItem struct {
-	ID              string   `json:"id"`
-	Pipeline        string   `json:"pipeline"`
-	Model           string   `json:"model,omitempty"`
-	Gateway         string   `json:"gateway"`
-	OrchestratorURL string   `json:"orchestratorUrl"`
-	State           string   `json:"state"`
-	JobType         string   `json:"job_type,omitempty"`
-	InputFPS        float64  `json:"inputFps"`
-	OutputFPS       float64  `json:"outputFps"`
-	FirstSeen       string   `json:"firstSeen"`
-	LastSeen        string   `json:"lastSeen"`
-	DurationSeconds *float64 `json:"durationSeconds,omitempty"`
+	ID                  string   `json:"id"`
+	Pipeline            string   `json:"pipeline"`
+	Model               string   `json:"model,omitempty"`
+	Gateway             string   `json:"gateway"`
+	OrchestratorAddress string   `json:"orchestratorAddress"`
+	OrchestratorURL     string   `json:"orchestratorUrl,omitempty"`
+	State               string   `json:"state"`
+	InputFPS            float64  `json:"inputFps"`
+	OutputFPS           float64  `json:"outputFps"`
+	FirstSeen           string   `json:"firstSeen"`
+	LastSeen            string   `json:"lastSeen"`
+	DurationSeconds     *float64 `json:"durationSeconds,omitempty"`
 }
