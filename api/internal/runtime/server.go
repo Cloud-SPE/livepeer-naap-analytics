@@ -119,6 +119,11 @@ func (s *Server) buildRouter() chi.Router {
 			r.Get("/gpu-metrics", s.handleListStreamingGPUMetrics)
 		})
 
+		// Discover — ranked orchestrator list for routing/selection decisions.
+		r.Route("/discover", func(r chi.Router) {
+			r.Get("/orchestrators", s.handleDiscoverOrchestrators)
+		})
+
 		// Requests — AI Batch + BYOC request/response job analytics.
 		r.Route("/requests", func(r chi.Router) {
 			r.Get("/models", s.handleGetRequestsModels)

@@ -44,6 +44,9 @@ type AnalyticsRepo interface {
 	GetBYOCWorkers(ctx context.Context, p types.TimeWindowParams) ([]types.BYOCWorkerRow, error)
 	GetBYOCAuth(ctx context.Context, p types.TimeWindowParams) ([]types.BYOCAuthRow, error)
 
+	// Discover
+	DiscoverOrchestrators(ctx context.Context, p types.DiscoverOrchestratorsParams) ([]types.DiscoverOrchestratorRow, error)
+
 	// Health
 	Ping(ctx context.Context) error
 }
@@ -122,5 +125,8 @@ func (n *NoopAnalyticsRepo) GetBYOCWorkers(_ context.Context, _ types.TimeWindow
 }
 func (n *NoopAnalyticsRepo) GetBYOCAuth(_ context.Context, _ types.TimeWindowParams) ([]types.BYOCAuthRow, error) {
 	return []types.BYOCAuthRow{}, nil
+}
+func (n *NoopAnalyticsRepo) DiscoverOrchestrators(_ context.Context, _ types.DiscoverOrchestratorsParams) ([]types.DiscoverOrchestratorRow, error) {
+	return []types.DiscoverOrchestratorRow{}, nil
 }
 func (n *NoopAnalyticsRepo) Ping(_ context.Context) error { return nil }

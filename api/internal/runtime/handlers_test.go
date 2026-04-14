@@ -442,6 +442,85 @@ func TestBYOCAuth_HappyPath(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Discover tests
+// ---------------------------------------------------------------------------
+
+func TestDiscoverOrchestrators_HappyPath(t *testing.T) {
+	srv := newTestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/v1/discover/orchestrators", nil)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	assertJSONArray(t, rr)
+}
+
+func TestDiscoverOrchestrators_WithCapsFilter(t *testing.T) {
+	srv := newTestServer(t)
+	req := httptest.NewRequest(http.MethodGet,
+		"/v1/discover/orchestrators?caps=live-video-to-video/streamdiffusion-sdxl&caps=llm/glm-4.7-flash",
+		nil)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	assertJSONArray(t, rr)
+}
+
+// TestDiscoverOrchestrators_MultipleRowsPerAddress verifies that the response
+// can carry multiple rows sharing the same orchestrator address (one per
+// pipeline). Uses a custom repo that returns two rows for the same address
+// but different pipelines.
+func TestDiscoverOrchestrators_MultipleRowsPerAddress(t *testing.T) {
+	r := &multiRowDiscoverRepo{}
+	srv := newTestServerWithRepo(t, r)
+	req := httptest.NewRequest(http.MethodGet, "/v1/discover/orchestrators", nil)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	body := assertJSONArray(t, rr)
+	if len(body) != 2 {
+		t.Fatalf("expected 2 rows, got %d", len(body))
+	}
+	row0 := body[0].(map[string]any)
+	row1 := body[1].(map[string]any)
+	if row0["address"] != row1["address"] {
+		t.Fatalf("expected both rows to share the same address, got %v vs %v",
+			row0["address"], row1["address"])
+	}
+}
+
+type multiRowDiscoverRepo struct {
+	repo.NoopAnalyticsRepo
+}
+
+func (r *multiRowDiscoverRepo) DiscoverOrchestrators(_ context.Context, _ types.DiscoverOrchestratorsParams) ([]types.DiscoverOrchestratorRow, error) {
+	return []types.DiscoverOrchestratorRow{
+		{
+			Address:      "https://orch.example.com:8935",
+			Score:        0.95,
+			Capabilities: []string{"live-video-to-video/streamdiffusion-sdxl"},
+			LastSeenMs:   1776164007740,
+			LastSeen:     "2026-04-14T10:53:27.740Z",
+		},
+		{
+			Address:      "https://orch.example.com:8935",
+			Score:        0.88,
+			Capabilities: []string{"llm/meta-llama/Meta-Llama-3.1-8B-Instruct"},
+			LastSeenMs:   1776164007740,
+			LastSeen:     "2026-04-14T10:53:27.740Z",
+		},
+	}, nil
+}
+
+// ---------------------------------------------------------------------------
 // 404 test
 // ---------------------------------------------------------------------------
 

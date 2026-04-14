@@ -43,6 +43,9 @@ type AnalyticsService interface {
 	GetBYOCWorkers(ctx context.Context, p types.TimeWindowParams) ([]types.BYOCWorkerRow, error)
 	GetBYOCAuth(ctx context.Context, p types.TimeWindowParams) ([]types.BYOCAuthRow, error)
 
+	// Discover
+	DiscoverOrchestrators(ctx context.Context, p types.DiscoverOrchestratorsParams) ([]types.DiscoverOrchestratorRow, error)
+
 	// Health
 	Ping(ctx context.Context) error
 }
@@ -249,6 +252,16 @@ func (s *analyticsService) GetBYOCAuth(ctx context.Context, p types.TimeWindowPa
 	v, err := s.repo.GetBYOCAuth(ctx, p)
 	if err != nil {
 		return nil, fmt.Errorf("get byoc auth: %w", err)
+	}
+	return v, nil
+}
+
+// --- Discover ---
+
+func (s *analyticsService) DiscoverOrchestrators(ctx context.Context, p types.DiscoverOrchestratorsParams) ([]types.DiscoverOrchestratorRow, error) {
+	v, err := s.repo.DiscoverOrchestrators(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("discover orchestrators: %w", err)
 	}
 	return v, nil
 }

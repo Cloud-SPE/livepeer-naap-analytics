@@ -33,6 +33,8 @@ tags:
     description: Live-video-to-video session analytics
   - name: Requests
     description: AI Batch + BYOC request/response job analytics
+  - name: Discover
+    description: Ranked orchestrator list for routing/selection decisions
 
 paths:
   # ──────────────────────── Dashboard (7 endpoints) ────────────────────────
@@ -524,6 +526,59 @@ paths:
                 items:
                   $ref: "#/components/schemas/BYOCAuthRow"
 
+  # ──────────────────────── Discover (1 endpoint) ────────────────────────
+
+  /v1/discover/orchestrators:
+    get:
+      operationId: discoverOrchestrators
+      tags: [Discover]
+      summary: Ranked orchestrator+pipeline list with optional capability filter
+      description: |
+        Orchestrators eligible to serve jobs, decomposed into one row per
+        (orchestrator, pipeline). An orch advertising N pipelines emits N rows
+        sharing the same `address` and timestamps but each carrying its own
+        `score` and `capabilities` list. For example, an orch serving
+        `live-video-to-video` and `llm` produces 2 rows.
+
+        Each row's score is `sla_score / 100` for that specific pipeline,
+        derived from the last 2 hours of activity (`api_sla_compliance` for
+        live-video-to-video, `api_requests_sla` for everything else). When no
+        recent SLA data exists for that (orch, pipeline), score is `0.0` and
+        `recent_work` is `false` — signaling the score is a placeholder, not
+        a measurement. When SLA data exists, `recent_work` is `true` and the
+        score is meaningful. Only orchestrators that heartbeated in the last
+        30 minutes are included. Excludes BYOC capabilities (`openai-*`
+        pipelines).
+
+        The optional `caps` query parameter is repeatable and uses **OR
+        semantics**: a row is emitted whenever its pipeline has at least one
+        matching `pipeline/model` in the caps list. The returned `capabilities`
+        array still includes all of the orch's models for that pipeline.
+        Callers needing AND semantics can group rows by `address` themselves.
+        Intended for gateways and routing clients choosing a target.
+      parameters:
+        - name: caps
+          in: query
+          required: false
+          description: |
+            Repeatable capability filter in `pipeline/model` form. When supplied,
+            only orchestrators advertising every listed capability are returned.
+            Example: `?caps=live-video-to-video/streamdiffusion-sdxl&caps=llm/glm-4.7-flash`
+          schema:
+            type: array
+            items: { type: string }
+          style: form
+          explode: true
+      responses:
+        "200":
+          description: Discover-ranked orchestrator rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DiscoverOrchestratorRow"
+
   # ──────────────────────── Infrastructure ────────────────────────
 
   /healthz:
@@ -1002,3 +1057,38 @@ components:
         total_events: { type: integer }
         success_rate: { type: number }
         failure_count: { type: integer }
+
+    DiscoverOrchestratorRow:
+      type: object
+      properties:
+        address:
+          type: string
+          description: Orchestrator service URI
+        score:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: |
+            Fitness score; higher is better. When `recent_work` is true, this is
+            a measured value derived from the last 1-hour SLA. When `recent_work`
+            is false, this is `0.0` (placeholder — there's no measurement yet).
+        capabilities:
+          type: array
+          items:
+            type: string
+            description: "`pipeline/model` pair (e.g., `live-video-to-video/streamdiffusion-sdxl`)"
+        last_seen_ms:
+          type: integer
+          format: int64
+          description: Unix millisecond timestamp of the most recent heartbeat
+        last_seen:
+          type: string
+          format: date-time
+          description: ISO 8601 representation of the most recent heartbeat
+        recent_work:
+          type: boolean
+          description: |
+            True when this (orchestrator, pipeline) had SLA samples in the last
+            2 hours, meaning `score` is a meaningful measurement. False when
+            there's been no recent activity, in which case `score` is a `0.0`
+            placeholder.
