@@ -158,11 +158,11 @@ SELECT
     org,
     orch_address,
     orch_uri_norm,
-    JSONExtractString(hardware_json, 'pipeline') AS pipeline_id,
-    JSONExtractString(hardware_json, 'model_id') AS model_id,
-    ifNull(nullIf(JSONExtractString(gpu_info_raw, '0', 'id'), ''), '') AS gpu_id,
-    nullIf(JSONExtractString(gpu_info_raw, '0', 'name'), '') AS gpu_model_name,
-    nullIf(JSONExtractUInt(gpu_info_raw, '0', 'memory_total'), 0) AS gpu_memory_bytes_total,
+    pipeline_id,
+    model_id,
+    JSONExtractString(gpu_json, 'id') AS gpu_id,
+    nullIf(JSONExtractString(gpu_json, 'name'), '') AS gpu_model_name,
+    nullIf(JSONExtractUInt(gpu_json, 'memory_total'), 0) AS gpu_memory_bytes_total,
     cast(null as Nullable(String)) AS runner_version,
     cast(null as Nullable(String)) AS cuda_version
 FROM (
@@ -172,8 +172,19 @@ FROM (
         org,
         orch_address,
         orch_uri_norm,
-        hardware_json,
-        JSONExtractRaw(hardware_json, 'gpu_info') AS gpu_info_raw
+        JSONExtractString(hardware_json, 'pipeline') AS pipeline_id,
+        JSONExtractString(hardware_json, 'model_id') AS model_id,
+        arrayJoin(
+            if(
+                gpu_info_raw IN ('', 'null', '{}', '[]'),
+                CAST([], 'Array(String)'),
+                if(
+                    startsWith(gpu_info_raw, '['),
+                    JSONExtractArrayRaw(gpu_info_raw),
+                    tupleElement(JSONExtractKeysAndValuesRaw(gpu_info_raw), 2)
+                )
+            )
+        ) AS gpu_json
     FROM (
         SELECT
             row_id,
@@ -181,12 +192,15 @@ FROM (
             org,
             orch_address,
             orch_uri_norm,
-            arrayJoin(JSONExtractArrayRaw(raw_capabilities, 'hardware')) AS hardware_json
+            hardware_json,
+            JSONExtractRaw(hardware_json, 'gpu_info') AS gpu_info_raw
         FROM naap.normalized_network_capabilities
+        ARRAY JOIN JSONExtractArrayRaw(raw_capabilities, 'hardware') AS hardware_json
         WHERE length(JSONExtractArrayRaw(raw_capabilities, 'hardware')) > 0
     )
 )
-WHERE pipeline_id != '';
+WHERE pipeline_id != ''
+  AND JSONExtractString(gpu_json, 'id') != '';
 
 INSERT INTO naap.canonical_capability_hardware_inventory_by_snapshot
 SELECT
@@ -232,6 +246,7 @@ SELECT
     orch_address,
     pipeline_id,
     model_id,
+    gpu_id,
     argMaxIfState(gpu_id, snapshot_ts, toUInt8(gpu_id != '')) AS gpu_id_state,
     argMaxIfState(ifNull(gpu_model_name, ''), snapshot_ts, toUInt8(ifNull(gpu_model_name, '') != '')) AS gpu_model_name_state,
     argMaxIfState(ifNull(gpu_memory_bytes_total, toUInt64(0)), snapshot_ts, toUInt8(ifNull(gpu_memory_bytes_total, toUInt64(0)) > 0)) AS gpu_memory_bytes_total_state,
@@ -240,4 +255,4 @@ SELECT
     maxState(snapshot_ts) AS last_seen_state
 FROM naap.canonical_capability_hardware_inventory
 WHERE pipeline_id != ''
-GROUP BY org, orch_address, pipeline_id, model_id;
+GROUP BY org, orch_address, pipeline_id, model_id, gpu_id;

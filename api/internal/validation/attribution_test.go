@@ -369,6 +369,57 @@ func TestRuleAttribution002_PipelineAndModelStayDistinctAcrossCanonicalAndAPIVie
 	}
 }
 
+func TestRuleAttribution002_HardwareInventoryCapturesAllGPUEntriesFromArrayShape(t *testing.T) {
+	h := newHarness(t)
+	ts := anchor()
+	orchAddr := strings.ToLower(fmt.Sprintf("0x%s", uid("orch")))
+	orchURI := fmt.Sprintf("https://orch-%s.example.com", uid("uri"))
+
+	h.insert(t, []rawEvent{{
+		EventID: uid("e"), EventType: "network_capabilities", EventTs: ts, Org: h.org,
+		Data: fmt.Sprintf(`[{"address":%q,"local_address":"orch","uri":%q,"version":"0.9.0","hardware":[{"pipeline":"text-to-image","model_id":"model-array","gpu_info":[{"id":"gpu-array-a","name":"L4","memory_total":24576},{"id":"gpu-array-b","name":"L40","memory_total":49152}]}]}]`,
+			orchAddr, orchURI),
+		IngestedAt: ts,
+	}})
+
+	if got := h.queryInt(t, `SELECT count() FROM naap.canonical_capability_hardware_inventory WHERE org = ? AND orch_address = ? AND pipeline_id = 'text-to-image' AND model_id = 'model-array'`, h.org, orchAddr); got != 2 {
+		t.Fatalf("RULE-ATTRIBUTION-002: canonical hardware rows = %d, want 2", got)
+	}
+	if got := h.queryInt(t, `SELECT count() FROM naap.api_gpu_inventory WHERE org = ? AND orch_address = ? AND pipeline = 'text-to-image' AND model_id = 'model-array'`, h.org, orchAddr); got != 2 {
+		t.Fatalf("RULE-ATTRIBUTION-002: api inventory rows = %d, want 2", got)
+	}
+	if got := h.queryInt(t, `SELECT count() FROM naap.api_gpu_inventory WHERE org = ? AND orch_address = ? AND gpu_id IN ('gpu-array-a', 'gpu-array-b')`, h.org, orchAddr); got != 2 {
+		t.Fatalf("RULE-ATTRIBUTION-002: api inventory missing one or more array GPUs")
+	}
+}
+
+func TestRuleAttribution002_HardwareInventoryCapturesAllGPUEntriesFromObjectShapeAndSkipsEmptyIDs(t *testing.T) {
+	h := newHarness(t)
+	ts := anchor()
+	orchAddr := strings.ToLower(fmt.Sprintf("0x%s", uid("orch")))
+	orchURI := fmt.Sprintf("https://orch-%s.example.com", uid("uri"))
+
+	h.insert(t, []rawEvent{{
+		EventID: uid("e"), EventType: "network_capabilities", EventTs: ts, Org: h.org,
+		Data: fmt.Sprintf(`[{"address":%q,"local_address":"orch","uri":%q,"version":"0.9.0","hardware":[{"pipeline":"image-to-video","model_id":"model-object","gpu_info":{"0":{"id":"","name":"ignore-me","memory_total":1},"1":{"id":"gpu-object-a","name":"RTX 4090","memory_total":25769803776},"2":{"id":"gpu-object-b","name":"RTX 5090","memory_total":34190917632}}}]}]`,
+			orchAddr, orchURI),
+		IngestedAt: ts,
+	}})
+
+	if got := h.queryInt(t, `SELECT count() FROM naap.canonical_capability_hardware_inventory WHERE org = ? AND orch_address = ? AND pipeline_id = 'image-to-video' AND model_id = 'model-object'`, h.org, orchAddr); got != 2 {
+		t.Fatalf("RULE-ATTRIBUTION-002: canonical hardware rows = %d, want 2 after skipping empty gpu id", got)
+	}
+	if got := h.queryInt(t, `SELECT count() FROM naap.api_gpu_inventory WHERE org = ? AND orch_address = ? AND pipeline = 'image-to-video' AND model_id = 'model-object'`, h.org, orchAddr); got != 2 {
+		t.Fatalf("RULE-ATTRIBUTION-002: api inventory rows = %d, want 2 after skipping empty gpu id", got)
+	}
+	if got := h.queryInt(t, `SELECT count() FROM naap.api_gpu_inventory WHERE org = ? AND orch_address = ? AND gpu_id = ''`, h.org, orchAddr); got != 0 {
+		t.Fatalf("RULE-ATTRIBUTION-002: api inventory retained empty gpu ids")
+	}
+	if got := h.queryInt(t, `SELECT count() FROM naap.api_gpu_inventory WHERE org = ? AND orch_address = ? AND gpu_id IN ('gpu-object-a', 'gpu-object-b')`, h.org, orchAddr); got != 2 {
+		t.Fatalf("RULE-ATTRIBUTION-002: api inventory missing one or more object GPUs")
+	}
+}
+
 func TestRuleAttribution003_InWindowSnapshotWinsOverOnlyStaleEvidence(t *testing.T) {
 	h := newHarness(t)
 	ts := anchor()

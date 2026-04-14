@@ -21,7 +21,7 @@ Top-level architecture map for Livepeer NaaP Analytics.
   ─────────────────────────────────────────────────────────────────────────────
   /api/orchestrator  ──HTTP (5m)──► enrichment worker ──INSERT──► naap.orch_metadata
   /api/gateways      ──poll──►      (Go goroutine)     ──INSERT──► naap.gateway_metadata
-  agg_orch_state     ──read──►      (same worker)      ──INSERT──► naap.agg_gpu_inventory
+  accepted_raw_events ──MV/dbt──► canonical capability inventory ──VIEW──► naap.api_gpu_inventory
 
   Observability
   ─────────────────────────────────────────────────────────────────────────────
@@ -43,13 +43,13 @@ No application-layer consumer sits between Kafka and ClickHouse.
 
 **Enrichment path:** A background Go goroutine polls the Livepeer public API every 5 minutes
 and upserts orchestrator and gateway metadata (ENS names, stake, service URIs, deposits) into
-dedicated ClickHouse tables. It also reads the current `agg_orch_state` snapshot to build a
-structured GPU inventory in `agg_gpu_inventory`. All enrichment tables can be JOINed from any
-aggregate query.
+dedicated ClickHouse tables. GPU inventory is not part of enrichment anymore; it is derived
+natively inside ClickHouse from retained capability events and exposed through `api_gpu_inventory`.
+All enrichment tables can be JOINed from any aggregate query.
 
 **Table population strategies:** Two distinct strategies are used for aggregate tables:
 - **MV-populated** (event-driven): accepted Kafka events are routed into `naap.accepted_raw_events`, then normalized/core materialized views populate the downstream event-driven tables.
-- **Worker-populated** (polled): `orch_metadata`, `gateway_metadata`, `agg_gpu_inventory` — written by the enrichment worker on a 5-minute interval. GPU inventory uses this strategy because `gpu_info` is a JSON map with dynamic integer keys that are trivial to iterate in Go but awkward in ClickHouse SQL.
+- **Worker-populated** (polled): `orch_metadata`, `gateway_metadata` — written by the enrichment worker on a 5-minute interval.
 
 **Serving path:** The Go API reads published `api_*` relations only. The
 semantic serving layer may use internal `api_base_*` helper views to compute

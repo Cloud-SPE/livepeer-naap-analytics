@@ -20,8 +20,7 @@ Rebuild supported downstream state from retained ClickHouse raw history.
 This workflow preserves:
 - naap.accepted_raw_events
 - naap.ignored_raw_events
-- worker-populated metadata tables such as agg_gpu_inventory, orch_metadata,
-  and gateway_metadata
+- external metadata tables such as orch_metadata and gateway_metadata
 
 This workflow purges and rebuilds:
 - raw-derived normalized event-family tables
@@ -106,7 +105,7 @@ Destructive steps:
 
 Preserved tables:
   - accepted_raw_events / ignored_raw_events
-  - worker-populated metadata tables
+  - external metadata tables populated by the enrichment worker
   - unsupported compatibility tables without a maintained retained-raw replay path
 EOF
 

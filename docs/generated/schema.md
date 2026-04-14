@@ -15,7 +15,6 @@ The documented `raw_*`, `normalized_*`, `canonical_*`, `operational_*`, `api_bas
 | `accepted_raw_events` | `ReplacingMergeTree` |
 | `agg_discovery_latency_hourly` | `SummingMergeTree` |
 | `agg_fps_hourly` | `SummingMergeTree` |
-| `agg_gpu_inventory` | `ReplacingMergeTree` |
 | `agg_orch_reliability_hourly` | `SummingMergeTree` |
 | `agg_orch_state` | `ReplacingMergeTree` |
 | `agg_payment_hourly` | `SummingMergeTree` |
@@ -77,8 +76,8 @@ The documented `raw_*`, `normalized_*`, `canonical_*`, `operational_*`, `api_bas
 | `resolver_query_selection_event_ids` | `MergeTree` |
 | `resolver_query_session_keys` | `MergeTree` |
 | `resolver_query_window_slices` | `MergeTree` |
-| `resolver_repair_requests` | `ReplacingMergeTree` |
 | `resolver_runs` | `MergeTree` |
+| `resolver_repair_requests` | `ReplacingMergeTree` |
 | `resolver_runtime_state` | `ReplacingMergeTree` |
 | `resolver_window_claims` | `ReplacingMergeTree` |
 | `selection_attribution_changes` | `MergeTree` |

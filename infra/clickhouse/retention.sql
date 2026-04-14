@@ -47,9 +47,6 @@ ALTER TABLE naap.agg_stream_status_samples
 -- stale entries beyond that have no operational value.
 -- ------------------------------------------------------------
 
-ALTER TABLE naap.agg_gpu_inventory
-    MODIFY TTL toDateTime(last_seen) + toIntervalDay(7);
-
 ALTER TABLE naap.gateway_metadata
     MODIFY TTL updated_at + toIntervalDay(7);
 

@@ -269,8 +269,7 @@ make rebuild-from-retained-raw
 This workflow preserves:
 
 - `accepted_raw_events` and `ignored_raw_events`
-- worker-populated metadata tables such as `agg_gpu_inventory`,
-  `orch_metadata`, and `gateway_metadata`
+- external metadata tables such as `orch_metadata` and `gateway_metadata`
 
 This workflow rebuilds:
 
@@ -283,7 +282,7 @@ This workflow rebuilds:
   selection-centered attribution outputs
 - dbt semantic views after the resolver replay
 
-It is intentionally not a wildcard purge of every non-raw table. Worker-managed
+It is intentionally not a wildcard purge of every non-raw table. External
 metadata tables remain preserved because they are not part of the retained-raw
 replay spine.
 
