@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/livepeer/naap-analytics/internal/config"
@@ -60,42 +59,8 @@ func assertJSONArray(t *testing.T, rr *httptest.ResponseRecorder) []any {
 	return body
 }
 
-func assertCursorEnvelope(t *testing.T, body map[string]any) {
-	t.Helper()
-	for _, field := range []string{"data", "pagination", "meta"} {
-		if _, ok := body[field]; !ok {
-			t.Fatalf("missing field %s in cursor envelope", field)
-		}
-	}
-	pag, ok := body["pagination"].(map[string]any)
-	if !ok {
-		t.Fatalf("pagination is not an object")
-	}
-	if _, ok := pag["has_more"]; !ok {
-		t.Fatal("pagination missing has_more")
-	}
-	if _, ok := pag["page_size"]; !ok {
-		t.Fatal("pagination missing page_size")
-	}
-}
-
-func assertProblemDetail(t *testing.T, rr *httptest.ResponseRecorder, expectedDetail string) {
-	t.Helper()
-	if got := rr.Header().Get("Content-Type"); got != "application/problem+json" {
-		t.Fatalf("expected problem content type, got %q", got)
-	}
-	var body map[string]any
-	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
-		t.Fatalf("decode problem body: %v", err)
-	}
-	detail, _ := body["detail"].(string)
-	if !strings.Contains(detail, expectedDetail) {
-		t.Fatalf("expected detail containing %q, got %q", expectedDetail, detail)
-	}
-}
-
 // ---------------------------------------------------------------------------
-// Dashboard tests
+// Health
 // ---------------------------------------------------------------------------
 
 func TestHealthz_HappyPath(t *testing.T) {
@@ -112,6 +77,10 @@ func TestHealthz_HappyPath(t *testing.T) {
 		t.Fatalf("expected status ok, got %v", body["status"])
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Dashboard
+// ---------------------------------------------------------------------------
 
 func TestDashboardKPI_HappyPath(t *testing.T) {
 	srv := newTestServer(t)
@@ -213,7 +182,7 @@ func TestDashboardJobFeed_HappyPath(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Streaming tests
+// Streaming + Requests model inventories
 // ---------------------------------------------------------------------------
 
 func TestStreamingModels_HappyPath(t *testing.T) {
@@ -228,73 +197,6 @@ func TestStreamingModels_HappyPath(t *testing.T) {
 	assertJSONArray(t, rr)
 }
 
-func TestStreamingOrchestrators_HappyPath(t *testing.T) {
-	srv := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/v1/streaming/orchestrators", nil)
-	rr := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rr.Code)
-	}
-	assertJSONArray(t, rr)
-}
-
-func TestStreamingSLA_HappyPath(t *testing.T) {
-	srv := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/v1/streaming/sla", nil)
-	rr := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rr.Code)
-	}
-	body := assertJSON(t, rr)
-	assertCursorEnvelope(t, body)
-}
-
-func TestStreamingSLA_RejectsLegacyPagination(t *testing.T) {
-	srv := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/v1/streaming/sla?limit=10&offset=0", nil)
-	rr := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d", rr.Code)
-	}
-	assertProblemDetail(t, rr, `"offset" is no longer supported`)
-}
-
-func TestStreamingDemand_HappyPath(t *testing.T) {
-	srv := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/v1/streaming/demand", nil)
-	rr := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rr.Code)
-	}
-	body := assertJSON(t, rr)
-	assertCursorEnvelope(t, body)
-}
-
-func TestStreamingGPUMetrics_HappyPath(t *testing.T) {
-	srv := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/v1/streaming/gpu-metrics", nil)
-	rr := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rr.Code)
-	}
-	body := assertJSON(t, rr)
-	assertCursorEnvelope(t, body)
-}
-
-// ---------------------------------------------------------------------------
-// Requests tests
-// ---------------------------------------------------------------------------
-
 func TestRequestsModels_HappyPath(t *testing.T) {
 	srv := newTestServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/v1/requests/models", nil)
@@ -307,142 +209,8 @@ func TestRequestsModels_HappyPath(t *testing.T) {
 	assertJSONArray(t, rr)
 }
 
-func TestRequestsOrchestrators_HappyPath(t *testing.T) {
-	srv := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/v1/requests/orchestrators", nil)
-	rr := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rr.Code)
-	}
-	assertJSONArray(t, rr)
-}
-
-func TestAIBatchSummary_HappyPath(t *testing.T) {
-	srv := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/v1/requests/ai-batch/summary", nil)
-	rr := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rr.Code)
-	}
-	assertJSONArray(t, rr)
-}
-
-func TestAIBatchJobs_HappyPath(t *testing.T) {
-	srv := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/v1/requests/ai-batch/jobs", nil)
-	rr := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rr.Code)
-	}
-	body := assertJSON(t, rr)
-	assertCursorEnvelope(t, body)
-}
-
-func TestAIBatchJobs_RejectsLegacyPagination(t *testing.T) {
-	srv := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/v1/requests/ai-batch/jobs?page=1", nil)
-	rr := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d", rr.Code)
-	}
-	assertProblemDetail(t, rr, `"page" is no longer supported`)
-}
-
-func TestAIBatchJobs_InvalidCursor(t *testing.T) {
-	r := &invalidCursorAIBatchRepo{}
-	srv := newTestServerWithRepo(t, r)
-	req := httptest.NewRequest(http.MethodGet, "/v1/requests/ai-batch/jobs?cursor=bad", nil)
-	rr := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d", rr.Code)
-	}
-}
-
-func TestAIBatchLLMSummary_HappyPath(t *testing.T) {
-	srv := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/v1/requests/ai-batch/llm-summary", nil)
-	rr := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rr.Code)
-	}
-	assertJSONArray(t, rr)
-}
-
-func TestBYOCSummary_HappyPath(t *testing.T) {
-	srv := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/v1/requests/byoc/summary", nil)
-	rr := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rr.Code)
-	}
-	assertJSONArray(t, rr)
-}
-
-func TestBYOCJobs_HappyPath(t *testing.T) {
-	srv := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/v1/requests/byoc/jobs", nil)
-	rr := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rr.Code)
-	}
-	body := assertJSON(t, rr)
-	assertCursorEnvelope(t, body)
-}
-
-func TestBYOCJobs_RejectsLegacyPagination(t *testing.T) {
-	srv := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/v1/requests/byoc/jobs?page_size=50", nil)
-	rr := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d", rr.Code)
-	}
-	assertProblemDetail(t, rr, `"page_size" is no longer supported`)
-}
-
-func TestBYOCWorkers_HappyPath(t *testing.T) {
-	srv := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/v1/requests/byoc/workers", nil)
-	rr := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rr.Code)
-	}
-	assertJSONArray(t, rr)
-}
-
-func TestBYOCAuth_HappyPath(t *testing.T) {
-	srv := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/v1/requests/byoc/auth", nil)
-	rr := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rr.Code)
-	}
-	assertJSONArray(t, rr)
-}
-
 // ---------------------------------------------------------------------------
-// Discover tests
+// Discover
 // ---------------------------------------------------------------------------
 
 func TestDiscoverOrchestrators_HappyPath(t *testing.T) {
@@ -509,6 +277,7 @@ func (r *multiRowDiscoverRepo) DiscoverOrchestrators(_ context.Context, _ types.
 			Capabilities: []string{"live-video-to-video/streamdiffusion-sdxl"},
 			LastSeenMs:   1776164007740,
 			LastSeen:     "2026-04-14T10:53:27.740Z",
+			RecentWork:   true,
 		},
 		{
 			Address:      "https://orch.example.com:8935",
@@ -516,12 +285,13 @@ func (r *multiRowDiscoverRepo) DiscoverOrchestrators(_ context.Context, _ types.
 			Capabilities: []string{"llm/meta-llama/Meta-Llama-3.1-8B-Instruct"},
 			LastSeenMs:   1776164007740,
 			LastSeen:     "2026-04-14T10:53:27.740Z",
+			RecentWork:   true,
 		},
 	}, nil
 }
 
 // ---------------------------------------------------------------------------
-// 404 test
+// 404
 // ---------------------------------------------------------------------------
 
 func TestUnknownRoute_Returns404(t *testing.T) {
@@ -533,19 +303,4 @@ func TestUnknownRoute_Returns404(t *testing.T) {
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", rr.Code)
 	}
-}
-
-// ---------------------------------------------------------------------------
-// Custom mock repos for error testing
-// ---------------------------------------------------------------------------
-
-type invalidCursorAIBatchRepo struct {
-	repo.NoopAnalyticsRepo
-}
-
-func (r *invalidCursorAIBatchRepo) ListAIBatchJobs(_ context.Context, p types.TimeWindowParams) ([]types.AIBatchJobRecord, types.CursorPageInfo, error) {
-	if p.Cursor != "" {
-		return nil, types.CursorPageInfo{}, types.ErrInvalidCursor
-	}
-	return []types.AIBatchJobRecord{}, types.CursorPageInfo{}, nil
 }

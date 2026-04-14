@@ -10,9 +10,9 @@ import (
 )
 
 // AnalyticsRepo is the read interface for all NAAP analytics data.
-// 21 query methods + 1 healthcheck. Implementations must be safe for concurrent use.
+// Implementations must be safe for concurrent use.
 type AnalyticsRepo interface {
-	// Dashboard (7 endpoints)
+	// Dashboard
 	GetDashboardKPI(ctx context.Context, windowHours int, pipeline, modelID string) (*types.DashboardKPI, error)
 	GetDashboardPipelines(ctx context.Context, limit int, windowHours int) ([]types.DashboardPipelineUsage, error)
 	GetDashboardOrchestrators(ctx context.Context, windowHours int) ([]types.DashboardOrchestrator, error)
@@ -26,23 +26,11 @@ type AnalyticsRepo interface {
 	GetDashboardJobsByPipeline(ctx context.Context, windowHours int) ([]types.DashboardJobsByPipelineRow, error)
 	GetDashboardJobsByCapability(ctx context.Context, windowHours int) ([]types.DashboardJobsByCapabilityRow, error)
 
-	// Streaming (5 endpoints)
+	// Streaming
 	GetStreamingModels(ctx context.Context) ([]types.StreamingModel, error)
-	GetStreamingOrchestrators(ctx context.Context) ([]types.StreamingOrchestrator, error)
-	ListStreamingSLA(ctx context.Context, p types.TimeWindowParams) ([]types.StreamingSLARow, types.CursorPageInfo, error)
-	ListStreamingDemand(ctx context.Context, p types.TimeWindowParams) ([]types.StreamingDemandRow, types.CursorPageInfo, error)
-	ListStreamingGPUMetrics(ctx context.Context, p types.TimeWindowParams) ([]types.StreamingGPUMetricRow, types.CursorPageInfo, error)
 
-	// Requests (9 endpoints)
+	// Requests
 	GetRequestsModels(ctx context.Context) ([]types.RequestsModel, error)
-	GetRequestsOrchestrators(ctx context.Context) ([]types.RequestsOrchestrator, error)
-	GetAIBatchSummary(ctx context.Context, p types.TimeWindowParams) ([]types.AIBatchSummaryRow, error)
-	ListAIBatchJobs(ctx context.Context, p types.TimeWindowParams) ([]types.AIBatchJobRecord, types.CursorPageInfo, error)
-	GetAIBatchLLMSummary(ctx context.Context, p types.TimeWindowParams) ([]types.AIBatchLLMSummaryRow, error)
-	GetBYOCSummary(ctx context.Context, p types.TimeWindowParams) ([]types.BYOCSummaryRow, error)
-	ListBYOCJobs(ctx context.Context, p types.TimeWindowParams) ([]types.BYOCJobRecord, types.CursorPageInfo, error)
-	GetBYOCWorkers(ctx context.Context, p types.TimeWindowParams) ([]types.BYOCWorkerRow, error)
-	GetBYOCAuth(ctx context.Context, p types.TimeWindowParams) ([]types.BYOCAuthRow, error)
 
 	// Discover
 	DiscoverOrchestrators(ctx context.Context, p types.DiscoverOrchestratorsParams) ([]types.DiscoverOrchestratorRow, error)
@@ -87,44 +75,8 @@ func (n *NoopAnalyticsRepo) GetDashboardJobsByCapability(_ context.Context, _ in
 func (n *NoopAnalyticsRepo) GetStreamingModels(_ context.Context) ([]types.StreamingModel, error) {
 	return []types.StreamingModel{}, nil
 }
-func (n *NoopAnalyticsRepo) GetStreamingOrchestrators(_ context.Context) ([]types.StreamingOrchestrator, error) {
-	return []types.StreamingOrchestrator{}, nil
-}
-func (n *NoopAnalyticsRepo) ListStreamingSLA(_ context.Context, _ types.TimeWindowParams) ([]types.StreamingSLARow, types.CursorPageInfo, error) {
-	return []types.StreamingSLARow{}, types.CursorPageInfo{}, nil
-}
-func (n *NoopAnalyticsRepo) ListStreamingDemand(_ context.Context, _ types.TimeWindowParams) ([]types.StreamingDemandRow, types.CursorPageInfo, error) {
-	return []types.StreamingDemandRow{}, types.CursorPageInfo{}, nil
-}
-func (n *NoopAnalyticsRepo) ListStreamingGPUMetrics(_ context.Context, _ types.TimeWindowParams) ([]types.StreamingGPUMetricRow, types.CursorPageInfo, error) {
-	return []types.StreamingGPUMetricRow{}, types.CursorPageInfo{}, nil
-}
 func (n *NoopAnalyticsRepo) GetRequestsModels(_ context.Context) ([]types.RequestsModel, error) {
 	return []types.RequestsModel{}, nil
-}
-func (n *NoopAnalyticsRepo) GetRequestsOrchestrators(_ context.Context) ([]types.RequestsOrchestrator, error) {
-	return []types.RequestsOrchestrator{}, nil
-}
-func (n *NoopAnalyticsRepo) GetAIBatchSummary(_ context.Context, _ types.TimeWindowParams) ([]types.AIBatchSummaryRow, error) {
-	return []types.AIBatchSummaryRow{}, nil
-}
-func (n *NoopAnalyticsRepo) ListAIBatchJobs(_ context.Context, _ types.TimeWindowParams) ([]types.AIBatchJobRecord, types.CursorPageInfo, error) {
-	return []types.AIBatchJobRecord{}, types.CursorPageInfo{}, nil
-}
-func (n *NoopAnalyticsRepo) GetAIBatchLLMSummary(_ context.Context, _ types.TimeWindowParams) ([]types.AIBatchLLMSummaryRow, error) {
-	return []types.AIBatchLLMSummaryRow{}, nil
-}
-func (n *NoopAnalyticsRepo) GetBYOCSummary(_ context.Context, _ types.TimeWindowParams) ([]types.BYOCSummaryRow, error) {
-	return []types.BYOCSummaryRow{}, nil
-}
-func (n *NoopAnalyticsRepo) ListBYOCJobs(_ context.Context, _ types.TimeWindowParams) ([]types.BYOCJobRecord, types.CursorPageInfo, error) {
-	return []types.BYOCJobRecord{}, types.CursorPageInfo{}, nil
-}
-func (n *NoopAnalyticsRepo) GetBYOCWorkers(_ context.Context, _ types.TimeWindowParams) ([]types.BYOCWorkerRow, error) {
-	return []types.BYOCWorkerRow{}, nil
-}
-func (n *NoopAnalyticsRepo) GetBYOCAuth(_ context.Context, _ types.TimeWindowParams) ([]types.BYOCAuthRow, error) {
-	return []types.BYOCAuthRow{}, nil
 }
 func (n *NoopAnalyticsRepo) DiscoverOrchestrators(_ context.Context, _ types.DiscoverOrchestratorsParams) ([]types.DiscoverOrchestratorRow, error) {
 	return []types.DiscoverOrchestratorRow{}, nil
