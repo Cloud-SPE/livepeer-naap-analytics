@@ -10,31 +10,9 @@ import (
 )
 
 const (
-	activeOrchMinutes     = 10
-	activeStreamSecs      = 120
-	minReliabilitySamples = 5
-	defaultLimit          = 50
-	maxFailureLimit       = 500
+	activeOrchMinutes = 10
+	defaultLimit      = 50
 )
-
-// effectiveWindow returns the query time window, applying defaults when zero.
-// Default window is the last 24 hours.
-func effectiveWindow(p types.QueryParams) (start, end time.Time) {
-	end = p.EndTime
-	if end.IsZero() {
-		end = time.Now().UTC()
-	}
-	start = p.StartTime
-	if start.IsZero() {
-		start = end.Add(-24 * time.Hour)
-	}
-	return start.UTC(), end.UTC()
-}
-
-// effectiveLimit returns the query limit, applying the default when zero.
-func effectiveLimit(p types.QueryParams) int {
-	return normalizeLimit(p.Limit)
-}
 
 func normalizeLimit(limit int) int {
 	if limit <= 0 {
@@ -43,7 +21,18 @@ func normalizeLimit(limit int) int {
 	return limit
 }
 
-// divSafe divides a by b, returning 0 if b is zero.
+func defaultWindow(p types.TimeWindowParams) (start, end time.Time) {
+	end = p.End
+	if end.IsZero() {
+		end = time.Now().UTC()
+	}
+	start = p.Start
+	if start.IsZero() {
+		start = end.Add(-24 * time.Hour)
+	}
+	return start.UTC(), end.UTC()
+}
+
 func divSafe(a, b float64) float64 {
 	if b == 0 {
 		return 0
@@ -51,27 +40,11 @@ func divSafe(a, b float64) float64 {
 	return a / b
 }
 
-// rateOrNil returns nil when the sample count is below the minimum threshold,
-// preventing misleading percentages from tiny samples (REL-002-a).
-func rateOrNil(num, denom int64) *float64 {
-	if denom < minReliabilitySamples {
-		return nil
-	}
-	v := float64(num) / float64(denom)
-	return &v
-}
-
-func activeStreamPredicate(column string) string {
-	return fmt.Sprintf("%s > now() - INTERVAL %d SECOND", column, activeStreamSecs)
-}
-
-// encodeCursorValues encodes an ordered list of string values as an opaque cursor.
 func encodeCursorValues(values ...string) string {
 	raw, _ := json.Marshal(values)
 	return base64.RawURLEncoding.EncodeToString(raw)
 }
 
-// decodeCursorValues decodes a cursor produced by encodeCursorValues.
 func decodeCursorValues(cursor string, expected int) ([]string, error) {
 	if cursor == "" {
 		return nil, nil
@@ -88,4 +61,30 @@ func decodeCursorValues(cursor string, expected int) ([]string, error) {
 		return nil, fmt.Errorf("%w: expected %d values, got %d", types.ErrInvalidCursor, expected, len(values))
 	}
 	return values, nil
+}
+
+func nullableString(v *string) string {
+	if v == nil {
+		return ""
+	}
+	return *v
+}
+
+// hostnameFromURI extracts the hostname from a URI string.
+func hostnameFromURI(uri string) string {
+	// Simple extraction — strip scheme and path
+	s := uri
+	for _, prefix := range []string{"https://", "http://"} {
+		if len(s) > len(prefix) && s[:len(prefix)] == prefix {
+			s = s[len(prefix):]
+			break
+		}
+	}
+	// Strip port and path
+	for i := 0; i < len(s); i++ {
+		if s[i] == ':' || s[i] == '/' {
+			return s[:i]
+		}
+	}
+	return s
 }

@@ -1,59 +1,22 @@
-openapi: 3.0.3
+openapi: "3.0.3"
 info:
-  title: NAAP Analytics API
-  version: "1"
+  title: NAAP Analytics API v2
+  version: "2"
   description: |
-    Read-only analytics API for the Livepeer AI Network Analytics Platform (NAAP).
-    Backed by ClickHouse materialized views fed from two Kafka topics:
-    `streaming_events` (live video-to-video streaming sessions, originating from the
-    cloudspe org) and `network_events` (AI batch and BYOC request/response jobs,
-    originating from the daydream org).
+    Read-only analytics API for the Livepeer AI network, backed by ClickHouse.
 
-    **Three job types co-exist in this system:**
-    - `stream` — persistent live video-to-video streaming sessions tracked in
-      `streaming_events`. Metrics for this type appear in the `/v1/network/` and
-      `/v1/streaming/` endpoints, and in most `/v1/dashboard/` endpoints.
-    - `ai-batch` — fixed-pipeline discrete AI inference calls (text-to-image,
-      image-to-image, image-to-video, upscale, audio-to-text, llm, segment-anything-2,
-      image-to-text, text-to-speech) tracked in `network_events`. Metrics appear in
-      `/v1/requests/` endpoints.
-    - `byoc` — Bring Your Own Capability jobs with dynamic capability names
-      (e.g. `openai-chat-completions`, `openai-image-generation`,
-      `openai-text-embeddings`) also tracked in `network_events`. Metrics appear in
-      `/v1/requests/` endpoints.
+    **21 endpoints** organized into three sections:
+    - **Dashboard** (7) — pre-aggregated widgets for the NAAP UI dashboard page
+    - **Streaming** (5) — live-video-to-video session analytics
+    - **Requests** (9) — AI Batch + BYOC request/response job analytics
 
-    **Streaming data and job data are fully separate namespaces.** No endpoint
-    mixes streaming sessions with AI-batch or BYOC jobs. When in doubt, read the
-    endpoint description carefully for its exact coverage.
-
-    **Data pipeline:** Raw events land in ClickHouse via Kafka Engine tables, flow
-    through Materialized Views into normalized tables, are transformed by dbt into
-    canonical views, and are finally served from API-specific aggregation tables.
-    Attribution of jobs to orchestrators and GPU hardware is performed by a Go
-    resolver service that writes to `canonical_ai_batch_job_store` and
-    `canonical_byoc_job_store` using a selection-centered attribution engine.
-    Attribution status values are: `resolved` (full orch + GPU confirmed),
-    `hardware_less` (orch confirmed, no GPU data), `stale` (only a stale capability
-    snapshot was available), `ambiguous` (multiple incompatible candidates found),
-    `unresolved` (no match found).
-
-    **Rate limiting:** 100 req/s sustained, burst 200 per IP.
-    Exceeded requests receive `429 Too Many Requests`.
-
-    **Default time window:** last 24 hours when `start`/`end` are omitted.
-
-    **WEI values** (payment amounts) are returned as decimal strings to avoid
-    float64 precision loss (e.g. `"1234500000000000000"`).
-
-    **All timestamps are UTC.**
-
-    **Cursor pagination** uses base64-encoded JSON position markers. Pass the
-    `next_cursor` value from the previous response as the `cursor` query parameter
-    to retrieve the next page. Omit `cursor` on the first request.
-
-    **Known null fields network-wide:** `region` is always null — it is not
-    captured in any current event schema. `runner_version` and `cuda_version` in
-    GPU metrics are always null.
+    ## Conventions
+    - All timestamps are UTC ISO 8601 / RFC 3339.
+    - Cursor-paginated endpoints return `{data, pagination, meta}` envelopes.
+    - Non-paginated endpoints return the payload directly.
+    - Errors follow RFC 7807 `application/problem+json`.
+    - Default time window is **24 hours** when `window` / `start` / `end` are omitted.
+    - Rate limit: 100 req/s sustained, burst 200 per IP.
 
 servers:
   - url: https://naap-api.livepeer.cloud
@@ -64,460 +27,610 @@ servers:
     description: Local development
 
 tags:
-  - name: Health
-  - name: Network
-    description: |
-      Orchestrator network state, model availability, and capacity. Supports
-      job_type, org, and pipeline query filters to scope results by capability
-      type. Sourced from orchestrator capability heartbeats.
-  - name: Streaming
-    description: |
-      Live streaming session analytics: SLA compliance, network demand,
-      GPU demand/metrics, and per-model performance. All endpoints cover
-      streaming sessions (live-video-to-video) only.
-  - name: Requests
-    description: |
-      AI Batch and BYOC request/response job analytics. Includes per-type
-      summaries, job lists, cross-type demand/SLA, and model performance.
   - name: Dashboard
-    description: |
-      Pre-aggregated, UI-ready endpoints for NAAP dashboard widgets. KPI and
-      pipeline endpoints return combined payloads with streaming and requests
-      sections. Other endpoints (orchestrators, gpu-capacity, pipeline-catalog,
-      pricing, job-feed) return their existing shapes.
+    description: Pre-aggregated UI widgets combining streaming + requests data
+  - name: Streaming
+    description: Live-video-to-video session analytics
+  - name: Requests
+    description: AI Batch + BYOC request/response job analytics
 
-# ── Common parameter definitions ──────────────────────────────────────────────
+paths:
+  # ──────────────────────── Dashboard (7 endpoints) ────────────────────────
+
+  /v1/dashboard/kpi:
+    get:
+      operationId: getDashboardKPI
+      tags: [Dashboard]
+      summary: KPI summary with hourly timeseries
+      description: |
+        Returns success rate, active orchestrators, usage minutes, session count,
+        and hourly timeseries for the given window. Includes period-over-period deltas.
+        Also includes request-job overview (AI Batch + BYOC totals).
+      parameters:
+        - $ref: "#/components/parameters/DashboardWindow"
+        - name: pipeline
+          in: query
+          schema: { type: string }
+        - name: model_id
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: KPI payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardKPICombined"
+
+  /v1/dashboard/pipelines:
+    get:
+      operationId: getDashboardPipelines
+      tags: [Dashboard]
+      summary: Pipeline usage breakdown
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 5, minimum: 1, maximum: 20 }
+        - $ref: "#/components/parameters/DashboardWindow"
+      responses:
+        "200":
+          description: Pipeline usage payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardPipelinesCombined"
+
+  /v1/dashboard/orchestrators:
+    get:
+      operationId: getDashboardOrchestrators
+      tags: [Dashboard]
+      summary: Orchestrator SLA table
+      parameters:
+        - name: window
+          in: query
+          schema: { type: string, default: "7d" }
+          description: "Time window (e.g. 24h, 7d). Max 30d."
+      responses:
+        "200":
+          description: Orchestrator list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DashboardOrchestrator"
+
+  /v1/dashboard/gpu-capacity:
+    get:
+      operationId: getDashboardGPUCapacity
+      tags: [Dashboard]
+      summary: GPU inventory summary
+      responses:
+        "200":
+          description: GPU capacity payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardGPUCapacity"
+
+  /v1/dashboard/pipeline-catalog:
+    get:
+      operationId: getDashboardPipelineCatalog
+      tags: [Dashboard]
+      summary: Available pipeline + model combinations
+      responses:
+        "200":
+          description: Pipeline catalog
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DashboardPipelineCatalogEntry"
+
+  /v1/dashboard/pricing:
+    get:
+      operationId: getDashboardPricing
+      tags: [Dashboard]
+      summary: Per-orchestrator pricing
+      responses:
+        "200":
+          description: Pricing rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DashboardPipelinePricing"
+
+  /v1/dashboard/job-feed:
+    get:
+      operationId: getDashboardJobFeed
+      tags: [Dashboard]
+      summary: Live job/stream feed
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50, minimum: 1, maximum: 200 }
+      responses:
+        "200":
+          description: Job feed items
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DashboardJobFeedItem"
+
+  # ──────────────────────── Streaming (5 endpoints) ────────────────────────
+
+  /v1/streaming/models:
+    get:
+      operationId: getStreamingModels
+      tags: [Streaming]
+      summary: Streaming model capacity and performance
+      responses:
+        "200":
+          description: Streaming model rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/StreamingModel"
+
+  /v1/streaming/orchestrators:
+    get:
+      operationId: getStreamingOrchestrators
+      tags: [Streaming]
+      summary: Streaming orchestrator inventory
+      responses:
+        "200":
+          description: Streaming orchestrator rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/StreamingOrchestrator"
+
+  /v1/streaming/sla:
+    get:
+      operationId: getStreamingSLA
+      tags: [Streaming]
+      summary: Streaming SLA compliance (cursor-paginated)
+      parameters:
+        - $ref: "#/components/parameters/WindowStart"
+        - $ref: "#/components/parameters/WindowEnd"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: SLA compliance rows
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CursorEnvelope_StreamingSLARow"
+
+  /v1/streaming/demand:
+    get:
+      operationId: getStreamingDemand
+      tags: [Streaming]
+      summary: Streaming network demand (cursor-paginated)
+      parameters:
+        - $ref: "#/components/parameters/WindowStart"
+        - $ref: "#/components/parameters/WindowEnd"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Demand rows
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CursorEnvelope_StreamingDemandRow"
+
+  /v1/streaming/gpu-metrics:
+    get:
+      operationId: getStreamingGPUMetrics
+      tags: [Streaming]
+      summary: Per-GPU streaming metrics (cursor-paginated)
+      parameters:
+        - $ref: "#/components/parameters/WindowStart"
+        - $ref: "#/components/parameters/WindowEnd"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: GPU metric rows
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CursorEnvelope_StreamingGPUMetricRow"
+
+  # ──────────────────────── Requests (9 endpoints) ────────────────────────
+
+  /v1/requests/models:
+    get:
+      operationId: getRequestsModels
+      tags: [Requests]
+      summary: Request-based model capacity and performance
+      responses:
+        "200":
+          description: Request model rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RequestsModel"
+
+  /v1/requests/orchestrators:
+    get:
+      operationId: getRequestsOrchestrators
+      tags: [Requests]
+      summary: Request-based orchestrator inventory
+      responses:
+        "200":
+          description: Request orchestrator rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RequestsOrchestrator"
+
+  /v1/requests/ai-batch/summary:
+    get:
+      operationId: getAIBatchSummary
+      tags: [Requests]
+      summary: AI Batch job summary by pipeline
+      parameters:
+        - $ref: "#/components/parameters/WindowStart"
+        - $ref: "#/components/parameters/WindowEnd"
+      responses:
+        "200":
+          description: AI Batch summary rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AIBatchSummaryRow"
+
+  /v1/requests/ai-batch/jobs:
+    get:
+      operationId: listAIBatchJobs
+      tags: [Requests]
+      summary: AI Batch individual job records (cursor-paginated)
+      parameters:
+        - $ref: "#/components/parameters/WindowStart"
+        - $ref: "#/components/parameters/WindowEnd"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: AI Batch job records
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CursorEnvelope_AIBatchJobRecord"
+
+  /v1/requests/ai-batch/llm-summary:
+    get:
+      operationId: getAIBatchLLMSummary
+      tags: [Requests]
+      summary: AI Batch LLM-specific summary by model
+      parameters:
+        - $ref: "#/components/parameters/WindowStart"
+        - $ref: "#/components/parameters/WindowEnd"
+      responses:
+        "200":
+          description: LLM summary rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AIBatchLLMSummaryRow"
+
+  /v1/requests/byoc/summary:
+    get:
+      operationId: getBYOCSummary
+      tags: [Requests]
+      summary: BYOC job summary by capability
+      parameters:
+        - $ref: "#/components/parameters/WindowStart"
+        - $ref: "#/components/parameters/WindowEnd"
+      responses:
+        "200":
+          description: BYOC summary rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BYOCSummaryRow"
+
+  /v1/requests/byoc/jobs:
+    get:
+      operationId: listBYOCJobs
+      tags: [Requests]
+      summary: BYOC individual job records (cursor-paginated)
+      parameters:
+        - $ref: "#/components/parameters/WindowStart"
+        - $ref: "#/components/parameters/WindowEnd"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: BYOC job records
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CursorEnvelope_BYOCJobRecord"
+
+  /v1/requests/byoc/workers:
+    get:
+      operationId: getBYOCWorkers
+      tags: [Requests]
+      summary: BYOC worker inventory by capability
+      parameters:
+        - $ref: "#/components/parameters/WindowStart"
+        - $ref: "#/components/parameters/WindowEnd"
+      responses:
+        "200":
+          description: BYOC worker rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BYOCWorkerRow"
+
+  /v1/requests/byoc/auth:
+    get:
+      operationId: getBYOCAuth
+      tags: [Requests]
+      summary: BYOC auth event summary by capability
+      parameters:
+        - $ref: "#/components/parameters/WindowStart"
+        - $ref: "#/components/parameters/WindowEnd"
+      responses:
+        "200":
+          description: BYOC auth rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BYOCAuthRow"
+
+  # ──────────────────────── Infrastructure ────────────────────────
+
+  /healthz:
+    get:
+      operationId: healthz
+      summary: Health check
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: "ok" }
 
 components:
   parameters:
-    org:
-      name: org
-      in: query
-      description: Filter to a single organisation. Omit for all orgs.
-      schema:
-        type: string
-        enum: [daydream, cloudspe]
-    start:
-      name: start
-      in: query
-      description: Window start (RFC3339). Defaults to 24 hours ago.
-      schema:
-        type: string
-        format: date-time
-        example: "2026-03-01T00:00:00Z"
-    end:
-      name: end
-      in: query
-      description: Window end (RFC3339). Defaults to now.
-      schema:
-        type: string
-        format: date-time
-        example: "2026-03-24T23:59:59Z"
-    limit:
-      name: limit
-      in: query
-      description: Maximum rows to return (1–1000).
-      schema:
-        type: integer
-        minimum: 1
-        maximum: 1000
-        default: 50
-    cursor:
-      name: cursor
-      in: query
-      description: Opaque cursor returned by the previous page. Omit on the first page.
-      schema:
-        type: string
-    pipeline:
-      name: pipeline
-      in: query
-      description: Filter by pipeline name (e.g. `text-to-image`).
-      schema:
-        type: string
-    orch_address:
-      name: orch_address
-      in: query
-      description: Filter by orchestrator Ethereum address (lowercased).
-      schema:
-        type: string
-        example: ""
-    active_only:
-      name: active_only
-      in: query
-      description: When `true`, return only orchestrators active within the last 15 minutes.
-      schema:
-        type: boolean
-        default: false
-    stream_id:
-      name: stream_id
-      in: query
-      schema:
-        type: string
-    failure_type:
-      name: failure_type
-      in: query
-      description: Filter failure events by type.
-      schema:
-        type: string
-        enum: [no_orch_available, orch_swap, inference_restart, inference_error]
-    address_path:
-      name: address
-      in: path
-      required: true
-      description: Orchestrator Ethereum address (lowercased).
-      schema:
-        type: string
-        example: ""
-    window:
+    DashboardWindow:
       name: window
       in: query
-      description: |
-        Lookback window as a duration string. Accepts Go duration syntax (`24h`, `90m`, `30s`)
-        or a day suffix (`7d`). Capped per-endpoint — see endpoint description for limits.
-      schema:
-        type: string
-        example: "24h"
-        default: "24h"
-    orchestrator_address:
-      name: orchestrator_address
+      schema: { type: string, default: "24h" }
+      description: "Time window (e.g. 1h, 24h, 7d). Max 168h."
+
+    WindowStart:
+      name: start
       in: query
-      description: Filter by orchestrator Ethereum address (lowercased).
-      schema:
-        type: string
-        example: ""
-    orchestrator_uri:
-      name: orchestrator_uri
+      schema: { type: string, format: date-time }
+      description: "Window start (RFC 3339). Default: now - 24h."
+
+    WindowEnd:
+      name: end
       in: query
-      description: Filter by non-streaming orchestrator service URI (lowercased).
-      schema:
-        type: string
-        example: ""
-    pipeline_id:
-      name: pipeline_id
+      schema: { type: string, format: date-time }
+      description: "Window end (RFC 3339). Default: now."
+
+    Limit:
+      name: limit
       in: query
-      description: Filter by pipeline name (e.g. `streamdiffusion-sdxl-v2v`).
-      schema:
-        type: string
-    model_id:
-      name: model_id
+      schema: { type: integer, default: 50, minimum: 1, maximum: 1000 }
+
+    Cursor:
+      name: cursor
       in: query
-      description: Filter by model identifier.
-      schema:
-        type: string
-    gpu_id:
-      name: gpu_id
-      in: query
-      description: Filter by GPU slot identifier.
-      schema:
-        type: string
-    gateway_filter:
-      name: gateway
-      in: query
-      description: Filter by gateway Ethereum address.
-      schema:
-        type: string
-    gpu_model_name:
-      name: gpu_model_name
-      in: query
-      description: Filter by GPU model name (e.g. `RTX-4090`).
-      schema:
-        type: string
-    runner_version:
-      name: runner_version
-      in: query
-      description: Filter by runner software version.
-      schema:
-        type: string
-    cuda_version:
-      name: cuda_version
-      in: query
-      description: Filter by CUDA version string.
-      schema:
-        type: string
-    region:
-      name: region
-      in: query
-      description: Filter by geographic region (currently always null — reserved for future use).
-      schema:
-        type: string
+      schema: { type: string }
+      description: Opaque cursor for keyset pagination.
 
   schemas:
-
-    # ── AI Batch (R17) ───────────────────────────────────────────────────────
-
-    AIBatchJobSummary:
+    CursorPageInfo:
       type: object
       properties:
-        pipeline:        { type: string, description: "Fixed pipeline name (e.g. text-to-image, llm)" }
-        total_jobs:      { type: integer, format: int64 }
-        selected_jobs:   { type: integer, format: int64, description: "Jobs with explicit orchestrator selection evidence." }
-        no_orch_jobs:    { type: integer, format: int64, description: "Jobs that failed before selection with explicit no_orchestrators evidence." }
-        unknown_jobs:    { type: integer, format: int64, description: "Jobs without enough evidence to classify selection outcome." }
-        success_rate:    { type: number, format: double, description: "0.0–1.0" }
-        avg_duration_ms: { type: number, format: double }
-        avg_latency_score: { type: number, format: double }
-        selected_attribution_worked_rate: { type: number, format: double, description: "Worked attribution rate on selection_outcome = selected, where worked = resolved + hardware_less + stale." }
-      required: [pipeline, total_jobs, selected_jobs, no_orch_jobs, unknown_jobs, success_rate, avg_duration_ms, avg_latency_score, selected_attribution_worked_rate]
+        next_cursor: { type: string }
+        has_more: { type: boolean }
+        page_size: { type: integer }
 
-    AIBatchJobRecord:
+    Meta:
       type: object
       properties:
-        request_id:    { type: string }
-        org:           { type: string }
-        gateway:       { type: string }
-        pipeline:      { type: string }
-        model_id:      { type: string }
-        completed_at:  { type: string, format: date-time }
-        success:       { type: boolean, nullable: true }
-        tries:         { type: integer, format: int64 }
-        duration_ms:   { type: integer, format: int64 }
-        orch_url:      { type: string }
-        selection_outcome: { type: string, enum: [selected, no_orch, unknown] }
-        latency_score: { type: number, format: double }
-        price_per_unit: { type: number, format: double }
-        error_type:    { type: string }
-        error:         { type: string }
-        gpu_model:     { type: string }
-        attribution_status: { type: string, enum: [resolved, hardware_less, stale, ambiguous, unresolved] }
-      required: [request_id, org, gateway, pipeline, model_id, completed_at, tries, duration_ms, orch_url, selection_outcome, latency_score, price_per_unit, error_type, error, attribution_status]
+        generated_at: { type: string, format: date-time }
+        request_id: { type: string }
 
-    AIBatchLLMSummary:
+    MetricDelta:
       type: object
       properties:
-        model:             { type: string }
-        total_requests:    { type: integer, format: int64 }
-        success_rate:      { type: number, format: double, description: "0.0–1.0" }
-        avg_tokens_per_sec: { type: number, format: double }
-        avg_ttft_ms:       { type: number, format: double }
-        avg_total_tokens:  { type: number, format: double }
-      required: [model, total_requests, success_rate, avg_tokens_per_sec, avg_ttft_ms, avg_total_tokens]
+        value: { type: number }
+        delta: { type: number }
 
-    # ── BYOC (R18) ───────────────────────────────────────────────────────────
-
-    BYOCJobSummary:
-      type: object
-      description: |
-        Per-capability aggregate for BYOC jobs. Capability values are stored
-        verbatim (e.g. "openai-chat-completions") and never hardcoded.
-      properties:
-        capability:      { type: string }
-        total_jobs:      { type: integer, format: int64 }
-        selected_jobs:   { type: integer, format: int64, description: "Jobs with explicit orchestrator selection evidence." }
-        no_orch_jobs:    { type: integer, format: int64, description: "Jobs that failed before selection with explicit no_orchestrator evidence. Under the current raw contract this is usually zero." }
-        unknown_jobs:    { type: integer, format: int64, description: "Jobs without enough evidence to classify selection outcome." }
-        success_rate:    { type: number, format: double, description: "0.0–1.0" }
-        avg_duration_ms: { type: number, format: double }
-        selected_attribution_worked_rate: { type: number, format: double, description: "Worked attribution rate on selection_outcome = selected, where worked = resolved + hardware_less + stale." }
-      required: [capability, total_jobs, selected_jobs, no_orch_jobs, unknown_jobs, success_rate, avg_duration_ms, selected_attribution_worked_rate]
-
-    BYOCJobRecord:
-      type: object
-      properties:
-        request_id:   { type: string }
-        org:          { type: string }
-        capability:   { type: string }
-        completed_at: { type: string, format: date-time }
-        success:      { type: boolean, nullable: true }
-        duration_ms:  { type: integer, format: int64 }
-        http_status:  { type: integer, format: int64 }
-        orch_address: { type: string }
-        orch_url:     { type: string }
-        selection_outcome: { type: string, enum: [selected, no_orch, unknown] }
-        worker_url:   { type: string }
-        error:        { type: string }
-        gpu_model:     { type: string }
-        attribution_status: { type: string, enum: [resolved, hardware_less, stale, ambiguous, unresolved] }
-      required: [request_id, org, capability, completed_at, duration_ms, http_status, orch_address, orch_url, selection_outcome, worker_url, error, attribution_status]
-
-    BYOCWorkerSummary:
-      type: object
-      properties:
-        capability:        { type: string }
-        worker_count:      { type: integer, format: int64 }
-        models:
-          type: array
-          items: { type: string }
-        avg_price_per_unit: { type: number, format: double }
-      required: [capability, worker_count, models, avg_price_per_unit]
-
-    BYOCAuthSummary:
-      type: object
-      properties:
-        capability:    { type: string }
-        total_events:  { type: integer, format: int64 }
-        success_rate:  { type: number, format: double, description: "0.0–1.0" }
-        failure_count: { type: integer, format: int64 }
-      required: [capability, total_events, success_rate, failure_count]
-
-    # ── Jobs — request/response (R19) ───────────────────────────────────────
-
-    JobsDemandRow:
-      type: object
-      properties:
-        window_start:    { type: string, format: date-time }
-        org:             { type: string, nullable: true }
-        gateway:         { type: string }
-        pipeline_id:     { type: string }
-        model_id:        { type: string, nullable: true }
-        job_type:        { type: string, enum: [ai-batch, byoc] }
-        job_count:       { type: integer, format: int64 }
-        success_count:   { type: integer, format: int64 }
-        success_rate:    { type: number, format: double }
-        avg_duration_ms: { type: number, format: double }
-        total_minutes:   { type: number, format: double }
-      required: [window_start, gateway, pipeline_id, job_type, job_count, success_count, success_rate, avg_duration_ms, total_minutes]
-
-    JobsSLARow:
-      type: object
-      properties:
-        window_start:         { type: string, format: date-time }
-        org:                  { type: string, nullable: true }
-        orchestrator_uri:     { type: string }
-        pipeline_id:          { type: string }
-        model_id:             { type: string, nullable: true }
-        gpu_id:               { type: string, nullable: true }
-        job_type:             { type: string, enum: [ai-batch, byoc] }
-        job_count:            { type: integer, format: int64 }
-        success_count:        { type: integer, format: int64 }
-        success_rate:         { type: number, format: double }
-        avg_duration_ms:      { type: number, format: double }
-        sla_score:            { type: number, format: double, nullable: true }
-      required: [window_start, orchestrator_uri, pipeline_id, job_type, job_count, success_count, success_rate, avg_duration_ms]
-
-    JobModelPerformance:
-      type: object
-      properties:
-        model_id:        { type: string }
-        pipeline:        { type: string }
-        job_type:        { type: string, enum: [ai-batch, byoc] }
-        job_count:       { type: integer, format: int64 }
-        warm_orch_count: { type: integer, format: int64 }
-        avg_duration_ms: { type: number, format: double, nullable: true }
-        p50_duration_ms: { type: number, format: double, nullable: true }
-        p99_duration_ms: { type: number, format: double, nullable: true }
-      required: [model_id, pipeline, job_type, job_count, warm_orch_count]
-
-    # ── Dashboard (R16) ──────────────────────────────────────────────────────
-
-    DashboardMetricDelta:
-      type: object
-      properties:
-        value: { type: number, format: double }
-        delta: { type: number, format: double, description: "Period-over-period % change" }
-      required: [value, delta]
-
-    DashboardHourlyBucket:
+    HourlyBucket:
       type: object
       properties:
         hour: { type: string, format: date-time }
-        value: { type: number, format: double }
-      required: [hour, value]
+        value: { type: number }
 
     DashboardKPI:
       type: object
       properties:
-        successRate:          { $ref: "#/components/schemas/DashboardMetricDelta" }
-        orchestratorsOnline:  { $ref: "#/components/schemas/DashboardMetricDelta" }
-        dailyUsageMins:       { $ref: "#/components/schemas/DashboardMetricDelta", description: "Total stream-minutes from api_network_demand" }
-        dailySessionCount:    { $ref: "#/components/schemas/DashboardMetricDelta" }
-        dailyNetworkFeesEth:  { $ref: "#/components/schemas/DashboardMetricDelta" }
-        timeframeHours:       { type: integer }
+        successRate: { $ref: "#/components/schemas/MetricDelta" }
+        orchestratorsOnline: { $ref: "#/components/schemas/MetricDelta" }
+        dailyUsageMins: { $ref: "#/components/schemas/MetricDelta" }
+        dailySessionCount: { $ref: "#/components/schemas/MetricDelta" }
+        dailyNetworkFeesEth: { $ref: "#/components/schemas/MetricDelta" }
+        timeframeHours: { type: integer }
         hourlySessions:
           type: array
-          items: { $ref: "#/components/schemas/DashboardHourlyBucket" }
+          items: { $ref: "#/components/schemas/HourlyBucket" }
         hourlyUsage:
           type: array
-          items: { $ref: "#/components/schemas/DashboardHourlyBucket" }
+          items: { $ref: "#/components/schemas/HourlyBucket" }
+
+    DashboardJobsOverview:
+      type: object
+      properties:
+        ai_batch:
+          $ref: "#/components/schemas/DashboardJobsStats"
+        byoc:
+          $ref: "#/components/schemas/DashboardJobsStats"
+
+    DashboardJobsStats:
+      type: object
+      properties:
+        total_jobs: { type: integer }
+        selected_jobs: { type: integer }
+        no_orch_jobs: { type: integer }
+        success_rate: { type: number }
+        avg_duration_ms: { type: number }
+
+    DashboardKPICombined:
+      type: object
+      properties:
+        streaming: { $ref: "#/components/schemas/DashboardKPI" }
+        requests: { $ref: "#/components/schemas/DashboardJobsOverview" }
 
     DashboardPipelineModelMins:
       type: object
       properties:
-        model:    { type: string }
-        mins:     { type: number, format: double }
-        sessions: { type: integer, format: int64 }
-        avgFps:   { type: number, format: double }
+        model: { type: string }
+        mins: { type: number }
+        sessions: { type: integer }
+        avgFps: { type: number }
 
     DashboardPipelineUsage:
       type: object
       properties:
-        name:     { type: string }
-        sessions: { type: integer, format: int64 }
-        mins:     { type: number, format: double }
-        avgFps:   { type: number, format: double }
-        job_type: { type: string, description: "Job type (e.g. stream, ai-batch, byoc). Omitted for streaming pipelines.", nullable: true }
+        name: { type: string }
+        mins: { type: number }
+        sessions: { type: integer }
+        avgFps: { type: number }
         modelMins:
           type: array
           items: { $ref: "#/components/schemas/DashboardPipelineModelMins" }
-          description: "Per-model breakdown. Omitted when not available."
 
-    DashboardPipelineModelOffer:
+    DashboardJobsByPipelineRow:
       type: object
       properties:
-        pipelineId: { type: string }
-        modelIds:
+        pipeline: { type: string }
+        total_jobs: { type: integer }
+        selected_jobs: { type: integer }
+        no_orch_jobs: { type: integer }
+        success_rate: { type: number }
+        avg_duration_ms: { type: number }
+
+    DashboardJobsByCapabilityRow:
+      type: object
+      properties:
+        capability: { type: string }
+        total_jobs: { type: integer }
+        selected_jobs: { type: integer }
+        no_orch_jobs: { type: integer }
+        success_rate: { type: number }
+        avg_duration_ms: { type: number }
+
+    DashboardPipelinesCombined:
+      type: object
+      properties:
+        streaming:
           type: array
-          items: { type: string }
+          items: { $ref: "#/components/schemas/DashboardPipelineUsage" }
+        requests:
+          type: object
+          properties:
+            by_pipeline:
+              type: array
+              items: { $ref: "#/components/schemas/DashboardJobsByPipelineRow" }
+            by_capability:
+              type: array
+              items: { $ref: "#/components/schemas/DashboardJobsByCapabilityRow" }
 
     DashboardOrchestrator:
       type: object
       properties:
-        address:              { type: string }
-        ensName:              { type: string, description: "ENS name if registered, empty otherwise" }
-        serviceUri:           { type: string, description: "Orchestrator service URI (e.g. https://host:8935)" }
-        knownSessions:        { type: integer, format: int64 }
-        successSessions:      { type: integer, format: int64 }
-        successRatio:         { type: number, format: double }
-        effectiveSuccessRate: { type: number, format: double, nullable: true }
-        noSwapRatio:          { type: number, format: double, nullable: true }
-        slaScore:             { type: number, format: double, nullable: true, description: "Latest available hourly contracted sla_score for the orchestrator within the requested dashboard window." }
-        slaWindowStart:       { type: string, format: date-time, nullable: true, description: "Hour bucket that produced slaScore." }
+        address: { type: string }
+        serviceUri: { type: string }
+        knownSessions: { type: integer }
+        successSessions: { type: integer }
+        successRatio: { type: number }
+        effectiveSuccessRate: { type: number, nullable: true }
+        noSwapRatio: { type: number, nullable: true }
+        slaScore: { type: number, nullable: true }
         pipelines:
           type: array
           items: { type: string }
         pipelineModels:
           type: array
-          items: { $ref: "#/components/schemas/DashboardPipelineModelOffer" }
-        gpuCount: { type: integer, format: int64 }
-
-    DashboardGPUModelCapacity:
-      type: object
-      properties:
-        model: { type: string }
-        count: { type: integer, format: int64 }
-
-    DashboardGPUCapacityPipelineModel:
-      type: object
-      properties:
-        model: { type: string }
-        gpus:  { type: integer, format: int64 }
-
-    DashboardGPUCapacityPipeline:
-      type: object
-      properties:
-        name: { type: string }
-        gpus: { type: integer, format: int64 }
-        models:
-          type: array
-          items: { $ref: "#/components/schemas/DashboardGPUCapacityPipelineModel" }
+          items:
+            type: object
+            properties:
+              pipelineId: { type: string }
+              modelIds:
+                type: array
+                items: { type: string }
+        gpuCount: { type: integer }
 
     DashboardGPUCapacity:
       type: object
       properties:
-        totalGPUs:         { type: integer, format: int64 }
-        activeGPUs:        { type: integer, format: int64 }
-        availableCapacity: { type: number, format: double, description: "Fraction 0–1" }
+        totalGPUs: { type: integer }
+        activeGPUs: { type: integer }
+        availableCapacity: { type: number }
         models:
           type: array
-          items: { $ref: "#/components/schemas/DashboardGPUModelCapacity" }
+          items:
+            type: object
+            properties:
+              model: { type: string }
+              count: { type: integer }
         pipelineGPUs:
           type: array
-          items: { $ref: "#/components/schemas/DashboardGPUCapacityPipeline" }
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              gpus: { type: integer }
+              models:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    model: { type: string }
+                    gpus: { type: integer }
 
     DashboardPipelineCatalogEntry:
       type: object
       properties:
-        id:      { type: string }
-        name:    { type: string }
+        id: { type: string }
+        name: { type: string }
         models:
           type: array
           items: { type: string }
@@ -528,1617 +641,246 @@ components:
     DashboardPipelinePricing:
       type: object
       properties:
-        orchAddress:     { type: string }
-        orchName:        { type: string }
-        pipeline:        { type: string }
-        model:           { type: string }
-        priceWeiPerUnit: { type: integer, format: int64 }
-        pixelsPerUnit:   { type: integer, format: int64 }
-        isWarm:          { type: boolean }
+        orchAddress: { type: string }
+        orchName: { type: string }
+        pipeline: { type: string }
+        model: { type: string }
+        priceWeiPerUnit: { type: integer }
+        pixelsPerUnit: { type: integer }
+        isWarm: { type: boolean }
 
     DashboardJobFeedItem:
       type: object
       properties:
-        id:              { type: string }
-        pipeline:        { type: string }
-        model:           { type: string, nullable: true }
-        gateway:         { type: string }
+        id: { type: string }
+        pipeline: { type: string }
+        model: { type: string }
+        gateway: { type: string }
         orchestratorUrl: { type: string }
-        state:           { type: string }
-        job_type:        { type: string, description: "Job type (e.g. stream, ai-batch, byoc). Omitted for streaming.", nullable: true }
-        inputFps:        { type: number, format: double }
-        outputFps:       { type: number, format: double }
-        firstSeen:       { type: string, format: date-time }
-        lastSeen:        { type: string, format: date-time }
-        durationSeconds: { type: number, format: double, nullable: true }
+        state: { type: string }
+        job_type: { type: string }
+        inputFps: { type: number }
+        outputFps: { type: number }
+        firstSeen: { type: string, format: date-time }
+        lastSeen: { type: string, format: date-time }
+        durationSeconds: { type: number, nullable: true }
 
-    # ── Dashboard Jobs ───────────────────────────────────────────────────────
-
-    DashboardJobsStats:
-      type: object
-      description: Aggregate metrics for one job family (AI batch or BYOC).
-      properties:
-        total_jobs:     { type: integer, format: int64 }
-        selected_jobs:  { type: integer, format: int64 }
-        no_orch_jobs:   { type: integer, format: int64 }
-        unknown_jobs:   { type: integer, format: int64 }
-        success_rate:   { type: number, format: double, description: "0.0–1.0" }
-        avg_duration_ms: { type: number, format: double }
-        p99_duration_ms: { type: number, format: double }
-        selected_attribution_worked_rate: { type: number, format: double, description: "Worked attribution rate on selection_outcome = selected." }
-      required: [total_jobs, selected_jobs, no_orch_jobs, unknown_jobs, success_rate, avg_duration_ms, p99_duration_ms, selected_attribution_worked_rate]
-
-    DashboardJobsOverview:
-      type: object
-      description: Top-level aggregate stats across AI batch and BYOC jobs.
-      properties:
-        ai_batch: { $ref: "#/components/schemas/DashboardJobsStats" }
-        byoc:     { $ref: "#/components/schemas/DashboardJobsStats" }
-      required: [ai_batch, byoc]
-
-    DashboardJobsByPipelineRow:
-      type: object
-      description: Per-pipeline aggregate for AI batch jobs.
-      properties:
-        pipeline:       { type: string, description: "Pipeline name (e.g. text-to-image, llm)" }
-        total_jobs:     { type: integer, format: int64 }
-        selected_jobs:  { type: integer, format: int64 }
-        no_orch_jobs:   { type: integer, format: int64 }
-        unknown_jobs:   { type: integer, format: int64 }
-        success_rate:   { type: number, format: double, description: "0.0–1.0" }
-        avg_duration_ms: { type: number, format: double }
-        selected_attribution_worked_rate: { type: number, format: double, description: "Worked attribution rate on selection_outcome = selected." }
-      required: [pipeline, total_jobs, selected_jobs, no_orch_jobs, unknown_jobs, success_rate, avg_duration_ms, selected_attribution_worked_rate]
-
-    DashboardJobsByCapabilityRow:
-      type: object
-      description: Per-capability aggregate for BYOC jobs.
-      properties:
-        capability:     { type: string, description: "Capability name (e.g. openai-chat-completions)" }
-        total_jobs:     { type: integer, format: int64 }
-        selected_jobs:  { type: integer, format: int64 }
-        no_orch_jobs:   { type: integer, format: int64 }
-        unknown_jobs:   { type: integer, format: int64 }
-        success_rate:   { type: number, format: double, description: "0.0–1.0" }
-        avg_duration_ms: { type: number, format: double }
-        selected_attribution_worked_rate: { type: number, format: double, description: "Worked attribution rate on selection_outcome = selected." }
-      required: [capability, total_jobs, selected_jobs, no_orch_jobs, unknown_jobs, success_rate, avg_duration_ms, selected_attribution_worked_rate]
-
-    # ── Shared ──────────────────────────────────────────────────────────────
-
-    ResponseMeta:
-      type: object
-      description: Standard response envelope metadata (ADR-002).
-      properties:
-        generated_at: { type: string, format: date-time, description: "UTC timestamp when the response was generated." }
-        request_id:   { type: string, description: "Value of the X-Request-Id request header, if present." }
-
-    Problem:
-      description: RFC 7807 Problem Details error response.
+    StreamingModel:
       type: object
       properties:
-        type:
-          type: string
-          example: "about:blank"
-        title:
-          type: string
-          example: "Too Many Requests"
-        status:
-          type: integer
-          example: 429
-        detail:
-          type: string
-          example: "rate limit exceeded"
+        pipeline: { type: string }
+        model: { type: string }
+        warm_orch_count: { type: integer }
+        gpu_slots: { type: integer }
+        active_streams: { type: integer }
+        available_capacity: { type: integer }
+        avg_fps: { type: number }
 
-    WEI:
-      description: |
-        Payment value in wei (1e-18 ETH), returned as a decimal string to
-        preserve full uint64 precision.
-      type: string
-      pattern: "^[0-9]+$"
-      example: "1234500000000000000"
-
-    FPSStats:
+    StreamingOrchestrator:
       type: object
       properties:
-        Avg:
-          type: number
-          format: double
-        P5:
-          type: number
-          format: double
-        P50:
-          type: number
-          format: double
-        P99:
-          type: number
-          format: double
-
-    # ── Network (R1) ────────────────────────────────────────────────────────
-
-    Orchestrator:
-      type: object
-      properties:
-        Address:
-          type: string
-        Org:
-          type: string
-        Name:
-          type: string
-        URI:
-          type: string
-        Version:
-          type: string
-        LastSeen:
-          type: string
-          format: date-time
-        IsActive:
-          type: boolean
-        RawCapabilities:
-          type: string
-          description: Raw JSON capabilities blob.
-
-    ModelAvailability:
-      type: object
-      properties:
-        Pipeline:
-          type: string
-        Model:
-          type: string
-        WarmOrchCount:
-          type: integer
-          format: int64
-        TotalCapacity:
-          type: integer
-          format: int64
-        PriceMinWeiPerPixel:
-          type: integer
-          format: int64
-        PriceMaxWeiPerPixel:
-          type: integer
-          format: int64
-        PriceAvgWeiPerPixel:
-          type: number
-          format: double
-
-    # ── Model Performance (R12) ──────────────────────────────────────────────
-
-    ModelPerformance:
-      type: object
-      properties:
-        ModelID: { type: string }
-        Pipeline: { type: string }
-        AvgFPS: { type: number, format: double }
-        P50FPS: { type: number, format: double }
-        P99FPS: { type: number, format: double }
-        WarmOrchCount: { type: integer, format: int64 }
-        TotalStreams: { type: integer, format: int64 }
-
-    OrchModelStats:
-      type: object
-      properties:
-        Address: { type: string }
-        Name: { type: string }
-        AvgFPS: { type: number, format: double }
-        IsWarm: { type: boolean }
-
-    # ── Capacity (R15) ───────────────────────────────────────────────────────
-
-    CapacityEntry:
-      type: object
-      properties:
-        Pipeline: { type: string }
-        ModelID: { type: string }
-        WarmOrchCount: { type: integer, format: int64 }
-        ActiveStreams: { type: integer, format: int64 }
-        UtilizationPct: { type: number, format: double, description: "active streams / warm orchs (0–1)" }
-        TotalVRAMBytes: { type: integer, format: int64 }
-
-    CapacitySummary:
-      type: object
-      properties:
-        SnapshotTime: { type: string, format: date-time }
-        Entries:
+        address: { type: string }
+        uri: { type: string }
+        models:
           type: array
-          items: { $ref: "#/components/schemas/CapacityEntry" }
+          items: { type: string }
+        gpu_count: { type: integer }
+        last_seen: { type: string, format: date-time }
 
-    # ── SLA / GPU / Network Demand (ported from leaderboard-serverless) ──────
-
-    CursorPagination:
+    StreamingSLARow:
       type: object
-      description: Cursor pagination metadata included in list responses.
       properties:
-        next_cursor: { type: string, example: "WyIyMDI2LTA0LTA5VDEyOjAwOjAwWiIsIjB4YWJjMTIzIl0" }
-        has_more:    { type: boolean, example: true }
-        page_size:   { type: integer, example: 50 }
+        window_start: { type: string, format: date-time }
+        org: { type: string }
+        orchestrator_address: { type: string }
+        pipeline_id: { type: string }
+        model_id: { type: string }
+        gpu_id: { type: string }
+        requested_sessions: { type: integer }
+        startup_success_sessions: { type: integer }
+        effective_success_rate: { type: number }
+        no_swap_rate: { type: number }
+        avg_output_fps: { type: number }
+        sla_score: { type: number }
 
-    OrchestratorListResponse:
+    CursorEnvelope_StreamingSLARow:
       type: object
       properties:
         data:
           type: array
-          items: { $ref: "#/components/schemas/Orchestrator" }
-        pagination: { $ref: "#/components/schemas/CursorPagination" }
-        meta: { $ref: "#/components/schemas/ResponseMeta" }
+          items: { $ref: "#/components/schemas/StreamingSLARow" }
+        pagination: { $ref: "#/components/schemas/CursorPageInfo" }
+        meta: { $ref: "#/components/schemas/Meta" }
 
-    SLAComplianceRow:
+    StreamingDemandRow:
       type: object
-      description: SLA compliance metrics for one (orchestrator, pipeline, model, gpu, window) bucket.
       properties:
-        window_start:                { type: string, format: date-time }
-        org:                         { type: string, nullable: true }
-        orchestrator_address:        { type: string, example: "0xabc123" }
-        pipeline_id:                 { type: string, example: "streamdiffusion-sdxl-v2v" }
-        model_id:                    { type: string, nullable: true }
-        gpu_id:                      { type: string, nullable: true }
-        gpu_model_name:              { type: string, nullable: true, description: "Hardware model surfaced for drilldown visibility. It is not part of cohort normalization." }
-        region:                      { type: string, nullable: true, description: "Always null — not captured in event data." }
-        known_sessions_count:        { type: integer, format: int64 }
-        requested_sessions:          { type: integer, format: int64 }
-        startup_success_sessions:    { type: integer, format: int64 }
-        no_orch_sessions:            { type: integer, format: int64 }
-        startup_excused_sessions:    { type: integer, format: int64, description: "Failed sessions whose KPI treatment is explicitly excused by canonical lifecycle rules." }
-        startup_failed_sessions:     { type: integer, format: int64 }
-        loading_only_sessions:       { type: integer, format: int64 }
-        zero_output_fps_sessions:    { type: integer, format: int64 }
-        output_failed_sessions:      { type: integer, format: int64, description: "Union count of requested sessions that were loading-only or zero-output; one session contributes at most once." }
-        effective_failed_sessions:   { type: integer, format: int64 }
-        confirmed_swapped_sessions:  { type: integer, format: int64, description: "Always 0 — confirmation signal absent." }
-        inferred_swap_sessions:      { type: integer, format: int64 }
-        total_swapped_sessions:      { type: integer, format: int64 }
-        sessions_ending_in_error:    { type: integer, format: int64 }
-        error_status_samples:        { type: integer, format: int64 }
-        health_signal_count:         { type: integer, format: int64 }
-        health_expected_signal_count: { type: integer, format: int64 }
-        health_signal_coverage_ratio: { type: number, format: double, description: "Bounded to the inclusive range [0,1]." }
-        startup_success_rate:        { type: number, format: double, nullable: true }
-        excused_failure_rate:        { type: number, format: double, nullable: true }
-        effective_success_rate:      { type: number, format: double, nullable: true }
-        no_swap_rate:                { type: number, format: double, nullable: true }
-        output_viability_rate:       { type: number, format: double, nullable: true, description: "1 - output_failed_sessions / requested_sessions; bounded to [0,1]." }
-        output_fps_sum:              { type: number, format: double, description: "Additive FPS support field used for SLA quality scoring and safe higher-grain recomputation." }
-        status_samples:              { type: integer, format: int64, description: "Additive FPS support count used for SLA quality scoring and safe higher-grain recomputation." }
-        avg_output_fps:              { type: number, format: double, nullable: true, description: "Current-window mean output FPS derived from output_fps_sum / status_samples." }
-        prompt_to_first_frame_sum_ms: { type: number, format: double, description: "Additive prompt-to-first-frame support field used for SLA quality scoring." }
-        prompt_to_first_frame_sample_count: { type: integer, format: int64, description: "Current-window evidence count backing avg_prompt_to_first_frame_ms." }
-        avg_prompt_to_first_frame_ms: { type: number, format: double, nullable: true, description: "Current-window mean prompt-to-playable latency used for benchmark-relative SLA quality scoring." }
-        e2e_latency_sum_ms:          { type: number, format: double, description: "Additive E2E latency support field used for SLA quality scoring." }
-        e2e_latency_sample_count:    { type: integer, format: int64, description: "Current-window evidence count backing avg_e2e_latency_ms." }
-        avg_e2e_latency_ms:          { type: number, format: double, nullable: true, description: "Current-window mean E2E latency used for benchmark-relative SLA quality scoring." }
-        reliability_score:           { type: number, format: double, nullable: true, description: "Bounded reliability component: (0.4×startup_success_rate)+(0.2×no_swap_rate)+(0.4×output_viability_rate)." }
-        ptff_score:                  { type: number, format: double, description: "Benchmark-relative PTFF score after shrink-to-neutral. Rows at or below the 7-day cohort p50 score 1.0; rows at or above p90 score 0.0." }
-        e2e_score:                   { type: number, format: double, description: "Benchmark-relative E2E score after shrink-to-neutral. Rows at or below the 7-day cohort p50 score 1.0; rows at or above p90 score 0.0." }
-        latency_score:               { type: number, format: double, description: "0.6×ptff_score + 0.4×e2e_score." }
-        fps_score:                   { type: number, format: double, description: "Benchmark-relative output-FPS score after shrink-to-neutral. Rows at or above the 7-day cohort p50 score 1.0; rows at or below p10 score 0.0." }
-        quality_score:               { type: number, format: double, description: "0.6×latency_score + 0.4×fps_score." }
-        sla_semantics_version:       { type: string, description: "Active SLA scoring contract version. Current value: quality-benchmark-v1." }
-        sla_score:                   { type: number, format: double, nullable: true, description: "100×health_signal_coverage_ratio×((0.7×reliability_score)+(0.3×quality_score)), then clamped to [0,100]. Quality compares the current row to the prior 7 full UTC days of network-wide pipeline+model benchmarks." }
+        window_start: { type: string, format: date-time }
+        org: { type: string }
+        gateway: { type: string }
+        pipeline_id: { type: string }
+        model_id: { type: string }
+        requested_sessions: { type: integer }
+        startup_success_sessions: { type: integer }
+        effective_success_rate: { type: number }
+        total_minutes: { type: number }
+        no_orch_sessions: { type: integer }
 
-    SLAComplianceResponse:
+    CursorEnvelope_StreamingDemandRow:
       type: object
       properties:
         data:
           type: array
-          items: { $ref: "#/components/schemas/SLAComplianceRow" }
-        pagination: { $ref: "#/components/schemas/CursorPagination" }
-        meta: { $ref: "#/components/schemas/ResponseMeta" }
+          items: { $ref: "#/components/schemas/StreamingDemandRow" }
+        pagination: { $ref: "#/components/schemas/CursorPageInfo" }
+        meta: { $ref: "#/components/schemas/Meta" }
 
-    NetworkDemandRow:
+    StreamingGPUMetricRow:
       type: object
-      description: Network demand metrics for one (gateway, pipeline, model, window) bucket.
       properties:
-        window_start:                { type: string, format: date-time }
-        org:                         { type: string, nullable: true }
-        gateway:                     { type: string, example: "0xgateway123" }
-        region:                      { type: string, nullable: true, description: "Always null." }
-        pipeline_id:                 { type: string }
-        model_id:                    { type: string, nullable: true }
-        sessions_count:              { type: integer, format: int64 }
-        avg_output_fps:              { type: number, format: double }
-        output_fps_sum:              { type: number, format: double, description: "Additive FPS support field used for safe higher-grain recomputation." }
-        status_samples:              { type: integer, format: int64, description: "Additive FPS support count used for safe higher-grain recomputation." }
-        total_minutes:               { type: number, format: double }
-        known_sessions_count:        { type: integer, format: int64 }
-        requested_sessions:          { type: integer, format: int64 }
-        startup_success_sessions:    { type: integer, format: int64 }
-        no_orch_sessions:            { type: integer, format: int64 }
-        startup_excused_sessions:    { type: integer, format: int64 }
-        startup_failed_sessions:     { type: integer, format: int64 }
-        loading_only_sessions:       { type: integer, format: int64 }
-        zero_output_fps_sessions:    { type: integer, format: int64 }
-        effective_failed_sessions:   { type: integer, format: int64 }
-        confirmed_swapped_sessions:  { type: integer, format: int64 }
-        inferred_swap_sessions:      { type: integer, format: int64 }
-        total_swapped_sessions:      { type: integer, format: int64 }
-        sessions_ending_in_error:    { type: integer, format: int64 }
-        error_status_samples:        { type: integer, format: int64 }
-        health_signal_count:         { type: integer, format: int64 }
-        health_expected_signal_count: { type: integer, format: int64 }
-        health_signal_coverage_ratio: { type: number, format: double, description: "Bounded to the inclusive range [0,1]." }
-        startup_success_rate:        { type: number, format: double }
-        excused_failure_rate:        { type: number, format: double }
-        effective_success_rate:      { type: number, format: double }
-        ticket_face_value_eth:       { type: number, format: double, description: "Proportional ETH payment estimate for this gateway's sessions." }
+        window_start: { type: string, format: date-time }
+        org: { type: string }
+        orchestrator_address: { type: string }
+        pipeline_id: { type: string }
+        model_id: { type: string }
+        gpu_id: { type: string }
+        gpu_model_name: { type: string }
+        known_sessions_count: { type: integer }
+        startup_success_sessions: { type: integer }
+        avg_output_fps: { type: number }
+        avg_e2e_latency_ms: { type: number }
+        swap_rate: { type: number }
 
-    NetworkDemandResponse:
+    CursorEnvelope_StreamingGPUMetricRow:
       type: object
       properties:
         data:
           type: array
-          items: { $ref: "#/components/schemas/NetworkDemandRow" }
-        pagination: { $ref: "#/components/schemas/CursorPagination" }
-        meta: { $ref: "#/components/schemas/ResponseMeta" }
+          items: { $ref: "#/components/schemas/StreamingGPUMetricRow" }
+        pagination: { $ref: "#/components/schemas/CursorPageInfo" }
+        meta: { $ref: "#/components/schemas/Meta" }
 
-    GPUNetworkDemandRow:
+    RequestsModel:
       type: object
-      description: GPU-sliced network demand metrics for one (gateway, orchestrator, pipeline, model, gpu, window) bucket.
       properties:
-        window_start:                { type: string, format: date-time }
-        org:                         { type: string, nullable: true }
-        gateway:                     { type: string }
-        orchestrator_address:        { type: string }
-        region:                      { type: string, nullable: true, description: "Always null." }
-        pipeline_id:                 { type: string }
-        model_id:                    { type: string, nullable: true }
-        gpu_id:                      { type: string, nullable: true }
-        gpu_identity_status:         { type: string, enum: [resolved, hardware_unresolved] }
-        sessions_count:              { type: integer, format: int64 }
-        avg_output_fps:              { type: number, format: double }
-        output_fps_sum:              { type: number, format: double, description: "Additive FPS support field used for safe higher-grain recomputation." }
-        status_samples:              { type: integer, format: int64, description: "Additive FPS support count used for safe higher-grain recomputation." }
-        total_minutes:               { type: number, format: double }
-        known_sessions_count:        { type: integer, format: int64 }
-        requested_sessions:          { type: integer, format: int64 }
-        startup_success_sessions:    { type: integer, format: int64 }
-        no_orch_sessions:            { type: integer, format: int64 }
-        startup_excused_sessions:    { type: integer, format: int64 }
-        startup_failed_sessions:     { type: integer, format: int64 }
-        loading_only_sessions:       { type: integer, format: int64 }
-        zero_output_fps_sessions:    { type: integer, format: int64 }
-        effective_failed_sessions:   { type: integer, format: int64 }
-        confirmed_swapped_sessions:  { type: integer, format: int64 }
-        inferred_swap_sessions:      { type: integer, format: int64 }
-        total_swapped_sessions:      { type: integer, format: int64 }
-        sessions_ending_in_error:    { type: integer, format: int64 }
-        error_status_samples:        { type: integer, format: int64 }
-        health_signal_count:         { type: integer, format: int64 }
-        health_expected_signal_count: { type: integer, format: int64 }
-        health_signal_coverage_ratio: { type: number, format: double, description: "Bounded to the inclusive range [0,1]." }
-        startup_success_rate:        { type: number, format: double }
-        excused_failure_rate:        { type: number, format: double }
-        effective_success_rate:      { type: number, format: double }
-        ticket_face_value_eth:       { type: number, format: double }
+        pipeline: { type: string }
+        model: { type: string }
+        job_type: { type: string }
+        warm_orch_count: { type: integer }
+        gpu_slots: { type: integer }
+        job_count_24h: { type: integer }
+        success_rate: { type: number }
+        avg_duration_ms: { type: number }
 
-    GPUNetworkDemandResponse:
+    RequestsOrchestrator:
+      type: object
+      properties:
+        address: { type: string }
+        uri: { type: string }
+        capabilities:
+          type: array
+          items: { type: string }
+        gpu_count: { type: integer }
+        last_seen: { type: string, format: date-time }
+
+    AIBatchSummaryRow:
+      type: object
+      properties:
+        pipeline: { type: string }
+        total_jobs: { type: integer }
+        selected_jobs: { type: integer }
+        no_orch_jobs: { type: integer }
+        success_rate: { type: number }
+        avg_duration_ms: { type: number }
+
+    AIBatchJobRecord:
+      type: object
+      properties:
+        request_id: { type: string }
+        org: { type: string }
+        gateway: { type: string }
+        pipeline: { type: string }
+        model_id: { type: string }
+        completed_at: { type: string, format: date-time }
+        success: { type: boolean }
+        tries: { type: integer }
+        duration_ms: { type: integer }
+        orch_url: { type: string }
+        selection_outcome: { type: string }
+        gpu_model_name: { type: string }
+        attribution_status: { type: string }
+
+    CursorEnvelope_AIBatchJobRecord:
       type: object
       properties:
         data:
           type: array
-          items: { $ref: "#/components/schemas/GPUNetworkDemandRow" }
-        pagination: { $ref: "#/components/schemas/CursorPagination" }
-        meta: { $ref: "#/components/schemas/ResponseMeta" }
+          items: { $ref: "#/components/schemas/AIBatchJobRecord" }
+        pagination: { $ref: "#/components/schemas/CursorPageInfo" }
+        meta: { $ref: "#/components/schemas/Meta" }
 
-    GPUMetric:
+    AIBatchLLMSummaryRow:
       type: object
-      description: GPU performance metrics for one (orchestrator, pipeline, model, gpu, window) bucket.
       properties:
-        window_start:                   { type: string, format: date-time }
-        org:                            { type: string, nullable: true }
-        orchestrator_address:           { type: string }
-        pipeline_id:                    { type: string }
-        model_id:                       { type: string, nullable: true }
-        gpu_id:                         { type: string, nullable: true }
-        region:                         { type: string, nullable: true, description: "Always null." }
-        avg_output_fps:                 { type: number, format: double }
-        output_fps_sum:                 { type: number, format: double, description: "Additive FPS support field used for safe higher-grain recomputation." }
-        p95_output_fps:                 { type: number, format: double }
-        fps_jitter_coefficient:         { type: number, format: double, nullable: true, description: "Always null — not computed." }
-        status_samples:                 { type: integer, format: int64 }
-        error_status_samples:           { type: integer, format: int64 }
-        health_signal_count:            { type: integer, format: int64 }
-        health_expected_signal_count:   { type: integer, format: int64 }
-        health_signal_coverage_ratio:   { type: number, format: double, description: "Bounded to the inclusive range [0,1]." }
-        gpu_model_name:                 { type: string, nullable: true }
-        gpu_memory_bytes_total:         { type: integer, format: int64, nullable: true }
-        runner_version:                 { type: string, nullable: true, description: "Always null." }
-        cuda_version:                   { type: string, nullable: true, description: "Always null." }
-        avg_prompt_to_first_frame_ms:   { type: number, format: double, nullable: true, description: "Mean prompt-to-playable proxy in milliseconds (`ai_stream_status.start_time` -> `gateway_receive_few_processed_segments`)." }
-        prompt_to_first_frame_sum_ms:   { type: number, format: double, description: "Additive latency support field used for safe higher-grain recomputation." }
-        avg_startup_latency_ms:         { type: number, format: double, nullable: true, description: "Mean startup proxy in milliseconds (`gateway_receive_stream_request` -> `gateway_receive_first_processed_segment`)." }
-        startup_latency_sum_ms:         { type: number, format: double, description: "Additive latency support field used for safe higher-grain recomputation." }
-        avg_e2e_latency_ms:             { type: number, format: double, nullable: true, description: "Mean E2E proxy in milliseconds (`gateway_send_first_ingest_segment` -> `runner_send_first_processed_segment`)." }
-        e2e_latency_sum_ms:             { type: number, format: double, description: "Additive latency support field used for safe higher-grain recomputation." }
-        p95_prompt_to_first_frame_latency_ms: { type: number, format: double, nullable: true, description: "P95 prompt-to-playable proxy in milliseconds (`ai_stream_status.start_time` -> `gateway_receive_few_processed_segments`)." }
-        p95_startup_latency_ms:         { type: number, format: double, nullable: true, description: "P95 startup proxy in milliseconds (`gateway_receive_stream_request` -> `gateway_receive_first_processed_segment`)." }
-        p95_e2e_latency_ms:             { type: number, format: double, nullable: true, description: "P95 E2E proxy in milliseconds (`gateway_send_first_ingest_segment` -> `runner_send_first_processed_segment`)." }
-        prompt_to_first_frame_sample_count: { type: integer, format: int64 }
-        startup_latency_sample_count:   { type: integer, format: int64 }
-        e2e_latency_sample_count:       { type: integer, format: int64 }
-        known_sessions_count:           { type: integer, format: int64 }
-        startup_success_sessions:       { type: integer, format: int64 }
-        no_orch_sessions:               { type: integer, format: int64 }
-        startup_excused_sessions:       { type: integer, format: int64 }
-        startup_failed_sessions:        { type: integer, format: int64 }
-        confirmed_swapped_sessions:     { type: integer, format: int64 }
-        inferred_swap_sessions:         { type: integer, format: int64 }
-        total_swapped_sessions:         { type: integer, format: int64 }
-        sessions_ending_in_error:       { type: integer, format: int64 }
-        startup_failed_rate:            { type: number, format: double }
-        swap_rate:                      { type: number, format: double }
+        model: { type: string }
+        total_requests: { type: integer }
+        success_rate: { type: number }
+        avg_tokens_per_sec: { type: number }
+        avg_ttft_ms: { type: number }
+        avg_total_tokens: { type: number }
 
-    GPUMetricsResponse:
+    BYOCSummaryRow:
+      type: object
+      properties:
+        capability: { type: string }
+        total_jobs: { type: integer }
+        selected_jobs: { type: integer }
+        no_orch_jobs: { type: integer }
+        success_rate: { type: number }
+        avg_duration_ms: { type: number }
+
+    BYOCJobRecord:
+      type: object
+      properties:
+        request_id: { type: string }
+        org: { type: string }
+        capability: { type: string }
+        model: { type: string }
+        completed_at: { type: string, format: date-time }
+        success: { type: boolean }
+        duration_ms: { type: integer }
+        http_status: { type: integer }
+        orch_address: { type: string }
+        orch_url: { type: string }
+        worker_url: { type: string }
+        selection_outcome: { type: string }
+        gpu_model_name: { type: string }
+        attribution_status: { type: string }
+        error: { type: string }
+
+    CursorEnvelope_BYOCJobRecord:
       type: object
       properties:
         data:
           type: array
-          items: { $ref: "#/components/schemas/GPUMetric" }
-        pagination: { $ref: "#/components/schemas/CursorPagination" }
-        meta: { $ref: "#/components/schemas/ResponseMeta" }
-
-  responses:
-    429:
-      description: Rate limit exceeded.
-      headers:
-        Retry-After:
-          schema:
-            type: integer
-          description: Seconds to wait before retrying.
-      content:
-        application/problem+json:
-          schema:
-            $ref: "#/components/schemas/Problem"
-    500:
-      description: Internal server error.
-      content:
-        application/problem+json:
-          schema:
-            $ref: "#/components/schemas/Problem"
-    404:
-      description: Resource not found.
-      content:
-        application/problem+json:
-          schema:
-            $ref: "#/components/schemas/Problem"
-    TooManyRequests:
-      description: Rate limit exceeded.
-      content:
-        application/problem+json:
-          schema: { $ref: "#/components/schemas/Problem" }
-    NotFound:
-      description: Resource not found.
-      content:
-        application/problem+json:
-          schema: { $ref: "#/components/schemas/Problem" }
-    BadRequest:
-      description: Bad request.
-      content:
-        application/problem+json:
-          schema: { $ref: "#/components/schemas/Problem" }
-
-# ── Paths ──────────────────────────────────────────────────────────────────────
-
-paths:
-
-  /healthz:
-    get:
-      tags: [Health]
-      summary: Health check
-      description: |
-        Returns 200 with `{"status":"ok"}` if the service and ClickHouse are healthy.
-        Returns 503 if the ClickHouse ping fails. Use this endpoint for liveness and
-        readiness probes — it performs a cheap no-op query against ClickHouse to
-        confirm connectivity before returning.
-      operationId: getHealth
-      responses:
-        "200":
-          description: Service is healthy.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  status:
-                    type: string
-                    enum: [ok, degraded]
-        "503":
-          description: ClickHouse is unreachable.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  status:
-                    type: string
-                    example: degraded
-
-  # ── Network ────────────────────────────────────────────────────────────────
-
-  /v1/network/orchestrators:
-    get:
-      tags: [Network]
-      summary: List orchestrators
-      description: |
-        Returns a cursor-paginated list of all known Livepeer AI orchestrators,
-        ordered by `last_seen` descending. Backed by `naap.api_latest_orchestrator_state`,
-        which is a ClickHouse view over the orchestrator capability heartbeat stream.
-        Each row represents one orchestrator's most recent known state.
-
-        `IsActive` is `true` when the orchestrator was seen within the last 15 minutes.
-        Use `?active_only=true` to filter to currently active orchestrators only.
-
-        `RawCapabilities` is the full JSON blob from the orchestrator's capability
-        heartbeat — it contains the complete pipeline/model/price advertisement as
-        broadcast by the node. Consumers may parse this blob to extract fine-grained
-        capability details.
-
-        **Important:** `total_count` in the pagination envelope is always `null`
-        and is not computed. Do not rely on it for page-count calculations — use
-        `has_more` instead to determine whether additional pages exist.
-
-        **BYOC workers do not appear here.** BYOC workers register via
-        `worker_lifecycle` Kafka events rather than the Livepeer capability heartbeat
-        protocol, so they are never written to `api_latest_orchestrator_state`. Use
-        `/v1/requests/byoc/workers` for BYOC worker inventory.
-      operationId: listOrchestrators
-      parameters:
-        - $ref: "#/components/parameters/org"
-        - $ref: "#/components/parameters/active_only"
-        - $ref: "#/components/parameters/limit"
-        - $ref: "#/components/parameters/cursor"
-        - name: job_type
-          in: query
-          required: false
-          schema:
-            type: string
-            enum: [stream, ai-batch, byoc]
-          description: Filter by job type category. "stream" returns only streaming orchestrators/models, "ai-batch" or "byoc" returns non-streaming ones.
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/OrchestratorListResponse" }
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "429":
-          $ref: "#/components/responses/429"
-        "500":
-          $ref: "#/components/responses/500"
-
-  /v1/network/models:
-    get:
-      tags: [Network]
-      summary: Model availability
-      description: |
-        Returns one row per (pipeline, model) combination currently offered by at
-        least one warm Livepeer AI orchestrator, including warm orchestrator count
-        and wei-per-pixel price range. Backed by `naap.api_latest_orchestrator_state`,
-        parsing the `raw_capabilities` JSON of each active orchestrator to enumerate
-        which (pipeline, model) pairs it advertises.
-
-        This endpoint covers the nine standard Livepeer AI pipelines only:
-        text-to-image, image-to-image, image-to-video, upscale, audio-to-text, llm,
-        segment-anything-2, image-to-text, and text-to-speech.
-
-        **BYOC models (e.g. `openai-chat-completions`) do NOT appear here.** BYOC
-        workers register via `worker_lifecycle` Kafka events and never write to the
-        capability heartbeat table that backs this endpoint. To see which BYOC
-        capabilities and models are currently available, use `/v1/requests/byoc/workers`.
-
-        `WarmOrchCount` reflects orchestrators seen within the last 15 minutes at
-        query time. Prices are in wei per pixel as advertised in the capability
-        heartbeat; not all orchestrators set a price, so coverage may be sparse.
-      operationId: listModels
-      parameters:
-        - $ref: "#/components/parameters/org"
-        - $ref: "#/components/parameters/pipeline"
-        - $ref: "#/components/parameters/limit"
-        - name: job_type
-          in: query
-          required: false
-          schema:
-            type: string
-            enum: [stream, ai-batch, byoc]
-          description: Filter by job type category. "stream" returns only streaming orchestrators/models, "ai-batch" or "byoc" returns non-streaming ones.
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/ModelAvailability"
-        "429":
-          $ref: "#/components/responses/429"
-        "500":
-          $ref: "#/components/responses/500"
-
-
-  # ── Model Performance (R12) ──────────────────────────────────────────────
-
-  /v1/streaming/perf-by-model:
-    get:
-      summary: Streaming performance by AI model
-      description: |
-        Returns frames-per-second (FPS) performance statistics broken down by
-        (model, pipeline) for live streaming sessions. Backed by
-        `naap.api_gpu_inventory` joined with `naap.api_fps_hourly`. Each row
-        summarises avg, P50, and P99 output FPS across all streaming sessions
-        observed in the requested time window for that (model, pipeline) pair.
-
-        This endpoint measures continuous video streaming throughput — it is
-        meaningful only for pipelines that produce a continuous video output
-        (e.g. streamdiffusion-sdxl-v2v). `WarmOrchCount` is derived from the
-        current capability snapshot (not a historical aggregate).
-
-        **BYOC and AI-batch models do NOT appear here, by design.** BYOC and
-        AI-batch jobs are discrete request/response API calls with durations in
-        the millisecond range. They do not produce continuous video streams, they
-        generate no FPS measurements, and they are never written to
-        `api_fps_hourly`. To compare AI-batch and BYOC model performance by
-        duration (p50/p99 latency), use `/v1/requests/perf-by-model`, which is the
-        dedicated cross-type model performance endpoint.
-      operationId: listModelPerformance
-      tags: [Streaming]
-      parameters:
-        - $ref: "#/components/parameters/org"
-        - $ref: "#/components/parameters/start"
-        - $ref: "#/components/parameters/end"
-        - $ref: "#/components/parameters/pipeline"
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: array
-                items: { $ref: "#/components/schemas/ModelPerformance" }
-        "429": { $ref: "#/components/responses/TooManyRequests" }
-
-  # ── Capacity (R15) ───────────────────────────────────────────────────────
-
-  /v1/network/capacity:
-    get:
-      summary: Network capacity vs. demand
-      description: |
-        Returns a point-in-time snapshot of GPU supply versus active stream demand
-        per (pipeline, model). Backed by `naap.canonical_capability_hardware_inventory`
-        joined with `naap.canonical_active_stream_state_latest_store`.
-
-        `WarmOrchCount` is the number of orchestrators offering the pipeline/model
-        pair as of the most recent capability snapshot. `TotalVRAMBytes` is the
-        sum of VRAM across all warm orchestrators for that pair. `ActiveStreams` is
-        the count of currently live streaming sessions for the pair.
-
-        **BYOC pipelines do appear in this response** because BYOC workers register
-        their capabilities in the same capability snapshot mechanism. However,
-        `ActiveStreams` is always 0 for BYOC pipelines because BYOC jobs use a
-        discrete request/response model and are never reflected in the active
-        stream state table. Do not interpret a non-zero `WarmOrchCount` with zero
-        `ActiveStreams` on a BYOC pipeline as underutilisation — these are
-        structurally different job types.
-
-        The `SnapshotTime` field indicates when the underlying capability snapshot
-        was taken. This endpoint does not accept time-range parameters; it always
-        reflects the latest available snapshot.
-      operationId: getCapacitySummary
-      tags: [Network]
-      parameters:
-        - $ref: "#/components/parameters/org"
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/CapacitySummary" }
-        "429": { $ref: "#/components/responses/TooManyRequests" }
-
-  # ── SLA / GPU / Network Demand (ported from leaderboard-serverless) ────────
-
-  /v1/streaming/sla:
-    get:
-      summary: SLA compliance metrics
-      description: |
-        Returns per-orchestrator SLA compliance metrics aggregated into hourly
-        buckets, grouped by (orchestrator_address, pipeline_id, model_id, gpu_id).
-        Backed by `naap.api_sla_compliance_store`. This endpoint covers live
-        streaming sessions only — AI-batch and BYOC job SLA is tracked separately
-        at `/v1/requests/sla`.
-
-        The `sla_score` field is the primary composite quality metric: it equals
-        `100 × health_signal_coverage_ratio × ((0.7 × reliability_score) + (0.3 ×
-        quality_score))`, clamped to [0, 100]. Quality scoring compares the current
-        row against the prior 7 full UTC days of network-wide pipeline+model
-        benchmarks; the active scoring contract version is reported in
-        `sla_semantics_version` (currently `quality-benchmark-v1`).
-
-        `region` is always null — it is not captured in any current event schema.
-        `confirmed_swapped_sessions` is always 0 because the confirmation signal
-        is absent in the current event schema. Filtering on `region` is accepted
-        but has no effect.
-
-        **Window:** default 3h, min 1m, max 30d.
-      operationId: listSLACompliance
-      tags: [Streaming]
-      parameters:
-        - $ref: "#/components/parameters/org"
-        - $ref: "#/components/parameters/window"
-        - $ref: "#/components/parameters/orchestrator_address"
-        - $ref: "#/components/parameters/pipeline_id"
-        - $ref: "#/components/parameters/model_id"
-        - $ref: "#/components/parameters/gpu_id"
-        - $ref: "#/components/parameters/region"
-        - $ref: "#/components/parameters/limit"
-        - $ref: "#/components/parameters/cursor"
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/SLAComplianceResponse" }
-        "400": { $ref: "#/components/responses/BadRequest" }
-        "500": { $ref: "#/components/responses/500" }
-
-  /v1/streaming/demand:
-    get:
-      summary: Network demand metrics
-      description: |
-        Returns gateway-level streaming demand aggregated into hourly buckets,
-        grouped by (gateway, pipeline_id, model_id). Backed by
-        `naap.api_network_demand`. This endpoint covers live streaming sessions
-        only — AI-batch and BYOC demand is tracked separately at `/v1/requests/demand`.
-
-        Each row captures session counts, FPS statistics, stream-minutes, and
-        detailed session lifecycle counters (startup success, swaps, errors) for
-        one gateway/pipeline/model/hour combination. The `ticket_face_value_eth`
-        field is a proportional ETH payment estimate for the gateway's sessions
-        in that bucket.
-
-        `region` is always null. This surface unions performance-backed hourly
-        keys with session-demand keys so that demand-only rows (sessions with no
-        FPS data) and perf-only rows both remain visible in the result set.
-
-        **Window:** default 3h, min 1m, max 30d.
-      operationId: listNetworkDemand
-      tags: [Streaming]
-      parameters:
-        - $ref: "#/components/parameters/org"
-        - $ref: "#/components/parameters/window"
-        - $ref: "#/components/parameters/gateway_filter"
-        - $ref: "#/components/parameters/pipeline_id"
-        - $ref: "#/components/parameters/model_id"
-        - $ref: "#/components/parameters/region"
-        - $ref: "#/components/parameters/limit"
-        - $ref: "#/components/parameters/cursor"
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/NetworkDemandResponse" }
-        "400": { $ref: "#/components/responses/BadRequest" }
-        "500": { $ref: "#/components/responses/500" }
-
-  /v1/streaming/gpu-demand:
-    get:
-      summary: GPU-sliced network demand metrics
-      description: |
-        Returns GPU-sliced gateway streaming demand aggregated into hourly buckets,
-        grouped by (gateway, orchestrator_address, pipeline_id, model_id, gpu_id).
-        Backed by `naap.api_gpu_network_demand`. This is the GPU-attributed view
-        of the same streaming session data as `/v1/streaming/demand` — it adds
-        per-GPU granularity at the cost of additional attribution uncertainty.
-
-        Rows where GPU identity could not be resolved carry
-        `gpu_identity_status = hardware_unresolved` and a null `gpu_id`. These
-        rows remain visible so that unattributed session volume is not silently
-        dropped. Rows with a confirmed GPU have `gpu_identity_status = resolved`.
-
-        `region` is always null. This endpoint covers streaming sessions only —
-        AI-batch and BYOC jobs do not produce GPU-sliced streaming demand rows.
-
-        **Window:** default 3h, min 1m, max 30d.
-      operationId: listGPUNetworkDemand
-      tags: [Streaming]
-      parameters:
-        - $ref: "#/components/parameters/org"
-        - $ref: "#/components/parameters/window"
-        - $ref: "#/components/parameters/gateway_filter"
-        - $ref: "#/components/parameters/orchestrator_address"
-        - $ref: "#/components/parameters/pipeline_id"
-        - $ref: "#/components/parameters/model_id"
-        - $ref: "#/components/parameters/gpu_id"
-        - $ref: "#/components/parameters/region"
-        - $ref: "#/components/parameters/limit"
-        - $ref: "#/components/parameters/cursor"
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/GPUNetworkDemandResponse" }
-        "400": { $ref: "#/components/responses/BadRequest" }
-        "500": { $ref: "#/components/responses/500" }
-
-  /v1/streaming/gpu-metrics:
-    get:
-      summary: GPU performance metrics
-      description: |
-        Returns per-GPU streaming performance metrics aggregated into hourly
-        buckets, grouped by (orchestrator_address, pipeline_id, model_id, gpu_id).
-        Backed by `naap.api_sla_compliance_store` (the SLA hourly bucket table).
-        Hardware dimensions (`gpu_model_name`, `gpu_memory_bytes_total`) are joined
-        from the GPU inventory table. This endpoint covers streaming sessions only —
-        AI-batch and BYOC jobs are not reflected in these metrics.
-
-        Latency fields use canonical session-edge proxies rather than
-        raw producer-reported status latency: `avg_prompt_to_first_frame_ms` is
-        derived from `ai_stream_status.start_time` to
-        `gateway_receive_few_processed_segments`; `avg_e2e_latency_ms` from
-        `gateway_send_first_ingest_segment` to `runner_send_first_processed_segment`.
-
-        **The following fields are always null network-wide and should not be used
-        for filtering or analysis:** `region` (not captured in event data),
-        `runner_version` (not captured), `cuda_version` (not captured),
-        `fps_jitter_coefficient` (not computed). Filter parameters for these fields
-        are accepted but have no effect.
-
-        **Window:** default 24h, min 1m, max 72h.
-      operationId: listGPUMetrics
-      tags: [Streaming]
-      parameters:
-        - $ref: "#/components/parameters/org"
-        - $ref: "#/components/parameters/window"
-        - $ref: "#/components/parameters/orchestrator_address"
-        - $ref: "#/components/parameters/pipeline_id"
-        - $ref: "#/components/parameters/model_id"
-        - $ref: "#/components/parameters/gpu_id"
-        - $ref: "#/components/parameters/gpu_model_name"
-        - $ref: "#/components/parameters/runner_version"
-        - $ref: "#/components/parameters/cuda_version"
-        - $ref: "#/components/parameters/region"
-        - $ref: "#/components/parameters/limit"
-        - $ref: "#/components/parameters/cursor"
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/GPUMetricsResponse" }
-        "400": { $ref: "#/components/responses/BadRequest" }
-        "500": { $ref: "#/components/responses/500" }
-
-  # ── Dashboard paths (R16) ─────────────────────────────────────────────────
-
-  /v1/dashboard/kpi:
-    get:
-      summary: Dashboard KPI metrics
-      description: |
-        Returns top-level KPI metrics for the dashboard: success rate, active
-        orchestrator count, total session count, usage minutes, and hourly
-        time-series buckets for sessions and usage. Backed by
-        `naap.api_network_demand` (for session and usage metrics) and
-        `naap.api_latest_orchestrator_state` (for `orchestratorsOnline`).
-
-        **This endpoint returns a combined payload with `streaming` and `requests`
-        sections.** The streaming section covers live video streaming sessions;
-        the requests section covers AI-batch and BYOC job overview metrics.
-
-        `dailyNetworkFeesEth` is always 0 — fees are not tracked in the current
-        event schema and this field is reserved for future use.
-
-        Deltas are computed by splitting the requested window into two equal halves
-        and comparing the earlier half against the later half. A positive delta
-        indicates growth from the first half to the second.
-
-        **Window:** default 24h, max 168h (7 days). Accepts `?window=24h` or `?window=7d`.
-
-        **Filters:** `pipeline` narrows session counts and usage minutes; `model_id`
-        narrows usage minutes only (session counts are not tracked at model
-        granularity in the underlying table).
-      operationId: getDashboardKPI
-      tags: [Dashboard]
-      parameters:
-        - $ref: "#/components/parameters/window"
-        - $ref: "#/components/parameters/pipeline"
-        - $ref: "#/components/parameters/model_id"
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/DashboardKPI" }
-        "500": { $ref: "#/components/responses/500" }
-
-  /v1/dashboard/pipelines:
-    get:
-      summary: Pipeline usage summary
-      description: |
-        Returns the top N streaming pipelines by session count over the last 24
-        hours, suitable for the pipeline usage bar or pie chart widget. Each row
-        contains total sessions, total usage minutes, average FPS, and a per-model
-        breakdown (`modelMins`).
-
-        **This endpoint returns a combined payload with `streaming` and `requests`
-        sections.** The streaming section covers streaming session pipelines; the
-        requests section covers AI-batch and BYOC pipeline/capability breakdowns.
-        The data is sourced from `naap.api_network_demand` (streaming) and
-        canonical job tables (requests).
-
-        The `limit` parameter controls how many top pipelines are returned
-        (1–20, default 5).
-      operationId: getDashboardPipelines
-      tags: [Dashboard]
-      parameters:
-        - name: limit
-          in: query
-          description: Maximum pipelines to return (1–20, default 5).
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 20
-            default: 5
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: array
-                items: { $ref: "#/components/schemas/DashboardPipelineUsage" }
-        "500": { $ref: "#/components/responses/500" }
-
-  /v1/dashboard/orchestrators:
-    get:
-      summary: Orchestrator SLA table
-      description: |
-        Returns per-orchestrator SLA metrics aggregated over a rolling window,
-        suitable for the orchestrator leaderboard table widget. Each row includes
-        session counts, effective success rate, no-swap ratio, pipelines and models
-        currently offered, GPU count from the hardware inventory, and the latest
-        available hourly contracted `slaScore` within the requested window.
-
-        `slaScore` is taken from the most recent hour bucket within the window that
-        has a computed score — it is not a window-wide average. `slaWindowStart`
-        indicates which hour bucket produced the score. If no scored bucket falls
-        within the window, both fields are null.
-
-        Data is sourced from `naap.api_sla_compliance_store` (for SLA metrics) and
-        `naap.api_latest_orchestrator_state` (for pipeline/model/GPU inventory).
-        This endpoint covers streaming orchestrators only — BYOC workers do not
-        appear here.
-
-        **Window:** default 7d (168h), max 30d (720h).
-      operationId: getDashboardOrchestrators
-      tags: [Dashboard]
-      parameters:
-        - $ref: "#/components/parameters/window"
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: array
-                items: { $ref: "#/components/schemas/DashboardOrchestrator" }
-        "500": { $ref: "#/components/responses/500" }
-
-  /v1/dashboard/gpu-capacity:
-    get:
-      summary: GPU capacity inventory
-      description: |
-        Returns GPU hardware inventory grouped by pipeline, model, and GPU model,
-        sourced from the latest capability snapshots (last 10 minutes). Suitable
-        for the GPU capacity widget. The response includes total GPU count, active
-        GPU count, available capacity fraction, a breakdown by GPU hardware model,
-        and a nested breakdown by pipeline and model.
-
-        Data is sourced from `naap.canonical_capability_hardware_inventory`, which
-        is populated from orchestrator capability heartbeats. Only orchestrators
-        active within the last 10 minutes are included.
-
-        This endpoint does not accept time-range parameters — it always reflects
-        the most recent capability snapshot. GPU counts reflect the number of GPU
-        slots advertised in capability heartbeats, not necessarily the number of
-        physically distinct cards.
-      operationId: getDashboardGPUCapacity
-      tags: [Dashboard]
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/DashboardGPUCapacity" }
-        "500": { $ref: "#/components/responses/500" }
-
-  /v1/dashboard/pipeline-catalog:
-    get:
-      summary: Active pipeline catalog
-      description: |
-        Returns all (pipeline, model) combinations currently offered by at least
-        one warm orchestrator (seen within the last 10 minutes), sourced from
-        `naap.api_latest_orchestrator_state`. Suitable for the pipeline catalog
-        widget or for populating filter dropdowns.
-
-        **Response format note:** This endpoint returns a plain JSON array — there
-        is no `data` wrapper object and no `meta` envelope. The response body is
-        directly an array of `DashboardPipelineCatalogEntry` objects.
-
-        The `regions` array in each entry is always empty — region data is not
-        captured in the current event schema. This endpoint covers the nine standard
-        Livepeer AI pipelines only; BYOC capabilities do not appear here.
-      operationId: getDashboardPipelineCatalog
-      tags: [Dashboard]
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: array
-                items: { $ref: "#/components/schemas/DashboardPipelineCatalogEntry" }
-        "500": { $ref: "#/components/responses/500" }
-
-  /v1/dashboard/pricing:
-    get:
-      summary: Per-orchestrator pipeline pricing (raw wei)
-      description: |
-        Returns one pricing row per (orchAddress, pipeline, model) combination for
-        all active orchestrators (seen within the last 10 minutes). Prices are
-        sourced directly from orchestrator capability heartbeats stored in
-        `naap.api_latest_orchestrator_state`.
-
-        Each row includes the real `pixelsPerUnit` from the orchestrator's
-        advertisement. To convert to a human-readable scale:
-        `price_in_gwei_per_megapixel = priceWeiPerUnit * 1e6 / pixelsPerUnit / 1e9`.
-        `isWarm` indicates whether the orchestrator currently has the model loaded
-        in GPU memory.
-
-        **Coverage is sparse.** Most orchestrators do not advertise explicit prices
-        in their capability heartbeats, so many (pipeline, model) pairs will simply
-        not appear in the response.
-
-        **Breaking change (v1.8):** Previously returned one aggregated row per
-        (pipeline, model) with min/max/avg prices. Now returns per-orchestrator
-        rows so the UI can display market structure.
-
-        **Response format note:** This endpoint returns a plain JSON array — there
-        is no `data` wrapper object and no `meta` envelope.
-      operationId: getDashboardPricing
-      tags: [Dashboard]
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: array
-                items: { $ref: "#/components/schemas/DashboardPipelinePricing" }
-        "500": { $ref: "#/components/responses/500" }
-
-  /v1/dashboard/job-feed:
-    get:
-      summary: Live job feed
-      description: |
-        Returns currently active streaming sessions ordered by most recently seen,
-        each representing one live stream attributed to a gateway/orchestrator pair.
-        Sourced from `naap.canonical_active_stream_state_latest_store`. Suitable
-        for the live activity feed widget on the dashboard.
-
-        **This endpoint covers streaming sessions only.** AI-batch and BYOC jobs are
-        discrete request/response calls that complete in milliseconds and are never
-        in a persistent "active" state, so they do not appear in this feed. Sessions
-        with no orchestrator attribution yet appear with an empty `orchestratorUrl`
-        field — this is normal during the brief period before the orchestrator
-        assignment is confirmed.
-
-        `durationSeconds` is the elapsed time since `firstSeen`. `inputFps` and
-        `outputFps` are the most recently observed FPS values for the session.
-
-        **Response format note:** This endpoint returns a plain JSON array — there
-        is no `data` wrapper object and no `meta` envelope.
-
-        The `limit` parameter controls the maximum number of active sessions returned
-        (1–200, default 50).
-      operationId: getDashboardJobFeed
-      tags: [Dashboard]
-      parameters:
-        - name: limit
-          in: query
-          description: Maximum items to return (1–200, default 50).
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 200
-            default: 50
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: array
-                items: { $ref: "#/components/schemas/DashboardJobFeedItem" }
-        "500": { $ref: "#/components/responses/500" }
-
-  # ── AI Batch Jobs (R17) ───────────────────────────────────────────────────
-
-  /v1/requests/ai-batch/summary:
-    get:
-      summary: AI batch job summary by pipeline
-      description: |
-        Returns per-pipeline aggregates — total job count, selection outcome
-        counts, success rate, average duration, average latency score, and a
-        selected-only attribution worked rate — for completed AI-batch jobs in
-        the requested time window. Backed by `naap.canonical_ai_batch_jobs`,
-        which is populated by the Go attribution resolver processing events from
-        the `network_events` Kafka topic.
-
-        Covers the nine fixed Livepeer AI pipelines: text-to-image,
-        image-to-image, image-to-video, upscale, audio-to-text, llm,
-        segment-anything-2, image-to-text, and text-to-speech. BYOC capabilities
-        never appear here. For LLM-specific metrics (tokens/sec, TTFT, total
-        tokens), use `/v1/requests/ai-batch/llm-summary`.
-
-        The default time window is the last 24 hours. `avg_latency_score` is the
-        mean of the per-job latency score computed by the resolver based on
-        orchestrator response time relative to network benchmarks.
-        `selected_attribution_worked_rate` uses `selection_outcome = selected`
-        as the denominator and treats `resolved + hardware_less + stale` as
-        worked attribution.
-      operationId: getAIBatchSummary
-      tags: [Requests]
-      parameters:
-        - { $ref: "#/components/parameters/org" }
-        - { $ref: "#/components/parameters/start" }
-        - { $ref: "#/components/parameters/end" }
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: array
-                    items: { $ref: "#/components/schemas/AIBatchJobSummary" }
-                  meta: { $ref: "#/components/schemas/ResponseMeta" }
-        "500": { $ref: "#/components/responses/500" }
-
-  /v1/requests/ai-batch/jobs:
-    get:
-      summary: Paginated AI batch job records
-      description: |
-        Returns individual completed AI-batch job records ordered by
-        `completed_at` descending, with cursor pagination. Backed by
-        `naap.canonical_ai_batch_jobs`. Each record represents a single discrete
-        AI inference request across any of the nine fixed pipelines.
-
-        Attribution fields populated by the resolver include `gpu_model`
-        (the GPU hardware model that served the job, if resolved),
-        `selection_outcome` (`selected`, `no_orch`, `unknown`), and
-        `attribution_status` (one of: `resolved`, `hardware_less`, `stale`,
-        `ambiguous`, `unresolved`). `selection_outcome` is a job-lifecycle field
-        independent from attribution status.
-
-        `success` can be null when the outcome was not deterministically recorded
-        in the event stream. `tries` reflects the number of orchestrator attempts
-        before the job completed or failed. `orch_url` is the URL of the
-        orchestrator that ultimately served the job (empty if unattributed).
-
-        Cursor pagination uses base64-encoded JSON position markers. Pass the
-        `next_cursor` from the previous response as `?cursor=` on the next request.
-      operationId: listAIBatchJobs
-      tags: [Requests]
-      parameters:
-        - { $ref: "#/components/parameters/org" }
-        - { $ref: "#/components/parameters/start" }
-        - { $ref: "#/components/parameters/end" }
-        - { $ref: "#/components/parameters/limit" }
-        - { $ref: "#/components/parameters/cursor" }
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: array
-                    items: { $ref: "#/components/schemas/AIBatchJobRecord" }
-                  pagination: { $ref: "#/components/schemas/CursorPagination" }
-                  meta: { $ref: "#/components/schemas/ResponseMeta" }
-        "400": { $ref: "#/components/responses/BadRequest" }
-        "500": { $ref: "#/components/responses/500" }
-
-  /v1/requests/ai-batch/llm-summary:
-    get:
-      summary: LLM performance summary by model
-      description: |
-        Returns per-model LLM-specific performance metrics for the `llm` AI-batch
-        pipeline only. Backed by `naap.canonical_ai_batch_jobs` joined with
-        `naap.stg_ai_llm_requests`, which contains token-level telemetry emitted
-        by LLM inference workers.
-
-        Metrics include: total request count, success rate, average tokens per
-        second (`avg_tokens_per_sec`), average time to first token in milliseconds
-        (`avg_ttft_ms`), and average total tokens per request (`avg_total_tokens`).
-
-        **This endpoint is exclusive to the `llm` pipeline.** All other AI-batch
-        pipelines (text-to-image, audio-to-text, etc.) produce no LLM records and
-        will return an empty result set if targeted via filtering. Token and TTFT
-        data is only available for jobs where the LLM worker emitted the
-        corresponding telemetry events; jobs with missing telemetry contribute to
-        request counts but not to token or latency averages.
-      operationId: getAIBatchLLMSummary
-      tags: [Requests]
-      parameters:
-        - { $ref: "#/components/parameters/org" }
-        - { $ref: "#/components/parameters/start" }
-        - { $ref: "#/components/parameters/end" }
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: array
-                    items: { $ref: "#/components/schemas/AIBatchLLMSummary" }
-                  meta: { $ref: "#/components/schemas/ResponseMeta" }
-        "500": { $ref: "#/components/responses/500" }
-
-  # ── BYOC Jobs (R18) ───────────────────────────────────────────────────────
-
-  /v1/requests/byoc/summary:
-    get:
-      summary: BYOC job summary by capability
-      description: |
-        Returns per-capability aggregates — total job count, selection outcome
-        counts, success rate, average duration, and a selected-only attribution
-        worked rate — for completed BYOC jobs in the requested time window.
-        Backed by `naap.canonical_byoc_jobs`, which is populated by the Go
-        attribution resolver processing `network_events` Kafka events.
-
-        Capability values are stored and returned verbatim as broadcast by BYOC
-        workers (e.g. `openai-chat-completions`, `openai-image-generation`,
-        `openai-text-embeddings`). The set of capabilities is fully dynamic and
-        never hardcoded in the API — new capabilities appear automatically as BYOC
-        workers register them. Fixed AI-batch pipelines never appear in this
-        endpoint; use `/v1/requests/ai-batch/summary` for those.
-
-        The default time window is the last 24 hours.
-        Under the current raw BYOC contract, `no_orch_jobs` is usually zero
-        because blank-identity failures generally remain `unknown` until explicit
-        pre-selection failure evidence exists.
-      operationId: getBYOCSummary
-      tags: [Requests]
-      parameters:
-        - { $ref: "#/components/parameters/org" }
-        - { $ref: "#/components/parameters/start" }
-        - { $ref: "#/components/parameters/end" }
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: array
-                    items: { $ref: "#/components/schemas/BYOCJobSummary" }
-                  meta: { $ref: "#/components/schemas/ResponseMeta" }
-        "500": { $ref: "#/components/responses/500" }
-
-  /v1/requests/byoc/jobs:
-    get:
-      summary: Paginated BYOC job records
-      description: |
-        Returns individual completed BYOC job records ordered by `completed_at`
-        descending, with cursor pagination. Backed by `naap.canonical_byoc_jobs`.
-        Each record represents a single discrete BYOC request for a dynamic
-        capability.
-
-        `capability` is the verbatim capability string as registered by the BYOC
-        worker. `orch_address` is the orchestrator service URL for BYOC jobs (e.g.
-        `https://livepeer-ai.xodeapp.xyz:18935`), not an Ethereum address —
-        BYOC jobs are identified by URL rather than on-chain address. `worker_url`
-        is the URL of the specific BYOC worker that handled the request; it is
-        often empty because not all workers report it in the event payload.
-
-        Attribution fields (`gpu_model`, `selection_outcome`,
-        `attribution_status`) follow the same resolver-written schema as
-        AI-batch jobs. `http_status` reflects the HTTP response code returned by
-        the BYOC worker for the inference request.
-
-        Cursor pagination uses base64-encoded JSON position markers.
-      operationId: listBYOCJobs
-      tags: [Requests]
-      parameters:
-        - { $ref: "#/components/parameters/org" }
-        - { $ref: "#/components/parameters/start" }
-        - { $ref: "#/components/parameters/end" }
-        - { $ref: "#/components/parameters/limit" }
-        - { $ref: "#/components/parameters/cursor" }
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: array
-                    items: { $ref: "#/components/schemas/BYOCJobRecord" }
-                  pagination: { $ref: "#/components/schemas/CursorPagination" }
-                  meta: { $ref: "#/components/schemas/ResponseMeta" }
-        "400": { $ref: "#/components/responses/BadRequest" }
-        "500": { $ref: "#/components/responses/500" }
-
-  /v1/requests/byoc/workers:
-    get:
-      summary: BYOC worker inventory by capability
-      description: |
-        Returns per-capability BYOC worker registrations, including worker count,
-        the list of model IDs each capability serves, and average price per unit.
-        Backed by `naap.canonical_byoc_workers`, which is populated from
-        `worker_lifecycle` Kafka events emitted when BYOC workers start up or
-        heartbeat their registration.
-
-        **This is the canonical source for BYOC model availability.** Because BYOC
-        workers do not use the Livepeer capability heartbeat protocol, they never
-        appear in `/v1/network/models` or `/v1/network/orchestrators`. This endpoint is
-        the only place in the API where BYOC model names (e.g.
-        `Qwen/Qwen2.5-14B-Instruct-AWQ`) are directly enumerated per capability.
-
-        `worker_count` is the number of distinct workers that registered the
-        capability within the requested time window. `models` is the union of
-        all model IDs reported by workers for that capability during the window.
-        `avg_price_per_unit` is the mean price across registrations that included
-        pricing information.
-      operationId: getBYOCWorkers
-      tags: [Requests]
-      parameters:
-        - { $ref: "#/components/parameters/org" }
-        - { $ref: "#/components/parameters/start" }
-        - { $ref: "#/components/parameters/end" }
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: array
-                    items: { $ref: "#/components/schemas/BYOCWorkerSummary" }
-                  meta: { $ref: "#/components/schemas/ResponseMeta" }
-        "500": { $ref: "#/components/responses/500" }
-
-  /v1/requests/byoc/auth:
-    get:
-      summary: BYOC auth event summary by capability
-      description: |
-        Returns per-capability authentication event counts, success rates, and
-        failure counts from `job_auth` events in the requested time window. Backed
-        by `naap.canonical_byoc_auth`. Auth events are emitted when a gateway
-        attempts to authenticate a BYOC request with an orchestrator before
-        dispatching it to the worker.
-
-        `total_events` is the count of all auth events (successes + failures) for
-        the capability. `success_rate` is the fraction of auth events that resulted
-        in a successful authentication (0.0–1.0). `failure_count` is the raw count
-        of failed auth events. A high failure rate may indicate credential issues,
-        misconfigured workers, or gateway/orchestrator version mismatches.
-
-        Capability names are stored verbatim. The default time window is the last
-        24 hours.
-      operationId: getBYOCAuthSummary
-      tags: [Requests]
-      parameters:
-        - { $ref: "#/components/parameters/org" }
-        - { $ref: "#/components/parameters/start" }
-        - { $ref: "#/components/parameters/end" }
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: array
-                    items: { $ref: "#/components/schemas/BYOCAuthSummary" }
-                  meta: { $ref: "#/components/schemas/ResponseMeta" }
-        "500": { $ref: "#/components/responses/500" }
-
-  # ── Jobs — request/response job types (R19) ──────────────────────────────
-
-  /v1/requests/demand:
-    get:
-      summary: Hourly demand for request/response jobs
-      description: |
-        Returns hourly demand metrics — job counts, success counts, success rate,
-        average duration, and total minutes — for AI-batch and BYOC jobs grouped
-        by (window_start, org, gateway, pipeline_id, model_id, job_type). Backed
-        by `naap.api_requests_demand`. The `job_type` field distinguishes `ai-batch`
-        from `byoc` rows within the same response.
-
-        **This endpoint covers AI-batch and BYOC jobs only — not streaming
-        sessions.** Streaming demand is available at `/v1/streaming/demand`.
-
-        For BYOC rows, `pipeline_id` holds the dynamic capability name (e.g.
-        `openai-chat-completions`) and `model_id` holds the worker-resolved model
-        identifier (e.g. `Qwen/Qwen2.5-14B-Instruct-AWQ`). For AI-batch rows,
-        `pipeline_id` holds the fixed pipeline name (e.g. `text-to-image`).
-
-        Use `?job_type=ai-batch` or `?job_type=byoc` to filter to a single type.
-        Omit `job_type` to receive both types interleaved and differentiated by
-        the `job_type` field.
-
-        **Window:** default 24h. Cursor-paginated.
-      operationId: listJobsDemand
-      tags: [Requests]
-      parameters:
-        - { $ref: "#/components/parameters/org" }
-        - { $ref: "#/components/parameters/window" }
-        - { $ref: "#/components/parameters/limit" }
-        - { $ref: "#/components/parameters/cursor" }
-        - name: pipeline_id
-          in: query
-          description: Filter by pipeline name (for ai-batch) or capability name (for byoc).
-          schema: { type: string }
-        - name: model_id
-          in: query
-          description: Filter by model identifier.
-          schema: { type: string }
-        - name: gateway
-          in: query
-          description: Filter by gateway Ethereum address.
-          schema: { type: string }
-        - name: job_type
-          in: query
-          description: Filter to one job type. One of "ai-batch" or "byoc".
-          schema:
-            type: string
-            enum: [ai-batch, byoc]
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: array
-                    items: { $ref: "#/components/schemas/JobsDemandRow" }
-                  pagination: { $ref: "#/components/schemas/CursorPagination" }
-                  meta: { $ref: "#/components/schemas/ResponseMeta" }
-        "400": { $ref: "#/components/responses/BadRequest" }
-        "500": { $ref: "#/components/responses/500" }
-
-  /v1/requests/sla:
-    get:
-      summary: SLA compliance for request/response jobs
-      description: |
-        Returns hourly per-orchestrator SLA metrics — job counts, success rates,
-        and SLA scores — for AI-batch and BYOC jobs grouped by
-        (window_start, org, orchestrator_uri, pipeline_id, model_id, gpu_id,
-        job_type). Backed by `naap.api_requests_sla`. The `job_type` field
-        distinguishes `ai-batch` from `byoc` rows.
-
-        **This endpoint covers AI-batch and BYOC jobs only.** Streaming session
-        SLA is tracked separately at `/v1/streaming/sla`.
-
-        `orchestrator_uri` is always a service URI, not an on-chain address.
-        BYOC jobs are identified by orchestrator URL rather than Ethereum
-        address because BYOC orchestrators are not required to be registered
-        on-chain. Do not attempt to look up BYOC URIs in `/v1/network/orchestrators`.
-
-        `sla_score` is nullable — it may be null for rows where the scoring model
-        could not produce a score (e.g. insufficient data in the window).
-
-        **Window:** default 24h. Cursor-paginated.
-      operationId: listJobsSLA
-      tags: [Requests]
-      parameters:
-        - { $ref: "#/components/parameters/org" }
-        - { $ref: "#/components/parameters/window" }
-        - { $ref: "#/components/parameters/limit" }
-        - { $ref: "#/components/parameters/cursor" }
-        - name: pipeline_id
-          in: query
-          description: Filter by pipeline name (for ai-batch) or capability name (for byoc).
-          schema: { type: string }
-        - name: model_id
-          in: query
-          description: Filter by model identifier.
-          schema: { type: string }
-        - $ref: "#/components/parameters/orchestrator_uri"
-        - name: job_type
-          in: query
-          description: Filter to one job type. One of "ai-batch" or "byoc".
-          schema:
-            type: string
-            enum: [ai-batch, byoc]
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: array
-                    items: { $ref: "#/components/schemas/JobsSLARow" }
-                  pagination: { $ref: "#/components/schemas/CursorPagination" }
-                  meta: { $ref: "#/components/schemas/ResponseMeta" }
-        "400": { $ref: "#/components/responses/BadRequest" }
-        "500": { $ref: "#/components/responses/500" }
-
-  /v1/requests/perf-by-model:
-    get:
-      summary: Request/response job performance by model
-      description: |
-        Returns p50/p99 duration, average duration, job count, and warm orchestrator
-        count per (pipeline, model, job_type) for AI-batch and BYOC jobs. Backed by
-        `naap.canonical_ai_batch_jobs` and `naap.canonical_byoc_jobs`. The
-        `job_type` field distinguishes `ai-batch` from `byoc` rows.
-
-        **This is the only endpoint in the entire API that shows both AI-batch and
-        BYOC model performance side by side in a single response.** Use it to
-        compare inference latency across models regardless of whether they are
-        served by fixed Livepeer AI pipelines or dynamic BYOC capabilities.
-
-        For AI-batch rows, `pipeline` is the fixed pipeline name (e.g.
-        `text-to-image`). For BYOC rows, `pipeline` holds the capability name
-        (e.g. `openai-chat-completions`). `warm_orch_count` is derived from the
-        current capability snapshot at query time — it reflects live availability,
-        not a historical count from the requested window.
-
-        `avg_duration_ms`, `p50_duration_ms`, and `p99_duration_ms` are nullable —
-        they are null when no completed jobs with duration data exist for that
-        (pipeline, model, job_type) combination in the window.
-
-        For streaming FPS performance (not duration), use `/v1/streaming/perf-by-model`.
-
-        **Window:** default 24h.
-      operationId: listJobsByModel
-      tags: [Requests]
-      parameters:
-        - { $ref: "#/components/parameters/org" }
-        - { $ref: "#/components/parameters/window" }
-        - name: pipeline_id
-          in: query
-          description: Filter by pipeline name (for ai-batch) or capability name (for byoc).
-          schema: { type: string }
-        - name: model_id
-          in: query
-          description: Filter by model identifier.
-          schema: { type: string }
-        - name: job_type
-          in: query
-          description: Filter to one job type. One of "ai-batch" or "byoc".
-          schema:
-            type: string
-            enum: [ai-batch, byoc]
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: array
-                items: { $ref: "#/components/schemas/JobModelPerformance" }
-        "500": { $ref: "#/components/responses/500" }
+          items: { $ref: "#/components/schemas/BYOCJobRecord" }
+        pagination: { $ref: "#/components/schemas/CursorPageInfo" }
+        meta: { $ref: "#/components/schemas/Meta" }
+
+    BYOCWorkerRow:
+      type: object
+      properties:
+        capability: { type: string }
+        worker_count: { type: integer }
+        models:
+          type: array
+          items: { type: string }
+        avg_price_per_unit: { type: number }
+
+    BYOCAuthRow:
+      type: object
+      properties:
+        capability: { type: string }
+        total_events: { type: integer }
+        success_rate: { type: number }
+        failure_count: { type: integer }

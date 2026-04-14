@@ -99,27 +99,30 @@ func (s *Server) buildRouter() chi.Router {
 	r.Get("/docs/openapi.yaml", handleOpenAPISpec)
 
 	r.Route("/v1", func(r chi.Router) {
-		// Network — capability-based orchestrator and model inventory.
-		r.Route("/network", func(r chi.Router) {
-			r.Get("/orchestrators", s.handleListOrchestrators)
-			r.Get("/models", s.handleListModels)
-			r.Get("/capacity", s.handleGetCapacitySummary)
+		// Dashboard — pre-aggregated UI widgets.
+		r.Route("/dashboard", func(r chi.Router) {
+			r.Get("/kpi", s.handleGetDashboardKPI)
+			r.Get("/pipelines", s.handleGetDashboardPipelines)
+			r.Get("/orchestrators", s.handleGetDashboardOrchestrators)
+			r.Get("/gpu-capacity", s.handleGetDashboardGPUCapacity)
+			r.Get("/pipeline-catalog", s.handleGetDashboardPipelineCatalog)
+			r.Get("/pricing", s.handleGetDashboardPricing)
+			r.Get("/job-feed", s.handleGetDashboardJobFeed)
 		})
 
 		// Streaming — live-video-to-video session analytics.
 		r.Route("/streaming", func(r chi.Router) {
-			r.Get("/sla", s.handleListSLACompliance)
-			r.Get("/demand", s.handleListNetworkDemand)
-			r.Get("/gpu-demand", s.handleListGPUNetworkDemand)
-			r.Get("/gpu-metrics", s.handleListGPUMetrics)
-			r.Get("/perf-by-model", s.handleListModelPerformance)
+			r.Get("/models", s.handleGetStreamingModels)
+			r.Get("/orchestrators", s.handleGetStreamingOrchestrators)
+			r.Get("/sla", s.handleListStreamingSLA)
+			r.Get("/demand", s.handleListStreamingDemand)
+			r.Get("/gpu-metrics", s.handleListStreamingGPUMetrics)
 		})
 
 		// Requests — AI Batch + BYOC request/response job analytics.
 		r.Route("/requests", func(r chi.Router) {
-			r.Get("/demand", s.handleListJobsDemand)
-			r.Get("/sla", s.handleListJobsSLA)
-			r.Get("/perf-by-model", s.handleListJobsByModel)
+			r.Get("/models", s.handleGetRequestsModels)
+			r.Get("/orchestrators", s.handleGetRequestsOrchestrators)
 			r.Route("/ai-batch", func(r chi.Router) {
 				r.Get("/summary", s.handleGetAIBatchSummary)
 				r.Get("/jobs", s.handleListAIBatchJobs)
@@ -129,19 +132,8 @@ func (s *Server) buildRouter() chi.Router {
 				r.Get("/summary", s.handleGetBYOCSummary)
 				r.Get("/jobs", s.handleListBYOCJobs)
 				r.Get("/workers", s.handleGetBYOCWorkers)
-				r.Get("/auth", s.handleGetBYOCAuthSummary)
+				r.Get("/auth", s.handleGetBYOCAuth)
 			})
-		})
-
-		// Dashboard — pre-aggregated UI endpoints with combined streaming + requests payloads.
-		r.Route("/dashboard", func(r chi.Router) {
-			r.Get("/kpi", s.handleGetDashboardKPI)
-			r.Get("/pipelines", s.handleGetDashboardPipelines)
-			r.Get("/orchestrators", s.handleGetDashboardOrchestrators)
-			r.Get("/gpu-capacity", s.handleGetDashboardGPUCapacity)
-			r.Get("/pipeline-catalog", s.handleGetDashboardPipelineCatalog)
-			r.Get("/pricing", s.handleGetDashboardPricing)
-			r.Get("/job-feed", s.handleGetDashboardJobFeed)
 		})
 	})
 
@@ -164,20 +156,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": status})
 }
 
-// notImplemented is a placeholder handler for routes not yet implemented.
-// Returns RFC 7807-style JSON error with 501 Not Implemented.
-func notImplemented(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(http.StatusNotImplemented)
-	_ = json.NewEncoder(w).Encode(map[string]string{
-		"type":   "about:blank",
-		"title":  "Not Implemented",
-		"status": "501",
-	})
-}
-
-// buildMeta returns the standard meta envelope for list responses that follow
-// the cursor-pagination contract.
+// buildMeta returns the standard meta envelope for cursor-paginated responses.
 func buildMeta(r *http.Request) map[string]any {
 	return map[string]any{
 		"generated_at": time.Now().UTC(),
@@ -196,7 +175,6 @@ func respondJSON(w http.ResponseWriter, status int, v any) {
 	_, _ = w.Write(append(body, '\n'))
 }
 
-// problemDetail is the RFC 7807 error response body.
 type problemDetail struct {
 	Type   string `json:"type"`
 	Title  string `json:"title"`
@@ -204,7 +182,6 @@ type problemDetail struct {
 	Detail string `json:"detail,omitempty"`
 }
 
-// writeError writes an RFC 7807 problem+json response.
 func writeError(w http.ResponseWriter, status int, title, detail string) {
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(status)

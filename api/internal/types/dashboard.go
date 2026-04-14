@@ -1,33 +1,52 @@
-// Package types — Dashboard endpoint types (R16).
-// These types map directly to the @naap/plugin-sdk TypeScript interfaces so the
-// naap-ui facade can use the API responses without client-side transformation.
 package types
 
-// DashboardMetricDelta is a single KPI value paired with a period-over-period delta.
-type DashboardMetricDelta struct {
+// ---------------------------------------------------------------------------
+// Dashboard KPI (endpoint 1)
+// ---------------------------------------------------------------------------
+
+type MetricDelta struct {
 	Value float64 `json:"value"`
 	Delta float64 `json:"delta"`
 }
 
-// DashboardHourlyBucket is one hour of a time-series KPI chart.
-type DashboardHourlyBucket struct {
+type HourlyBucket struct {
 	Hour  string  `json:"hour"` // RFC 3339
 	Value float64 `json:"value"`
 }
 
-// DashboardKPI is the top-level KPI widget payload (matches plugin-sdk DashboardKPI).
 type DashboardKPI struct {
-	SuccessRate         DashboardMetricDelta    `json:"successRate"`
-	OrchestratorsOnline DashboardMetricDelta    `json:"orchestratorsOnline"`
-	DailyUsageMins      DashboardMetricDelta    `json:"dailyUsageMins"` // Phase 2
-	DailySessionCount   DashboardMetricDelta    `json:"dailySessionCount"`
-	DailyNetworkFeesEth DashboardMetricDelta    `json:"dailyNetworkFeesEth"` // Phase 4
-	TimeframeHours      int                     `json:"timeframeHours"`
-	HourlySessions      []DashboardHourlyBucket `json:"hourlySessions,omitempty"`
-	HourlyUsage         []DashboardHourlyBucket `json:"hourlyUsage,omitempty"`
+	SuccessRate         MetricDelta    `json:"successRate"`
+	OrchestratorsOnline MetricDelta    `json:"orchestratorsOnline"`
+	DailyUsageMins      MetricDelta    `json:"dailyUsageMins"`
+	DailySessionCount   MetricDelta    `json:"dailySessionCount"`
+	DailyNetworkFeesEth MetricDelta    `json:"dailyNetworkFeesEth"`
+	TimeframeHours      int            `json:"timeframeHours"`
+	HourlySessions      []HourlyBucket `json:"hourlySessions,omitempty"`
+	HourlyUsage         []HourlyBucket `json:"hourlyUsage,omitempty"`
 }
 
-// DashboardPipelineModelMins is a per-model breakdown within a pipeline usage entry.
+type DashboardJobsStats struct {
+	TotalJobs     int64   `json:"total_jobs"`
+	SelectedJobs  int64   `json:"selected_jobs"`
+	NoOrchJobs    int64   `json:"no_orch_jobs"`
+	SuccessRate   float64 `json:"success_rate"`
+	AvgDurationMs float64 `json:"avg_duration_ms"`
+}
+
+type DashboardJobsOverview struct {
+	AIBatch DashboardJobsStats `json:"ai_batch"`
+	BYOC    DashboardJobsStats `json:"byoc"`
+}
+
+type DashboardKPICombined struct {
+	Streaming *DashboardKPI          `json:"streaming"`
+	Requests  *DashboardJobsOverview `json:"requests"`
+}
+
+// ---------------------------------------------------------------------------
+// Dashboard Pipelines (endpoint 2)
+// ---------------------------------------------------------------------------
+
 type DashboardPipelineModelMins struct {
 	Model    string  `json:"model"`
 	Mins     float64 `json:"mins"`
@@ -35,28 +54,53 @@ type DashboardPipelineModelMins struct {
 	AvgFps   float64 `json:"avgFps"`
 }
 
-// DashboardPipelineUsage is one pipeline entry in the pipeline usage widget
-// (matches plugin-sdk DashboardPipelineUsage).
 type DashboardPipelineUsage struct {
 	Name      string                       `json:"name"`
-	Mins      float64                      `json:"mins"` // Phase 2: from network demand
+	Mins      float64                      `json:"mins"`
 	Sessions  int64                        `json:"sessions"`
-	AvgFps    float64                      `json:"avgFps"` // Phase 2
-	JobType   string                       `json:"job_type,omitempty"`
+	AvgFps    float64                      `json:"avgFps"`
 	ModelMins []DashboardPipelineModelMins `json:"modelMins,omitempty"`
 }
 
-// DashboardPipelineModelOffer lists the model IDs an orchestrator serves for a pipeline.
+type DashboardJobsByPipelineRow struct {
+	Pipeline      string  `json:"pipeline"`
+	TotalJobs     int64   `json:"total_jobs"`
+	SelectedJobs  int64   `json:"selected_jobs"`
+	NoOrchJobs    int64   `json:"no_orch_jobs"`
+	SuccessRate   float64 `json:"success_rate"`
+	AvgDurationMs float64 `json:"avg_duration_ms"`
+}
+
+type DashboardJobsByCapabilityRow struct {
+	Capability    string  `json:"capability"`
+	TotalJobs     int64   `json:"total_jobs"`
+	SelectedJobs  int64   `json:"selected_jobs"`
+	NoOrchJobs    int64   `json:"no_orch_jobs"`
+	SuccessRate   float64 `json:"success_rate"`
+	AvgDurationMs float64 `json:"avg_duration_ms"`
+}
+
+type DashboardPipelinesRequestsSection struct {
+	ByPipeline   []DashboardJobsByPipelineRow   `json:"by_pipeline"`
+	ByCapability []DashboardJobsByCapabilityRow `json:"by_capability"`
+}
+
+type DashboardPipelinesCombined struct {
+	Streaming []DashboardPipelineUsage           `json:"streaming"`
+	Requests  *DashboardPipelinesRequestsSection `json:"requests"`
+}
+
+// ---------------------------------------------------------------------------
+// Dashboard Orchestrators (endpoint 3)
+// ---------------------------------------------------------------------------
+
 type DashboardPipelineModelOffer struct {
 	PipelineID string   `json:"pipelineId"`
 	ModelIDs   []string `json:"modelIds"`
 }
 
-// DashboardOrchestrator is one row in the orchestrator table widget
-// (matches plugin-sdk DashboardOrchestrator).
 type DashboardOrchestrator struct {
 	Address              string                        `json:"address"`
-	EnsName              string                        `json:"ensName,omitempty"`
 	ServiceURI           string                        `json:"serviceUri,omitempty"`
 	KnownSessions        int64                         `json:"knownSessions"`
 	SuccessSessions      int64                         `json:"successSessions"`
@@ -70,27 +114,26 @@ type DashboardOrchestrator struct {
 	GPUCount             int64                         `json:"gpuCount"`
 }
 
-// DashboardGPUModelCapacity is one GPU model row in the overall GPU capacity summary.
+// ---------------------------------------------------------------------------
+// Dashboard GPU Capacity (endpoint 4)
+// ---------------------------------------------------------------------------
+
 type DashboardGPUModelCapacity struct {
 	Model string `json:"model"`
 	Count int64  `json:"count"`
 }
 
-// DashboardGPUCapacityPipelineModel is one model within a pipeline GPU breakdown.
 type DashboardGPUCapacityPipelineModel struct {
 	Model string `json:"model"`
 	GPUs  int64  `json:"gpus"`
 }
 
-// DashboardGPUCapacityPipeline is one pipeline row in the GPU capacity widget.
 type DashboardGPUCapacityPipeline struct {
 	Name   string                              `json:"name"`
 	GPUs   int64                               `json:"gpus"`
 	Models []DashboardGPUCapacityPipelineModel `json:"models,omitempty"`
 }
 
-// DashboardGPUCapacity is the GPU capacity widget payload
-// (matches plugin-sdk DashboardGPUCapacity).
 type DashboardGPUCapacity struct {
 	TotalGPUs         int64                          `json:"totalGPUs"`
 	ActiveGPUs        int64                          `json:"activeGPUs"`
@@ -99,8 +142,10 @@ type DashboardGPUCapacity struct {
 	PipelineGPUs      []DashboardGPUCapacityPipeline `json:"pipelineGPUs"`
 }
 
-// DashboardPipelineCatalogEntry is one pipeline in the catalog widget
-// (matches plugin-sdk DashboardPipelineCatalogEntry).
+// ---------------------------------------------------------------------------
+// Dashboard Pipeline Catalog (endpoint 5)
+// ---------------------------------------------------------------------------
+
 type DashboardPipelineCatalogEntry struct {
 	ID      string   `json:"id"`
 	Name    string   `json:"name"`
@@ -108,21 +153,24 @@ type DashboardPipelineCatalogEntry struct {
 	Regions []string `json:"regions"`
 }
 
-// DashboardPipelinePricing carries raw wei pricing per orchestrator per
-// pipeline+model so the UI can see per-orch market structure and apply its own
-// unit conversion and formatting.
+// ---------------------------------------------------------------------------
+// Dashboard Pricing (endpoint 6)
+// ---------------------------------------------------------------------------
+
 type DashboardPipelinePricing struct {
-	OrchAddress      string `json:"orchAddress"`
-	OrchName         string `json:"orchName,omitempty"`
-	Pipeline         string `json:"pipeline"`
-	Model            string `json:"model,omitempty"`
-	PriceWeiPerUnit  int64  `json:"priceWeiPerUnit"`
-	PixelsPerUnit    int64  `json:"pixelsPerUnit"`
-	IsWarm           bool   `json:"isWarm"`
+	OrchAddress     string `json:"orchAddress"`
+	OrchName        string `json:"orchName,omitempty"`
+	Pipeline        string `json:"pipeline"`
+	Model           string `json:"model,omitempty"`
+	PriceWeiPerUnit int64  `json:"priceWeiPerUnit"`
+	PixelsPerUnit   int64  `json:"pixelsPerUnit"`
+	IsWarm          bool   `json:"isWarm"`
 }
 
-// DashboardJobFeedItem is one active stream in the live job feed widget
-// (matches the JobFeedItem shape in naap-ui/facade/types.ts).
+// ---------------------------------------------------------------------------
+// Dashboard Job Feed (endpoint 7)
+// ---------------------------------------------------------------------------
+
 type DashboardJobFeedItem struct {
 	ID              string   `json:"id"`
 	Pipeline        string   `json:"pipeline"`

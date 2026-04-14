@@ -3,22 +3,20 @@ package runtime
 import (
 	"net/http"
 	"strconv"
-	"strings"
 	"sync"
 
 	"github.com/livepeer/naap-analytics/internal/types"
 )
 
 // handleGetDashboardKPI serves GET /v1/dashboard/kpi
-// Returns a combined payload with streaming KPI and request-job overview.
-// Query params: window=24h (default) or window=7d — capped at 168 h.
 func (s *Server) handleGetDashboardKPI(w http.ResponseWriter, r *http.Request) {
 	hours := parseDashboardWindow(r, 24, 168)
-	p := parseQueryParams(r)
+	pipeline := r.URL.Query().Get("pipeline")
+	modelID := r.URL.Query().Get("model_id")
 
 	var (
-		streaming *types.DashboardKPI
-		requests  *types.DashboardJobsOverview
+		streaming  *types.DashboardKPI
+		requests   *types.DashboardJobsOverview
 		errS, errR error
 		wg         sync.WaitGroup
 	)
@@ -26,11 +24,11 @@ func (s *Server) handleGetDashboardKPI(w http.ResponseWriter, r *http.Request) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		streaming, errS = s.svc.GetDashboardKPI(r.Context(), hours, p.Pipeline, p.ModelID)
+		streaming, errS = s.svc.GetDashboardKPI(r.Context(), hours, pipeline, modelID)
 	}()
 	go func() {
 		defer wg.Done()
-		requests, errR = s.svc.GetDashboardJobsOverview(r.Context(), p)
+		requests, errR = s.svc.GetDashboardJobsOverview(r.Context(), hours)
 	}()
 	wg.Wait()
 
@@ -52,9 +50,8 @@ func (s *Server) handleGetDashboardKPI(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleGetDashboardPipelines serves GET /v1/dashboard/pipelines
-// Returns a combined payload with streaming pipeline usage and request-job breakdowns.
-// Query params: limit=5 (default, max 20).
 func (s *Server) handleGetDashboardPipelines(w http.ResponseWriter, r *http.Request) {
+	hours := parseDashboardWindow(r, 24, 168)
 	limit := 5
 	if raw := r.URL.Query().Get("limit"); raw != "" {
 		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
@@ -64,7 +61,6 @@ func (s *Server) handleGetDashboardPipelines(w http.ResponseWriter, r *http.Requ
 			limit = n
 		}
 	}
-	p := parseQueryParams(r)
 
 	var (
 		streaming    []types.DashboardPipelineUsage
@@ -77,15 +73,15 @@ func (s *Server) handleGetDashboardPipelines(w http.ResponseWriter, r *http.Requ
 	wg.Add(3)
 	go func() {
 		defer wg.Done()
-		streaming, errS = s.svc.GetDashboardPipelines(r.Context(), limit)
+		streaming, errS = s.svc.GetDashboardPipelines(r.Context(), limit, hours)
 	}()
 	go func() {
 		defer wg.Done()
-		byPipeline, errP = s.svc.GetDashboardJobsByPipeline(r.Context(), p)
+		byPipeline, errP = s.svc.GetDashboardJobsByPipeline(r.Context(), hours)
 	}()
 	go func() {
 		defer wg.Done()
-		byCapability, errC = s.svc.GetDashboardJobsByCapability(r.Context(), p)
+		byCapability, errC = s.svc.GetDashboardJobsByCapability(r.Context(), hours)
 	}()
 	wg.Wait()
 
@@ -115,7 +111,6 @@ func (s *Server) handleGetDashboardPipelines(w http.ResponseWriter, r *http.Requ
 }
 
 // handleGetDashboardOrchestrators serves GET /v1/dashboard/orchestrators
-// Query params: window=7d (default) or window=24h — capped at 720 h (30 days).
 func (s *Server) handleGetDashboardOrchestrators(w http.ResponseWriter, r *http.Request) {
 	hours := parseDashboardWindow(r, 168, 720)
 
@@ -162,7 +157,6 @@ func (s *Server) handleGetDashboardPricing(w http.ResponseWriter, r *http.Reques
 }
 
 // handleGetDashboardJobFeed serves GET /v1/dashboard/job-feed
-// Query params: limit=50 (default, max 200).
 func (s *Server) handleGetDashboardJobFeed(w http.ResponseWriter, r *http.Request) {
 	limit := 50
 	if raw := r.URL.Query().Get("limit"); raw != "" {
@@ -181,35 +175,4 @@ func (s *Server) handleGetDashboardJobFeed(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	respondJSON(w, http.StatusOK, result)
-}
-
-// parseDashboardWindow reads ?window=Xh or ?window=Xd and returns the value in
-// hours, clamped to [1, maxHours]. Returns defaultHours if not provided.
-func parseDashboardWindow(r *http.Request, defaultHours, maxHours int) int {
-	raw := strings.TrimSpace(r.URL.Query().Get("window"))
-	if raw == "" {
-		return defaultHours
-	}
-	var hours int
-	switch {
-	case strings.HasSuffix(raw, "h"):
-		if n, err := strconv.Atoi(strings.TrimSuffix(raw, "h")); err == nil && n > 0 {
-			hours = n
-		}
-	case strings.HasSuffix(raw, "d"):
-		if n, err := strconv.Atoi(strings.TrimSuffix(raw, "d")); err == nil && n > 0 {
-			hours = n * 24
-		}
-	default:
-		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
-			hours = n
-		}
-	}
-	if hours <= 0 {
-		return defaultHours
-	}
-	if hours > maxHours {
-		hours = maxHours
-	}
-	return hours
 }
