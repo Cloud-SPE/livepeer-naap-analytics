@@ -43,9 +43,12 @@ paths:
       tags: [Dashboard]
       summary: KPI summary with hourly timeseries
       description: |
-        Returns success rate, active orchestrators, usage minutes, session count,
-        and hourly timeseries for the given window. Includes period-over-period deltas.
-        Also includes request-job overview (AI Batch + BYOC totals).
+        Success rate, active orchestrator count, session count, and usage minutes
+        for the dashboard header, with hourly timeseries and period-over-period deltas.
+        Returns two sections: `streaming` (live-video-to-video metrics over the
+        requested window) and `requests` (AI Batch + BYOC job totals). The
+        orchestrator count reflects the last 10-minute heartbeat window regardless
+        of the time window parameter.
       parameters:
         - $ref: "#/components/parameters/DashboardWindow"
         - name: pipeline
@@ -67,6 +70,12 @@ paths:
       operationId: getDashboardPipelines
       tags: [Dashboard]
       summary: Pipeline usage breakdown
+      description: |
+        Pipeline-level usage rollup for the dashboard "Pipelines & GPUs" panel.
+        Returns a `streaming` array (live-video-to-video pipelines with sessions,
+        minutes, and weighted average FPS, broken down per model) and a `requests`
+        object with AI Batch breakdown by pipeline and BYOC breakdown by capability.
+        The `limit` parameter caps the streaming array length only.
       parameters:
         - name: limit
           in: query
@@ -85,6 +94,11 @@ paths:
       operationId: getDashboardOrchestrators
       tags: [Dashboard]
       summary: Orchestrator SLA table
+      description: |
+        One row per orchestrator for the Orchestrators table, with SLA metrics
+        (effective success rate, no-swap rate, SLA score), known session count,
+        advertised pipelines/models, and GPU count. SLA metrics are weighted by
+        requested session volume. Sorted by session volume. Default window is 7 days.
       parameters:
         - name: window
           in: query
@@ -105,6 +119,13 @@ paths:
       operationId: getDashboardGPUCapacity
       tags: [Dashboard]
       summary: GPU inventory summary
+      description: |
+        GPU inventory snapshot for the dashboard capacity widget. Returns the
+        total unique GPU count, a breakdown by GPU model (RTX 4090, 5090, etc.),
+        and a per-pipeline breakdown showing which GPU models serve which pipelines.
+        A GPU shared across multiple pipelines appears in each pipeline's breakdown
+        but is counted once in the total. Reflects orchestrators active in the last
+        30 minutes.
       responses:
         "200":
           description: GPU capacity payload
@@ -118,6 +139,13 @@ paths:
       operationId: getDashboardPipelineCatalog
       tags: [Dashboard]
       summary: Available pipeline + model combinations
+      description: |
+        Available pipelines and their models, derived from orchestrator capability
+        announcements over the last 30 minutes. Each entry is one pipeline
+        (e.g., `live-video-to-video`, `openai-chat-completions`) with the set of
+        models currently offered. Used by the UI to populate filter dropdowns and
+        the pipeline catalog view. The `regions` field is reserved for future use
+        and is currently empty.
       responses:
         "200":
           description: Pipeline catalog
@@ -133,6 +161,13 @@ paths:
       operationId: getDashboardPricing
       tags: [Dashboard]
       summary: Per-orchestrator pricing
+      description: |
+        Per-orchestrator price points for the pricing table, parsed from each
+        orchestrator's capability announcement. One row per (orchestrator, pipeline,
+        model) combination with raw wei-per-unit pricing and pixels-per-unit.
+        Orchestrators with a capability-specific price list produce one row per
+        capability; those with only a global `price_info` produce a single fallback
+        row with an empty pipeline.
       responses:
         "200":
           description: Pricing rows
@@ -148,6 +183,11 @@ paths:
       operationId: getDashboardJobFeed
       tags: [Dashboard]
       summary: Live job/stream feed
+      description: |
+        Most recently active live-video-to-video streams for the job feed widget,
+        ordered by last-seen timestamp descending. Returns only in-flight streams
+        (completed sessions are excluded). Includes orchestrator URL, pipeline,
+        model, gateway, input/output FPS, and elapsed duration.
       parameters:
         - name: limit
           in: query
@@ -169,6 +209,13 @@ paths:
       operationId: getStreamingModels
       tags: [Streaming]
       summary: Streaming model capacity and performance
+      description: |
+        Per-model capacity and load view for the live-video-to-video streaming page.
+        Each row shows warm orchestrator count, total GPU slots, currently active
+        streams, available capacity (slots minus active), and 24-hour weighted
+        average output FPS. Only includes the `live-video-to-video` pipeline.
+        A negative `available_capacity` means slots are oversubscribed (multiple
+        concurrent streams per GPU).
       responses:
         "200":
           description: Streaming model rows
@@ -184,6 +231,10 @@ paths:
       operationId: getStreamingOrchestrators
       tags: [Streaming]
       summary: Streaming orchestrator inventory
+      description: |
+        Orchestrators serving `live-video-to-video` in the last 30 minutes, with
+        their service URI, advertised models, and GPU count. Each orchestrator
+        address appears at most once. Sorted by GPU count descending.
       responses:
         "200":
           description: Streaming orchestrator rows
@@ -199,6 +250,12 @@ paths:
       operationId: getStreamingSLA
       tags: [Streaming]
       summary: Streaming SLA compliance (cursor-paginated)
+      description: |
+        Hourly SLA compliance metrics per (orchestrator, pipeline, model, GPU)
+        for live-video-to-video, derived from per-session health samples.
+        Includes requested vs. successful sessions, effective success rate,
+        no-swap rate, average output FPS, and a composite SLA score.
+        Cursor-paginated; default window is the last 24 hours.
       parameters:
         - $ref: "#/components/parameters/WindowStart"
         - $ref: "#/components/parameters/WindowEnd"
@@ -217,6 +274,12 @@ paths:
       operationId: getStreamingDemand
       tags: [Streaming]
       summary: Streaming network demand (cursor-paginated)
+      description: |
+        Hourly network demand as seen from the gateway side: how many sessions
+        each gateway requested, how many started successfully, how many failed
+        with no orchestrator available, and total minutes of usage.
+        Cursor-paginated. Use this to analyze traffic and capacity gaps; for
+        orchestrator-side quality metrics use `/streaming/sla` instead.
       parameters:
         - $ref: "#/components/parameters/WindowStart"
         - $ref: "#/components/parameters/WindowEnd"
@@ -235,6 +298,11 @@ paths:
       operationId: getStreamingGPUMetrics
       tags: [Streaming]
       summary: Per-GPU streaming metrics (cursor-paginated)
+      description: |
+        Finest-grain performance data: one row per (hour, GPU) for
+        live-video-to-video, with session counts, average output FPS,
+        end-to-end latency, and swap rate. Use this to identify individual
+        underperforming GPUs. Cursor-paginated; default window is the last 24 hours.
       parameters:
         - $ref: "#/components/parameters/WindowStart"
         - $ref: "#/components/parameters/WindowEnd"
@@ -255,6 +323,12 @@ paths:
       operationId: getRequestsModels
       tags: [Requests]
       summary: Request-based model capacity and performance
+      description: |
+        Per-model capacity and load view for non-streaming pipelines
+        (AI Batch + BYOC). Each row shows warm orchestrator count, GPU slots,
+        and 24-hour job statistics (count, success rate, average duration).
+        The `job_type` field indicates whether the model is served by AI Batch
+        or BYOC orchestrators. Sorted by recent job volume.
       responses:
         "200":
           description: Request model rows
@@ -270,6 +344,11 @@ paths:
       operationId: getRequestsOrchestrators
       tags: [Requests]
       summary: Request-based orchestrator inventory
+      description: |
+        Orchestrators serving non-streaming pipelines in the last 30 minutes,
+        with their service URI, advertised capabilities (as `pipeline:model`
+        strings), and GPU count. Each orchestrator address appears at most once.
+        Sorted by GPU count descending.
       responses:
         "200":
           description: Request orchestrator rows
@@ -285,6 +364,12 @@ paths:
       operationId: getAIBatchSummary
       tags: [Requests]
       summary: AI Batch job summary by pipeline
+      description: |
+        AI Batch job totals grouped by pipeline (e.g., `text-to-image`, `llm`,
+        `upscale`). Each row shows total jobs, how many were successfully selected
+        vs. rejected for no-orchestrator-available, success rate, and average
+        duration. Use for the AI Batch overview dashboard; for per-request details
+        use `/requests/ai-batch/jobs`.
       parameters:
         - $ref: "#/components/parameters/WindowStart"
         - $ref: "#/components/parameters/WindowEnd"
@@ -303,6 +388,12 @@ paths:
       operationId: listAIBatchJobs
       tags: [Requests]
       summary: AI Batch individual job records (cursor-paginated)
+      description: |
+        Individual AI Batch job records, one row per request, ordered by completion
+        time descending. Includes success status, retry count, duration, the
+        selected orchestrator URL, GPU model, and attribution status.
+        Cursor-paginated. Use for audit trails, debugging failed requests, and
+        drilling into specific jobs.
       parameters:
         - $ref: "#/components/parameters/WindowStart"
         - $ref: "#/components/parameters/WindowEnd"
@@ -321,6 +412,12 @@ paths:
       operationId: getAIBatchLLMSummary
       tags: [Requests]
       summary: AI Batch LLM-specific summary by model
+      description: |
+        LLM-specific performance metrics grouped by model (tokens/sec,
+        time-to-first-token, average tokens per request, success rate).
+        Covers only LLM requests from AI Batch traffic. Separate from
+        `/requests/ai-batch/summary` because LLM throughput and token metrics
+        don't apply to image or audio pipelines.
       parameters:
         - $ref: "#/components/parameters/WindowStart"
         - $ref: "#/components/parameters/WindowEnd"
@@ -339,6 +436,11 @@ paths:
       operationId: getBYOCSummary
       tags: [Requests]
       summary: BYOC job summary by capability
+      description: |
+        BYOC (Bring-Your-Own-Compute) job totals grouped by capability
+        (`openai-chat-completions`, `openai-image-generation`, etc.). Each row
+        shows total jobs, selection outcome counts, success rate, and average
+        duration. Use for the BYOC overview dashboard.
       parameters:
         - $ref: "#/components/parameters/WindowStart"
         - $ref: "#/components/parameters/WindowEnd"
@@ -357,6 +459,12 @@ paths:
       operationId: listBYOCJobs
       tags: [Requests]
       summary: BYOC individual job records (cursor-paginated)
+      description: |
+        Individual BYOC job records, ordered by completion time descending.
+        Includes HTTP status, worker URL, orchestrator selection outcome, GPU
+        model, attribution status, and error message for failures.
+        Cursor-paginated. Use for audit trails, debugging, and tracing specific
+        requests through the orchestrator-worker chain.
       parameters:
         - $ref: "#/components/parameters/WindowStart"
         - $ref: "#/components/parameters/WindowEnd"
@@ -375,6 +483,11 @@ paths:
       operationId: getBYOCWorkers
       tags: [Requests]
       summary: BYOC worker inventory by capability
+      description: |
+        BYOC worker inventory grouped by capability. Each row shows how many
+        distinct workers advertised the capability in the time window, the
+        models they support, and their average price-per-unit. Use to understand
+        supply-side composition for each capability.
       parameters:
         - $ref: "#/components/parameters/WindowStart"
         - $ref: "#/components/parameters/WindowEnd"
@@ -393,6 +506,11 @@ paths:
       operationId: getBYOCAuth
       tags: [Requests]
       summary: BYOC auth event summary by capability
+      description: |
+        Authentication event outcomes grouped by capability — how many auth
+        attempts happened, the success rate, and failure count. Separate from
+        job execution success; a capability can have healthy auth but failing
+        jobs, or vice versa. Use to debug connectivity or credential issues.
       parameters:
         - $ref: "#/components/parameters/WindowStart"
         - $ref: "#/components/parameters/WindowEnd"
