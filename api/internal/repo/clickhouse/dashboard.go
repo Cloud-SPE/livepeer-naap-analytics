@@ -421,71 +421,91 @@ func (r *Repo) GetDashboardOrchestrators(ctx context.Context, windowHours int) (
 // GetDashboardGPUCapacity serves GET /v1/dashboard/gpu-capacity.
 // Uses a 30-minute window (not activeOrchMinutes=10) because non-streaming
 // orchestrators advertise less frequently than live-video-to-video ones.
+//
+// Three views of the inventory:
+//   - TotalGPUs: distinct (orch, gpu_id) pairs across the whole network
+//   - Models[]: top-level GPU hardware breakdown (e.g. "RTX 4090: 22 GPUs")
+//   - PipelineGPUs[].Models[]: per-pipeline breakdown where each entry is
+//     the number of distinct GPUs serving a specific AI model on that pipeline
+//     (e.g. "live-video-to-video → streamdiffusion-sdxl: 27 GPUs").
+//     A GPU serving multiple AI models within the same pipeline is counted
+//     once per AI model.
 func (r *Repo) GetDashboardGPUCapacity(ctx context.Context) (*types.DashboardGPUCapacity, error) {
 	rows, err := r.conn.Query(ctx, `
-		SELECT orch_address, pipeline_id, ifNull(gpu_id, '') AS gpu_id,
+		SELECT orch_address, pipeline_id, model_id, ifNull(gpu_id, '') AS gpu_id,
 		       ifNull(anyLast(gpu_model_name), 'Unknown') AS gpu_model
 		FROM naap.api_latest_orchestrator_pipeline_models
 		WHERE last_seen > now() - INTERVAL 30 MINUTE
 		  AND pipeline_id != '' AND model_id != ''
-		GROUP BY orch_address, pipeline_id, gpu_id
+		GROUP BY orch_address, pipeline_id, model_id, gpu_id
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("dashboard gpu capacity: %w", err)
 	}
 	defer rows.Close()
 
-	// Track unique (orch, gpu) for totalGPUs, per-pipeline for breakdown
-	uniqueGPUs := map[string]string{}                  // "orch|gpu" -> gpuModel (deduped for total)
-	pipelineGPUModels := map[string]map[string]int64{} // pipeline -> gpuModel -> count
-	pipelineGPUIDs := map[string]map[string]bool{}     // pipeline -> set of "orch|gpu" (dedup per pipeline)
+	// uniqueGPUs: dedup for TotalGPUs and the top-level Models[] (GPU hardware)
+	uniqueGPUs := map[string]string{} // "orch|gpu" -> gpu hardware model
+	// pipelineAIModelGPUs: pipeline -> ai_model -> set of "orch|gpu"
+	pipelineAIModelGPUs := map[string]map[string]map[string]bool{}
+	// pipelineGPUKeys: pipeline -> set of "orch|gpu" (for the pipeline-level total)
+	pipelineGPUKeys := map[string]map[string]bool{}
 
 	for rows.Next() {
-		var orchAddr, pipelineID, gpuID, gpuModel string
-		if err := rows.Scan(&orchAddr, &pipelineID, &gpuID, &gpuModel); err != nil {
+		var orchAddr, pipelineID, aiModel, gpuID, gpuHardware string
+		if err := rows.Scan(&orchAddr, &pipelineID, &aiModel, &gpuID, &gpuHardware); err != nil {
 			return nil, fmt.Errorf("dashboard gpu capacity scan: %w", err)
 		}
-		if gpuModel == "" {
-			gpuModel = "Unknown"
+		if gpuHardware == "" {
+			gpuHardware = "Unknown"
 		}
 		gpuKey := orchAddr + "|" + gpuID
-		uniqueGPUs[gpuKey] = gpuModel
+		uniqueGPUs[gpuKey] = gpuHardware
 
-		if _, ok := pipelineGPUIDs[pipelineID]; !ok {
-			pipelineGPUIDs[pipelineID] = map[string]bool{}
-			pipelineGPUModels[pipelineID] = map[string]int64{}
+		if _, ok := pipelineGPUKeys[pipelineID]; !ok {
+			pipelineGPUKeys[pipelineID] = map[string]bool{}
+			pipelineAIModelGPUs[pipelineID] = map[string]map[string]bool{}
 		}
-		if !pipelineGPUIDs[pipelineID][gpuKey] {
-			pipelineGPUIDs[pipelineID][gpuKey] = true
-			pipelineGPUModels[pipelineID][gpuModel]++
+		pipelineGPUKeys[pipelineID][gpuKey] = true
+
+		if _, ok := pipelineAIModelGPUs[pipelineID][aiModel]; !ok {
+			pipelineAIModelGPUs[pipelineID][aiModel] = map[string]bool{}
 		}
+		pipelineAIModelGPUs[pipelineID][aiModel][gpuKey] = true
 	}
 
-	// Total GPUs: count unique (orch, gpu) pairs
-	gpuModelCounts := map[string]int64{}
-	for _, gpuModel := range uniqueGPUs {
-		gpuModelCounts[gpuModel]++
+	// Total GPUs and top-level Models[] (GPU hardware breakdown)
+	gpuHardwareCounts := map[string]int64{}
+	for _, hw := range uniqueGPUs {
+		gpuHardwareCounts[hw]++
 	}
 	totalGPUs := int64(len(uniqueGPUs))
 
-	models := make([]types.DashboardGPUModelCapacity, 0, len(gpuModelCounts))
-	for model, count := range gpuModelCounts {
+	models := make([]types.DashboardGPUModelCapacity, 0, len(gpuHardwareCounts))
+	for model, count := range gpuHardwareCounts {
 		models = append(models, types.DashboardGPUModelCapacity{Model: model, Count: count})
 	}
 	sort.Slice(models, func(i, j int) bool { return models[i].Count > models[j].Count })
 
-	pipelineGPUs := make([]types.DashboardGPUCapacityPipeline, 0, len(pipelineGPUModels))
-	for pipeline, gpuModels := range pipelineGPUModels {
-		var pipelineTotal int64
-		pModels := make([]types.DashboardGPUCapacityPipelineModel, 0, len(gpuModels))
-		for model, count := range gpuModels {
-			pModels = append(pModels, types.DashboardGPUCapacityPipelineModel{Model: model, GPUs: count})
-			pipelineTotal += count
+	// PipelineGPUs[]: one entry per pipeline; Models[] is per-AI-model GPU count
+	pipelineGPUs := make([]types.DashboardGPUCapacityPipeline, 0, len(pipelineAIModelGPUs))
+	for pipeline, aiModels := range pipelineAIModelGPUs {
+		pModels := make([]types.DashboardGPUCapacityPipelineModel, 0, len(aiModels))
+		for aiModel, gpuKeys := range aiModels {
+			pModels = append(pModels, types.DashboardGPUCapacityPipelineModel{
+				Model: aiModel,
+				GPUs:  int64(len(gpuKeys)),
+			})
 		}
-		sort.Slice(pModels, func(i, j int) bool { return pModels[i].GPUs > pModels[j].GPUs })
+		sort.Slice(pModels, func(i, j int) bool {
+			if pModels[i].GPUs != pModels[j].GPUs {
+				return pModels[i].GPUs > pModels[j].GPUs
+			}
+			return pModels[i].Model < pModels[j].Model
+		})
 		pipelineGPUs = append(pipelineGPUs, types.DashboardGPUCapacityPipeline{
 			Name:   pipeline,
-			GPUs:   pipelineTotal,
+			GPUs:   int64(len(pipelineGPUKeys[pipeline])),
 			Models: pModels,
 		})
 	}
