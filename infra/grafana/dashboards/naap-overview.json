@@ -544,7 +544,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "sql",
-          "rawSql": "SELECT toFloat64(sum(greatest(requested_sessions - no_orch_sessions, 0))) AS value\nFROM naap.api_hourly_streaming_demand\nWHERE window_start >= now() - INTERVAL 1 HOUR\nAND pipeline_id != ''\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))",
+          "rawSql": "SELECT toFloat64(sum(startup_success_sessions)) AS value\nFROM naap.api_hourly_streaming_demand\nWHERE window_start >= now() - INTERVAL 1 HOUR\nAND pipeline_id != ''\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))",
           "refId": "A"
         }
       ],
@@ -654,7 +654,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT toStartOfInterval(window_start, INTERVAL 1 HOUR) AS time,\n    sum(greatest(requested_sessions - no_orch_sessions, 0)) AS served_sessions,\n    sum(no_orch_sessions) AS unserved_sessions\nFROM naap.api_hourly_streaming_demand\nWHERE $__timeFilter(window_start)\nAND pipeline_id != ''\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY time ORDER BY time",
+          "rawSql": "SELECT toStartOfInterval(window_start, INTERVAL 1 HOUR) AS time,\n    sum(startup_success_sessions) AS served_sessions,\n    sum(no_orch_sessions) AS unserved_sessions\nFROM naap.api_hourly_streaming_demand\nWHERE $__timeFilter(window_start)\nAND pipeline_id != ''\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY time\nORDER BY time",
           "refId": "A"
         }
       ],
