@@ -14,8 +14,8 @@ import (
 // produces N rows that share the same `address` and timestamps but each carry
 // their own per-pipeline `score` and `capabilities` list. Score uses the SLA
 // source matching the row's pipeline (last 2-hour window):
-//   - live-video-to-video → api_sla_compliance.sla_score / 100
-//   - any other non-BYOC pipeline → api_requests_sla.sla_score / 100
+//   - live-video-to-video → api_hourly_streaming_sla.sla_score / 100
+//   - any other non-BYOC pipeline → api_hourly_request_demand success rate
 //
 // When there's no recent SLA activity for an (orch, pipeline), score is set to
 // 0.0 and `recent_work` is false (signaling the score is a placeholder, not a
@@ -29,17 +29,22 @@ func (r *Repo) DiscoverOrchestrators(ctx context.Context, p types.DiscoverOrches
 	capsFilter := ""
 	args := []any{}
 	if len(p.Caps) > 0 {
-		// Pipelines mentioned in any cap → restrict the (orch, pipeline) rows we emit
-		// to those pipelines, then within each row include only orchs that advertise
-		// at least one matching cap. Two-stage filter via subquery on pipeline_models.
+		// Restrict rows to builtin capability offers that advertise at least one of
+		// the requested pipeline/model pairs.
 		capsFilter = `
 		  AND (p.pipeline_id, o.orch_address) IN (
-		    SELECT pipeline_id, orch_address
-		    FROM naap.api_latest_orchestrator_pipeline_models
+		    SELECT
+		      if(capability_family = 'byoc', offered_name, ifNull(canonical_pipeline, capability_name)) AS pipeline_id,
+		      orch_address
+		    FROM naap.api_current_capability_offer
 		    WHERE last_seen > now() - INTERVAL 30 MINUTE
-		      AND pipeline_id != ''
+		      AND capability_family = 'builtin'
+		      AND if(capability_family = 'byoc', offered_name, ifNull(canonical_pipeline, capability_name)) != ''
 		      AND model_id != ''
-		      AND (pipeline_id || '/' || model_id) IN (?)
+		      AND (
+		          if(capability_family = 'byoc', offered_name, ifNull(canonical_pipeline, capability_name))
+		          || '/' || model_id
+		      ) IN (?)
 		  )
 		`
 		args = append(args, p.Caps)
@@ -54,44 +59,54 @@ func (r *Repo) DiscoverOrchestrators(ctx context.Context, p types.DiscoverOrches
 		      pipeline_id,
 		      sum(ifNull(sla_score, 0) * requested_sessions)
 		        / nullIf(sum(requested_sessions), 0) / 100.0 AS score
-		    FROM naap.api_sla_compliance
+		    FROM naap.api_hourly_streaming_sla
 		    WHERE window_start >= now() - INTERVAL 2 HOUR
 		      AND orchestrator_address != ''
 		      AND pipeline_id = 'live-video-to-video'
 		    GROUP BY orchestrator_address, pipeline_id
 		  ),
-		  -- AI-batch SLA per (orch_uri, pipeline_id), last 2 hours. Note URI not address.
+		  -- AI-batch success score per (orch_uri, pipeline_id), last 2 hours.
 		  ai_batch_sla AS (
 		    SELECT
 		      orchestrator_uri AS orch_uri,
-		      pipeline_id,
-		      sum(ifNull(sla_score, 0) * job_count)
-		        / nullIf(sum(job_count), 0) / 100.0 AS score
-		    FROM naap.api_requests_sla
+		      canonical_pipeline AS pipeline_id,
+		      sum(success_count) / nullIf(toFloat64(sum(job_count)), 0.0) AS score
+		    FROM naap.api_hourly_request_demand
 		    WHERE window_start >= now() - INTERVAL 2 HOUR
 		      AND orchestrator_uri != ''
-		      AND job_type != 'byoc'
+		      AND capability_family = 'builtin'
+		      AND execution_mode = 'request'
+		      AND canonical_pipeline != ''
 		    GROUP BY orchestrator_uri, pipeline_id
 		  )
 		SELECT
-		  anyLast(o.uri) AS address,
+		  anyLast(o.orchestrator_uri) AS address,
 		  round(coalesce(s.score, a.score, 0.0), 3) AS score,
 		  arrayDistinct(groupArray(p.pipeline_id || '/' || p.model_id)) AS capabilities,
 		  toInt64(toUnixTimestamp64Milli(max(o.last_seen))) AS last_seen_ms,
 		  max(o.last_seen) AS last_seen,
 		  (s.score IS NOT NULL OR a.score IS NOT NULL) AS recent_work
-		FROM naap.api_latest_orchestrator_state o
-		INNER JOIN naap.api_latest_orchestrator_pipeline_models p
+		FROM naap.api_current_orchestrator o
+		INNER JOIN (
+		  SELECT
+		    orch_address,
+		    if(capability_family = 'byoc', offered_name, ifNull(canonical_pipeline, capability_name)) AS pipeline_id,
+		    model_id,
+		    last_seen,
+		    capability_family
+		  FROM naap.api_current_capability_offer
+		  WHERE model_id IS NOT NULL
+		) p
 		  ON o.orch_address = p.orch_address
 		LEFT JOIN streaming_sla s
 		  ON s.orch_address = o.orch_address AND s.pipeline_id = p.pipeline_id
 		LEFT JOIN ai_batch_sla a
-		  ON a.orch_uri = o.uri AND a.pipeline_id = p.pipeline_id
+		  ON a.orch_uri = o.orchestrator_uri AND a.pipeline_id = p.pipeline_id
 		WHERE o.last_seen > now() - INTERVAL 30 MINUTE
 		  AND p.last_seen > now() - INTERVAL 30 MINUTE
 		  AND p.pipeline_id != ''
 		  AND p.model_id != ''
-		  AND p.pipeline_id NOT LIKE 'openai-%'
+		  AND p.capability_family = 'builtin'
 		  ` + capsFilter + `
 		GROUP BY o.orch_address, p.pipeline_id, s.score, a.score
 		ORDER BY score DESC, length(capabilities) DESC, address ASC

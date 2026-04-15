@@ -1,6 +1,6 @@
 {{ config(materialized='view') }}
 
-with {{ latest_value_cte('latest_slices', 'naap.api_sla_compliance_inputs_by_org_store', ['org', 'window_start'], 'refresh_run_id') }},
+with {{ latest_value_cte('latest_slices', 'naap.canonical_streaming_sla_input_hourly_store', ['org', 'window_start'], 'refresh_run_id') }},
 inventory_by_org as (
     select
         inv.org,
@@ -82,7 +82,7 @@ select
         sum(s.e2e_latency_sum_ms) / toFloat64(sum(s.e2e_latency_sample_count)),
         cast(null as Nullable(Float64))
     ) as avg_e2e_latency_ms
-from naap.api_sla_compliance_inputs_by_org_store s
+from naap.canonical_streaming_sla_input_hourly_store s
 inner join latest_slices l
     on {{ join_on_columns('s', 'l', ['org', 'window_start']) }}
    and s.refresh_run_id = l.refresh_run_id

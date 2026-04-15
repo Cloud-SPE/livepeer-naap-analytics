@@ -94,7 +94,7 @@ func insertNetworkDemandSlice(t *testing.T, h *harness, org, gateway, pipeline s
 	refreshRunID := fmt.Sprintf("alert-net-%s-%d", org, windowStart.UnixNano())
 	startupSuccess := requested - effectiveFailed
 	if err := h.conn.Exec(context.Background(), `
-		INSERT INTO naap.api_network_demand_by_org_store
+		INSERT INTO naap.canonical_streaming_demand_hourly_store
 		(
 			window_start, org, gateway, region, pipeline_id, model_id, sessions_count, avg_output_fps,
 			output_fps_sum, status_samples, total_minutes, known_sessions_count, requested_sessions,

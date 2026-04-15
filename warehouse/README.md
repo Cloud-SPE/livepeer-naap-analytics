@@ -20,12 +20,12 @@ Model split:
   physical `canonical_*_store` tables
 - `warehouse/models/api_base/` exposes internal helper views used to build
   published API/dashboard models safely from additive or merge-safe inputs
-- `warehouse/models/api/` exposes serving contracts over bounded resolver-fed
-  store tables
-- `api_status_samples` and `api_active_stream_state` remain store-backed so
-  request paths do not reconstruct hot state from wide history joins
-- `api_active_stream_state` is deterministic; recency filtering belongs in
-  request or dashboard queries, not in the semantic view itself
+- `warehouse/models/api/` exposes serving contracts over bounded canonical and
+  resolver-fed stores
+- `api_current_active_stream_state` remains store-backed so request paths do not
+  reconstruct hot state from wide history joins
+- `api_current_active_stream_state` is deterministic; recency filtering belongs
+  in request or dashboard queries, not in the semantic view itself
 
 Tier contract:
 

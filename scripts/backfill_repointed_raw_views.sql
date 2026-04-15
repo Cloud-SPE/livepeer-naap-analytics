@@ -4,11 +4,11 @@
 -- the dashboard-facing tables that were repointed off the frozen legacy
 -- naap.events source.
 
-TRUNCATE TABLE naap.agg_stream_status_samples;
-TRUNCATE TABLE naap.agg_fps_hourly;
-TRUNCATE TABLE naap.agg_discovery_latency_hourly;
-TRUNCATE TABLE naap.agg_webrtc_hourly;
-TRUNCATE TABLE naap.typed_stream_ingest_metrics;
+TRUNCATE TABLE IF EXISTS naap.agg_stream_status_samples;
+TRUNCATE TABLE IF EXISTS naap.agg_fps_hourly;
+TRUNCATE TABLE IF EXISTS naap.agg_discovery_latency_hourly;
+TRUNCATE TABLE IF EXISTS naap.agg_webrtc_hourly;
+TRUNCATE TABLE IF EXISTS naap.typed_stream_ingest_metrics;
 
 INSERT INTO naap.agg_stream_status_samples
 SELECT
@@ -88,28 +88,5 @@ SELECT
     toUInt64(JSONExtractString(data, 'stats', 'conn_quality') = 'good') AS quality_good,
     toUInt64(JSONExtractString(data, 'stats', 'conn_quality') = 'fair') AS quality_fair,
     toUInt64(JSONExtractString(data, 'stats', 'conn_quality') = 'poor') AS quality_poor
-FROM naap.accepted_raw_events
-WHERE event_type = 'stream_ingest_metrics';
-
-INSERT INTO naap.typed_stream_ingest_metrics
-WITH
-    JSONExtractArrayRaw(data, 'stats', 'track_stats') AS tracks,
-    arrayFirst(x -> JSONExtractString(x, 'type') = 'video', tracks) AS video_track,
-    arrayFirst(x -> JSONExtractString(x, 'type') = 'audio', tracks) AS audio_track
-SELECT
-    event_id,
-    event_ts,
-    org,
-    gateway,
-    JSONExtractString(data, 'stream_id') AS stream_id,
-    JSONExtractString(data, 'request_id') AS request_id,
-    JSONExtractString(data, 'stats', 'conn_quality') AS conn_quality,
-    if(video_track != '', JSONExtractFloat(video_track, 'jitter'), 0.0) AS video_jitter_ms,
-    if(video_track != '', toUInt64OrDefault(toString(JSONExtractUInt(video_track, 'packets_lost'))), 0) AS video_packets_lost,
-    if(video_track != '', toUInt64OrDefault(toString(JSONExtractUInt(video_track, 'packets_received'))), 0) AS video_packets_received,
-    if(audio_track != '', JSONExtractFloat(audio_track, 'jitter'), 0.0) AS audio_jitter_ms,
-    if(audio_track != '', toUInt64OrDefault(toString(JSONExtractUInt(audio_track, 'packets_lost'))), 0) AS audio_packets_lost,
-    if(audio_track != '', toUInt64OrDefault(toString(JSONExtractUInt(audio_track, 'packets_received'))), 0) AS audio_packets_received,
-    data
 FROM naap.accepted_raw_events
 WHERE event_type = 'stream_ingest_metrics';

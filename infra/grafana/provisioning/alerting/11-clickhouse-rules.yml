@@ -408,7 +408,7 @@ groups:
               intervalMs: 1000
               maxDataPoints: 43200
               queryType: sql
-              rawSql: WITH recent AS (SELECT count() AS total_samples, countIf(is_attributed = 1) AS attributed_samples FROM naap.api_status_samples WHERE sample_ts >= now() - INTERVAL 60 MINUTE) SELECT if(total_samples >= 500, toFloat64(attributed_samples) / toFloat64(total_samples), 1.0) AS value FROM recent
+              rawSql: WITH recent AS (SELECT count() AS total_samples, countIf(is_attributed = 1) AS attributed_samples FROM naap.canonical_status_samples_recent WHERE sample_ts >= now() - INTERVAL 60 MINUTE) SELECT if(total_samples >= 500, toFloat64(attributed_samples) / toFloat64(total_samples), 1.0) AS value FROM recent
               refId: A
           - refId: B
             datasourceUid: __expr__
@@ -617,12 +617,20 @@ groups:
                 WITH current_bucket AS (
                   SELECT toStartOfHour(now()) - INTERVAL 1 HOUR AS window_start
                 ),
+                request_rows AS (
+                  SELECT
+                    if(capability_family = 'byoc', 'byoc', 'ai-batch') AS job_type,
+                    ifNull(canonical_pipeline, capability_name) AS pipeline_id,
+                    window_start,
+                    job_count
+                  FROM naap.api_hourly_request_demand
+                ),
                 current_counts AS (
                   SELECT
                     job_type,
                     pipeline_id,
                     sum(job_count) AS current_jobs
-                  FROM naap.api_requests_demand
+                  FROM request_rows
                   WHERE window_start = (SELECT window_start FROM current_bucket)
                   GROUP BY job_type, pipeline_id
                 ),
@@ -632,7 +640,7 @@ groups:
                     pipeline_id,
                     window_start,
                     sum(job_count) AS hourly_jobs
-                  FROM naap.api_requests_demand
+                  FROM request_rows
                   WHERE window_start >= (SELECT window_start FROM current_bucket) - INTERVAL 24 HOUR
                     AND window_start < (SELECT window_start FROM current_bucket)
                   GROUP BY job_type, pipeline_id, window_start
@@ -722,7 +730,7 @@ groups:
                     ) * 100,
                     2
                   )) AS value
-                FROM naap.api_network_demand
+                FROM naap.api_hourly_streaming_demand
                 WHERE window_start = (SELECT window_start FROM current_bucket)
                   AND pipeline_id != ''
                 GROUP BY pipeline_id
@@ -793,7 +801,7 @@ groups:
                     pipeline_id,
                     requested_sessions,
                     effective_failed_sessions
-                  FROM naap.api_network_demand_by_org
+                  FROM naap.api_hourly_streaming_demand
                   WHERE window_start = (SELECT window_start FROM current_bucket)
                     AND pipeline_id != ''
                 )
@@ -856,7 +864,7 @@ groups:
                   SELECT
                     pipeline_id,
                     sum(requested_sessions) AS current_requested
-                  FROM naap.api_network_demand
+                  FROM naap.api_hourly_streaming_demand
                   WHERE window_start = (SELECT window_start FROM current_bucket)
                     AND pipeline_id != ''
                   GROUP BY pipeline_id
@@ -866,7 +874,7 @@ groups:
                     pipeline_id,
                     window_start,
                     sum(requested_sessions) AS hourly_requested
-                  FROM naap.api_network_demand
+                  FROM naap.api_hourly_streaming_demand
                   WHERE window_start >= (SELECT window_start FROM current_bucket) - INTERVAL 24 HOUR
                     AND window_start < (SELECT window_start FROM current_bucket)
                     AND pipeline_id != ''

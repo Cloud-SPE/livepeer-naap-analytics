@@ -4,6 +4,11 @@ set -euo pipefail
 # Pass-through mode: if args are given, run dbt directly.
 # Used by: docker compose run --rm warehouse run|test|...
 if [ $# -gt 0 ]; then
+    if [ "$1" = "seed-run" ]; then
+        shift
+        dbt seed "$@"
+        exec dbt run "$@"
+    fi
     exec dbt "$@"
 fi
 
@@ -13,6 +18,8 @@ fi
 AUTO_RUN="${DBT_AUTO_RUN_ON_START:-true}"
 
 if [ "${AUTO_RUN}" = "true" ]; then
+    echo "[dbt-tooling] Running initial dbt seed..."
+    dbt seed
     echo "[dbt-tooling] Running initial dbt run..."
     dbt run
     echo "[dbt-tooling] Running dbt compile for canonical refresh artifacts..."

@@ -422,7 +422,7 @@ func (h *harness) waitForWarehouseReady(t *testing.T) {
 		"stg_ai_stream_status",
 		"stg_ai_stream_events",
 		"canonical_capability_snapshots",
-		"canonical_capability_hardware_inventory",
+		"canonical_capability_hardware_current",
 		"canonical_latest_orchestrator_pipeline_inventory_agg",
 		"canonical_session_attribution_latest",
 		"canonical_session_current",

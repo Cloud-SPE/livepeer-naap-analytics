@@ -34,6 +34,8 @@ make warehouse-run
 make rebuild-from-retained-raw
 make test-validation-clean
 make bootstrap-extract
+scripts/export_retained_raw.sh .local/raw-export/<snapshot>
+scripts/import_retained_raw.sh .local/raw-export/<snapshot>
 ```
 
 `make up` does not start the optional long-lived `warehouse` tooling container or any validation-only services. Those stay behind dedicated Compose profiles so the default runtime only includes the always-on system components plus a one-shot `warehouse-init` publication step.
@@ -297,6 +299,6 @@ Recommended SQL spot checks:
 
 ```sql
 SELECT count() FROM naap.canonical_session_current;
-SELECT count() FROM naap.api_network_demand_by_org;
-SELECT count() FROM naap.api_active_stream_state WHERE last_seen > now() - INTERVAL 120 SECOND;
+SELECT count() FROM naap.api_hourly_streaming_demand;
+SELECT count() FROM naap.api_current_active_stream_state WHERE last_seen > now() - INTERVAL 120 SECOND;
 ```

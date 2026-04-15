@@ -141,9 +141,9 @@ ch-smoke:
 	clickhouse-client --query "SELECT count() AS n, event_type, org FROM naap.accepted_raw_events GROUP BY event_type, org ORDER BY n DESC"
 	@echo "=== Orch state rows ==="
 	clickhouse-client --query "SELECT count() FROM naap.agg_orch_state FINAL"
-	@echo "=== Stream hourly rows ==="
-	clickhouse-client --query "SELECT sum(requested_sessions), sum(startup_success_sessions), sum(no_orch_sessions) FROM naap.api_stream_hourly"
-	@echo "=== Payment hourly rows ==="
+	@echo "=== Streaming demand hourly rows ==="
+	clickhouse-client --query "SELECT sum(requested_sessions), sum(startup_success_sessions), sum(no_orch_sessions) FROM naap.api_hourly_streaming_demand"
+	@echo "=== Payment aggregate rows ==="
 	clickhouse-client --query "SELECT count(), sum(total_wei) FROM naap.agg_payment_hourly"
 
 # Interactive ClickHouse client.

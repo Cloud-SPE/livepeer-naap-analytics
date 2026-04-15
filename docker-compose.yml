@@ -204,7 +204,7 @@ services:
     volumes:
       - ./warehouse:/app/warehouse
     working_dir: /app/warehouse
-    command: ["run"]
+    command: ["seed-run"]
     restart: "no"
 
   validation-go:

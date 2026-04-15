@@ -48,7 +48,7 @@ Impact:
 Robust fix:
 
 - add an additive `output_failed_sessions` support field to
-  `api_sla_compliance_inputs_by_org_store`
+  `canonical_streaming_sla_input_hourly_store`
 - compute that field with union semantics:
   `loading_only_session = 1 OR zero_output_fps_session = 1`
 - compute `output_viability_rate` only from `output_failed_sessions`
@@ -146,9 +146,9 @@ until proven on HEAD.
 
 2. Validation test: defensive coverage clamp
 
-- Insert a synthetic `api_sla_compliance_inputs_by_org_store` row with impossible
+- Insert a synthetic `canonical_streaming_sla_input_hourly_store` row with impossible
   `health_signal_count > health_expected_signal_count`
-- Assert both `api_sla_compliance_by_org` and `api_sla_compliance` cap
+- Assert `api_hourly_streaming_sla` caps
   coverage to `1.0` and keep `sla_score <= 100`
 - This is intentionally a store-level invariant test because the goal is to
   defend downstream consumers even when upstream backfill/replay logic is wrong
@@ -157,7 +157,7 @@ until proven on HEAD.
 
 - Raw scenario: same org, same window, same GPU slice, two sessions with highly
   imbalanced status-sample counts and FPS values
-- Assert `api_gpu_metrics_by_org.avg_output_fps` equals direct recomputation
+- Assert `api_hourly_streaming_gpu_metrics.avg_output_fps` equals direct recomputation
   from lower-grain evidence, not an average of session-hour averages
 - Extend the same pattern to latency fields when the synthetic inputs are easy
   to express
@@ -167,9 +167,8 @@ until proven on HEAD.
 - Raw scenario: two synthetic orgs share the same public grain but have
   materially different support counts
 - Assert:
-  - `api_network_demand.avg_output_fps`
-  - `api_gpu_network_demand.avg_output_fps`
-  - `api_gpu_metrics.avg_output_fps`
+  - `api_hourly_streaming_demand.avg_output_fps`
+  - `api_hourly_streaming_gpu_metrics.avg_output_fps`
   match independent recomputation from lower-grain additive evidence
 
 5. Static CI guard
@@ -189,21 +188,21 @@ until proven on HEAD.
 
 ### Phase 1: Add Safe Support Columns
 
-`api_sla_compliance_inputs_by_org_store`
+`canonical_streaming_sla_input_hourly_store`
 
 - add `output_failed_sessions`
 
-`api_network_demand_by_org_store`
+`canonical_streaming_demand_hourly_store`
 
 - add `status_samples`
 - add `output_fps_sum`
 
-`api_gpu_network_demand_by_org_store`
+retired GPU-demand compatibility store
 
 - add `status_samples`
 - add `output_fps_sum`
 
-`api_gpu_metrics_by_org_store`
+`canonical_streaming_gpu_metrics_hourly_store`
 
 - add `output_fps_sum`
 - add `health_signal_count`

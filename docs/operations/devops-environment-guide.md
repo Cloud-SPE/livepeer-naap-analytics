@@ -118,7 +118,7 @@ SELECT count() FROM naap.accepted_raw_events
 WHERE ingested_at > now() - INTERVAL 5 MINUTE;
 
 -- Active sessions visible to the API
-SELECT count() FROM naap.api_active_stream_state
+SELECT count() FROM naap.api_current_active_stream_state
 WHERE last_seen > now() - INTERVAL 120 SECOND;
 
 -- Consumer group offsets (run in ClickHouse)

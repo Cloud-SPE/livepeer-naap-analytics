@@ -357,9 +357,9 @@ func TestAffectedDashboardPanelsDeduplicateOrchestratorStateLookups(t *testing.T
 	}
 
 	unsafeSnippets := []string{
-		"WITH ens AS (SELECT orch_address AS addr, name AS ens_name FROM naap.api_latest_orchestrator_state)",
-		"WITH ens AS (SELECT orch_address AS addr, name AS ens_name FROM naap.api_latest_orchestrator_state),",
-		"LEFT JOIN naap.api_latest_orchestrator_state o ON o.orch_address = so.orch_address",
+		"WITH ens AS (SELECT orch_address AS addr, name AS ens_name FROM naap.api_current_orchestrator)",
+		"WITH ens AS (SELECT orch_address AS addr, name AS ens_name FROM naap.api_current_orchestrator),",
+		"LEFT JOIN naap.api_current_orchestrator o ON o.orch_address = so.orch_address",
 	}
 
 	for _, path := range paths {
@@ -455,7 +455,7 @@ func TestAffectedDashboardPanelsUseCollisionAwareLabelsAndStreamingSLA(t *testin
 				switch panel.Title {
 				case "Top 10 Orchestrators by SLA Score (Bar Chart)":
 					slaChartCount++
-					if !strings.Contains(sql, "FROM naap.api_sla_compliance") {
+					if !strings.Contains(sql, "FROM naap.api_hourly_streaming_sla") {
 						t.Fatalf("panel %q in %s should read from streaming SLA source", panel.Title, path)
 					}
 					if strings.Contains(sql, "api_requests_sla") {
@@ -468,7 +468,7 @@ func TestAffectedDashboardPanelsUseCollisionAwareLabelsAndStreamingSLA(t *testin
 						t.Fatalf("panel %q in %s should filter SLA rows through eligible orchestrators", panel.Title, path)
 					}
 				case "Top Orchestrators (24h: Streams, FPS, Latency)":
-					if !strings.Contains(sql, "FROM naap.api_sla_compliance") {
+					if !strings.Contains(sql, "FROM naap.api_hourly_streaming_sla") {
 						t.Fatalf("panel %q in %s should join streaming SLA data", panel.Title, path)
 					}
 					if strings.Contains(sql, "api_requests_sla") {

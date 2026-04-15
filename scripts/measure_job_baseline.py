@@ -41,6 +41,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", default=".local/baselines")
     parser.add_argument("--window-seconds", type=int, default=60)
     parser.add_argument("--session-window-minutes", type=int, default=7 * 24 * 60)
+    parser.add_argument("--job-window-minutes", type=int, default=24 * 60)
     parser.add_argument("--status-window-minutes", type=int, default=15)
     parser.add_argument(
         "--kafka-ui-url", default=dotenv_first("KAFKA_UI_URL", fallback=None)
@@ -774,7 +775,7 @@ def sample_sla_cohorts(ch: ClickHouseHTTPClient, days: int = 7, max_cohorts: int
                 ptff_score,
                 e2e_score,
                 sla_score
-            FROM naap.api_sla_compliance
+            FROM naap.api_hourly_streaming_sla
             WHERE window_start >= now() - INTERVAL {days} DAY
               AND requested_sessions > 0
               AND ifNull(model_id, '') != ''
@@ -1172,10 +1173,12 @@ def build_markdown_report(
                 "/v1/dashboard/kpi",
                 "/v1/dashboard/orchestrators",
                 "/v1/net/orchestrators",
-                "/v1/sla/compliance",
-                "/v1/network/demand",
-                "/v1/gpu/network-demand",
-                "/v1/gpu/metrics",
+                "/v1/dashboard/pipeline-catalog",
+                "/v1/dashboard/gpu-capacity",
+                "/v1/dashboard/job-feed",
+                "/v1/discover/orchestrators",
+                "/v1/net/orchestrators",
+                "/v1/streaming/models",
             )
         )
     ]
@@ -1185,10 +1188,7 @@ def build_markdown_report(
         if any(
             token in row.get("name", "")
             for token in (
-                "/v1/ai-batch/jobs",
-                "/v1/byoc/jobs",
-                "/v1/jobs/demand",
-                "/v1/jobs/sla",
+                "/v1/requests/models",
             )
         )
     ]
@@ -1502,14 +1502,12 @@ def main() -> None:
         ("GET /v1/dashboard/kpi", "/v1/dashboard/kpi", "default"),
         ("GET /v1/dashboard/orchestrators", "/v1/dashboard/orchestrators", "default"),
         ("GET /v1/net/orchestrators?limit=10", "/v1/net/orchestrators?limit=10", "default"),
-        ("GET /v1/sla/compliance?limit=10", "/v1/sla/compliance?limit=10", "default"),
-        ("GET /v1/network/demand?limit=10", "/v1/network/demand?limit=10", "default"),
-        ("GET /v1/gpu/network-demand?limit=10", "/v1/gpu/network-demand?limit=10", "default"),
-        ("GET /v1/gpu/metrics?limit=10", "/v1/gpu/metrics?limit=10", "default"),
-        ("GET /v1/ai-batch/jobs?limit=10", "/v1/ai-batch/jobs?limit=10", "default"),
-        ("GET /v1/byoc/jobs?limit=10", "/v1/byoc/jobs?limit=10", "default"),
-        ("GET /v1/jobs/demand?limit=10", "/v1/jobs/demand?limit=10", "default"),
-        ("GET /v1/jobs/sla?limit=10", "/v1/jobs/sla?limit=10", "default"),
+        ("GET /v1/dashboard/pipeline-catalog", "/v1/dashboard/pipeline-catalog", "default"),
+        ("GET /v1/dashboard/gpu-capacity", "/v1/dashboard/gpu-capacity", "default"),
+        ("GET /v1/dashboard/job-feed", "/v1/dashboard/job-feed", "default"),
+        ("GET /v1/discover/orchestrators", "/v1/discover/orchestrators", "default"),
+        ("GET /v1/streaming/models", "/v1/streaming/models", "default"),
+        ("GET /v1/requests/models", "/v1/requests/models", "default"),
     ]
     api_probes: list[dict[str, Any]] = []
     for name, path, window in api_probe_specs:

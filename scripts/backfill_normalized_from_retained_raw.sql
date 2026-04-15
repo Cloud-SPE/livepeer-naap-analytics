@@ -5,33 +5,33 @@
 -- you want ClickHouse to repopulate the supported downstream spine from
 -- retained raw history without replaying Kafka.
 
-TRUNCATE TABLE naap.agg_discovery_latency_hourly;
-TRUNCATE TABLE naap.agg_fps_hourly;
-TRUNCATE TABLE naap.agg_orch_reliability_hourly;
-TRUNCATE TABLE naap.agg_orch_state;
-TRUNCATE TABLE naap.agg_payment_hourly;
-TRUNCATE TABLE naap.agg_stream_hourly;
-TRUNCATE TABLE naap.agg_stream_state;
-TRUNCATE TABLE naap.agg_stream_status_samples;
-TRUNCATE TABLE naap.agg_webrtc_hourly;
-TRUNCATE TABLE naap.typed_stream_ingest_metrics;
+TRUNCATE TABLE IF EXISTS naap.agg_discovery_latency_hourly;
+TRUNCATE TABLE IF EXISTS naap.agg_fps_hourly;
+TRUNCATE TABLE IF EXISTS naap.agg_orch_reliability_hourly;
+TRUNCATE TABLE IF EXISTS naap.agg_orch_state;
+TRUNCATE TABLE IF EXISTS naap.agg_payment_hourly;
+TRUNCATE TABLE IF EXISTS naap.agg_stream_hourly;
+TRUNCATE TABLE IF EXISTS naap.agg_stream_state;
+TRUNCATE TABLE IF EXISTS naap.agg_stream_status_samples;
+TRUNCATE TABLE IF EXISTS naap.agg_webrtc_hourly;
+TRUNCATE TABLE IF EXISTS naap.typed_stream_ingest_metrics;
 
-TRUNCATE TABLE naap.normalized_ai_batch_job;
-TRUNCATE TABLE naap.normalized_ai_llm_request;
-TRUNCATE TABLE naap.normalized_ai_stream_events;
-TRUNCATE TABLE naap.normalized_ai_stream_status;
-TRUNCATE TABLE naap.normalized_byoc_auth;
-TRUNCATE TABLE naap.normalized_byoc_job;
-TRUNCATE TABLE naap.normalized_byoc_payment;
-TRUNCATE TABLE naap.normalized_network_capabilities;
-TRUNCATE TABLE naap.normalized_session_attribution_input_latest_store;
-TRUNCATE TABLE naap.normalized_session_event_rollup_latest;
-TRUNCATE TABLE naap.normalized_session_orchestrator_observation_rollup_latest;
-TRUNCATE TABLE naap.normalized_session_status_hour_rollup;
-TRUNCATE TABLE naap.normalized_session_status_rollup_latest;
-TRUNCATE TABLE naap.normalized_session_trace_rollup_latest;
-TRUNCATE TABLE naap.normalized_stream_trace;
-TRUNCATE TABLE naap.normalized_worker_lifecycle;
+TRUNCATE TABLE IF EXISTS naap.normalized_ai_batch_job;
+TRUNCATE TABLE IF EXISTS naap.normalized_ai_llm_request;
+TRUNCATE TABLE IF EXISTS naap.normalized_ai_stream_events;
+TRUNCATE TABLE IF EXISTS naap.normalized_ai_stream_status;
+TRUNCATE TABLE IF EXISTS naap.normalized_byoc_auth;
+TRUNCATE TABLE IF EXISTS naap.normalized_byoc_job;
+TRUNCATE TABLE IF EXISTS naap.normalized_byoc_payment;
+TRUNCATE TABLE IF EXISTS naap.normalized_network_capabilities;
+TRUNCATE TABLE IF EXISTS naap.normalized_session_attribution_input_latest_store;
+TRUNCATE TABLE IF EXISTS naap.normalized_session_event_rollup_latest;
+TRUNCATE TABLE IF EXISTS naap.normalized_session_orchestrator_observation_rollup_latest;
+TRUNCATE TABLE IF EXISTS naap.normalized_session_status_hour_rollup;
+TRUNCATE TABLE IF EXISTS naap.normalized_session_status_rollup_latest;
+TRUNCATE TABLE IF EXISTS naap.normalized_session_trace_rollup_latest;
+TRUNCATE TABLE IF EXISTS naap.normalized_stream_trace;
+TRUNCATE TABLE IF EXISTS naap.normalized_worker_lifecycle;
 
 INSERT INTO naap.normalized_ai_stream_events
 SELECT
@@ -406,29 +406,6 @@ SELECT
     toUInt64(JSONExtractString(data, 'stats', 'conn_quality') = 'good') AS quality_good,
     toUInt64(JSONExtractString(data, 'stats', 'conn_quality') = 'fair') AS quality_fair,
     toUInt64(JSONExtractString(data, 'stats', 'conn_quality') = 'poor') AS quality_poor
-FROM naap.accepted_raw_events
-WHERE event_type = 'stream_ingest_metrics';
-
-INSERT INTO naap.typed_stream_ingest_metrics
-WITH
-    JSONExtractArrayRaw(data, 'stats', 'track_stats') AS tracks,
-    arrayFirst(x -> JSONExtractString(x, 'type') = 'video', tracks) AS video_track,
-    arrayFirst(x -> JSONExtractString(x, 'type') = 'audio', tracks) AS audio_track
-SELECT
-    event_id,
-    event_ts,
-    org,
-    gateway,
-    JSONExtractString(data, 'stream_id') AS stream_id,
-    JSONExtractString(data, 'request_id') AS request_id,
-    JSONExtractString(data, 'stats', 'conn_quality') AS conn_quality,
-    if(video_track != '', JSONExtractFloat(video_track, 'jitter'), 0.0) AS video_jitter_ms,
-    if(video_track != '', toUInt64OrDefault(toString(JSONExtractUInt(video_track, 'packets_lost'))), 0) AS video_packets_lost,
-    if(video_track != '', toUInt64OrDefault(toString(JSONExtractUInt(video_track, 'packets_received'))), 0) AS video_packets_received,
-    if(audio_track != '', JSONExtractFloat(audio_track, 'jitter'), 0.0) AS audio_jitter_ms,
-    if(audio_track != '', toUInt64OrDefault(toString(JSONExtractUInt(audio_track, 'packets_lost'))), 0) AS audio_packets_lost,
-    if(audio_track != '', toUInt64OrDefault(toString(JSONExtractUInt(audio_track, 'packets_received'))), 0) AS audio_packets_received,
-    data
 FROM naap.accepted_raw_events
 WHERE event_type = 'stream_ingest_metrics';
 

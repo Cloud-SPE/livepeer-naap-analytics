@@ -218,9 +218,9 @@ def build_snapshot(args: Args) -> dict[str, Any]:
             (SELECT count() FROM canonical_session_current_store) AS session_current_store_rows,
             (SELECT count() FROM canonical_session_demand_input_current FINAL) AS demand_input_rows,
             (SELECT count() FROM canonical_status_hours_store) AS status_hours_rows,
-            (SELECT count() FROM api_network_demand_by_org_store) AS demand_store_rows,
-            (SELECT count() FROM api_sla_compliance_by_org_store) AS sla_store_rows,
-            (SELECT count() FROM api_gpu_metrics_by_org_store) AS gpu_metrics_store_rows
+            (SELECT count() FROM canonical_streaming_demand_hourly_store) AS demand_store_rows,
+            (SELECT count() FROM canonical_streaming_sla_hourly_store) AS sla_store_rows,
+            (SELECT count() FROM canonical_streaming_gpu_metrics_hourly_store) AS gpu_metrics_store_rows
         """,
     )
 
@@ -243,11 +243,11 @@ def build_snapshot(args: Args) -> dict[str, Any]:
         UNION ALL
         SELECT 'canonical_session_demand_input_current' AS table, count() AS rows FROM canonical_session_demand_input_current FINAL
         UNION ALL
-        SELECT 'api_network_demand_by_org_store' AS table, count() AS rows FROM api_network_demand_by_org_store
+        SELECT 'canonical_streaming_demand_hourly_store' AS table, count() AS rows FROM canonical_streaming_demand_hourly_store
         UNION ALL
-        SELECT 'api_sla_compliance_by_org_store' AS table, count() AS rows FROM api_sla_compliance_by_org_store
+        SELECT 'canonical_streaming_sla_hourly_store' AS table, count() AS rows FROM canonical_streaming_sla_hourly_store
         UNION ALL
-        SELECT 'api_gpu_metrics_by_org_store' AS table, count() AS rows FROM api_gpu_metrics_by_org_store
+        SELECT 'canonical_streaming_gpu_metrics_hourly_store' AS table, count() AS rows FROM canonical_streaming_gpu_metrics_hourly_store
         ORDER BY table
         """,
     )
@@ -282,7 +282,7 @@ def build_snapshot(args: Args) -> dict[str, Any]:
             countIf(notEmpty(ifNull(model_id, ''))) AS rows_with_model,
             countIf(notEmpty(ifNull(gpu_id, ''))) AS rows_with_gpu,
             sum(known_sessions_count) AS known_sessions_total
-        FROM api_gpu_metrics_by_org
+        FROM api_hourly_streaming_gpu_metrics
         """,
     )
 
@@ -295,7 +295,7 @@ def build_snapshot(args: Args) -> dict[str, Any]:
             countIf(notEmpty(ifNull(model_id, ''))) AS rows_with_model,
             countIf(notEmpty(ifNull(gpu_id, ''))) AS rows_with_gpu,
             sum(known_sessions_count) AS known_sessions_total
-        FROM api_sla_compliance_by_org
+        FROM api_hourly_streaming_sla
         """,
     )
 
@@ -315,7 +315,7 @@ def build_snapshot(args: Args) -> dict[str, Any]:
            OR query LIKE '%INSERT INTO naap.canonical_status_hours_store%'
            OR query LIKE '%INSERT INTO naap.canonical_status_samples_recent_store%'
            OR query LIKE '%INSERT INTO naap.canonical_active_stream_state_latest_store%'
-           OR query LIKE '%INSERT INTO naap.api_%_store%'
+           OR query LIKE '%INSERT INTO naap.canonical_%_store%'
         ORDER BY elapsed DESC
         LIMIT 5
         """,
@@ -343,10 +343,9 @@ def build_snapshot(args: Args) -> dict[str, Any]:
                     query LIKE '%INSERT INTO naap.canonical_status_hours_store%', 'canonical_status_hours_store',
                     query LIKE '%INSERT INTO naap.canonical_status_samples_recent_store%', 'canonical_status_samples_recent_store',
                     query LIKE '%INSERT INTO naap.canonical_active_stream_state_latest_store%', 'canonical_active_stream_state_latest_store',
-                    query LIKE '%INSERT INTO naap.api_network_demand_by_org_store%', 'api_network_demand_by_org_store',
-                    query LIKE '%INSERT INTO naap.api_gpu_network_demand_by_org_store%', 'api_gpu_network_demand_by_org_store',
-                    query LIKE '%INSERT INTO naap.api_sla_compliance_by_org_store%', 'api_sla_compliance_by_org_store',
-                    query LIKE '%INSERT INTO naap.api_gpu_metrics_by_org_store%', 'api_gpu_metrics_by_org_store',
+                    query LIKE '%INSERT INTO naap.canonical_streaming_demand_hourly_store%', 'canonical_streaming_demand_hourly_store',
+                    query LIKE '%INSERT INTO naap.canonical_streaming_sla_hourly_store%', 'canonical_streaming_sla_hourly_store',
+                    query LIKE '%INSERT INTO naap.canonical_streaming_gpu_metrics_hourly_store%', 'canonical_streaming_gpu_metrics_hourly_store',
                     'other'
                 ) AS target,
                 query_duration_ms,
@@ -362,10 +361,9 @@ def build_snapshot(args: Args) -> dict[str, Any]:
                  OR query LIKE '%INSERT INTO naap.canonical_status_hours_store%'
                  OR query LIKE '%INSERT INTO naap.canonical_status_samples_recent_store%'
                  OR query LIKE '%INSERT INTO naap.canonical_active_stream_state_latest_store%'
-                 OR query LIKE '%INSERT INTO naap.api_network_demand_by_org_store%'
-                 OR query LIKE '%INSERT INTO naap.api_gpu_network_demand_by_org_store%'
-                 OR query LIKE '%INSERT INTO naap.api_sla_compliance_by_org_store%'
-                 OR query LIKE '%INSERT INTO naap.api_gpu_metrics_by_org_store%'
+                 OR query LIKE '%INSERT INTO naap.canonical_streaming_demand_hourly_store%'
+                 OR query LIKE '%INSERT INTO naap.canonical_streaming_sla_hourly_store%'
+                 OR query LIKE '%INSERT INTO naap.canonical_streaming_gpu_metrics_hourly_store%'
               )
         )
         GROUP BY target

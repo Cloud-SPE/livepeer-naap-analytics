@@ -22,13 +22,10 @@ The documented `raw_*`, `normalized_*`, `canonical_*`, `operational_*`, `api_bas
 | `agg_stream_state` | `ReplacingMergeTree` |
 | `agg_stream_status_samples` | `MergeTree` |
 | `agg_webrtc_hourly` | `SummingMergeTree` |
-| `api_gpu_metrics_by_org_store` | `MergeTree` |
-| `api_gpu_network_demand_by_org_store` | `MergeTree` |
-| `api_network_demand_by_org_store` | `MergeTree` |
-| `api_payment_hourly_store` | `MergeTree` |
-| `api_sla_compliance_inputs_by_org_store` | `MergeTree` |
-| `api_sla_compliance_by_org_store` | `MergeTree` |
-| `api_sla_compliance_store` | `MergeTree` |
+| `canonical_streaming_demand_hourly_store` | `MergeTree` |
+| `canonical_streaming_gpu_metrics_hourly_store` | `MergeTree` |
+| `canonical_streaming_sla_hourly_store` | `MergeTree` |
+| `canonical_streaming_sla_input_hourly_store` | `MergeTree` |
 | `canonical_active_stream_state_latest_store` | `MergeTree` |
 | `canonical_ai_batch_job_store` | `ReplacingMergeTree` |
 | `canonical_byoc_job_store` | `ReplacingMergeTree` |

@@ -32,22 +32,6 @@ type perCapabilityModel struct {
 	Capacity int  `json:"capacity"`
 }
 
-// capabilityNumberToPipeline maps orchestrator capability numbers to canonical
-// pipeline names. Capability 37 (byoc) is excluded — BYOC orchestrators use
-// their hardware[].pipeline field directly.
-var capabilityNumberToPipeline = map[string]string{
-	"27": "text-to-image",
-	"28": "image-to-image",
-	"29": "image-to-video",
-	"30": "upscale",
-	"31": "audio-to-text",
-	"32": "segment-anything-2",
-	"33": "llm",
-	"34": "image-to-text",
-	"35": "live-video-to-video",
-	"36": "text-to-speech",
-}
-
 type capabilityHardwareEntry struct {
 	Pipeline string                `json:"pipeline"`
 	ModelID  string                `json:"model_id"`
@@ -240,9 +224,10 @@ func buildCapabilityIntervalTemplates(raw string) []capabilityIntervalTemplate {
 		return out
 	}
 
-	// Path 2: no hardware but PerCapability present (AI batch orchestrators).
-	// Creates hardware-less intervals with pipeline+model derived from capability
-	// number mapping. No GPU data is available in this case.
+	// Path 2: no hardware but PerCapability present (built-in request
+	// orchestrators). Creates hardware-less intervals with pipeline+model derived
+	// from the repo-owned capability catalog. Non-built-in ids, including BYOC 37,
+	// are intentionally skipped because BYOC offers must come from hardware[].
 	if payload.Capabilities != nil && payload.Capabilities.Constraints != nil &&
 		len(payload.Capabilities.Constraints.PerCapability) > 0 {
 		return buildPerCapabilityTemplates(payload.Capabilities.Constraints.PerCapability)
@@ -270,12 +255,13 @@ func buildPerCapabilityTemplates(perCap map[string]perCapabilityEntry) []capabil
 	out := make([]capabilityIntervalTemplate, 0, len(capNums))
 	seen := make(map[string]struct{})
 	for _, capNum := range capNums {
-		pipeline, ok := capabilityNumberToPipeline[capNum]
+		catalogEntry, ok := builtinCapabilityByNumber(capNum)
 		if !ok {
 			continue
 		}
-		entry := perCap[capNum]
-		models := pickAllModels(entry.Models)
+		pipeline := catalogEntry.CanonicalPipeline
+		perCapEntry := perCap[capNum]
+		models := pickAllModels(perCapEntry.Models)
 		for _, model := range models {
 			key := pipeline + "\x00" + model
 			if _, dup := seen[key]; dup {

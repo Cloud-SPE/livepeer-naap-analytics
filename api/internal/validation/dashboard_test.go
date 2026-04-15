@@ -72,7 +72,7 @@ func TestRuleServing001_DashboardOrchestratorsUsesLatestHourlyContractedSLA(t *t
 		t.Fatalf("GetDashboardOrchestrators: %v", err)
 	}
 
-	expectedScore := h.queryFloat(t, `SELECT sla_score FROM naap.api_sla_compliance WHERE window_start = ? AND orchestrator_address = '0xdashboard-sla'`, latestWindow)
+	expectedScore := h.queryFloat(t, `SELECT sla_score FROM naap.api_hourly_streaming_sla WHERE window_start = ? AND orchestrator_address = '0xdashboard-sla'`, latestWindow)
 	expectedWindow := latestWindow.UTC().Format(time.RFC3339)
 
 	for _, row := range rows {

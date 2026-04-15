@@ -10,7 +10,7 @@
 -- 1.27 M rows — a ~97 % reduction in aggregation work.
 --
 -- Semantics: canonical_active_stream_state_latest is consumed exclusively by
--- api_active_stream_state, which already applies WHERE completed = 0.  Restricting
+-- the current active-stream serving view, now published as api_current_active_stream_state, which already applies WHERE completed = 0.  Restricting
 -- the dedup to completed = 0 rows does not change observable query results; it only
 -- prevents the CTE from touching stale completed-session history.
 --

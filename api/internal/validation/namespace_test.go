@@ -70,11 +70,11 @@ func TestTierContract_CanonicalAndAPIViewsMirrorServingSurfaces(t *testing.T) {
 	if got := h.queryString(t, `SELECT attribution_status FROM naap.canonical_session_current WHERE canonical_session_key = ?`, key); got != "resolved" {
 		t.Fatalf("canonical_session_current attribution_status = %q, want resolved", got)
 	}
-	if got := h.queryInt(t, `SELECT count() FROM naap.api_status_samples WHERE canonical_session_key = ?`, key); got != 1 {
-		t.Fatalf("api_status_samples count = %d, want 1", got)
+	if got := h.queryInt(t, `SELECT count() FROM naap.canonical_status_samples_recent WHERE canonical_session_key = ?`, key); got != 1 {
+		t.Fatalf("canonical_status_samples_recent count = %d, want 1", got)
 	}
-	if got := h.queryInt(t, `SELECT count() FROM naap.api_active_stream_state WHERE org = ? AND stream_id = ? AND request_id = ?`, h.org, streamID, requestID); got != 1 {
-		t.Fatalf("api_active_stream_state count = %d, want 1", got)
+	if got := h.queryInt(t, `SELECT count() FROM naap.api_current_active_stream_state WHERE org = ? AND stream_id = ? AND request_id = ?`, h.org, streamID, requestID); got != 1 {
+		t.Fatalf("api_current_active_stream_state count = %d, want 1", got)
 	}
 }
 
@@ -106,8 +106,8 @@ func TestTierContract_TailFilteringRemainsVisibleThroughAPISurfaces(t *testing.T
 	if got := h.queryInt(t, `SELECT toUInt64(is_terminal_tail_artifact) FROM naap.canonical_status_hours WHERE canonical_session_key = ? AND hour = ?`, key, baseHour.Add(time.Hour)); got != 1 {
 		t.Fatalf("canonical_status_hours terminal tail flag = %d, want 1", got)
 	}
-	if got := h.queryInt(t, `SELECT count() FROM naap.api_orchestrator_reliability_hourly WHERE org = ?`, h.org); got != 1 {
-		t.Fatalf("api_orchestrator_reliability_hourly count = %d, want 1", got)
+	if got := h.queryInt(t, `SELECT count() FROM naap.api_hourly_streaming_sla WHERE org = ?`, h.org); got != 1 {
+		t.Fatalf("api_hourly_streaming_sla count = %d, want 1", got)
 	}
 }
 
@@ -133,10 +133,10 @@ func TestTierContract_APIActiveStreamStateExcludesBlankStreamIDs(t *testing.T) {
 		t.Fatalf("insert canonical_active_stream_state_latest_store: %v", err)
 	}
 
-	if got := h.queryInt(t, `SELECT count() FROM naap.api_active_stream_state WHERE org = ?`, h.org); got != 1 {
-		t.Fatalf("api_active_stream_state count = %d, want 1", got)
+	if got := h.queryInt(t, `SELECT count() FROM naap.api_current_active_stream_state WHERE org = ?`, h.org); got != 1 {
+		t.Fatalf("api_current_active_stream_state count = %d, want 1", got)
 	}
-	if got := h.queryInt(t, `SELECT count() FROM naap.api_active_stream_state WHERE org = ? AND stream_id = ''`, h.org); got != 0 {
-		t.Fatalf("api_active_stream_state blank stream count = %d, want 0", got)
+	if got := h.queryInt(t, `SELECT count() FROM naap.api_current_active_stream_state WHERE org = ? AND stream_id = ''`, h.org); got != 0 {
+		t.Fatalf("api_current_active_stream_state blank stream count = %d, want 0", got)
 	}
 }

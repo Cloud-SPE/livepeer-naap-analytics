@@ -29,8 +29,8 @@ layers rather than request-time scans of raw events:
 
 1. `ai_stream_status` contributes status-derived performance signals
 2. [`../../warehouse/models/canonical/canonical_status_hours.sql`](../../warehouse/models/canonical/canonical_status_hours.sql) materializes canonical hourly session status
-3. [`../../warehouse/models/api/api_fps_hourly.sql`](../../warehouse/models/api/api_fps_hourly.sql) publishes hourly FPS aggregates and excludes terminal-tail artifacts
-4. current capability inventory and warm state are joined through `api_gpu_inventory`
+3. [`../../warehouse/models/api/api_hourly_streaming_sla.sql`](../../warehouse/models/api/api_hourly_streaming_sla.sql) publishes hourly streaming quality aggregates and excludes terminal-tail artifacts
+4. current capability inventory and warm state are joined through `api_current_capability_hardware`
 5. [`../../api/internal/repo/clickhouse/streaming.go`](../../api/internal/repo/clickhouse/streaming.go) serves the final model-level rows
 
 ### Field semantics

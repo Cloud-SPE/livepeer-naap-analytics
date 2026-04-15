@@ -2689,25 +2689,13 @@ func (r *repo) publishServingRollups(ctx context.Context, runID string, slices [
 	if err := r.insertCanonicalActiveStreamState(ctx, runID, queryID); err != nil {
 		return err
 	}
-	// insertPaymentLinkRows must run before insertPaymentHourlyRollups so the
-	// store is populated with current-window rows before the hourly aggregation
-	// reads from it.
 	if err := r.insertPaymentLinkRows(ctx, runID, queryID); err != nil {
-		return err
-	}
-	if err := r.insertPaymentHourlyRollups(ctx, runID, queryID); err != nil {
 		return err
 	}
 	if err := r.insertNetworkDemandRollups(ctx, runID, queryID); err != nil {
 		return err
 	}
-	if err := r.insertGPUNetworkDemandRollups(ctx, runID, queryID); err != nil {
-		return err
-	}
 	if err := r.insertSLAComplianceRollups(ctx, runID, queryID); err != nil {
-		return err
-	}
-	if err := r.insertFinalSLAComplianceByOrgRollups(ctx, runID, queryID); err != nil {
 		return err
 	}
 	if err := r.insertFinalSLAComplianceRollups(ctx, runID, queryID); err != nil {
@@ -2914,47 +2902,9 @@ func (r *repo) insertPaymentLinkRows(ctx context.Context, runID, queryID string)
 	`, runID, r.cfg.ResolverVersion, queryID)
 }
 
-// insertPaymentHourlyRollups aggregates canonical_payment_links_store rows for
-// the active window slices into api_payment_hourly_store.  Reads from the store
-// (bounded, indexed) rather than the canonical_payment_links view (unbounded
-// full-scan with NOT-IN anti-joins) so it completes in milliseconds.
-func (r *repo) insertPaymentHourlyRollups(ctx context.Context, runID, queryID string) error {
-	return r.conn.Exec(ctx, `
-		INSERT INTO naap.api_payment_hourly_store
-		(
-			hour, org, pipeline, orch_address, total_wei, event_count,
-			avg_price_wei_per_pixel, refresh_run_id, artifact_checksum, refreshed_at
-		)
-		SELECT
-			toStartOfHour(p.event_ts)                                              AS hour,
-			p.org                                                                  AS org,
-			coalesce(nullIf(fs.canonical_pipeline, ''), p.pipeline_hint)          AS pipeline,
-			p.recipient_address                                                    AS orch_address,
-			sum(p.face_value_wei)                                                  AS total_wei,
-			count()                                                                AS event_count,
-			avg(p.price_wei_per_pixel)                                             AS avg_price_wei_per_pixel,
-			?,
-			?,
-			now64()
-		FROM naap.canonical_payment_links_store p FINAL
-		INNER JOIN naap.resolver_query_window_slices rs
-			ON  rs.query_id = ?
-			AND p.org = rs.org
-			AND toStartOfHour(p.event_ts) = rs.window_start
-		LEFT JOIN naap.canonical_session_current_store fs FINAL
-			ON  fs.canonical_session_key = p.canonical_session_key
-			AND isNotNull(p.canonical_session_key)
-		GROUP BY
-			hour,
-			p.org,
-			pipeline,
-			p.recipient_address
-	`, runID, r.cfg.ResolverVersion, queryID)
-}
-
 func (r *repo) insertNetworkDemandRollups(ctx context.Context, runID, queryID string) error {
 	return r.conn.Exec(ctx, `
-		INSERT INTO naap.api_network_demand_by_org_store
+		INSERT INTO naap.canonical_streaming_demand_hourly_store
 		(
 			window_start, org, gateway, region, pipeline_id, model_id, sessions_count,
 			avg_output_fps, output_fps_sum, status_samples, total_minutes, known_sessions_count, requested_sessions, startup_success_sessions,
@@ -3184,261 +3134,12 @@ func (r *repo) insertNetworkDemandRollups(ctx context.Context, runID, queryID st
 	`, queryID, queryID, runID, r.cfg.ResolverVersion)
 }
 
-func (r *repo) insertGPUNetworkDemandRollups(ctx context.Context, runID, queryID string) error {
-	return r.conn.Exec(ctx, `
-		INSERT INTO naap.api_gpu_network_demand_by_org_store
-		(
-			window_start, org, gateway, orchestrator_address, region, pipeline_id, model_id, gpu_id, gpu_identity_status,
-			sessions_count, avg_output_fps, output_fps_sum, status_samples, total_minutes, known_sessions_count, requested_sessions, startup_success_sessions,
-			no_orch_sessions, startup_excused_sessions, startup_failed_sessions, loading_only_sessions,
-			zero_output_fps_sessions, effective_failed_sessions, confirmed_swapped_sessions, inferred_swap_sessions,
-			total_swapped_sessions, sessions_ending_in_error, error_status_samples, health_signal_count,
-			health_expected_signal_count, health_signal_coverage_ratio, startup_success_rate,
-			excused_failure_rate, effective_success_rate, ticket_face_value_eth, refresh_run_id,
-			artifact_checksum, refreshed_at
-		)
-		WITH demand_sessions AS (
-			SELECT
-				d.canonical_session_key,
-				d.window_start,
-				d.org,
-				d.gateway,
-				d.region,
-				ifNull(cs.attributed_orch_address, '') AS orchestrator_address,
-				d.pipeline_id,
-				coalesce(d.model_id, nullIf(cs.canonical_model, '')) AS model_id,
-				cast(nullIf(cs.gpu_id, ''), 'Nullable(String)') AS gpu_id,
-				if(ifNull(cs.attributed_orch_address, '') != '' AND ifNull(cs.gpu_id, '') = '', 'hardware_unresolved', 'resolved') AS gpu_identity_status,
-				d.requested_seen,
-				d.selection_outcome,
-				d.startup_outcome,
-				d.excusal_reason,
-				d.loading_only_session,
-				d.zero_output_fps_session,
-				d.health_signal_count,
-				d.health_expected_signal_count,
-				d.swap_count,
-				d.error_seen,
-				d.status_error_sample_count,
-				d.total_minutes,
-				d.ticket_face_value_eth
-			FROM (
-				SELECT *
-				FROM naap.canonical_session_demand_input_current FINAL
-			) d
-			INNER JOIN naap.resolver_query_window_slices w
-				ON w.query_id = ? AND w.org = d.org AND w.window_start = d.window_start
-			LEFT JOIN naap.canonical_session_current cs
-				ON d.canonical_session_key = cs.canonical_session_key
-			WHERE ifNull(cs.attributed_orch_address, '') != ''
-		),
-		status_events AS (
-			SELECT
-				s.event_id AS event_id,
-				max(s.event_ts) AS event_ts,
-				argMax(s.org, s.event_ts) AS org,
-				argMax(s.gateway, s.event_ts) AS gateway,
-				argMax(s.canonical_session_key, s.event_ts) AS canonical_session_key,
-				argMax(s.output_fps, s.event_ts) AS output_fps
-			FROM naap.normalized_ai_stream_status s
-			INNER JOIN naap.resolver_query_window_slices w
-				ON w.query_id = ? AND w.org = s.org AND w.window_start = toStartOfHour(s.event_ts)
-			WHERE s.event_id != ''
-			  AND s.canonical_session_key != ''
-			GROUP BY s.event_id
-		),
-		perf_sessions AS (
-			SELECT
-				s.canonical_session_key AS canonical_session_key,
-				toStartOfHour(s.event_ts) AS window_start,
-				s.org AS org,
-				s.gateway AS gateway,
-				cast(null AS Nullable(String)) AS region,
-				ifNull(cs.attributed_orch_address, '') AS orchestrator_address,
-				fs.canonical_pipeline AS pipeline_id,
-				cast(nullIf(fs.canonical_model, ''), 'Nullable(String)') AS model_id,
-				cast(nullIf(cs.gpu_id, ''), 'Nullable(String)') AS gpu_id,
-				if(ifNull(cs.attributed_orch_address, '') != '' AND ifNull(cs.gpu_id, '') = '', 'hardware_unresolved', 'resolved') AS gpu_identity_status,
-				toUInt64(count()) AS status_samples,
-				sum(s.output_fps) AS output_fps_sum
-			FROM status_events s
-			LEFT JOIN naap.canonical_session_current fs
-				ON s.canonical_session_key = fs.canonical_session_key
-			LEFT JOIN naap.canonical_session_current cs
-				ON s.canonical_session_key = cs.canonical_session_key
-			WHERE ifNull(cs.attributed_orch_address, '') != ''
-			GROUP BY
-				s.canonical_session_key,
-				window_start,
-				s.org,
-				s.gateway,
-				orchestrator_address,
-				fs.canonical_pipeline,
-				model_id,
-				gpu_id,
-				gpu_identity_status
-		),
-		combined_rows AS (
-			SELECT
-				coalesce(d.canonical_session_key, p.canonical_session_key) AS canonical_session_key,
-				coalesce(d.window_start, p.window_start) AS window_start,
-				coalesce(d.org, p.org) AS org,
-				coalesce(d.gateway, p.gateway) AS gateway,
-				coalesce(d.orchestrator_address, p.orchestrator_address) AS orchestrator_address,
-				coalesce(d.region, p.region) AS region,
-				coalesce(d.pipeline_id, p.pipeline_id) AS pipeline_id,
-				coalesce(d.model_id, p.model_id) AS model_id,
-				coalesce(d.gpu_id, p.gpu_id) AS gpu_id,
-				if(d.gpu_identity_status = 'hardware_unresolved' OR p.gpu_identity_status = 'hardware_unresolved', 'hardware_unresolved', 'resolved') AS gpu_identity_status,
-				ifNull(d.requested_seen, toUInt8(0)) AS requested_seen,
-				ifNull(d.selection_outcome, 'unknown') AS selection_outcome,
-				ifNull(d.startup_outcome, 'unknown') AS startup_outcome,
-				ifNull(d.excusal_reason, 'none') AS excusal_reason,
-				ifNull(d.loading_only_session, toUInt8(0)) AS loading_only_session,
-				ifNull(d.zero_output_fps_session, toUInt8(0)) AS zero_output_fps_session,
-				ifNull(d.health_signal_count, toUInt64(0)) AS session_health_signal_count,
-				ifNull(d.health_expected_signal_count, toUInt64(0)) AS session_health_expected_signal_count,
-				ifNull(d.swap_count, toUInt64(0)) AS swap_count,
-				ifNull(d.error_seen, toUInt8(0)) AS error_seen,
-				ifNull(d.status_error_sample_count, toUInt64(0)) AS status_error_sample_count,
-				ifNull(d.total_minutes, 0.0) AS total_minutes,
-				ifNull(d.ticket_face_value_eth, 0.0) AS ticket_face_value_eth,
-				ifNull(p.status_samples, toUInt64(0)) AS status_samples,
-				ifNull(p.output_fps_sum, 0.0) AS output_fps_sum
-			FROM demand_sessions d
-			FULL OUTER JOIN perf_sessions p
-				ON d.canonical_session_key = p.canonical_session_key
-			   AND d.window_start = p.window_start
-			   AND d.org = p.org
-			   AND d.gateway = p.gateway
-			   AND d.orchestrator_address = p.orchestrator_address
-			   AND d.pipeline_id = p.pipeline_id
-			   AND ifNull(d.model_id, '') = ifNull(p.model_id, '')
-			   AND ifNull(d.gpu_id, '') = ifNull(p.gpu_id, '')
-		),
-		session_union AS (
-			SELECT
-				canonical_session_key,
-				window_start,
-				org,
-				gateway,
-				orchestrator_address,
-				region,
-				pipeline_id,
-				model_id,
-				gpu_id,
-				max(gpu_identity_status) AS gpu_identity_status,
-				max(requested_seen) AS requested_seen,
-				argMax(selection_outcome, status_samples) AS selection_outcome,
-				argMax(startup_outcome, status_samples) AS startup_outcome,
-				argMax(excusal_reason, status_samples) AS excusal_reason,
-				max(loading_only_session) AS loading_only_session,
-				max(zero_output_fps_session) AS zero_output_fps_session,
-				max(session_health_signal_count) AS session_health_signal_count,
-				max(session_health_expected_signal_count) AS session_health_expected_signal_count,
-				max(swap_count) AS swap_count,
-				max(error_seen) AS error_seen,
-				max(status_error_sample_count) AS status_error_sample_count,
-				max(total_minutes) AS total_minutes,
-				max(ticket_face_value_eth) AS ticket_face_value_eth,
-				sum(status_samples) AS session_status_samples,
-				sum(output_fps_sum) AS session_output_fps_sum
-			FROM combined_rows
-			GROUP BY
-				canonical_session_key,
-				window_start,
-				org,
-				gateway,
-				orchestrator_address,
-				region,
-				pipeline_id,
-				model_id,
-				gpu_id
-		)
-		SELECT
-			window_start,
-			org,
-			gateway,
-			orchestrator_address,
-			region,
-			pipeline_id,
-			model_id,
-			gpu_id,
-			gpu_identity_status,
-			toUInt64(count()) AS sessions_count,
-			if(sum(session_status_samples) > 0, sum(session_output_fps_sum) / toFloat64(sum(session_status_samples)), 0.0) AS avg_output_fps,
-			sum(session_output_fps_sum) AS output_fps_sum,
-			toUInt64(sum(session_status_samples)) AS status_samples,
-			sum(total_minutes) AS total_minutes,
-			toUInt64(countIf(requested_seen = 1)) AS known_sessions_count,
-			toUInt64(countIf(requested_seen = 1)) AS requested_sessions,
-			toUInt64(countIf(requested_seen = 1 AND startup_outcome = 'success')) AS startup_success_sessions,
-			toUInt64(countIf(requested_seen = 1 AND selection_outcome = 'no_orch')) AS no_orch_sessions,
-			toUInt64(countIf(requested_seen = 1 AND startup_outcome = 'failed' AND excusal_reason != 'none')) AS startup_excused_sessions,
-			toUInt64(countIf(requested_seen = 1 AND startup_outcome = 'failed' AND excusal_reason = 'none')) AS startup_failed_sessions,
-			toUInt64(countIf(requested_seen = 1 AND loading_only_session = 1)) AS loading_only_sessions,
-			toUInt64(countIf(requested_seen = 1 AND zero_output_fps_session = 1)) AS zero_output_fps_sessions,
-			toUInt64(countIf(
-				requested_seen = 1 AND (
-					(startup_outcome = 'failed' AND excusal_reason = 'none') OR
-					loading_only_session = 1 OR
-					zero_output_fps_session = 1
-				)
-			)) AS effective_failed_sessions,
-			toUInt64(0) AS confirmed_swapped_sessions,
-			toUInt64(0) AS inferred_swap_sessions,
-			toUInt64(countIf(requested_seen = 1 AND swap_count > 0)) AS total_swapped_sessions,
-			toUInt64(countIf(requested_seen = 1 AND error_seen = 1)) AS sessions_ending_in_error,
-			toUInt64(sum(status_error_sample_count)) AS error_status_samples,
-			toUInt64(sum(session_health_signal_count)) AS health_signal_count,
-			toUInt64(sum(session_health_expected_signal_count)) AS health_expected_signal_count,
-			least(
-				if(
-					sum(session_health_expected_signal_count) > 0,
-					sum(session_health_signal_count) / toFloat64(sum(session_health_expected_signal_count)),
-					1.0
-				),
-				1.0
-			) AS health_signal_coverage_ratio,
-			if(countIf(requested_seen = 1) > 0, countIf(requested_seen = 1 AND startup_outcome = 'success') / toFloat64(countIf(requested_seen = 1)), 0.0) AS startup_success_rate,
-			if(countIf(requested_seen = 1) > 0, countIf(requested_seen = 1 AND startup_outcome = 'failed' AND excusal_reason != 'none') / toFloat64(countIf(requested_seen = 1)), 0.0) AS excused_failure_rate,
-			if(
-				countIf(requested_seen = 1) > 0,
-				1.0 - (
-					countIf(
-						requested_seen = 1 AND (
-							(startup_outcome = 'failed' AND excusal_reason = 'none') OR
-							loading_only_session = 1 OR
-							zero_output_fps_session = 1
-						)
-					) / toFloat64(countIf(requested_seen = 1))
-				),
-				0.0
-			) AS effective_success_rate,
-			sum(ticket_face_value_eth) AS ticket_face_value_eth,
-			?,
-			?,
-			now64()
-		FROM session_union
-		GROUP BY
-			window_start,
-			org,
-			gateway,
-			orchestrator_address,
-			region,
-			pipeline_id,
-			model_id,
-			gpu_id,
-			gpu_identity_status
-	`, queryID, queryID, runID, r.cfg.ResolverVersion)
-}
-
 func (r *repo) insertSLAComplianceRollups(ctx context.Context, runID, queryID string) error {
-	// This input store remains the resolver-owned source of truth for additive
+	// This canonical store remains the source of truth for additive
 	// SLA facts. Final scored serving rows are published immediately afterward
 	// from the api_base_* helper relations so the API never scores on the hot path.
 	return r.conn.Exec(ctx, `
-		INSERT INTO naap.api_sla_compliance_inputs_by_org_store
+		INSERT INTO naap.canonical_streaming_sla_input_hourly_store
 		(
 			window_start, org, orchestrator_address, pipeline_id, model_id, gpu_id, gpu_model_name, region,
 			known_sessions_count, requested_sessions, startup_success_sessions, no_orch_sessions,
@@ -3639,43 +3340,9 @@ func (r *repo) insertSLAComplianceRollups(ctx context.Context, runID, queryID st
 	`, queryID, queryID, runID, r.cfg.ResolverVersion)
 }
 
-func (r *repo) insertFinalSLAComplianceByOrgRollups(ctx context.Context, runID, queryID string) error {
-	return r.conn.Exec(ctx, `
-		INSERT INTO naap.api_sla_compliance_by_org_store
-		(
-			window_start, org, orchestrator_address, pipeline_id, model_id, gpu_id, gpu_model_name, region,
-			known_sessions_count, requested_sessions, startup_success_sessions, no_orch_sessions,
-			startup_excused_sessions, startup_failed_sessions, loading_only_sessions, zero_output_fps_sessions,
-			output_failed_sessions, effective_failed_sessions, confirmed_swapped_sessions, inferred_swap_sessions,
-			total_swapped_sessions, sessions_ending_in_error, error_status_samples, health_signal_count,
-			health_expected_signal_count, health_signal_coverage_ratio, startup_success_rate, excused_failure_rate,
-			effective_success_rate, no_swap_rate, output_viability_rate, output_fps_sum, status_samples,
-			avg_output_fps, prompt_to_first_frame_sum_ms, prompt_to_first_frame_sample_count,
-			avg_prompt_to_first_frame_ms, e2e_latency_sum_ms, e2e_latency_sample_count, avg_e2e_latency_ms,
-			reliability_score, ptff_score, e2e_score, latency_score, fps_score, quality_score,
-			sla_semantics_version, sla_score, refresh_run_id, artifact_checksum, refreshed_at
-		)
-		SELECT
-			s.window_start, s.org, s.orchestrator_address, s.pipeline_id, s.model_id, s.gpu_id, s.gpu_model_name, s.region,
-			s.known_sessions_count, s.requested_sessions, s.startup_success_sessions, s.no_orch_sessions,
-			s.startup_excused_sessions, s.startup_failed_sessions, s.loading_only_sessions, s.zero_output_fps_sessions,
-			s.output_failed_sessions, s.effective_failed_sessions, s.confirmed_swapped_sessions, s.inferred_swap_sessions,
-			s.total_swapped_sessions, s.sessions_ending_in_error, s.error_status_samples, s.health_signal_count,
-			s.health_expected_signal_count, s.health_signal_coverage_ratio, s.startup_success_rate, s.excused_failure_rate,
-			s.effective_success_rate, s.no_swap_rate, s.output_viability_rate, s.output_fps_sum, s.status_samples,
-			s.avg_output_fps, s.prompt_to_first_frame_sum_ms, s.prompt_to_first_frame_sample_count,
-			s.avg_prompt_to_first_frame_ms, s.e2e_latency_sum_ms, s.e2e_latency_sample_count, s.avg_e2e_latency_ms,
-			s.reliability_score, s.ptff_score, s.e2e_score, s.latency_score, s.fps_score, s.quality_score,
-			s.sla_semantics_version, s.sla_score, ?, ?, now64()
-		FROM naap.api_base_sla_compliance_scored_by_org s
-		INNER JOIN naap.resolver_query_window_slices w
-			ON w.query_id = ? AND s.org = w.org AND s.window_start = w.window_start
-	`, runID, r.cfg.ResolverVersion, queryID)
-}
-
 func (r *repo) insertFinalSLAComplianceRollups(ctx context.Context, runID, queryID string) error {
 	return r.conn.Exec(ctx, `
-		INSERT INTO naap.api_sla_compliance_store
+		INSERT INTO naap.canonical_streaming_sla_hourly_store
 		(
 			window_start, org, orchestrator_address, pipeline_id, model_id, gpu_id, gpu_model_name, region,
 			known_sessions_count, requested_sessions, startup_success_sessions, no_orch_sessions,
@@ -3706,7 +3373,7 @@ func (r *repo) insertFinalSLAComplianceRollups(ctx context.Context, runID, query
 			s.avg_prompt_to_first_frame_ms, s.e2e_latency_sum_ms, s.e2e_latency_sample_count, s.avg_e2e_latency_ms,
 			s.reliability_score, s.ptff_score, s.e2e_score, s.latency_score, s.fps_score, s.quality_score,
 			s.sla_semantics_version, s.sla_score, ?, ?, now64()
-		FROM naap.api_base_sla_compliance_scored s
+		FROM naap.api_base_sla_compliance_scored_by_org s
 		INNER JOIN owned_windows w
 			ON s.window_start = w.window_start
 	`, queryID, runID, r.cfg.ResolverVersion)
@@ -3714,7 +3381,7 @@ func (r *repo) insertFinalSLAComplianceRollups(ctx context.Context, runID, query
 
 func (r *repo) insertGPUMetricsRollups(ctx context.Context, runID, queryID string) error {
 	return r.conn.Exec(ctx, `
-		INSERT INTO naap.api_gpu_metrics_by_org_store
+		INSERT INTO naap.canonical_streaming_gpu_metrics_hourly_store
 		(
 			window_start, org, orchestrator_address, pipeline_id, model_id, gpu_id, region,
 			avg_output_fps, output_fps_sum, p95_output_fps, output_fps_p95_state, fps_jitter_coefficient, status_samples,

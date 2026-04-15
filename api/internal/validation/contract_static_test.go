@@ -316,7 +316,7 @@ func TestTierContract_SLABenchmarkStateUsesAdditiveInputsOnly(t *testing.T) {
 				t.Fatalf("%s is missing required benchmark-state dependency %q", file, snippet)
 			}
 		}
-		for _, forbidden := range []string{"quality_cohort_level", "quality_history_window_count", "ref('api_sla_compliance", `ref("api_sla_compliance`} {
+		for _, forbidden := range []string{"quality_cohort_level", "quality_history_window_count", "ref('api_hourly_streaming_sla", `ref("api_hourly_streaming_sla`} {
 			if strings.Contains(text, forbidden) {
 				t.Fatalf("%s illegally depends on previously scored SLA outputs via %q", file, forbidden)
 			}

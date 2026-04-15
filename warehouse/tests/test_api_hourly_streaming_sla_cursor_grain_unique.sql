@@ -1,0 +1,12 @@
+select
+    window_start,
+    org,
+    orchestrator_address,
+    pipeline_id,
+    ifNull(model_id, '') as model_id_key,
+    ifNull(gpu_id, '') as gpu_id_key,
+    ifNull(region, '') as region_key,
+    count(*) as row_count
+from {{ ref('api_hourly_streaming_sla') }}
+group by 1, 2, 3, 4, 5, 6, 7
+having count(*) > 1

@@ -2,7 +2,6 @@ package clickhouse
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"time"
@@ -17,18 +16,19 @@ func (r *Repo) GetDashboardKPI(ctx context.Context, windowHours int, pipeline, m
 	windowStart := now.Add(-time.Duration(windowHours) * time.Hour)
 
 	// Query 1: orchestrator count. When pipeline/model filters are set, restrict
-	// to orchestrators that currently advertise that (pipeline, model) combo.
+	// to orchestrators that currently advertise that builtin capability offer.
 	var activeOrch, totalOrch uint64
 	if pipeline != "" || modelID != "" {
 		orchCountSQL := `
 			SELECT countIf(s.last_seen > now() - INTERVAL ? MINUTE) AS active,
 			       count() AS total
-			FROM naap.api_latest_orchestrator_state s
+			FROM naap.api_current_orchestrator s
 			INNER JOIN (
 				SELECT DISTINCT orch_address
-				FROM naap.api_latest_orchestrator_pipeline_models
+				FROM naap.api_current_capability_offer
 				WHERE last_seen > now() - INTERVAL ? MINUTE
-				  AND (? = '' OR pipeline_id = ?)
+				  AND capability_family = 'builtin'
+				  AND (? = '' OR canonical_pipeline = ?)
 				  AND (? = '' OR model_id = ?)
 			) pm ON pm.orch_address = s.orch_address
 		`
@@ -42,22 +42,21 @@ func (r *Repo) GetDashboardKPI(ctx context.Context, windowHours int, pipeline, m
 		if err := r.conn.QueryRow(ctx, `
 			SELECT countIf(last_seen > now() - INTERVAL ? MINUTE) AS active,
 			       count() AS total
-			FROM naap.api_latest_orchestrator_state
+			FROM naap.api_current_orchestrator
 		`, activeOrchMinutes).Scan(&activeOrch, &totalOrch); err != nil {
 			return nil, fmt.Errorf("dashboard kpi orch count: %w", err)
 		}
 	}
 
-	// Query 2: hourly session counts. api_stream_hourly carries `pipeline` but
-	// no model_id, so the model_id filter is dropped at this tier — session
-	// counts cannot be sliced by model without joining the session trace.
+	// Query 2: hourly session counts from the additive streaming demand spine.
 	sessionRows, err := r.conn.Query(ctx, `
-		SELECT hour, sum(requested_sessions) AS sessions, sum(startup_success_sessions) AS successes
-		FROM naap.api_stream_hourly
-		WHERE hour >= ?
-		  AND (? = '' OR pipeline = ?)
-		GROUP BY hour ORDER BY hour
-	`, windowStart, pipeline, pipeline)
+		SELECT window_start, sum(requested_sessions) AS sessions, sum(startup_success_sessions) AS successes
+		FROM naap.api_hourly_streaming_demand
+		WHERE window_start >= ?
+		  AND (? = '' OR pipeline_id = ?)
+		  AND (? = '' OR model_id = ?)
+		GROUP BY window_start ORDER BY window_start
+	`, windowStart, pipeline, pipeline, modelID, modelID)
 	if err != nil {
 		return nil, fmt.Errorf("dashboard kpi hourly sessions: %w", err)
 	}
@@ -80,7 +79,7 @@ func (r *Repo) GetDashboardKPI(ctx context.Context, windowHours int, pipeline, m
 	// Query 3: hourly usage minutes
 	usageRows, err := r.conn.Query(ctx, `
 		SELECT window_start, sum(total_minutes) AS mins
-		FROM naap.api_network_demand
+		FROM naap.api_hourly_streaming_demand
 		WHERE window_start >= ?
 		  AND (? = '' OR pipeline_id = ?)
 		  AND (? = '' OR model_id = ?)
@@ -173,8 +172,8 @@ func (r *Repo) GetDashboardPipelines(ctx context.Context, limit int, windowHours
 		       sum(requested_sessions) AS sessions,
 		       sum(total_minutes) AS mins,
 		       sum(ifNull(output_fps_sum, 0)) AS fps_sum,
-		       sum(ifNull(status_samples, 0)) AS fps_samples
-		FROM naap.api_network_demand
+		       toFloat64(sum(ifNull(status_samples, 0))) AS fps_samples
+		FROM naap.api_hourly_streaming_demand
 		WHERE window_start >= ? AND pipeline_id != ''
 		GROUP BY pipeline_id, model_id
 		ORDER BY sessions DESC
@@ -250,7 +249,7 @@ func (r *Repo) GetDashboardOrchestrators(ctx context.Context, windowHours int) (
 		       sum(ifNull(effective_success_rate, 0) * requested_sessions) / nullIf(sum(requested_sessions), 0) AS eff_rate,
 		       sum(ifNull(no_swap_rate, 0) * requested_sessions) / nullIf(sum(requested_sessions), 0) AS ns_rate,
 		       sum(ifNull(sla_score, 0) * requested_sessions) / nullIf(sum(requested_sessions), 0) AS sla
-		FROM naap.api_sla_compliance
+		FROM naap.api_hourly_streaming_sla
 		WHERE window_start >= ? AND orchestrator_address != ''
 		GROUP BY orchestrator_address, pipeline_id, m_id, g_id
 	`, windowStart)
@@ -304,7 +303,7 @@ func (r *Repo) GetDashboardOrchestrators(ctx context.Context, windowHours int) (
 		SELECT orchestrator_address,
 		       window_start,
 		       sum(ifNull(sla_score, 0) * requested_sessions) / nullIf(sum(requested_sessions), 0) AS sla
-		FROM naap.api_sla_compliance
+		FROM naap.api_hourly_streaming_sla
 		WHERE window_start >= ?
 		  AND orchestrator_address != ''
 		  AND sla_score IS NOT NULL
@@ -347,8 +346,8 @@ func (r *Repo) GetDashboardOrchestrators(ctx context.Context, windowHours int) (
 
 	// Enrich with orchestrator state (URI, pipeline models)
 	stateRows, err := r.conn.Query(ctx, `
-		SELECT orch_address, uri
-		FROM naap.api_latest_orchestrator_state
+		SELECT orch_address, ifNull(orchestrator_uri, '') AS orchestrator_uri
+		FROM naap.api_current_orchestrator
 		WHERE last_seen > now() - INTERVAL 30 MINUTE
 	`)
 	if err != nil {
@@ -377,10 +376,12 @@ func (r *Repo) GetDashboardOrchestrators(ctx context.Context, windowHours int) (
 	// separately with a single DISTINCT so GPUs shared across models are not
 	// double-counted.
 	pmRows, err := r.conn.Query(ctx, `
-		SELECT orch_address, pipeline_id, model_id
-		FROM naap.api_latest_orchestrator_pipeline_models
+		SELECT orch_address,
+		       ifNull(nullIf(canonical_pipeline, ''), ifNull(nullIf(offered_name, ''), 'unknown')) AS pipeline_id,
+		       model_id
+		FROM naap.api_current_capability_offer
 		WHERE last_seen > now() - INTERVAL 30 MINUTE
-		  AND pipeline_id != '' AND model_id != ''
+		  AND model_id != ''
 		GROUP BY orch_address, pipeline_id, model_id
 	`)
 	if err != nil {
@@ -409,9 +410,8 @@ func (r *Repo) GetDashboardOrchestrators(ctx context.Context, windowHours int) (
 
 	gpuRows, err := r.conn.Query(ctx, `
 		SELECT orch_address, toInt64(count(DISTINCT gpu_id)) AS gpu_count
-		FROM naap.api_latest_orchestrator_pipeline_models
+		FROM naap.api_current_capability_hardware
 		WHERE last_seen > now() - INTERVAL 30 MINUTE
-		  AND pipeline_id != '' AND model_id != ''
 		  AND gpu_id IS NOT NULL AND gpu_id != ''
 		GROUP BY orch_address
 	`)
@@ -488,13 +488,13 @@ func (r *Repo) GetDashboardOrchestrators(ctx context.Context, windowHours int) (
 //     once per AI model.
 func (r *Repo) GetDashboardGPUCapacity(ctx context.Context) (*types.DashboardGPUCapacity, error) {
 	rows, err := r.conn.Query(ctx, `
-		SELECT orch_address, pipeline_id, model_id, gpu_id,
+		SELECT orch_address, canonical_pipeline, model_id, gpu_id,
 		       ifNull(anyLast(gpu_model_name), 'Unknown') AS gpu_model
-		FROM naap.api_latest_orchestrator_pipeline_models
+		FROM naap.api_current_capability_hardware
 		WHERE last_seen > now() - INTERVAL 30 MINUTE
-		  AND pipeline_id != '' AND model_id != ''
+		  AND canonical_pipeline != '' AND model_id != ''
 		  AND gpu_id IS NOT NULL AND gpu_id != ''
-		GROUP BY orch_address, pipeline_id, model_id, gpu_id
+		GROUP BY orch_address, canonical_pipeline, model_id, gpu_id
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("dashboard gpu capacity: %w", err)
@@ -578,11 +578,12 @@ func (r *Repo) GetDashboardGPUCapacity(ctx context.Context) (*types.DashboardGPU
 // GetDashboardPipelineCatalog serves GET /v1/dashboard/pipeline-catalog.
 func (r *Repo) GetDashboardPipelineCatalog(ctx context.Context) ([]types.DashboardPipelineCatalogEntry, error) {
 	rows, err := r.conn.Query(ctx, `
-		SELECT DISTINCT pipeline_id, model_id
-		FROM naap.api_latest_orchestrator_pipeline_models
+		SELECT DISTINCT canonical_pipeline, model_id
+		FROM naap.api_current_capability_offer
 		WHERE last_seen > now() - INTERVAL 30 MINUTE
-		  AND pipeline_id != '' AND model_id != ''
-		ORDER BY pipeline_id, model_id
+		  AND capability_family = 'builtin'
+		  AND canonical_pipeline != '' AND model_id != ''
+		ORDER BY canonical_pipeline, model_id
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("dashboard pipeline catalog: %w", err)
@@ -619,45 +620,47 @@ func (r *Repo) GetDashboardPipelineCatalog(ctx context.Context) ([]types.Dashboa
 
 // GetDashboardPricing serves GET /v1/dashboard/pricing.
 func (r *Repo) GetDashboardPricing(ctx context.Context) ([]types.DashboardPipelinePricing, error) {
-	// Step 1: Build capability_id → pipeline_id mapping from pipeline models.
-	// The capabilities_prices array uses numeric capability IDs; the pipeline
-	// models table knows which pipeline each capability+model corresponds to.
-	pmRows, err := r.conn.Query(ctx, `
-		SELECT DISTINCT orch_address, pipeline_id, model_id
-		FROM naap.api_latest_orchestrator_pipeline_models
-		WHERE last_seen > now() - INTERVAL 30 MINUTE
-		  AND pipeline_id != '' AND model_id != ''
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("dashboard pricing pipeline models: %w", err)
-	}
-	defer pmRows.Close()
-
-	// orchAddress+model → set of pipelines. The same model name can legitimately
-	// serve multiple pipelines on the same orchestrator; keep every mapping so
-	// pricing rows are replicated across all applicable pipelines rather than
-	// silently collapsed to whichever row happened to be inserted last.
-	orchModelPipelines := map[string][]string{}
-	seen := map[string]bool{}
-	for pmRows.Next() {
-		var addr, pipelineID, modelID string
-		if err := pmRows.Scan(&addr, &pipelineID, &modelID); err != nil {
-			return nil, fmt.Errorf("dashboard pricing pm scan: %w", err)
-		}
-		key := addr + "|" + modelID
-		dedupeKey := key + "|" + pipelineID
-		if seen[dedupeKey] {
-			continue
-		}
-		seen[dedupeKey] = true
-		orchModelPipelines[key] = append(orchModelPipelines[key], pipelineID)
-	}
-
-	// Step 2: Read orchestrator state and parse pricing
 	rows, err := r.conn.Query(ctx, `
-		SELECT orch_address, uri, raw_capabilities
-		FROM naap.api_latest_orchestrator_state
-		WHERE last_seen > now() - INTERVAL 30 MINUTE
+		WITH builtin_offer AS (
+		    SELECT orch_address,
+		           ifNull(canonical_pipeline, '') AS canonical_pipeline,
+		           model_id,
+		           max(toUInt8(hardware_present = 1 OR ifNull(warm, toUInt8(0)) = 1)) AS is_warm
+		    FROM naap.api_current_capability_offer
+		    GROUP BY orch_address, canonical_pipeline, model_id
+		),
+		byoc_offer AS (
+		    SELECT orch_address,
+		           offered_name,
+		           any(model_id) AS model_id,
+		           max(toUInt8(hardware_present = 1 OR ifNull(warm, toUInt8(0)) = 1)) AS is_warm
+		    FROM naap.api_current_capability_offer
+		    WHERE offered_name != ''
+		    GROUP BY orch_address, offered_name
+		)
+		SELECT
+		    p.orch_address,
+		    ifNull(o.orchestrator_uri, '') AS orchestrator_uri,
+		    ifNull(p.canonical_pipeline, p.external_capability_name) AS pipeline,
+		    ifNull(nullIf(p.model_id, ''), ifNull(byoc_offer.model_id, ifNull(p.external_capability_name, ''))) AS model_id,
+		    p.price_per_unit,
+		    p.pixels_per_unit,
+		    greatest(ifNull(builtin_offer.is_warm, toUInt8(0)), ifNull(byoc_offer.is_warm, toUInt8(0))) AS is_warm
+		FROM naap.api_current_capability_pricing p
+		LEFT JOIN naap.api_current_orchestrator o
+		  ON o.orch_address = p.orch_address
+		LEFT JOIN builtin_offer
+		  ON builtin_offer.orch_address = p.orch_address
+		 AND builtin_offer.model_id = p.model_id
+		 AND builtin_offer.canonical_pipeline = ifNull(p.canonical_pipeline, '')
+		LEFT JOIN byoc_offer
+		  ON byoc_offer.orch_address = p.orch_address
+		 AND byoc_offer.offered_name = ifNull(p.external_capability_name, '')
+		WHERE p.last_seen > now() - INTERVAL 30 MINUTE
+		  AND p.price_per_unit > 0
+		  AND p.pixels_per_unit > 0
+		  AND ifNull(p.canonical_pipeline, p.external_capability_name) != ''
+		ORDER BY p.orch_address, pipeline, model_id
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("dashboard pricing: %w", err)
@@ -667,101 +670,33 @@ func (r *Repo) GetDashboardPricing(ctx context.Context) ([]types.DashboardPipeli
 	var result []types.DashboardPipelinePricing
 
 	for rows.Next() {
-		var addr, uri, rawCaps string
-		if err := rows.Scan(&addr, &uri, &rawCaps); err != nil {
+		var addr, uri, pipeline, model string
+		var priceWeiPerUnit, pixelsPerUnit int64
+		var isWarm uint8
+		if err := rows.Scan(&addr, &uri, &pipeline, &model, &priceWeiPerUnit, &pixelsPerUnit, &isWarm); err != nil {
 			return nil, fmt.Errorf("dashboard pricing scan: %w", err)
 		}
-
-		entries := parsePricingFromCapabilities(addr, uri, rawCaps, orchModelPipelines)
-		result = append(result, entries...)
+		result = append(result, types.DashboardPipelinePricing{
+			OrchAddress:     addr,
+			OrchName:        hostnameFromURI(uri),
+			Pipeline:        pipeline,
+			Model:           model,
+			PriceWeiPerUnit: priceWeiPerUnit,
+			PixelsPerUnit:   pixelsPerUnit,
+			IsWarm:          isWarm == 1,
+		})
 	}
 
 	return result, nil
 }
 
-// parsePricingFromCapabilities extracts pricing entries from the raw_capabilities JSON.
-// Handles two formats:
-//   - capabilities_prices[]: per-capability pricing with {pricePerUnit, pixelsPerUnit, capability, constraint}
-//   - price_info: global fallback pricing with {pricePerUnit, pixelsPerUnit}
-//
-// Pipeline names are resolved from capabilities.constraints.PerCapability when available,
-// otherwise the numeric capability ID is used as-is.
-func parsePricingFromCapabilities(addr, uri, rawCaps string, orchModelPipelines map[string][]string) []types.DashboardPipelinePricing {
-	if rawCaps == "" {
-		return nil
-	}
-
-	type capPriceEntry struct {
-		PricePerUnit  int64  `json:"pricePerUnit"`
-		PixelsPerUnit int64  `json:"pixelsPerUnit"`
-		Capability    int    `json:"capability"`
-		Constraint    string `json:"constraint"` // model name
-	}
-
-	type priceInfo struct {
-		PricePerUnit  int64 `json:"pricePerUnit"`
-		PixelsPerUnit int64 `json:"pixelsPerUnit"`
-	}
-
-	type rawCapsShape struct {
-		CapabilitiesPrices []capPriceEntry `json:"capabilities_prices"`
-		PriceInfo          *priceInfo      `json:"price_info"`
-	}
-
-	var caps rawCapsShape
-	if err := json.Unmarshal([]byte(rawCaps), &caps); err != nil {
-		return nil
-	}
-
-	orchName := hostnameFromURI(uri)
-
-	// Per-capability pricing entries. When (orch, model) maps to multiple pipelines,
-	// emit a row per pipeline — we lack a numeric capability-id → pipeline mapping
-	// in the warehouse, so replicating is preferable to silently picking one.
-	if len(caps.CapabilitiesPrices) > 0 {
-		result := make([]types.DashboardPipelinePricing, 0, len(caps.CapabilitiesPrices))
-		for _, cp := range caps.CapabilitiesPrices {
-			pipelines := orchModelPipelines[addr+"|"+cp.Constraint]
-			if len(pipelines) == 0 {
-				pipelines = []string{fmt.Sprintf("capability-%d", cp.Capability)}
-			}
-			for _, pipeline := range pipelines {
-				result = append(result, types.DashboardPipelinePricing{
-					OrchAddress:     addr,
-					OrchName:        orchName,
-					Pipeline:        pipeline,
-					Model:           cp.Constraint,
-					PriceWeiPerUnit: cp.PricePerUnit,
-					PixelsPerUnit:   cp.PixelsPerUnit,
-					IsWarm:          true,
-				})
-			}
-		}
-		return result
-	}
-
-	// Global fallback pricing
-	if caps.PriceInfo != nil && caps.PriceInfo.PricePerUnit > 0 {
-		return []types.DashboardPipelinePricing{{
-			OrchAddress:     addr,
-			OrchName:        orchName,
-			Pipeline:        "",
-			PriceWeiPerUnit: caps.PriceInfo.PricePerUnit,
-			PixelsPerUnit:   caps.PriceInfo.PixelsPerUnit,
-			IsWarm:          true,
-		}}
-	}
-
-	return nil
-}
-
 // GetDashboardJobFeed serves GET /v1/dashboard/job-feed.
 func (r *Repo) GetDashboardJobFeed(ctx context.Context, limit int) ([]types.DashboardJobFeedItem, error) {
-	// Resolve orch_address -> URI via the latest orchestrator state so callers
+	// Resolve orch_address -> URI via the current orchestrator spine so callers
 	// receive a real URL in orchestratorUrl rather than the canonical address.
 	orchURIRows, err := r.conn.Query(ctx, `
-		SELECT orch_address, ifNull(uri, '') AS uri
-		FROM naap.api_latest_orchestrator_state
+		SELECT orch_address, ifNull(orchestrator_uri, '') AS uri
+		FROM naap.api_current_orchestrator
 		WHERE last_seen > now() - INTERVAL 30 MINUTE
 	`)
 	if err != nil {
@@ -782,7 +717,7 @@ func (r *Repo) GetDashboardJobFeed(ctx context.Context, limit int) ([]types.Dash
 		SELECT event_id, pipeline, ifNull(model_id, '') AS model_id,
 		       gateway, ifNull(orch_address, '') AS orch_address, state,
 		       output_fps, input_fps, ifNull(started_at, last_seen) AS started_at, last_seen
-		FROM naap.api_active_stream_state
+		FROM naap.api_current_active_stream_state
 		ORDER BY last_seen DESC
 		LIMIT ?
 	`, limit)
@@ -832,7 +767,7 @@ func (r *Repo) GetDashboardJobsOverview(ctx context.Context, windowHours int) (*
 		       countIf(selection_outcome = 'no_orch') AS no_orch,
 		       if(count() > 0, countIf(ifNull(success, 0) = 1) / toFloat64(count()), 0.0) AS success_rate,
 		       if(count() > 0, avg(toFloat64(duration_ms)), 0.0) AS avg_duration_ms
-		FROM naap.api_ai_batch_jobs
+		FROM naap.api_fact_ai_batch_job
 		WHERE completed_at >= ?
 	`, windowStart).Scan(&aiTotal, &aiSelected, &aiNoOrch, &aiSuccessRate, &aiAvgDur)
 	if err != nil {
@@ -851,7 +786,7 @@ func (r *Repo) GetDashboardJobsOverview(ctx context.Context, windowHours int) (*
 		       countIf(selection_outcome = 'no_orch') AS no_orch,
 		       if(count() > 0, countIf(ifNull(success, 0) = 1) / toFloat64(count()), 0.0) AS success_rate,
 		       if(count() > 0, avg(toFloat64(duration_ms)), 0.0) AS avg_duration_ms
-		FROM naap.api_byoc_jobs
+		FROM naap.api_fact_byoc_job
 		WHERE completed_at >= ?
 	`, windowStart).Scan(&byocTotal, &byocSelected, &byocNoOrch, &byocSuccessRate, &byocAvgDur)
 	byoc := types.DashboardJobsStats{
@@ -876,7 +811,7 @@ func (r *Repo) GetDashboardJobsByPipeline(ctx context.Context, windowHours int) 
 		       countIf(selection_outcome = 'no_orch') AS no_orch,
 		       if(count() > 0, countIf(ifNull(success, 0) = 1) / toFloat64(count()), 0.0) AS success_rate,
 		       if(count() > 0, avg(toFloat64(duration_ms)), 0.0) AS avg_duration_ms
-		FROM naap.api_ai_batch_jobs
+		FROM naap.api_fact_ai_batch_job
 		WHERE completed_at >= ?
 		GROUP BY pipeline ORDER BY total DESC
 	`, windowStart)
@@ -912,7 +847,7 @@ func (r *Repo) GetDashboardJobsByCapability(ctx context.Context, windowHours int
 		       countIf(selection_outcome = 'no_orch') AS no_orch,
 		       if(count() > 0, countIf(ifNull(success, 0) = 1) / toFloat64(count()), 0.0) AS success_rate,
 		       if(count() > 0, avg(toFloat64(duration_ms)), 0.0) AS avg_duration_ms
-		FROM naap.api_byoc_jobs
+		FROM naap.api_fact_byoc_job
 		WHERE completed_at >= ?
 		GROUP BY capability ORDER BY total DESC
 	`, windowStart)

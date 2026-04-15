@@ -243,17 +243,17 @@ func TestRuleAttribution001_FailSafeStatesRemainVisibleInServingOutputs(t *testi
 	if got := h.queryString(t, `SELECT ifNull(attributed_orch_address, '') FROM naap.canonical_session_current WHERE canonical_session_key = ?`, hwKey); got != hwAddr {
 		t.Errorf("RULE-ATTRIBUTION-001: hardware-less attributed_orch_address = %q, want %q", got, hwAddr)
 	}
-	if got := h.queryString(t, `SELECT attribution_status FROM naap.api_status_samples WHERE canonical_session_key = ? LIMIT 1`, hwKey); got != "hardware_less" {
+	if got := h.queryString(t, `SELECT attribution_status FROM naap.canonical_status_samples_recent WHERE canonical_session_key = ? LIMIT 1`, hwKey); got != "hardware_less" {
 		t.Errorf("RULE-ATTRIBUTION-001: hardware-less serving attribution_status = %q, want hardware_less", got)
 	}
-	if h.queryInt(t, `SELECT count() FROM naap.api_sla_compliance_by_org WHERE org = ? AND orchestrator_address = ? AND gpu_id IS NULL`, h.org, hwAddr) == 0 {
-		t.Errorf("RULE-ATTRIBUTION-001: hardware-less session was dropped from SLA output for %s", hwAddr)
+	if h.queryInt(t, `SELECT count() FROM naap.api_hourly_streaming_sla WHERE org = ? AND orchestrator_address = ? AND gpu_id IS NULL`, h.org, hwAddr) == 0 {
+		t.Errorf("RULE-ATTRIBUTION-001: hardware-less session was dropped from hourly streaming SLA for %s", hwAddr)
 	}
 
 	if got := h.queryString(t, `SELECT attribution_status FROM naap.canonical_session_current WHERE canonical_session_key = ?`, unresolvedKey); got != "unresolved" {
 		t.Errorf("RULE-ATTRIBUTION-001: unresolved attribution_status = %q, want unresolved", got)
 	}
-	if got := h.queryString(t, `SELECT ifNull(orch_address, '') FROM naap.api_status_samples WHERE canonical_session_key = ? LIMIT 1`, unresolvedKey); got != "" {
+	if got := h.queryString(t, `SELECT ifNull(orch_address, '') FROM naap.canonical_status_samples_recent WHERE canonical_session_key = ? LIMIT 1`, unresolvedKey); got != "" {
 		t.Errorf("RULE-ATTRIBUTION-001: unresolved serving orch_address = %q, want empty canonical address", got)
 	}
 }
@@ -355,17 +355,17 @@ func TestRuleAttribution002_PipelineAndModelStayDistinctAcrossCanonicalAndAPIVie
 	if got := h.queryString(t, `SELECT ifNull(canonical_pipeline, '') FROM naap.canonical_session_current WHERE org = ? AND stream_id = ?`, h.org, streamID); got != "text-to-image" {
 		t.Fatalf("RULE-ATTRIBUTION-002: canonical_pipeline = %q, want text-to-image", got)
 	}
-	if h.queryInt(t, `SELECT count() FROM naap.canonical_capability_hardware_inventory WHERE org = ? AND orch_address = ? AND pipeline_id = 'text-to-image' AND model_id = 'model-a'`, h.org, orchAddr) == 0 {
+	if h.queryInt(t, `SELECT count() FROM naap.canonical_capability_hardware_current WHERE org = ? AND orch_address = ? AND canonical_pipeline = 'text-to-image' AND model_id = 'model-a'`, h.org, orchAddr) == 0 {
 		t.Fatalf("RULE-ATTRIBUTION-002: expected hardware inventory row for %s", orchAddr)
 	}
-	if got := h.queryString(t, `SELECT ifNull(pipeline, '') FROM naap.api_gpu_inventory WHERE org = ? AND orch_address = ?`, h.org, orchAddr); got != "text-to-image" {
-		t.Fatalf("RULE-ATTRIBUTION-002: api inventory pipeline = %q, want text-to-image", got)
+	if got := h.queryString(t, `SELECT ifNull(canonical_pipeline, '') FROM naap.api_current_capability_hardware WHERE org = ? AND orch_address = ?`, h.org, orchAddr); got != "text-to-image" {
+		t.Fatalf("RULE-ATTRIBUTION-002: api current hardware pipeline = %q, want text-to-image", got)
 	}
-	if got := h.queryString(t, `SELECT ifNull(model_id, '') FROM naap.api_gpu_inventory WHERE org = ? AND orch_address = ?`, h.org, orchAddr); got != "model-a" {
-		t.Fatalf("RULE-ATTRIBUTION-002: api inventory model_id = %q, want model-a", got)
+	if got := h.queryString(t, `SELECT ifNull(model_id, '') FROM naap.api_current_capability_hardware WHERE org = ? AND orch_address = ?`, h.org, orchAddr); got != "model-a" {
+		t.Fatalf("RULE-ATTRIBUTION-002: api current hardware model_id = %q, want model-a", got)
 	}
-	if h.queryInt(t, `SELECT count() FROM naap.api_gpu_inventory WHERE org = ? AND orch_address = ? AND pipeline = model_id`, h.org, orchAddr) != 0 {
-		t.Fatalf("RULE-ATTRIBUTION-002: API surface duplicated model identity into pipeline")
+	if h.queryInt(t, `SELECT count() FROM naap.api_current_capability_hardware WHERE org = ? AND orch_address = ? AND canonical_pipeline = model_id`, h.org, orchAddr) != 0 {
+		t.Fatalf("RULE-ATTRIBUTION-002: API current hardware surface duplicated model identity into pipeline")
 	}
 }
 
@@ -382,14 +382,14 @@ func TestRuleAttribution002_HardwareInventoryCapturesAllGPUEntriesFromArrayShape
 		IngestedAt: ts,
 	}})
 
-	if got := h.queryInt(t, `SELECT count() FROM naap.canonical_capability_hardware_inventory WHERE org = ? AND orch_address = ? AND pipeline_id = 'text-to-image' AND model_id = 'model-array'`, h.org, orchAddr); got != 2 {
+	if got := h.queryInt(t, `SELECT count() FROM naap.canonical_capability_hardware_current WHERE org = ? AND orch_address = ? AND canonical_pipeline = 'text-to-image' AND model_id = 'model-array'`, h.org, orchAddr); got != 2 {
 		t.Fatalf("RULE-ATTRIBUTION-002: canonical hardware rows = %d, want 2", got)
 	}
-	if got := h.queryInt(t, `SELECT count() FROM naap.api_gpu_inventory WHERE org = ? AND orch_address = ? AND pipeline = 'text-to-image' AND model_id = 'model-array'`, h.org, orchAddr); got != 2 {
-		t.Fatalf("RULE-ATTRIBUTION-002: api inventory rows = %d, want 2", got)
+	if got := h.queryInt(t, `SELECT count() FROM naap.api_current_capability_hardware WHERE org = ? AND orch_address = ? AND canonical_pipeline = 'text-to-image' AND model_id = 'model-array'`, h.org, orchAddr); got != 2 {
+		t.Fatalf("RULE-ATTRIBUTION-002: api current hardware rows = %d, want 2", got)
 	}
-	if got := h.queryInt(t, `SELECT count() FROM naap.api_gpu_inventory WHERE org = ? AND orch_address = ? AND gpu_id IN ('gpu-array-a', 'gpu-array-b')`, h.org, orchAddr); got != 2 {
-		t.Fatalf("RULE-ATTRIBUTION-002: api inventory missing one or more array GPUs")
+	if got := h.queryInt(t, `SELECT count() FROM naap.api_current_capability_hardware WHERE org = ? AND orch_address = ? AND gpu_id IN ('gpu-array-a', 'gpu-array-b')`, h.org, orchAddr); got != 2 {
+		t.Fatalf("RULE-ATTRIBUTION-002: api current hardware missing one or more array GPUs")
 	}
 }
 
@@ -406,17 +406,17 @@ func TestRuleAttribution002_HardwareInventoryCapturesAllGPUEntriesFromObjectShap
 		IngestedAt: ts,
 	}})
 
-	if got := h.queryInt(t, `SELECT count() FROM naap.canonical_capability_hardware_inventory WHERE org = ? AND orch_address = ? AND pipeline_id = 'image-to-video' AND model_id = 'model-object'`, h.org, orchAddr); got != 2 {
+	if got := h.queryInt(t, `SELECT count() FROM naap.canonical_capability_hardware_current WHERE org = ? AND orch_address = ? AND canonical_pipeline = 'image-to-video' AND model_id = 'model-object'`, h.org, orchAddr); got != 2 {
 		t.Fatalf("RULE-ATTRIBUTION-002: canonical hardware rows = %d, want 2 after skipping empty gpu id", got)
 	}
-	if got := h.queryInt(t, `SELECT count() FROM naap.api_gpu_inventory WHERE org = ? AND orch_address = ? AND pipeline = 'image-to-video' AND model_id = 'model-object'`, h.org, orchAddr); got != 2 {
-		t.Fatalf("RULE-ATTRIBUTION-002: api inventory rows = %d, want 2 after skipping empty gpu id", got)
+	if got := h.queryInt(t, `SELECT count() FROM naap.api_current_capability_hardware WHERE org = ? AND orch_address = ? AND canonical_pipeline = 'image-to-video' AND model_id = 'model-object'`, h.org, orchAddr); got != 2 {
+		t.Fatalf("RULE-ATTRIBUTION-002: api current hardware rows = %d, want 2 after skipping empty gpu id", got)
 	}
-	if got := h.queryInt(t, `SELECT count() FROM naap.api_gpu_inventory WHERE org = ? AND orch_address = ? AND gpu_id = ''`, h.org, orchAddr); got != 0 {
-		t.Fatalf("RULE-ATTRIBUTION-002: api inventory retained empty gpu ids")
+	if got := h.queryInt(t, `SELECT count() FROM naap.api_current_capability_hardware WHERE org = ? AND orch_address = ? AND gpu_id = ''`, h.org, orchAddr); got != 0 {
+		t.Fatalf("RULE-ATTRIBUTION-002: api current hardware retained empty gpu ids")
 	}
-	if got := h.queryInt(t, `SELECT count() FROM naap.api_gpu_inventory WHERE org = ? AND orch_address = ? AND gpu_id IN ('gpu-object-a', 'gpu-object-b')`, h.org, orchAddr); got != 2 {
-		t.Fatalf("RULE-ATTRIBUTION-002: api inventory missing one or more object GPUs")
+	if got := h.queryInt(t, `SELECT count() FROM naap.api_current_capability_hardware WHERE org = ? AND orch_address = ? AND gpu_id IN ('gpu-object-a', 'gpu-object-b')`, h.org, orchAddr); got != 2 {
+		t.Fatalf("RULE-ATTRIBUTION-002: api current hardware missing one or more object GPUs")
 	}
 }
 
@@ -555,10 +555,10 @@ func TestRuleAttribution005_UnresolvedRowsDoNotInventCanonicalFields(t *testing.
 	if got := h.queryString(t, `SELECT ifNull(canonical_model, '') FROM naap.canonical_session_current WHERE canonical_session_key = ?`, key); got != "" {
 		t.Fatalf("RULE-ATTRIBUTION-005: canonical_model = %q, want blank", got)
 	}
-	if got := h.queryString(t, `SELECT ifNull(model_id, '') FROM naap.api_sla_compliance_by_org WHERE org = ? AND window_start = ? AND orchestrator_address = ''`, h.org, windowStart); got != "" {
+	if got := h.queryString(t, `SELECT ifNull(model_id, '') FROM naap.api_hourly_streaming_sla WHERE org = ? AND window_start = ? AND orchestrator_address = ''`, h.org, windowStart); got != "" {
 		t.Fatalf("RULE-ATTRIBUTION-005: api model_id = %q, want blank", got)
 	}
-	if h.queryInt(t, `SELECT count() FROM naap.api_sla_compliance_by_org WHERE org = ? AND window_start = ? AND orchestrator_address = '' AND gpu_id IS NOT NULL`, h.org, windowStart) != 0 {
+	if h.queryInt(t, `SELECT count() FROM naap.api_hourly_streaming_sla WHERE org = ? AND window_start = ? AND orchestrator_address = '' AND gpu_id IS NOT NULL`, h.org, windowStart) != 0 {
 		t.Fatalf("RULE-ATTRIBUTION-005: unresolved row invented gpu identity")
 	}
 }
@@ -593,7 +593,7 @@ func TestRuleAttribution006_HardwareLessRowsRemainVisibleWithoutGPU(t *testing.T
 	if got := h.queryString(t, `SELECT attribution_status FROM naap.canonical_session_current WHERE org = ? AND stream_id = ?`, h.org, streamID); got != "hardware_less" {
 		t.Fatalf("RULE-ATTRIBUTION-006: attribution_status = %q, want hardware_less", got)
 	}
-	if h.queryInt(t, `SELECT count() FROM naap.api_sla_compliance_by_org WHERE org = ? AND window_start = ? AND orchestrator_address = ? AND gpu_id IS NULL`, h.org, windowStart, orchAddr) != 1 {
+	if h.queryInt(t, `SELECT count() FROM naap.api_hourly_streaming_sla WHERE org = ? AND window_start = ? AND orchestrator_address = ? AND gpu_id IS NULL`, h.org, windowStart, orchAddr) != 1 {
 		t.Fatalf("RULE-ATTRIBUTION-006: hardware-less row was not preserved with null gpu_id")
 	}
 }

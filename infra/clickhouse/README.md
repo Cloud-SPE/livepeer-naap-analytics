@@ -54,7 +54,7 @@ remains a separate operator step.
 | **MV-populated** | `accepted_raw_events`, `ignored_raw_events`, `normalized_*`, event-driven aggregates | Fires synchronously as Kafka rows are routed by the ingest materialized views |
 | **Worker-populated** | `orch_metadata`, `gateway_metadata` | API enrichment worker polls every 5m and batch-inserts |
 
-Worker-populated tables are applied manually on existing volumes — the bootstrap and any future forward migrations only create the table schema. The enrichment worker will populate them on next startup. GPU inventory is derived natively from `normalized_network_capabilities` through the canonical capability inventory path and is served through `api_gpu_inventory`.
+Worker-populated tables are applied manually on existing volumes — the bootstrap and any future forward migrations only create the table schema. The enrichment worker will populate them on next startup. GPU inventory is derived natively from `normalized_network_capabilities` through the canonical capability inventory path and is served through `api_current_capability_hardware`.
 
 ### Tier contract
 
@@ -107,7 +107,7 @@ clickhouse-client --query "SELECT count(), ignore_reason FROM naap.ignored_raw_e
 
 # Check canonical/serving tables populated:
 clickhouse-client --query "SELECT count() FROM naap.canonical_session_current_store FINAL"
-clickhouse-client --query "SELECT sum(requested_sessions) FROM naap.api_network_demand_by_org_store FINAL"
+clickhouse-client --query "SELECT sum(requested_sessions) FROM naap.canonical_streaming_demand_hourly_store FINAL"
 ```
 
 ## Changing the Kafka broker

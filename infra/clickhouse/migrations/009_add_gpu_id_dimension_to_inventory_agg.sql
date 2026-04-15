@@ -1,6 +1,6 @@
 -- Migration 009: preserve one row per GPU in the latest orchestrator pipeline
--- inventory aggregate so api_gpu_inventory does not collapse multi-GPU
--- capability snapshots back to one row.
+-- inventory aggregate so current capability hardware serving does not collapse
+-- multi-GPU capability snapshots back to one row.
 
 DROP VIEW IF EXISTS naap.mv_canonical_latest_orchestrator_pipeline_inventory_agg;
 DROP TABLE IF EXISTS naap.canonical_latest_orchestrator_pipeline_inventory_agg;

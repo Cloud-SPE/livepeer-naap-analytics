@@ -153,7 +153,7 @@ Start at the top and work down until you find the broken layer:
    NO  → Check naap-app / naap-resolver containers (logs, health)
    YES ↓
 
-2. Is data fresh? (api_active_stream_state last_seen within 2 minutes)
+2. Is data fresh? (`api_current_active_stream_state.last_seen` within 2 minutes)
    NO  → Check resolver: make resolver-logs | grep ERROR
          Check ClickHouse ingest rate (clickhouse-overview dashboard)
    YES ↓

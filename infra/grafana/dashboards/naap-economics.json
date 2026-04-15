@@ -2,7 +2,7 @@
   "annotations": {
     "list": []
   },
-  "description": "Queries public org-aware API views such as api_network_demand_by_org; internal v_base_*_by_org views are not dashboard surfaces.",
+  "description": "Queries the capability-aware API spine such as api_hourly_streaming_demand; internal v_base_*_by_org views are not dashboard surfaces.",
   "editable": true,
   "graphTooltip": 0,
   "id": null,
@@ -161,7 +161,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT toStartOfInterval(hour, INTERVAL 1 HOUR) AS time,\n    toFloat64(sum(total_wei)) / 1e18 AS total_revenue_eth\nFROM naap.api_payment_hourly\nWHERE $__timeFilter(hour)\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY time ORDER BY time",
+          "rawSql": "SELECT toStartOfInterval(event_ts, INTERVAL 1 HOUR) AS time,\n    toFloat64(sum(face_value_wei)) / 1e18 AS total_revenue_eth\nFROM naap.canonical_payment_links\nWHERE $__timeFilter(event_ts)\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY time ORDER BY time",
           "refId": "A"
         }
       ],
@@ -219,7 +219,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "WITH identity AS (\n    SELECT addr, ens_name\n    FROM (\n        SELECT orch_address AS addr,\n            name AS ens_name,\n            row_number() OVER (PARTITION BY orch_address ORDER BY last_seen DESC, org DESC) AS rn\n        FROM naap.api_latest_orchestrator_state\n    )\n    WHERE rn = 1\n),\nlabel_meta AS (\n    SELECT addr,\n        ens_name,\n        count() OVER (PARTITION BY lower(ens_name)) AS name_collision_count\n    FROM identity\n),\nlabels AS (\n    SELECT addr,\n        if(ifNull(ens_name, '') != '' AND NOT startsWith(lower(ens_name), '0x'), if(name_collision_count > 1, concat(ens_name, ' (', left(addr, 8), '...', right(addr, 4), ')'), ens_name), concat(left(addr, 8), '...', right(addr, 4))) AS orch_label\n    FROM label_meta\n),\nlatest_quotes AS (\n    SELECT orch_address, last_seen, model_id, price_per_unit, pixels_per_unit\n    FROM (\n        SELECT orch_address, org, last_seen,\n            JSONExtractString(cap_item, 'constraint') AS model_id,\n            JSONExtractInt(cap_item, 'pricePerUnit') AS price_per_unit,\n            JSONExtractInt(cap_item, 'pixelsPerUnit') AS pixels_per_unit,\n            row_number() OVER (PARTITION BY orch_address, JSONExtractString(cap_item, 'constraint') ORDER BY last_seen DESC, org DESC) AS rn\n        FROM naap.api_latest_orchestrator_state\n        ARRAY JOIN JSONExtractArrayRaw(raw_capabilities, 'capabilities_prices') AS cap_item\n        WHERE JSONExtractInt(cap_item, 'pricePerUnit') > 0\n        AND JSONExtractInt(cap_item, 'pixelsPerUnit') > 0\n        AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n        AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address))\n    )\n    WHERE rn = 1\n)\nSELECT q.last_seen AS \"Quote Time\",\n    ifNull(labels.orch_label, concat(left(q.orch_address, 8), '...', right(q.orch_address, 4))) AS \"Orchestrator\",\n    q.orch_address AS \"Orchestrator Address\",\n    q.model_id AS \"Model\",\n    round(toFloat64(q.price_per_unit) * 1000000.0 / toFloat64(q.pixels_per_unit) / 1000000000.0, 4) AS \"Price (gwei/MP)\"\nFROM latest_quotes q\nLEFT JOIN labels ON labels.addr = q.orch_address\nORDER BY \"Quote Time\" DESC, \"Price (gwei/MP)\" DESC\nLIMIT 20",
+          "rawSql": "WITH identity AS (\n    SELECT addr, ens_name\n    FROM (\n        SELECT orch_address AS addr,\n            name AS ens_name,\n            row_number() OVER (PARTITION BY orch_address ORDER BY last_seen DESC, org DESC) AS rn\n        FROM naap.api_current_orchestrator\n    )\n    WHERE rn = 1\n),\nlabel_meta AS (\n    SELECT addr,\n        ens_name,\n        count() OVER (PARTITION BY lower(ens_name)) AS name_collision_count\n    FROM identity\n),\nlabels AS (\n    SELECT addr,\n        if(ifNull(ens_name, '') != '' AND NOT startsWith(lower(ens_name), '0x'), if(name_collision_count > 1, concat(ens_name, ' (', left(addr, 8), '...', right(addr, 4), ')'), ens_name), concat(left(addr, 8), '...', right(addr, 4))) AS orch_label\n    FROM label_meta\n),\nlatest_quotes AS (\n    SELECT orch_address, last_seen, ifNull(model_id, '') AS model_id, price_per_unit, pixels_per_unit\n    FROM (\n        SELECT orch_address, org, last_seen, model_id, price_per_unit, pixels_per_unit,\n            row_number() OVER (PARTITION BY orch_address, ifNull(model_id, '') ORDER BY last_seen DESC, org DESC) AS rn\n        FROM naap.api_current_capability_pricing\n        WHERE price_per_unit > 0\n        AND pixels_per_unit > 0\n        AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n        AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address))\n    )\n    WHERE rn = 1\n)\nSELECT q.last_seen AS \"Quote Time\",\n    ifNull(labels.orch_label, concat(left(q.orch_address, 8), '...', right(q.orch_address, 4))) AS \"Orchestrator\",\n    q.orch_address AS \"Orchestrator Address\",\n    q.model_id AS \"Model\",\n    round(toFloat64(q.price_per_unit) * 1000000.0 / toFloat64(q.pixels_per_unit) / 1000000000.0, 4) AS \"Price (gwei/MP)\"\nFROM latest_quotes q\nLEFT JOIN labels ON labels.addr = q.orch_address\nORDER BY \"Quote Time\" DESC, \"Price (gwei/MP)\" DESC\nLIMIT 20",
           "refId": "A"
         }
       ],
@@ -255,14 +255,14 @@
           "text": "All",
           "value": "__all"
         },
-        "definition": "SELECT DISTINCT org FROM naap.api_latest_orchestrator_state WHERE org != '' ORDER BY org",
+        "definition": "SELECT DISTINCT org FROM naap.api_current_orchestrator WHERE org != '' ORDER BY org",
         "hide": 0,
         "includeAll": true,
         "label": "Org",
         "multi": true,
         "name": "org",
         "options": [],
-        "query": "SELECT DISTINCT org FROM naap.api_latest_orchestrator_state WHERE org != '' ORDER BY org",
+        "query": "SELECT DISTINCT org FROM naap.api_current_orchestrator WHERE org != '' ORDER BY org",
         "refresh": 1,
         "sort": 1,
         "type": "query",
@@ -276,14 +276,14 @@
           "text": "All",
           "value": "__all"
         },
-        "definition": "SELECT DISTINCT model_id FROM naap.api_gpu_inventory WHERE model_id != '' ORDER BY model_id",
+        "definition": "SELECT DISTINCT model_id FROM naap.api_current_capability_hardware WHERE model_id != '' ORDER BY model_id",
         "hide": 0,
         "includeAll": true,
         "label": "Model",
         "multi": true,
         "name": "model",
         "options": [],
-        "query": "SELECT DISTINCT model_id FROM naap.api_gpu_inventory WHERE model_id != '' ORDER BY model_id",
+        "query": "SELECT DISTINCT model_id FROM naap.api_current_capability_hardware WHERE model_id != '' ORDER BY model_id",
         "refresh": 1,
         "sort": 1,
         "type": "query",
@@ -297,14 +297,14 @@
           "text": "All",
           "value": "__all"
         },
-        "definition": "SELECT orch_address AS __value, if(name != '' AND NOT startsWith(lower(name), '0x'), concat(name, ' (', orch_address, ')'), orch_address) AS __text FROM naap.api_latest_orchestrator_state ORDER BY if(name != '' AND NOT startsWith(lower(name), '0x'), 1, 0) DESC, __text",
+        "definition": "SELECT orch_address AS __value, if(name != '' AND NOT startsWith(lower(name), '0x'), concat(name, ' (', orch_address, ')'), orch_address) AS __text FROM naap.api_current_orchestrator ORDER BY if(name != '' AND NOT startsWith(lower(name), '0x'), 1, 0) DESC, __text",
         "hide": 0,
         "includeAll": true,
         "label": "Orchestrator (ENS)",
         "multi": true,
         "name": "orchestrator",
         "options": [],
-        "query": "SELECT orch_address AS __value, if(name != '' AND NOT startsWith(lower(name), '0x'), concat(name, ' (', orch_address, ')'), orch_address) AS __text FROM naap.api_latest_orchestrator_state ORDER BY if(name != '' AND NOT startsWith(lower(name), '0x'), 1, 0) DESC, __text",
+        "query": "SELECT orch_address AS __value, if(name != '' AND NOT startsWith(lower(name), '0x'), concat(name, ' (', orch_address, ')'), orch_address) AS __text FROM naap.api_current_orchestrator ORDER BY if(name != '' AND NOT startsWith(lower(name), '0x'), 1, 0) DESC, __text",
         "refresh": 1,
         "sort": 1,
         "type": "query",

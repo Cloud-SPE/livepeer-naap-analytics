@@ -2,6 +2,19 @@ package resolver
 
 import "testing"
 
+func TestBuiltinCapabilityByNumber_UsesRepoOwnedCatalog(t *testing.T) {
+	entry, ok := builtinCapabilityByNumber("35")
+	if !ok {
+		t.Fatalf("expected capability 35 to resolve from repo-owned catalog")
+	}
+	if entry.CanonicalPipeline != "live-video-to-video" {
+		t.Fatalf("canonical pipeline = %q, want live-video-to-video", entry.CanonicalPipeline)
+	}
+	if !entry.SupportsStream || entry.SupportsRequest {
+		t.Fatalf("unexpected capability 35 support flags: %+v", entry)
+	}
+}
+
 func TestBuildCapabilityIntervalTemplates_AcceptsGPUInfoArray(t *testing.T) {
 	raw := `{"hardware":[{"pipeline":"text-to-image","model_id":"sdxl","gpu_info":[{"id":"gpu-a","name":"L4","memory_total":24576}]}]}`
 
@@ -72,8 +85,9 @@ func TestBuildCapabilityIntervalTemplates_PerCapabilityPath_ProducesHardwareLess
 	}
 }
 
-func TestBuildCapabilityIntervalTemplates_PerCapabilityPath_ExcludesBYOCCapability37(t *testing.T) {
-	// Capability 37 (byoc) must be excluded from PerCapability mapping.
+func TestBuildCapabilityIntervalTemplates_PerCapabilityPath_IgnoresBYOCCapability37(t *testing.T) {
+	// BYOC capability ids are not built-in offers. They must come from
+	// hardware[] rather than PerCapability.
 	raw := `{
 		"hardware": null,
 		"capabilities": {

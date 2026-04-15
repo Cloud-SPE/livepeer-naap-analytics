@@ -21,7 +21,7 @@ Top-level architecture map for Livepeer NaaP Analytics.
   ─────────────────────────────────────────────────────────────────────────────
   /api/orchestrator  ──HTTP (5m)──► enrichment worker ──INSERT──► naap.orch_metadata
   /api/gateways      ──poll──►      (Go goroutine)     ──INSERT──► naap.gateway_metadata
-  accepted_raw_events ──MV/dbt──► canonical capability inventory ──VIEW──► naap.api_gpu_inventory
+  accepted_raw_events ──MV/dbt──► canonical capability inventory ──VIEW──► naap.api_current_capability_hardware
 
   Observability
   ─────────────────────────────────────────────────────────────────────────────
@@ -44,7 +44,7 @@ No application-layer consumer sits between Kafka and ClickHouse.
 **Enrichment path:** A background Go goroutine polls the Livepeer public API every 5 minutes
 and upserts orchestrator and gateway metadata (ENS names, stake, service URIs, deposits) into
 dedicated ClickHouse tables. GPU inventory is not part of enrichment anymore; it is derived
-natively inside ClickHouse from retained capability events and exposed through `api_gpu_inventory`.
+natively inside ClickHouse from retained capability events and exposed through `api_current_capability_hardware`.
 All enrichment tables can be JOINed from any aggregate query.
 
 **Table population strategies:** Two distinct strategies are used for aggregate tables:

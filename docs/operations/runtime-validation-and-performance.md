@@ -137,8 +137,7 @@ Use these to confirm the contracted SLA behavior is live and bounded.
 
 Primary sources:
 
-- `api_sla_compliance`
-- `api_sla_compliance_by_org`
+- `api_hourly_streaming_sla`
 - live API responses
 
 ### Rollup inflation safety
@@ -147,10 +146,9 @@ Use these to confirm serving outputs are not inflating metrics via unsafe
 aggregate-of-aggregate math.
 
 - weighted recomputation drift for:
-  - `api_network_demand`
-  - `api_gpu_network_demand`
-  - `api_gpu_metrics`
-  - `api_sla_compliance`
+  - `api_hourly_streaming_demand`
+  - `api_hourly_streaming_gpu_metrics`
+  - `api_hourly_streaming_sla`
 - latency support-field recomputation drift
 - overlap check for:
   - `loading_only_sessions`

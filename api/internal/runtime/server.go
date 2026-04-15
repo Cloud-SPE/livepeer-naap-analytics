@@ -120,6 +120,12 @@ func (s *Server) buildRouter() chi.Router {
 			r.Get("/orchestrators", s.handleDiscoverOrchestrators)
 		})
 
+		// Net — discovery-compatible orchestrator inventory route kept for the
+		// current OpenAPI contract.
+		r.Route("/net", func(r chi.Router) {
+			r.Get("/orchestrators", s.handleDiscoverOrchestrators)
+		})
+
 		// Requests — non-streaming AI capabilities (model inventory only).
 		r.Route("/requests", func(r chi.Router) {
 			r.Get("/models", s.handleGetRequestsModels)

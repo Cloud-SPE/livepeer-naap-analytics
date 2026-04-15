@@ -214,8 +214,9 @@ paths:
       description: |
         Per-model capacity and load view for the live-video-to-video streaming page.
         Each row shows warm orchestrator count, total GPU slots, currently active
-        streams, available capacity (slots minus active), and 24-hour weighted
-        average output FPS. Only includes the `live-video-to-video` pipeline.
+        streams seen in the last 30 minutes, available capacity (slots minus active),
+        and 24-hour weighted average output FPS. Only includes the
+        `live-video-to-video` pipeline.
         A negative `available_capacity` means slots are oversubscribed (multiple
         concurrent streams per GPU).
       responses:
@@ -262,8 +263,9 @@ paths:
         `live-video-to-video` and `llm` produces 2 rows.
 
         Each row's score is `sla_score / 100` for that specific pipeline,
-        derived from the last 2 hours of activity (`api_sla_compliance` for
-        live-video-to-video, `api_requests_sla` for everything else). When no
+        derived from the last 2 hours of activity (`api_hourly_streaming_sla`
+        for live-video-to-video, `api_hourly_request_demand` for everything
+        else). When no
         recent SLA data exists for that (orch, pipeline), score is `0.0` and
         `recent_work` is `false` — signaling the score is a placeholder, not
         a measurement. When SLA data exists, `recent_work` is `true` and the

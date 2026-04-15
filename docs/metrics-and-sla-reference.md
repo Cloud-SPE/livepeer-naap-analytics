@@ -228,7 +228,7 @@ The coverage ratio multiplier penalises scores where telemetry data was sparse o
 
 **Source:** final SLA serving rows are published from the resolver-owned
 additive SLA input surface via the `api_base_*` scoring helpers, then exposed
-through `warehouse/models/api/api_sla_compliance.sql` as a thin contracted
+through `warehouse/models/api/api_hourly_streaming_sla.sql` as the contracted
 read model.
 
 **API endpoint:** `GET /v1/sla/compliance`

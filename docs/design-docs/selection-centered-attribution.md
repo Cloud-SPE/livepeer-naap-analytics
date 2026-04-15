@@ -72,7 +72,7 @@ and produce the same five-class attribution status. Only the event source and
   filtering; BYOC model evidence participates in candidate selection, not only
   final row decoration
 - Output: `canonical_byoc_job_store`
-
+a
 ## Capability interval building — three paths
 
 `buildCapabilityIntervalTemplates` dispatches on the structure of each
