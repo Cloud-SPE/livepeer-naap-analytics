@@ -635,7 +635,7 @@ func (r *Repo) GetDashboardPipelineCatalog(ctx context.Context) ([]types.Dashboa
 		SELECT DISTINCT canonical_pipeline, model_id
 		FROM naap.api_observed_capability_offer
 		WHERE last_seen >= ? AND last_seen < ?
-		  AND capability_family = 'builtin'
+		  AND hardware_present = 1
 		  AND canonical_pipeline != '' AND model_id != ''
 		ORDER BY canonical_pipeline, model_id
 	`, start, end)
