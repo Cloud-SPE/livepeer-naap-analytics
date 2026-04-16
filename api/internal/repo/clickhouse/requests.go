@@ -40,6 +40,7 @@ func (r *Repo) GetRequestsModels(ctx context.Context) ([]types.RequestsModel, er
 		        toInt64(0) AS gpu_slots
 		    FROM naap.api_observed_byoc_worker
 		    WHERE capability_name != ''
+		      AND ifNull(model, '') != ''
 		      AND last_seen >= ? AND last_seen < ?
 		    GROUP BY pipeline, model, capability_family
 		),

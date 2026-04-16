@@ -19,8 +19,8 @@ type HourlyBucket struct {
 }
 
 type DashboardKPI struct {
-	SuccessRate         MetricValue    `json:"successRate"`
-	OrchestratorsOnline MetricValue    `json:"orchestratorsOnline"`
+	SuccessRate         MetricDelta    `json:"successRate"`
+	OrchestratorsOnline MetricDelta    `json:"orchestratorsOnline"`
 	DailyUsageMins      MetricDelta    `json:"dailyUsageMins"`
 	DailySessionCount   MetricDelta    `json:"dailySessionCount"`
 	DailyNetworkFeesEth MetricDelta    `json:"dailyNetworkFeesEth"`
@@ -139,9 +139,11 @@ type DashboardGPUCapacityPipeline struct {
 }
 
 type DashboardGPUCapacity struct {
-	TotalGPUs    int64                          `json:"totalGPUs"`
-	Models       []DashboardGPUModelCapacity    `json:"models"`
-	PipelineGPUs []DashboardGPUCapacityPipeline `json:"pipelineGPUs"`
+	TotalGPUs         int64                          `json:"totalGPUs"`
+	ActiveGPUs        int64                          `json:"activeGPUs"`
+	AvailableCapacity int64                          `json:"availableCapacity"`
+	Models            []DashboardGPUModelCapacity    `json:"models"`
+	PipelineGPUs      []DashboardGPUCapacityPipeline `json:"pipelineGPUs"`
 }
 
 // ---------------------------------------------------------------------------

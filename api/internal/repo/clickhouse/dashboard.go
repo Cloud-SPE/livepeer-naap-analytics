@@ -9,6 +9,13 @@ import (
 	"github.com/livepeer/naap-analytics/internal/types"
 )
 
+// sessionBucket holds per-hour session counts used by KPI delta computations.
+type sessionBucket struct {
+	hour      time.Time
+	sessions  uint64
+	successes uint64
+}
+
 // GetDashboardKPI serves GET /v1/dashboard/kpi (streaming portion).
 // Runs 3 parallel ClickHouse queries: orchestrator count, hourly sessions, hourly usage.
 func (r *Repo) GetDashboardKPI(ctx context.Context, windowHours int, pipeline, modelID string) (*types.DashboardKPI, error) {
@@ -35,8 +42,8 @@ func (r *Repo) GetDashboardKPI(ctx context.Context, windowHours int, pipeline, m
 	} else {
 		if err := r.conn.QueryRow(ctx, `
 			SELECT countDistinct(orch_address) AS observed
-			FROM naap.canonical_capability_snapshots_store
-			WHERE snapshot_ts >= ? AND snapshot_ts < ?
+			FROM naap.api_observed_orchestrator
+			WHERE last_seen >= ? AND last_seen < ?
 		`, windowStart, now).Scan(&activeOrch); err != nil {
 			return nil, fmt.Errorf("dashboard kpi orch count: %w", err)
 		}
@@ -56,11 +63,6 @@ func (r *Repo) GetDashboardKPI(ctx context.Context, windowHours int, pipeline, m
 	}
 	defer sessionRows.Close()
 
-	type sessionBucket struct {
-		hour      time.Time
-		sessions  uint64
-		successes uint64
-	}
 	var sessionBuckets []sessionBucket
 	for sessionRows.Next() {
 		var b sessionBucket
@@ -121,12 +123,13 @@ func (r *Repo) GetDashboardKPI(ctx context.Context, windowHours int, pipeline, m
 
 	// Compute period-over-period deltas
 	successRate := divSafe(float64(totalSuccesses), float64(totalSessions)) * 100
+	successRateDelta := computeSuccessRateDelta(sessionBuckets)
 	sessionDelta := computeDelta(hourlySessions)
 	usageDelta := computeDelta(hourlyUsage)
 
 	kpi := &types.DashboardKPI{
-		SuccessRate:         types.MetricValue{Value: successRate},
-		OrchestratorsOnline: types.MetricValue{Value: float64(activeOrch)},
+		SuccessRate:         types.MetricDelta{Value: successRate, Delta: successRateDelta},
+		OrchestratorsOnline: types.MetricDelta{Value: float64(activeOrch), Delta: 0},
 		DailyUsageMins:      types.MetricDelta{Value: totalMins, Delta: usageDelta},
 		DailySessionCount:   types.MetricDelta{Value: float64(totalSessions), Delta: sessionDelta},
 		DailyNetworkFeesEth: types.MetricDelta{Value: 0, Delta: 0}, // Phase 4
@@ -155,6 +158,27 @@ func computeDelta(buckets []types.HourlyBucket) float64 {
 		return 0
 	}
 	return ((second - first) / first) * 100
+}
+
+// computeSuccessRateDelta splits session buckets at the midpoint and returns
+// the absolute percentage-point difference between the two halves' success rates.
+func computeSuccessRateDelta(buckets []sessionBucket) float64 {
+	if len(buckets) < 2 {
+		return 0
+	}
+	mid := len(buckets) / 2
+	var firstSessions, firstSuccesses, secondSessions, secondSuccesses uint64
+	for _, b := range buckets[:mid] {
+		firstSessions += b.sessions
+		firstSuccesses += b.successes
+	}
+	for _, b := range buckets[mid:] {
+		secondSessions += b.sessions
+		secondSuccesses += b.successes
+	}
+	firstRate := divSafe(float64(firstSuccesses), float64(firstSessions)) * 100
+	secondRate := divSafe(float64(secondSuccesses), float64(secondSessions)) * 100
+	return secondRate - firstRate
 }
 
 // GetDashboardPipelines serves GET /v1/dashboard/pipelines (streaming portion).
@@ -555,10 +579,30 @@ func (r *Repo) GetDashboardGPUCapacity(ctx context.Context) (*types.DashboardGPU
 	}
 	sort.Slice(pipelineGPUs, func(i, j int) bool { return pipelineGPUs[i].GPUs > pipelineGPUs[j].GPUs })
 
+	// Count distinct GPUs currently serving at least one active stream.
+	var gpusInUse uint64
+	if err := r.conn.QueryRow(ctx, `
+		SELECT count(DISTINCT concat(ifNull(attributed_orch_address, orch_address), '|', gpu_id))
+		FROM naap.api_current_active_stream_state
+		WHERE completed = 0
+		  AND last_seen > now() - INTERVAL 30 MINUTE
+		  AND gpu_id IS NOT NULL AND gpu_id != ''
+	`).Scan(&gpusInUse); err != nil {
+		return nil, fmt.Errorf("dashboard gpu capacity active gpus: %w", err)
+	}
+
+	activeGPUs := int64(gpusInUse)
+	availableCapacity := totalGPUs - activeGPUs
+	if availableCapacity < 0 {
+		availableCapacity = 0
+	}
+
 	return &types.DashboardGPUCapacity{
-		TotalGPUs:    totalGPUs,
-		Models:       models,
-		PipelineGPUs: pipelineGPUs,
+		TotalGPUs:         totalGPUs,
+		ActiveGPUs:        activeGPUs,
+		AvailableCapacity: availableCapacity,
+		Models:            models,
+		PipelineGPUs:      pipelineGPUs,
 	}, nil
 }
 

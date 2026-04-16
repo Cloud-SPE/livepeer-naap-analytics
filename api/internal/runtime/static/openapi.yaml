@@ -758,7 +758,7 @@ components:
         successRatio: { type: number }
         effectiveSuccessRate: { type: number, nullable: true }
         noSwapRatio: { type: number, nullable: true }
-        slaScore: { type: number, nullable: true }
+        slaScore: { type: number, nullable: true, description: "Composite SLA score (0–100)" }
         pipelines:
           type: array
           items: { type: string }
