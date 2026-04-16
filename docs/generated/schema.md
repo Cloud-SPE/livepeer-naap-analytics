@@ -35,16 +35,12 @@ The documented `raw_*`, `normalized_*`, `canonical_*`, `operational_*`, `api_bas
 | `canonical_capability_pricing_inventory_store` | `ReplacingMergeTree` |
 | `canonical_capability_snapshot_latest` | `AggregatingMergeTree` |
 | `canonical_capability_snapshots_store` | `ReplacingMergeTree` |
-| `canonical_capability_snapshots_by_address` | `ReplacingMergeTree` |
-| `canonical_capability_snapshots_by_uri` | `ReplacingMergeTree` |
 | `canonical_orch_capability_intervals` | `ReplacingMergeTree` |
 | `canonical_orch_capability_versions` | `ReplacingMergeTree` |
 | `canonical_payment_links_store` | `ReplacingMergeTree` |
 | `canonical_selection_attribution_current` | `ReplacingMergeTree` |
 | `canonical_selection_attribution_decisions` | `MergeTree` |
 | `canonical_selection_events` | `ReplacingMergeTree` |
-| `canonical_session_attribution_audit` | `MergeTree` |
-| `canonical_session_attribution_latest_store` | `MergeTree` |
 | `canonical_session_current_store` | `ReplacingMergeTree` |
 | `canonical_session_demand_input_current` | `ReplacingMergeTree` |
 | `canonical_status_hours_store` | `MergeTree` |
@@ -78,9 +74,6 @@ The documented `raw_*`, `normalized_*`, `canonical_*`, `operational_*`, `api_bas
 | `resolver_repair_requests` | `ReplacingMergeTree` |
 | `resolver_runtime_state` | `ReplacingMergeTree` |
 | `resolver_window_claims` | `ReplacingMergeTree` |
-| `selection_attribution_changes` | `MergeTree` |
-| `session_current_changes` | `MergeTree` |
-| `status_hour_changes` | `MergeTree` |
 | `mv_canonical_capability_hardware_inventory` | `MaterializedView` |
 | `mv_canonical_capability_hardware_inventory_by_snapshot` | `MaterializedView` |
 | `mv_canonical_capability_offer_inventory_store_builtin` | `MaterializedView` |
@@ -89,8 +82,6 @@ The documented `raw_*`, `normalized_*`, `canonical_*`, `operational_*`, `api_bas
 | `mv_canonical_capability_pricing_inventory_store_global` | `MaterializedView` |
 | `mv_canonical_capability_snapshot_latest` | `MaterializedView` |
 | `mv_canonical_capability_snapshots_store` | `MaterializedView` |
-| `mv_canonical_capability_snapshots_by_address` | `MaterializedView` |
-| `mv_canonical_capability_snapshots_by_uri` | `MaterializedView` |
 | `mv_discovery_latency_hourly` | `MaterializedView` |
 | `mv_fps_hourly` | `MaterializedView` |
 | `mv_ingest_network_events_accepted` | `MaterializedView` |

@@ -64,21 +64,6 @@ ALTER TABLE naap.resolver_window_claims
     MODIFY TTL toDateTime(created_at) + toIntervalDay(7);
 
 -- ------------------------------------------------------------
--- Tier 5: Audit changelogs (7 days)
--- Rationale: rolling audit window for change attribution.
--- Long-term history is available via accepted_raw_events.
--- ------------------------------------------------------------
-
-ALTER TABLE naap.selection_attribution_changes
-    MODIFY TTL toDateTime(created_at) + toIntervalDay(7);
-
-ALTER TABLE naap.session_current_changes
-    MODIFY TTL toDateTime(created_at) + toIntervalDay(7);
-
-ALTER TABLE naap.status_hour_changes
-    MODIFY TTL toDateTime(created_at) + toIntervalDay(7);
-
--- ------------------------------------------------------------
 -- Tier 6: Resolver working tables (1–2 days)
 -- Ephemeral per-query scratch tables.
 -- ------------------------------------------------------------

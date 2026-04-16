@@ -31,7 +31,6 @@ Useful commands:
 make logs
 make up-tooling
 make warehouse-run
-make rebuild-from-retained-raw
 make test-validation-clean
 make bootstrap-extract
 scripts/export_retained_raw.sh .local/raw-export/<snapshot>

@@ -344,7 +344,8 @@ func TestAffectedDashboardPanelsDeduplicateOrchestratorStateLookups(t *testing.T
 
 	affectedTitles := map[string]struct{}{
 		"Gateway -> Orchestrator -> Pipeline Paths (15m)":        {},
-		"Top 10 Orchestrators by SLA Score (Bar Chart)":          {},
+		"Top 20 Orchestrators by SLA Score":                      {},
+		"Top 10 Orchestrators by SLA Score":                      {},
 		"Top Orchestrators (24h: Streams, FPS, Latency)":         {},
 		"Current Active Streams":                                 {},
 		"Current Known Live Streams":                             {},
@@ -407,7 +408,8 @@ func TestAffectedDashboardPanelsUseCollisionAwareLabelsAndStreamingSLA(t *testin
 
 	labelTitles := map[string]struct{}{
 		"Gateway -> Orchestrator -> Pipeline Paths (15m)":        {},
-		"Top 10 Orchestrators by SLA Score (Bar Chart)":          {},
+		"Top 20 Orchestrators by SLA Score":                      {},
+		"Top 10 Orchestrators by SLA Score":                      {},
 		"Top Orchestrators (24h: Streams, FPS, Latency)":         {},
 		"Current Active Streams":                                 {},
 		"Current Known Live Streams":                             {},
@@ -453,7 +455,7 @@ func TestAffectedDashboardPanelsUseCollisionAwareLabelsAndStreamingSLA(t *testin
 					}
 				}
 				switch panel.Title {
-				case "Top 10 Orchestrators by SLA Score (Bar Chart)":
+				case "Top 20 Orchestrators by SLA Score", "Top 10 Orchestrators by SLA Score":
 					slaChartCount++
 					if !strings.Contains(sql, "FROM naap.api_hourly_streaming_sla") {
 						t.Fatalf("panel %q in %s should read from streaming SLA source", panel.Title, path)

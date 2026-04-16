@@ -1523,51 +1523,6 @@ func (r *repo) fetchLatestSessionDecisions(ctx context.Context, refs []sessionKe
 	return out, rows.Err()
 }
 
-func (r *repo) fetchCurrentDecisionHashes(ctx context.Context, selectionEventIDs []string) (map[string]string, error) {
-	if len(selectionEventIDs) == 0 {
-		return map[string]string{}, nil
-	}
-	queryID, err := r.stageSelectionEventIDs(ctx, selectionEventIDs)
-	if err != nil {
-		return nil, fmt.Errorf("stage decision ids: %w", err)
-	}
-	rows, err := r.conn.Query(ctx, `
-		SELECT
-			c.selection_event_id,
-			lower(hex(MD5(concat(
-				ifNull(c.attribution_status, ''), '|',
-				ifNull(c.attribution_reason, ''), '|',
-				ifNull(c.attribution_method, ''), '|',
-				ifNull(c.selection_confidence, ''), '|',
-				ifNull(c.selected_capability_version_id, ''), '|',
-				ifNull(c.selected_snapshot_event_id, ''), '|',
-				ifNull(c.attributed_orch_address, ''), '|',
-				ifNull(c.attributed_orch_uri, ''), '|',
-				ifNull(c.canonical_pipeline, ''), '|',
-				ifNull(c.canonical_model, ''), '|',
-				ifNull(c.gpu_id, '')
-			)))) AS row_hash
-		FROM naap.resolver_query_selection_event_ids i
-		INNER JOIN naap.canonical_selection_attribution_current c
-			ON i.selection_event_id = c.selection_event_id
-		WHERE i.query_id = ?
-	`, queryID)
-	if err != nil {
-		return nil, fmt.Errorf("fetch current decision hashes: %w", err)
-	}
-	defer rows.Close()
-
-	out := make(map[string]string, len(selectionEventIDs))
-	for rows.Next() {
-		var id, hash string
-		if err := rows.Scan(&id, &hash); err != nil {
-			return nil, fmt.Errorf("scan current decision hash: %w", err)
-		}
-		out[id] = hash
-	}
-	return out, rows.Err()
-}
-
 func (r *repo) recordRun(ctx context.Context, runID string, req RunRequest, status string, startedAt, finishedAt time.Time, rowsProcessed, mismatchCount uint64, errSummary string) error {
 	// Persist both timing knobs with each run so dashboards and alert rules can
 	// evaluate same-day repair eligibility from the live resolver config rather
@@ -2428,7 +2383,7 @@ func (r *repo) insertCapabilityIntervals(ctx context.Context, runID string, rows
 	return batch.Send()
 }
 
-func (r *repo) insertDecisionRows(ctx context.Context, runID string, rows []SelectionDecision, previous map[string]string) error {
+func (r *repo) insertDecisionRows(ctx context.Context, runID string, rows []SelectionDecision) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -2458,16 +2413,6 @@ func (r *repo) insertDecisionRows(ctx context.Context, runID string, rows []Sele
 	if err != nil {
 		return fmt.Errorf("prepare current decision batch: %w", err)
 	}
-	changes, err := r.conn.PrepareBatch(ctx, `
-		INSERT INTO naap.selection_attribution_changes
-		(
-			run_id, selection_event_id, org, canonical_session_key, selection_ts,
-			change_reason, previous_decision_hash, current_decision_hash, created_at
-		)
-	`)
-	if err != nil {
-		return fmt.Errorf("prepare decision change batch: %w", err)
-	}
 	now := time.Now().UTC()
 	for _, row := range rows {
 		decisionID := stableHash(row.SelectionEventID, row.Status, row.Reason, row.Method, row.InputHash, now.Format(time.RFC3339Nano))
@@ -2491,23 +2436,6 @@ func (r *repo) insertDecisionRows(ctx context.Context, runID string, rows []Sele
 		); err != nil {
 			return fmt.Errorf("append current decision row: %w", err)
 		}
-		currentHash := stableHash(
-			row.Status, row.Reason, row.Method, row.Confidence, row.CapabilityVersionID, row.SnapshotEventID,
-			row.AttributedOrchAddress, row.AttributedOrchURI, row.CanonicalPipeline, row.CanonicalModel, row.GPUID,
-		)
-		changeReason := "unchanged"
-		prevHash := previous[row.SelectionEventID]
-		if prevHash == "" {
-			changeReason = "new_selection_decision"
-		} else if prevHash != currentHash {
-			changeReason = "decision_updated"
-		}
-		if err := changes.Append(
-			runID, row.SelectionEventID, row.Org, row.SessionKey, row.SelectionTS.UTC(),
-			changeReason, nullableStringValue(prevHash), currentHash, now,
-		); err != nil {
-			return fmt.Errorf("append decision change row: %w", err)
-		}
 	}
 	if err := decisions.Send(); err != nil {
 		return fmt.Errorf("send decision rows: %w", err)
@@ -2515,7 +2443,7 @@ func (r *repo) insertDecisionRows(ctx context.Context, runID string, rows []Sele
 	if err := current.Send(); err != nil {
 		return fmt.Errorf("send current decision rows: %w", err)
 	}
-	return changes.Send()
+	return nil
 }
 
 func (r *repo) insertSessionCurrentRows(ctx context.Context, runID string, rows []SessionCurrentRow) error {
@@ -2541,15 +2469,6 @@ func (r *repo) insertSessionCurrentRows(ctx context.Context, runID string, rows 
 	if err != nil {
 		return fmt.Errorf("prepare session current batch: %w", err)
 	}
-	changes, err := r.conn.PrepareBatch(ctx, `
-		INSERT INTO naap.session_current_changes
-		(
-			run_id, canonical_session_key, org, last_seen, change_reason, current_row_hash, created_at
-		)
-	`)
-	if err != nil {
-		return fmt.Errorf("prepare session current change batch: %w", err)
-	}
 	now := time.Now().UTC()
 	for _, row := range rows {
 		if err := store.Append(
@@ -2567,16 +2486,11 @@ func (r *repo) insertSessionCurrentRows(ctx context.Context, runID string, rows 
 		); err != nil {
 			return fmt.Errorf("append session current row: %w", err)
 		}
-		rowHash := sessionCurrentRowHash(row)
-		changeReason := "session_updated"
-		if err := changes.Append(runID, row.SessionKey, row.Org, row.LastSeen.UTC(), changeReason, rowHash, now); err != nil {
-			return fmt.Errorf("append session current change: %w", err)
-		}
 	}
 	if err := store.Send(); err != nil {
 		return fmt.Errorf("send session current rows: %w", err)
 	}
-	return changes.Send()
+	return nil
 }
 
 func (r *repo) insertStatusHourRows(ctx context.Context, runID string, rows []StatusHourRow) error {
@@ -2598,15 +2512,6 @@ func (r *repo) insertStatusHourRows(ctx context.Context, runID string, rows []St
 	if err != nil {
 		return fmt.Errorf("prepare status hour batch: %w", err)
 	}
-	changes, err := r.conn.PrepareBatch(ctx, `
-		INSERT INTO naap.status_hour_changes
-		(
-			run_id, canonical_session_key, org, hour, change_reason, current_row_hash, created_at
-		)
-	`)
-	if err != nil {
-		return fmt.Errorf("prepare status hour change batch: %w", err)
-	}
 	now := time.Now().UTC()
 	for _, row := range rows {
 		if err := store.Append(
@@ -2621,15 +2526,11 @@ func (r *repo) insertStatusHourRows(ctx context.Context, runID string, rows []St
 		); err != nil {
 			return fmt.Errorf("append status hour row: %w", err)
 		}
-		rowHash := statusHourRowHash(row)
-		if err := changes.Append(runID, row.SessionKey, row.Org, row.Hour.UTC(), "status_hour_updated", rowHash, now); err != nil {
-			return fmt.Errorf("append status hour change: %w", err)
-		}
 	}
 	if err := store.Send(); err != nil {
 		return fmt.Errorf("send status hour rows: %w", err)
 	}
-	return changes.Send()
+	return nil
 }
 
 func (r *repo) insertSessionDemandInputRows(ctx context.Context, runID string, rows []SessionCurrentRow) error {

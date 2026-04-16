@@ -68,8 +68,17 @@ This contract governs semantic data flow, not physical naming uniformity. The
 generated bootstrap in [`../../docs/generated/schema.md`](../../docs/generated/schema.md)
 is the source of truth for the supported physical object inventory.
 
+Temporal suffixes add semantics on top of the tier prefix:
+
+- `*_current` / `*_latest` — latest-state entities or helpers only
+- `*_inventory` — observed historical/windowed inventory
+- `*_store` — physical ownership/persistence, not semantic truth by itself
+
 `canonical_*` is the only valid source for downstream derivations. `api_*` is a
 serving layer and must not be used as truth for new warehouse logic.
+
+Runtime/infrastructure families such as `resolver_*`, `agg_*`, `mv_*`, `kafka_*`,
+and metadata tables are intentionally outside the semantic tier prefixes.
 
 Resolver/store rule:
 

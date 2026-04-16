@@ -43,6 +43,17 @@ infrastructure/runtime tables such as `accepted_raw_events`, `ignored_raw_events
 Those physical names are part of the supported v1 schema and are not being
 renamed just to force prefix uniformity.
 
+Temporal suffixes add semantics on top of the tier prefix:
+
+- `*_current` / `*_latest` — true latest-state entities or helpers only
+- `*_inventory` — observed historical/windowed inventory
+- `*_store` — physically owned tables backing a semantic relation; `store` is not a truth tier
+
+The naming rule is therefore:
+
+- prefix defines the semantic tier
+- suffix defines latest-state vs observed inventory vs physical storage role
+
 Important rule:
 
 - downstream derivations must use `canonical_*`

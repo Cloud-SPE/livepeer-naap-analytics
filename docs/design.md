@@ -85,6 +85,21 @@ bootstrap also contains infrastructure/runtime namespaces such as `resolver_*`,
 supported as-is; we are not planning another broad schema rename just to force
 every table into the semantic prefixes.
 
+Temporal suffixes add semantics on top of the tier prefix:
+
+- `*_current` / `*_latest` — true latest-state entities or helpers only; do not use for observed inventory-over-window semantics
+- `*_inventory` — observed historical/windowed inventory semantics
+- `*_store` — physically owned tables written by a runtime component or MV; `store` says how data is persisted, not whether it is the semantic source of truth
+
+Naming is therefore two-part:
+
+- tier prefix describes where a relation sits in the semantic flow
+- suffix describes whether it is latest-state, observed inventory, or a physical store
+
+Runtime/infrastructure families such as `resolver_*`, `agg_*`, `mv_*`, `kafka_*`,
+and metadata tables are intentionally exempt from prefix uniformity. They are
+supported physical schema objects, not semantic tier names.
+
 Medallion mapping is documentation-only:
 
 - bronze = `raw_*`

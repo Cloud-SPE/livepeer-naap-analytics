@@ -1016,11 +1016,7 @@ func (e *Engine) executeWindow(ctx context.Context, req RunRequest) (stats RunSt
 		if err := e.repo.insertCapabilityIntervals(ctx, runID, intervals); err != nil {
 			return stats, runStatus, err
 		}
-		prevHashes, hashErr := e.repo.fetchCurrentDecisionHashes(ctx, selectionEventIDs(selectionEvents))
-		if hashErr != nil {
-			return stats, runStatus, hashErr
-		}
-		if err := e.repo.insertDecisionRows(ctx, runID, decisions, prevHashes); err != nil {
+		if err := e.repo.insertDecisionRows(ctx, runID, decisions); err != nil {
 			return stats, runStatus, err
 		}
 		logStage("persist_selection_state", stageStarted,

@@ -98,11 +98,7 @@ has expired but before the 90-day raw-event TTL boundary.
 | `naap.gateway_metadata` | `updated_at` | 7 days |
 | `naap.orch_metadata` | `updated_at` | 7 days |
 | `naap.resolver_window_claims` | `created_at` | 7 days |
-| `naap.selection_attribution_changes` | `created_at` | 7 days |
-| `naap.session_current_changes` | `created_at` | 7 days |
-| `naap.status_hour_changes` | `created_at` | 7 days |
-
-These tables are refreshed continuously by metadata polling or resolver activity. Entries older than 7 days have no operational value. Long-term history for change events and capability-derived GPU inventory remains available via retained raw events.
+These tables are refreshed continuously by metadata polling or resolver activity. Entries older than 7 days have no operational value. Long-term history for capability-derived GPU inventory remains available via retained raw events.
 
 ### Tier 4 — Resolver working tables (1–2 days)
 

@@ -15,7 +15,7 @@
       }
     ]
   },
-  "description": "Canonical/product overview dashboard. Queries api_* serving views only; these are read models over canonical_* and must not be treated as downstream derivation sources.",
+  "description": "Overview dashboard for live state, observed network state, and live-video usage. Most panels query published api_* read models; the experimental prompt panel reads normalized live-video status directly to trial prompt visibility.",
   "editable": true,
   "graphTooltip": 0,
   "id": null,
@@ -94,7 +94,7 @@
       },
       "id": 100,
       "panels": [],
-      "title": "Current State",
+      "title": "Live Now",
       "type": "row"
     },
     {
@@ -157,7 +157,7 @@
       },
       "gridPos": {
         "h": 5,
-        "w": 4,
+        "w": 6,
         "x": 0,
         "y": 1
       },
@@ -188,11 +188,151 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "sql",
-          "rawSql": "SELECT toFloat64(count()) AS value\nFROM naap.api_current_active_stream_state\nWHERE last_seen > now() - INTERVAL 120 SECOND\nAND stream_id != ''\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nAND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), ifNull(orch_address, '')))",
+          "rawSql": "SELECT toFloat64(count()) AS value\nFROM naap.api_current_active_stream_state\nWHERE last_seen > now() - INTERVAL 120 SECOND\nAND stream_id != ''\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nAND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(model_id, '')))\nAND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), ifNull(orch_address, '')))",
           "refId": "A"
         }
       ],
-      "title": "Current Active Streams",
+      "title": "Live Active Streams (120s)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 2,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "green",
+                "value": 10
+              }
+            ]
+          },
+          "unit": "fps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 6,
+        "y": 1
+      },
+      "id": 4,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT toFloat64(ifNull(avg(s.output_fps), 0)) AS value\nFROM naap.canonical_status_samples_recent_store AS s\nINNER JOIN (\n        SELECT event_id, argMax(refreshed_at, refreshed_at) AS max_ra\n        FROM naap.canonical_status_samples_recent_store\n        WHERE sample_ts >= now() - INTERVAL 15 MINUTE\n        GROUP BY event_id\n    ) AS _d ON s.event_id = _d.event_id AND s.refreshed_at = _d.max_ra\nWHERE s.sample_ts >= now() - INTERVAL 15 MINUTE\nAND s.is_attributed = 1 AND s.orch_address != ''\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), s.org))\nAND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(s.model_id, '')))\nAND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), s.orch_address))",
+          "refId": "A"
+        }
+      ],
+      "title": "Network FPS (15m avg)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 2,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 6
+              },
+              {
+                "color": "red",
+                "value": 12
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 12,
+        "y": 1
+      },
+      "id": 5,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT toFloat64(ifNull(avgIf(s.e2e_latency_ms, s.e2e_latency_ms > 0), 0)) / 1000.0 AS value\nFROM naap.canonical_status_samples_recent_store AS s\nINNER JOIN (\n        SELECT event_id, argMax(refreshed_at, refreshed_at) AS max_ra\n        FROM naap.canonical_status_samples_recent_store\n        WHERE sample_ts >= now() - INTERVAL 1 HOUR\n        GROUP BY event_id\n    ) AS _d ON s.event_id = _d.event_id AND s.refreshed_at = _d.max_ra\nWHERE s.sample_ts >= now() - INTERVAL 1 HOUR\nAND s.is_attributed = 1\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), s.org))\nAND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(s.model_id, '')))\nAND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), s.orch_address))",
+          "refId": "A"
+        }
+      ],
+      "title": "E2E Latency (1h avg)",
       "type": "stat"
     },
     {
@@ -229,9 +369,94 @@
       },
       "gridPos": {
         "h": 5,
-        "w": 4,
-        "x": 4,
+        "w": 6,
+        "x": 18,
         "y": 1
+      },
+      "id": 6,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT toFloat64(sum(startup_success_sessions)) AS value\nFROM naap.api_hourly_streaming_demand\nWHERE window_start >= now() - INTERVAL 1 HOUR\nAND pipeline_id != ''\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nAND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(model_id, '')))",
+          "refId": "A"
+        }
+      ],
+      "title": "Served Sessions (1h)",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 6
+      },
+      "id": 104,
+      "panels": [],
+      "title": "Observed Network State (24h)",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "green",
+                "value": 10
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 7
       },
       "id": 2,
       "options": {
@@ -301,9 +526,9 @@
       },
       "gridPos": {
         "h": 5,
-        "w": 4,
-        "x": 8,
-        "y": 1
+        "w": 6,
+        "x": 6,
+        "y": 7
       },
       "id": 3,
       "options": {
@@ -332,11 +557,11 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "sql",
-          "rawSql": "SELECT toFloat64(uniqExact(orch_address)) AS value\nFROM naap.canonical_status_hours\nWHERE hour >= now() - INTERVAL 24 HOUR\n  AND orch_address IS NOT NULL AND orch_address != ''\n  AND is_terminal_tail_artifact = 0\n  AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n  AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address))",
+          "rawSql": "SELECT toFloat64(uniqExact(orch_address)) AS value\nFROM naap.canonical_status_hours\nWHERE hour >= now() - INTERVAL 24 HOUR\n  AND orch_address IS NOT NULL AND orch_address != ''\n  AND is_terminal_tail_artifact = 0\n  AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n  AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(canonical_model, '')))\n  AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address))",
           "refId": "A"
         }
       ],
-      "title": "Active Orchestrators (24h)",
+      "title": "Observed Orchestrators (24h)",
       "type": "stat"
     },
     {
@@ -349,36 +574,36 @@
           "color": {
             "mode": "thresholds"
           },
-          "decimals": 2,
+          "decimals": 1,
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
                 "color": "red",
-                "value": 0
+                "value": null
               },
               {
                 "color": "yellow",
-                "value": 1
+                "value": -0.01
               },
               {
                 "color": "green",
-                "value": 10
+                "value": 0.01
               }
             ]
           },
-          "unit": "fps"
+          "unit": "percentunit"
         },
         "overrides": []
       },
       "gridPos": {
         "h": 5,
-        "w": 4,
+        "w": 6,
         "x": 12,
-        "y": 1
+        "y": 7
       },
-      "id": 4,
+      "id": 14,
       "options": {
         "colorMode": "background",
         "graphMode": "none",
@@ -405,12 +630,13 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "sql",
-          "rawSql": "SELECT toFloat64(ifNull(avg(s.output_fps), 0)) AS value\nFROM naap.canonical_status_samples_recent_store AS s\nINNER JOIN (\n        SELECT event_id, argMax(refreshed_at, refreshed_at) AS max_ra\n        FROM naap.canonical_status_samples_recent_store\n        WHERE sample_ts >= now() - INTERVAL 15 MINUTE\n        GROUP BY event_id\n    ) AS _d ON s.event_id = _d.event_id AND s.refreshed_at = _d.max_ra\nWHERE s.sample_ts >= now() - INTERVAL 15 MINUTE\nAND s.is_attributed = 1 AND s.orch_address != ''\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), s.org))\nAND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), s.orch_address))",
+          "rawSql": "WITH current_window AS (\n    SELECT sum(requested_sessions) AS current_value\n    FROM naap.api_hourly_streaming_demand\n    WHERE window_start >= now() - INTERVAL 24 HOUR\n      AND pipeline_id = 'live-video-to-video'\n      AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n      AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(model_id, '')))\n), baseline_window AS (\n    SELECT sum(requested_sessions) AS baseline_value\n    FROM naap.api_hourly_streaming_demand\n    WHERE window_start >= now() - INTERVAL 8 DAY\n      AND window_start < now() - INTERVAL 7 DAY\n      AND pipeline_id = 'live-video-to-video'\n      AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n      AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(model_id, '')))\n)\nSELECT if(\n    ifNull(baseline_value, 0) = 0,\n    0.0,\n    (toFloat64(ifNull(current_value, 0)) - toFloat64(baseline_value)) / toFloat64(baseline_value)\n) AS value\nFROM current_window\nCROSS JOIN baseline_window",
           "refId": "A"
         }
       ],
-      "title": "Network FPS (15m avg)",
-      "type": "stat"
+      "title": "Demand Change (7d)",
+      "type": "stat",
+      "description": "Change in live-video requested sessions for the latest 24 hours versus the same 24-hour window seven days earlier."
     },
     {
       "datasource": {
@@ -422,102 +648,36 @@
           "color": {
             "mode": "thresholds"
           },
-          "decimals": 2,
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": 0
-              },
-              {
-                "color": "yellow",
-                "value": 6
-              },
-              {
-                "color": "red",
-                "value": 12
-              }
-            ]
-          },
-          "unit": "s"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 4,
-        "x": 16,
-        "y": 1
-      },
-      "id": 5,
-      "options": {
-        "colorMode": "background",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "targets": [
-        {
-          "editorType": "sql",
-          "format": 1,
-          "queryType": "sql",
-          "rawSql": "SELECT toFloat64(ifNull(avgIf(s.e2e_latency_ms, s.e2e_latency_ms > 0), 0)) / 1000.0 AS value\nFROM naap.canonical_status_samples_recent_store AS s\nINNER JOIN (\n        SELECT event_id, argMax(refreshed_at, refreshed_at) AS max_ra\n        FROM naap.canonical_status_samples_recent_store\n        WHERE sample_ts >= now() - INTERVAL 1 HOUR\n        GROUP BY event_id\n    ) AS _d ON s.event_id = _d.event_id AND s.refreshed_at = _d.max_ra\nWHERE s.sample_ts >= now() - INTERVAL 1 HOUR\nAND s.is_attributed = 1\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), s.org))\nAND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), s.orch_address))",
-          "refId": "A"
-        }
-      ],
-      "title": "E2E Latency (1h avg)",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "grafana-clickhouse-datasource",
-        "uid": "${clickhouse_ds}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
+          "decimals": 1,
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
                 "color": "red",
-                "value": 0
+                "value": null
               },
               {
                 "color": "yellow",
-                "value": 1
+                "value": -0.01
               },
               {
                 "color": "green",
-                "value": 10
+                "value": 0.01
               }
             ]
           },
-          "unit": "short"
+          "unit": "percentunit"
         },
         "overrides": []
       },
       "gridPos": {
         "h": 5,
-        "w": 4,
-        "x": 20,
-        "y": 1
+        "w": 6,
+        "x": 18,
+        "y": 7
       },
-      "id": 6,
+      "id": 16,
       "options": {
         "colorMode": "background",
         "graphMode": "none",
@@ -544,12 +704,13 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "sql",
-          "rawSql": "SELECT toFloat64(sum(startup_success_sessions)) AS value\nFROM naap.api_hourly_streaming_demand\nWHERE window_start >= now() - INTERVAL 1 HOUR\nAND pipeline_id != ''\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))",
+          "rawSql": "WITH current_window AS (\n    SELECT uniqExact(gpu_id) AS current_value\n    FROM naap.api_observed_capability_offer\n    WHERE last_seen >= now() - INTERVAL 24 HOUR\n      AND canonical_pipeline = 'live-video-to-video'\n      AND capability_family = 'builtin'\n      AND hardware_present = 1\n      AND gpu_id != ''\n      AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n      AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), model_id))\n      AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address))\n), baseline_window AS (\n    SELECT uniqExact(gpu_id) AS baseline_value\n    FROM naap.api_observed_capability_offer\n    WHERE last_seen >= now() - INTERVAL 8 DAY\n      AND last_seen < now() - INTERVAL 7 DAY\n      AND canonical_pipeline = 'live-video-to-video'\n      AND capability_family = 'builtin'\n      AND hardware_present = 1\n      AND gpu_id != ''\n      AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n      AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), model_id))\n      AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address))\n)\nSELECT if(\n    ifNull(baseline_value, 0) = 0,\n    0.0,\n    (toFloat64(ifNull(current_value, 0)) - toFloat64(baseline_value)) / toFloat64(baseline_value)\n) AS value\nFROM current_window\nCROSS JOIN baseline_window",
           "refId": "A"
         }
       ],
-      "title": "Served Sessions (1h)",
-      "type": "stat"
+      "title": "Observed Supply Change (7d)",
+      "type": "stat",
+      "description": "Change in observed live-video GPU supply for the latest 24 hours versus the same 24-hour window seven days earlier."
     },
     {
       "collapsed": false,
@@ -557,11 +718,11 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 6
+        "y": 15
       },
       "id": 101,
       "panels": [],
-      "title": "Gateway View",
+      "title": "Live Video Usage (selected range)",
       "type": "row"
     },
     {
@@ -626,7 +787,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 7
+        "y": 16
       },
       "id": 7,
       "options": {
@@ -654,7 +815,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT toStartOfInterval(window_start, INTERVAL 1 HOUR) AS time,\n    sum(startup_success_sessions) AS served_sessions,\n    sum(no_orch_sessions) AS unserved_sessions\nFROM naap.api_hourly_streaming_demand\nWHERE $__timeFilter(window_start)\nAND pipeline_id != ''\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY time\nORDER BY time",
+          "rawSql": "SELECT toStartOfInterval(window_start, INTERVAL 1 HOUR) AS time,\n    sum(startup_success_sessions) AS served_sessions,\n    sum(no_orch_sessions) AS unserved_sessions\nFROM naap.api_hourly_streaming_demand\nWHERE $__timeFilter(window_start)\nAND pipeline_id != ''\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nAND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(model_id, '')))\nGROUP BY time\nORDER BY time",
           "refId": "A"
         }
       ],
@@ -695,7 +856,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 7
+        "y": 16
       },
       "id": 8,
       "options": {
@@ -704,7 +865,7 @@
         "sortBy": [
           {
             "desc": true,
-            "displayName": "Unserved Sessions"
+            "displayName": "Sessions"
           }
         ]
       },
@@ -717,7 +878,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT if(gateway = '', 'unattributed_gateway', gateway) AS \"Gateway\",\n    sum(requested_sessions) AS \"Requested Sessions\",\n    sum(no_orch_sessions) AS \"No Orch Sessions\",\n    sum(total_swapped_sessions) AS \"Swapped Sessions\",\n    sum(startup_failed_sessions) AS \"Startup Failed Sessions\",\n    if(sum(requested_sessions) > 0,\n        toFloat64(sum(effective_failed_sessions)) / toFloat64(sum(requested_sessions)), 0.0) AS \"Unmet Demand Rate\"\nFROM naap.api_hourly_streaming_demand\nWHERE $__timeFilter(window_start)\nAND pipeline_id != ''\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY if(gateway = '', 'unattributed_gateway', gateway)\nORDER BY sum(effective_failed_sessions) DESC, sum(requested_sessions) DESC",
+          "rawSql": "SELECT if(gateway = '', 'unattributed_gateway', gateway) AS \"Gateway\",\n    sum(requested_sessions) AS \"Requested Sessions\",\n    sum(no_orch_sessions) AS \"No Orch Sessions\",\n    sum(total_swapped_sessions) AS \"Swapped Sessions\",\n    sum(startup_failed_sessions) AS \"Startup Failed Sessions\",\n    if(sum(requested_sessions) > 0,\n        toFloat64(sum(effective_failed_sessions)) / toFloat64(sum(requested_sessions)), 0.0) AS \"Unmet Demand Rate\"\nFROM naap.api_hourly_streaming_demand\nWHERE $__timeFilter(window_start)\nAND pipeline_id != ''\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nAND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(model_id, '')))\nGROUP BY if(gateway = '', 'unattributed_gateway', gateway)\nORDER BY sum(effective_failed_sessions) DESC, sum(requested_sessions) DESC",
           "refId": "A"
         }
       ],
@@ -758,7 +919,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 15
+        "y": 24
       },
       "id": 9,
       "options": {
@@ -780,7 +941,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT ifNull(nullIf(pipeline_id, ''), 'unknown_pipeline') AS \"Pipeline\",\n    ifNull(nullIf(gateway, ''), 'unattributed_gateway') AS \"Gateway\",\n    sum(effective_failed_sessions) AS \"Unserved Sessions\",\n    sum(no_orch_sessions) AS \"No Orch Sessions\",\n    sum(requested_sessions) AS \"Requested Sessions\",\n    if(sum(requested_sessions) > 0,\n        toFloat64(sum(effective_failed_sessions)) / toFloat64(sum(requested_sessions)), 0.0) AS \"Unmet Demand Rate\"\nFROM naap.api_hourly_streaming_demand\nWHERE $__timeFilter(window_start)\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY ifNull(nullIf(pipeline_id, ''), 'unknown_pipeline'), ifNull(nullIf(gateway, ''), 'unattributed_gateway')\nHAVING sum(effective_failed_sessions) > 0\nORDER BY sum(effective_failed_sessions) DESC, sum(requested_sessions) DESC\nLIMIT 12",
+          "rawSql": "SELECT ifNull(nullIf(pipeline_id, ''), 'unknown_pipeline') AS \"Pipeline\",\n    ifNull(nullIf(gateway, ''), 'unattributed_gateway') AS \"Gateway\",\n    sum(effective_failed_sessions) AS \"Unserved Sessions\",\n    sum(no_orch_sessions) AS \"No Orch Sessions\",\n    sum(requested_sessions) AS \"Requested Sessions\",\n    if(sum(requested_sessions) > 0,\n        toFloat64(sum(effective_failed_sessions)) / toFloat64(sum(requested_sessions)), 0.0) AS \"Unmet Demand Rate\"\nFROM naap.api_hourly_streaming_demand\nWHERE $__timeFilter(window_start)\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nAND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(model_id, '')))\nGROUP BY ifNull(nullIf(pipeline_id, ''), 'unknown_pipeline'), ifNull(nullIf(gateway, ''), 'unattributed_gateway')\nHAVING sum(effective_failed_sessions) > 0\nORDER BY sum(effective_failed_sessions) DESC, sum(requested_sessions) DESC\nLIMIT 12",
           "refId": "A"
         }
       ],
@@ -821,13 +982,18 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 15
+        "y": 24
       },
-      "id": 10,
+      "id": 15,
       "options": {
         "cellHeight": "sm",
         "showHeader": true,
-        "sortBy": []
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Unserved Sessions"
+          }
+        ]
       },
       "targets": [
         {
@@ -838,12 +1004,13 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "WITH labels AS (\n    SELECT orch_address AS addr, orch_label\n    FROM naap.api_orchestrator_identity\n),\nactive_paths AS (\n    SELECT orch_address AS addr, gateway,\n        ifNull(nullIf(pipeline, ''), 'unknown') AS pipeline,\n        countDistinct(stream_id) AS active_streams,\n        round(avg(output_fps), 2) AS avg_fps\n    FROM naap.api_current_active_stream_state\n    WHERE last_seen > now() - INTERVAL 15 MINUTE\n    AND stream_id != ''\n    AND attribution_status = 'resolved'\n    AND orch_address IS NOT NULL AND orch_address != ''\n    AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n    GROUP BY addr, gateway, pipeline\n)\nSELECT ifNull(gateway, 'unknown') AS \"From\",\n    ifNull(labels.orch_label, concat(left(a.addr, 8), '...', right(a.addr, 4))) AS \"Orchestrator\",\n    a.addr AS \"Orchestrator Address\",\n    a.pipeline AS \"Pipeline\",\n    toUInt64(a.active_streams) AS \"Active Streams (15m)\",\n    toFloat64(a.avg_fps) AS \"Avg FPS\"\nFROM active_paths a\nLEFT JOIN labels ON labels.addr = a.addr\nWHERE ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), a.addr))\nORDER BY \"Active Streams (15m)\" DESC, \"Avg FPS\" DESC\nLIMIT 50",
+          "rawSql": "WITH status_prompts AS (\n    SELECT canonical_session_key,\n        gateway,\n        event_ts,\n        raw_pipeline_hint,\n        nullIf(JSONExtractString(data, 'inference_status', 'last_params', 'model_id'), '') AS model_id,\n        nullIf(JSONExtractString(data, 'inference_status', 'last_params', 'prompt'), '') AS prompt_text,\n        JSONExtractRaw(data, 'inference_status', 'last_params', 'prompt') AS prompt_raw\n    FROM naap.normalized_ai_stream_status\n    WHERE $__timeFilter(event_ts)\n      AND canonical_session_key != ''\n      AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n), ranked AS (\n    SELECT canonical_session_key,\n        gateway,\n        event_ts,\n        prompt_text,\n        prompt_raw,\n        row_number() OVER (PARTITION BY canonical_session_key ORDER BY event_ts DESC) AS rn\n    FROM status_prompts\n    WHERE (\n            lower(raw_pipeline_hint) LIKE '%streamdiffusion%'\n         OR lower(raw_pipeline_hint) LIKE '%comfyui%'\n         OR lower(raw_pipeline_hint) LIKE '%live-video%'\n      )\n      AND (\n            '${model:csv}' = '__all'\n         OR '${model:csv}' = ''\n         OR has(splitByChar(',', '${model:csv}'), ifNull(model_id, ''))\n         OR has(splitByChar(',', '${model:csv}'), ifNull(raw_pipeline_hint, ''))\n      )\n      AND (\n            prompt_text != ''\n         OR (prompt_raw NOT IN ('', 'null', '{}', '[]'))\n      )\n), latest AS (\n    SELECT event_ts,\n        gateway,\n        if(\n            prompt_text != '',\n            left(replaceRegexpAll(trim(BOTH ' ' FROM prompt_text), '\\s+', ' '), 120),\n            concat('[structured] ', substring(lower(hex(MD5(prompt_raw))), 1, 12))\n        ) AS prompt_label\n    FROM ranked\n    WHERE rn = 1\n)\nSELECT prompt_label AS \"Prompt\",\n    count() AS \"Sessions\",\n    countDistinct(gateway) AS \"Gateways\",\n    max(event_ts) AS \"Latest Seen\"\nFROM latest\nGROUP BY prompt_label\nORDER BY \"Sessions\" DESC, \"Latest Seen\" DESC\nLIMIT 15",
           "refId": "A"
         }
       ],
-      "title": "Gateway -> Orchestrator -> Pipeline Paths (15m)",
-      "type": "table"
+      "title": "Top Live Video Prompts (selected range)",
+      "type": "table",
+      "description": "Latest prompt seen per live-video session in the selected range. This panel reads normalized live-video status directly, matches the dashboard model filter against both live-video pipeline hints and embedded model ids, and groups structured prompts by hash when they are not plain strings."
     },
     {
       "collapsed": false,
@@ -851,11 +1018,11 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 23
+        "y": 32
       },
       "id": 102,
       "panels": [],
-      "title": "Orchestrator View",
+      "title": "Orchestrator Performance (selected range)",
       "type": "row"
     },
     {
@@ -937,7 +1104,7 @@
         "h": 16,
         "w": 12,
         "x": 0,
-        "y": 24
+        "y": 33
       },
       "id": 11,
       "options": {
@@ -972,11 +1139,11 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "WITH labels AS (\n    SELECT orch_address AS addr, orch_label, org\n    FROM naap.api_orchestrator_identity\n),\neligible_orch AS (\n    SELECT orch_address\n    FROM naap.api_orchestrator_identity\n    WHERE orch_address != ''\n      AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n      AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address))\n),\nwindowed_sla AS (\n    SELECT s.orchestrator_address,\n        s.window_start,\n        s.requested_sessions,\n        s.pipeline_id,\n        ifNull(s.model_id, '') AS model_id_key,\n        ifNull(s.gpu_id, '') AS gpu_id_key,\n        s.sla_score\n    FROM naap.api_hourly_streaming_sla s\n    INNER JOIN eligible_orch eo ON eo.orch_address = s.orchestrator_address\n    WHERE $__timeFilter(s.window_start)\n      AND s.orchestrator_address != ''\n      AND s.sla_score IS NOT NULL\n),\nranked AS (\n    SELECT orchestrator_address,\n        argMax(sla_score, tuple(window_start, requested_sessions, pipeline_id, model_id_key, gpu_id_key)) AS latest_sla_score\n    FROM windowed_sla\n    GROUP BY orchestrator_address\n)\nSELECT ifNull(labels.orch_label, concat(left(ranked.orchestrator_address, 8), '...', right(ranked.orchestrator_address, 4))) AS \"Orchestrator\",\n    toFloat64(round(assumeNotNull(ranked.latest_sla_score), 2)) AS \"SLA Score\"\nFROM ranked\nLEFT JOIN labels ON labels.addr = ranked.orchestrator_address\nORDER BY \"SLA Score\" DESC, \"Orchestrator\" ASC\nLIMIT 20",
+          "rawSql": "WITH labels AS (\n    SELECT orch_address AS addr, orch_label, org\n    FROM naap.api_orchestrator_identity\n),\neligible_orch AS (\n    SELECT orch_address\n    FROM naap.api_orchestrator_identity\n    WHERE orch_address != ''\n      AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n      AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address))\n),\nwindowed_sla AS (\n    SELECT s.orchestrator_address,\n        s.window_start,\n        s.requested_sessions,\n        s.pipeline_id,\n        ifNull(s.model_id, '') AS model_id_key,\n        ifNull(s.gpu_id, '') AS gpu_id_key,\n        s.sla_score\n    FROM naap.api_hourly_streaming_sla s\n    INNER JOIN eligible_orch eo ON eo.orch_address = s.orchestrator_address\n    WHERE $__timeFilter(s.window_start)\n      AND s.orchestrator_address != ''\n      AND s.sla_score IS NOT NULL\n      AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(s.model_id, '')))\n),\nranked AS (\n    SELECT orchestrator_address,\n        argMax(sla_score, tuple(window_start, requested_sessions, pipeline_id, model_id_key, gpu_id_key)) AS latest_sla_score\n    FROM windowed_sla\n    GROUP BY orchestrator_address\n)\nSELECT ifNull(labels.orch_label, concat(left(ranked.orchestrator_address, 8), '...', right(ranked.orchestrator_address, 4))) AS \"Orchestrator\",\n    toFloat64(round(assumeNotNull(ranked.latest_sla_score), 2)) AS \"SLA Score\"\nFROM ranked\nLEFT JOIN labels ON labels.addr = ranked.orchestrator_address\nORDER BY \"SLA Score\" DESC, \"Orchestrator\" ASC\nLIMIT 20",
           "refId": "A"
         }
       ],
-      "title": "Top 10 Orchestrators by SLA Score (Bar Chart)",
+      "title": "Top 20 Orchestrators by SLA Score",
       "type": "barchart"
     },
     {
@@ -1013,7 +1180,7 @@
         "h": 16,
         "w": 12,
         "x": 12,
-        "y": 24
+        "y": 33
       },
       "id": 12,
       "options": {
@@ -1035,7 +1202,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "WITH labels AS (\n    SELECT orch_address AS addr, orch_label\n    FROM naap.api_orchestrator_identity\n),\nagg AS (\n    SELECT orch_address,\n        countDistinct(canonical_session_key) AS active_streams,\n        sum(avg_output_fps * status_samples) / nullIf(sum(status_samples), 0) AS avg_fps,\n        ifNull(sum(avg_e2e_latency_ms * status_samples) / nullIf(sum(status_samples), 0), 0) / 1000.0 AS avg_e2e_latency_s,\n        arrayStringConcat(arraySort(groupUniqArray(ifNull(nullIf(canonical_model, ''), 'unknown'))), ', ') AS model_ids\n    FROM naap.canonical_status_hours\n    WHERE $__timeFilter(hour)\n      AND orch_address IS NOT NULL AND orch_address != ''\n      AND is_terminal_tail_artifact = 0\n      AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n      AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address))\n    GROUP BY orch_address\n),\norch_latest_sla AS (\n    SELECT s.orchestrator_address,\n        argMax(s.sla_score, tuple(s.window_start, s.requested_sessions, ifNull(s.pipeline_id, ''), ifNull(s.model_id, ''), ifNull(s.gpu_id, ''))) AS latest_sla_score\n    FROM naap.api_hourly_streaming_sla s\n    INNER JOIN agg a ON a.orch_address = s.orchestrator_address\n    WHERE $__timeFilter(s.window_start)\n      AND s.orchestrator_address != ''\n      AND s.sla_score IS NOT NULL\n    GROUP BY s.orchestrator_address\n),\norch_sla_rank AS (\n    SELECT orchestrator_address,\n        latest_sla_score,\n        row_number() OVER (ORDER BY latest_sla_score DESC, orchestrator_address ASC) AS sla_rank\n    FROM orch_latest_sla\n)\nSELECT orch_sla_rank.sla_rank AS \"SLA Rank\",\n    ifNull(labels.orch_label, concat(left(a.orch_address, 8), '...', right(a.orch_address, 4))) AS \"Orchestrator\",\n    a.model_ids AS \"Models Seen In Range\",\n    a.active_streams AS \"Active Streams\",\n    round(a.avg_fps, 2) AS \"Avg FPS\",\n    round(a.avg_e2e_latency_s, 3) AS \"Avg E2E Latency (s)\",\n    round(orch_sla_rank.latest_sla_score, 2) AS \"SLA Score\"\nFROM agg a\nLEFT JOIN orch_sla_rank ON orch_sla_rank.orchestrator_address = a.orch_address\nLEFT JOIN labels ON labels.addr = a.orch_address\nORDER BY isNull(orch_sla_rank.latest_sla_score) ASC, orch_sla_rank.latest_sla_score DESC, a.active_streams DESC, a.avg_fps DESC\nLIMIT 50",
+          "rawSql": "WITH labels AS (\n    SELECT orch_address AS addr, orch_label\n    FROM naap.api_orchestrator_identity\n),\nagg AS (\n    SELECT orch_address,\n        countDistinct(canonical_session_key) AS active_streams,\n        sum(avg_output_fps * status_samples) / nullIf(sum(status_samples), 0) AS avg_fps,\n        ifNull(sum(avg_e2e_latency_ms * status_samples) / nullIf(sum(status_samples), 0), 0) / 1000.0 AS avg_e2e_latency_s,\n        arrayStringConcat(arraySort(groupUniqArray(ifNull(nullIf(canonical_model, ''), 'unknown'))), ', ') AS model_ids\n    FROM naap.canonical_status_hours\n    WHERE $__timeFilter(hour)\n      AND orch_address IS NOT NULL AND orch_address != ''\n      AND is_terminal_tail_artifact = 0\n      AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n      AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(canonical_model, '')))\n      AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address))\n    GROUP BY orch_address\n),\norch_latest_sla AS (\n    SELECT s.orchestrator_address,\n        argMax(s.sla_score, tuple(s.window_start, s.requested_sessions, ifNull(s.pipeline_id, ''), ifNull(s.model_id, ''), ifNull(s.gpu_id, ''))) AS latest_sla_score\n    FROM naap.api_hourly_streaming_sla s\n    INNER JOIN agg a ON a.orch_address = s.orchestrator_address\n    WHERE $__timeFilter(s.window_start)\n      AND s.orchestrator_address != ''\n      AND s.sla_score IS NOT NULL\n      AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(s.model_id, '')))\n    GROUP BY s.orchestrator_address\n),\norch_sla_rank AS (\n    SELECT orchestrator_address,\n        latest_sla_score,\n        row_number() OVER (ORDER BY latest_sla_score DESC, orchestrator_address ASC) AS sla_rank\n    FROM orch_latest_sla\n)\nSELECT orch_sla_rank.sla_rank AS \"SLA Rank\",\n    ifNull(labels.orch_label, concat(left(a.orch_address, 8), '...', right(a.orch_address, 4))) AS \"Orchestrator\",\n    a.model_ids AS \"Models Seen In Range\",\n    a.active_streams AS \"Active Streams\",\n    round(a.avg_fps, 2) AS \"Avg FPS\",\n    round(a.avg_e2e_latency_s, 3) AS \"Avg E2E Latency (s)\",\n    round(orch_sla_rank.latest_sla_score, 2) AS \"SLA Score\"\nFROM agg a\nLEFT JOIN orch_sla_rank ON orch_sla_rank.orchestrator_address = a.orch_address\nLEFT JOIN labels ON labels.addr = a.orch_address\nORDER BY isNull(orch_sla_rank.latest_sla_score) ASC, orch_sla_rank.latest_sla_score DESC, a.active_streams DESC, a.avg_fps DESC\nLIMIT 50",
           "refId": "A"
         }
       ],
@@ -1049,11 +1216,11 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 40
+        "y": 49
       },
       "id": 103,
       "panels": [],
-      "title": "Live View",
+      "title": "Live Session Detail (120s freshness)",
       "type": "row"
     },
     {
@@ -1087,10 +1254,68 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 10,
-        "w": 24,
+        "h": 8,
+        "w": 12,
         "x": 0,
-        "y": 41
+        "y": 50
+      },
+      "id": 10,
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true,
+        "sortBy": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "WITH labels AS (\n    SELECT orch_address AS addr, orch_label\n    FROM naap.api_orchestrator_identity\n),\nactive_paths AS (\n    SELECT orch_address AS addr, gateway,\n        ifNull(nullIf(pipeline, ''), 'unknown') AS pipeline,\n        countDistinct(stream_id) AS active_streams,\n        round(avg(output_fps), 2) AS avg_fps\n    FROM naap.api_current_active_stream_state\n    WHERE last_seen > now() - INTERVAL 15 MINUTE\n    AND stream_id != ''\n    AND attribution_status = 'resolved'\n    AND orch_address IS NOT NULL AND orch_address != ''\n    AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n    AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(model_id, '')))\n    GROUP BY addr, gateway, pipeline\n)\nSELECT ifNull(gateway, 'unknown') AS \"From\",\n    ifNull(labels.orch_label, concat(left(a.addr, 8), '...', right(a.addr, 4))) AS \"Orchestrator\",\n    a.addr AS \"Orchestrator Address\",\n    a.pipeline AS \"Pipeline\",\n    toUInt64(a.active_streams) AS \"Active Streams (15m)\",\n    toFloat64(a.avg_fps) AS \"Avg FPS\"\nFROM active_paths a\nLEFT JOIN labels ON labels.addr = a.addr\nWHERE ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), a.addr))\nORDER BY \"Active Streams (15m)\" DESC, \"Avg FPS\" DESC\nLIMIT 50",
+          "refId": "A"
+        }
+      ],
+      "title": "Gateway -> Orchestrator -> Pipeline Paths (15m)",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "footer": {
+              "reducers": []
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 12,
+        "y": 50
       },
       "id": 13,
       "options": {
@@ -1112,11 +1337,11 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "WITH labels AS (\n    SELECT orch_address AS addr, orch_label\n    FROM naap.api_orchestrator_identity\n)\nSELECT s.stream_id AS \"Stream ID\",\n    s.orch_address AS \"Orchestrator Address\",\n    if(ifNull(labels.orch_label, '') != '', labels.orch_label, ifNull(nullIf(s.orch_address, ''), 'unresolved')) AS \"Orchestrator\",\n    ifNull(s.pipeline, 'unknown') AS \"Pipeline\",\n    s.attribution_status AS \"Attribution Status\",\n    round(ifNull(s.output_fps, 0), 2) AS \"FPS\",\n    s.state AS \"State\",\n    toUInt64(greatest(dateDiff('second', s.sample_ts, now()), 0)) AS \"Last Sample Age (s)\"\nFROM naap.api_current_active_stream_state s\nLEFT JOIN labels ON labels.addr = s.orch_address\nWHERE s.last_seen > now() - INTERVAL 120 SECOND\nAND s.stream_id != ''\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), s.org))\nAND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), s.orch_address))\nORDER BY \"Last Sample Age (s)\" ASC, \"FPS\" DESC\nLIMIT 20",
+          "rawSql": "WITH labels AS (\n    SELECT orch_address AS addr, orch_label\n    FROM naap.api_orchestrator_identity\n)\nSELECT s.stream_id AS \"Stream ID\",\n    s.orch_address AS \"Orchestrator Address\",\n    if(ifNull(labels.orch_label, '') != '', labels.orch_label, ifNull(nullIf(s.orch_address, ''), 'unresolved')) AS \"Orchestrator\",\n    ifNull(s.pipeline, 'unknown') AS \"Pipeline\",\n    s.attribution_status AS \"Attribution Status\",\n    round(ifNull(s.output_fps, 0), 2) AS \"FPS\",\n    s.state AS \"State\",\n    toUInt64(greatest(dateDiff('second', s.sample_ts, now()), 0)) AS \"Last Sample Age (s)\"\nFROM naap.api_current_active_stream_state s\nLEFT JOIN labels ON labels.addr = s.orch_address\nWHERE s.last_seen > now() - INTERVAL 120 SECOND\nAND s.stream_id != ''\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), s.org))\nAND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(s.model_id, '')))\nAND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), s.orch_address))\nORDER BY \"Last Sample Age (s)\" ASC, \"FPS\" DESC\nLIMIT 20",
           "refId": "A"
         }
       ],
-      "title": "Current Active Streams",
+      "title": "Current Live Sessions",
       "type": "table"
     }
   ],
