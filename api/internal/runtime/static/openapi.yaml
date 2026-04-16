@@ -564,7 +564,7 @@ paths:
           required: false
           description: |
             Repeatable capability filter in `pipeline/model` form. When supplied,
-            only orchestrators advertising every listed capability are returned.
+            rows whose pipeline has at least one matching capability are returned.
             Example: `?caps=live-video-to-video/streamdiffusion-sdxl&caps=llm/glm-4.7-flash`
           schema:
             type: array
@@ -1072,7 +1072,7 @@ components:
           maximum: 1
           description: |
             Fitness score; higher is better. When `recent_work` is true, this is
-            a measured value derived from the last 1-hour SLA. When `recent_work`
+            a measured value derived from the last 2-hour SLA. When `recent_work`
             is false, this is `0.0` (placeholder — there's no measurement yet).
         capabilities:
           type: array

@@ -1262,8 +1262,8 @@
           "text": "All",
           "value": "__all"
         },
-        "definition": "SELECT DISTINCT org FROM (SELECT org FROM naap.api_fact_ai_batch_job WHERE org != '' UNION ALL SELECT org FROM naap.api_fact_byoc_job WHERE org != '') AS orgs WHERE org != '' ORDER BY org",
-        "query": "SELECT DISTINCT org FROM (SELECT org FROM naap.api_fact_ai_batch_job WHERE org != '' UNION ALL SELECT org FROM naap.api_fact_byoc_job WHERE org != '') AS orgs WHERE org != '' ORDER BY org",
+        "definition": "SELECT DISTINCT org FROM naap.api_hourly_request_demand WHERE org != '' ORDER BY org",
+        "query": "SELECT DISTINCT org FROM naap.api_hourly_request_demand WHERE org != '' ORDER BY org",
         "refresh": 1,
         "sort": 1,
         "datasource": {

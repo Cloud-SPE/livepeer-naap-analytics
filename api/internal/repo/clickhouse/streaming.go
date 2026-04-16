@@ -3,7 +3,6 @@ package clickhouse
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/livepeer/naap-analytics/internal/types"
 )
@@ -114,9 +113,13 @@ func (r *Repo) ListStreamingSLA(ctx context.Context, p types.TimeWindowParams) (
 	start, end := defaultWindow(p)
 	limit := normalizeLimit(p.Limit)
 
-	cursorTs, cursorOrch, err := decodeTimeAddrCursor(p.Cursor)
+	cursorTs, cursorKeys, err := decodeTimeCursor(p.Cursor, 4)
 	if err != nil {
 		return nil, "", err
+	}
+	cursorOrch, cursorPipeline, cursorModel, cursorGPU := "", "", "", ""
+	if cursorKeys != nil {
+		cursorOrch, cursorPipeline, cursorModel, cursorGPU = cursorKeys[0], cursorKeys[1], cursorKeys[2], cursorKeys[3]
 	}
 
 	query := `
@@ -136,15 +139,35 @@ func (r *Repo) ListStreamingSLA(ctx context.Context, p types.TimeWindowParams) (
 		FROM naap.api_hourly_streaming_sla
 		WHERE window_start >= ? AND window_start < ?
 		  AND pipeline_id = 'live-video-to-video'
-		  AND (? = 0 OR (window_start, orchestrator_address) < (fromUnixTimestamp64Milli(?), ?))
-		ORDER BY window_start DESC, orchestrator_address DESC
+		  AND (
+		        ? = 0
+		     OR window_start < fromUnixTimestamp64Milli(?)
+		     OR (
+		            window_start = fromUnixTimestamp64Milli(?)
+		        AND (orchestrator_address, pipeline_id, ifNull(model_id, ''), ifNull(gpu_id, '')) > (?, ?, ?, ?)
+		     )
+		  )
+		ORDER BY window_start DESC, orchestrator_address ASC, pipeline_id ASC, model_id ASC, gpu_id ASC
 		LIMIT ?
 	`
 	cursorMs := int64(0)
 	if !cursorTs.IsZero() {
 		cursorMs = cursorTs.UnixMilli()
 	}
-	rows, err := r.conn.Query(ctx, query, start, end, cursorMs, cursorMs, cursorOrch, uint64(limit+1))
+	rows, err := r.conn.Query(
+		ctx,
+		query,
+		start,
+		end,
+		cursorMs,
+		cursorMs,
+		cursorMs,
+		cursorOrch,
+		cursorPipeline,
+		cursorModel,
+		cursorGPU,
+		uint64(limit+1),
+	)
 	if err != nil {
 		return nil, "", fmt.Errorf("streaming sla: %w", err)
 	}
@@ -164,7 +187,7 @@ func (r *Repo) ListStreamingSLA(ctx context.Context, p types.TimeWindowParams) (
 	nextCursor := ""
 	if len(result) > limit {
 		last := result[limit-1]
-		nextCursor = encodeTimeAddrCursor(last.WindowStart, last.OrchestratorAddress)
+		nextCursor = encodeTimeCursor(last.WindowStart, last.OrchestratorAddress, last.PipelineID, last.ModelID, last.GPUID)
 		result = result[:limit]
 	}
 	if result == nil {
@@ -178,9 +201,13 @@ func (r *Repo) ListStreamingDemand(ctx context.Context, p types.TimeWindowParams
 	start, end := defaultWindow(p)
 	limit := normalizeLimit(p.Limit)
 
-	cursorTs, cursorKey, err := decodeTimeAddrCursor(p.Cursor)
+	cursorTs, cursorKeys, err := decodeTimeCursor(p.Cursor, 3)
 	if err != nil {
 		return nil, "", err
+	}
+	cursorGateway, cursorPipeline, cursorModel := "", "", ""
+	if cursorKeys != nil {
+		cursorGateway, cursorPipeline, cursorModel = cursorKeys[0], cursorKeys[1], cursorKeys[2]
 	}
 
 	query := `
@@ -198,15 +225,22 @@ func (r *Repo) ListStreamingDemand(ctx context.Context, p types.TimeWindowParams
 		FROM naap.api_hourly_streaming_demand
 		WHERE window_start >= ? AND window_start < ?
 		  AND pipeline_id = 'live-video-to-video'
-		  AND (? = 0 OR (window_start, gateway) < (fromUnixTimestamp64Milli(?), ?))
-		ORDER BY window_start DESC, gateway DESC
+		  AND (
+		        ? = 0
+		     OR window_start < fromUnixTimestamp64Milli(?)
+		     OR (
+		            window_start = fromUnixTimestamp64Milli(?)
+		        AND (gateway, pipeline_id, ifNull(model_id, '')) > (?, ?, ?)
+		     )
+		  )
+		ORDER BY window_start DESC, gateway ASC, pipeline_id ASC, model_id ASC
 		LIMIT ?
 	`
 	cursorMs := int64(0)
 	if !cursorTs.IsZero() {
 		cursorMs = cursorTs.UnixMilli()
 	}
-	rows, err := r.conn.Query(ctx, query, start, end, cursorMs, cursorMs, cursorKey, uint64(limit+1))
+	rows, err := r.conn.Query(ctx, query, start, end, cursorMs, cursorMs, cursorMs, cursorGateway, cursorPipeline, cursorModel, uint64(limit+1))
 	if err != nil {
 		return nil, "", fmt.Errorf("streaming demand: %w", err)
 	}
@@ -226,7 +260,7 @@ func (r *Repo) ListStreamingDemand(ctx context.Context, p types.TimeWindowParams
 	nextCursor := ""
 	if len(result) > limit {
 		last := result[limit-1]
-		nextCursor = encodeTimeAddrCursor(last.WindowStart, last.Gateway)
+		nextCursor = encodeTimeCursor(last.WindowStart, last.Gateway, last.PipelineID, last.ModelID)
 		result = result[:limit]
 	}
 	if result == nil {
@@ -240,9 +274,13 @@ func (r *Repo) ListStreamingGPUMetrics(ctx context.Context, p types.TimeWindowPa
 	start, end := defaultWindow(p)
 	limit := normalizeLimit(p.Limit)
 
-	cursorTs, cursorKey, err := decodeTimeAddrCursor(p.Cursor)
+	cursorTs, cursorKeys, err := decodeTimeCursor(p.Cursor, 4)
 	if err != nil {
 		return nil, "", err
+	}
+	cursorOrch, cursorPipeline, cursorModel, cursorGPU := "", "", "", ""
+	if cursorKeys != nil {
+		cursorOrch, cursorPipeline, cursorModel, cursorGPU = cursorKeys[0], cursorKeys[1], cursorKeys[2], cursorKeys[3]
 	}
 
 	query := `
@@ -262,15 +300,35 @@ func (r *Repo) ListStreamingGPUMetrics(ctx context.Context, p types.TimeWindowPa
 		FROM naap.api_hourly_streaming_gpu_metrics
 		WHERE window_start >= ? AND window_start < ?
 		  AND pipeline_id = 'live-video-to-video'
-		  AND (? = 0 OR (window_start, gpu_id) < (fromUnixTimestamp64Milli(?), ?))
-		ORDER BY window_start DESC, gpu_id DESC
+		  AND (
+		        ? = 0
+		     OR window_start < fromUnixTimestamp64Milli(?)
+		     OR (
+		            window_start = fromUnixTimestamp64Milli(?)
+		        AND (orchestrator_address, pipeline_id, ifNull(model_id, ''), ifNull(gpu_id, '')) > (?, ?, ?, ?)
+		     )
+		  )
+		ORDER BY window_start DESC, orchestrator_address ASC, pipeline_id ASC, model_id ASC, gpu_id ASC
 		LIMIT ?
 	`
 	cursorMs := int64(0)
 	if !cursorTs.IsZero() {
 		cursorMs = cursorTs.UnixMilli()
 	}
-	rows, err := r.conn.Query(ctx, query, start, end, cursorMs, cursorMs, cursorKey, uint64(limit+1))
+	rows, err := r.conn.Query(
+		ctx,
+		query,
+		start,
+		end,
+		cursorMs,
+		cursorMs,
+		cursorMs,
+		cursorOrch,
+		cursorPipeline,
+		cursorModel,
+		cursorGPU,
+		uint64(limit+1),
+	)
 	if err != nil {
 		return nil, "", fmt.Errorf("streaming gpu metrics: %w", err)
 	}
@@ -290,32 +348,11 @@ func (r *Repo) ListStreamingGPUMetrics(ctx context.Context, p types.TimeWindowPa
 	nextCursor := ""
 	if len(result) > limit {
 		last := result[limit-1]
-		nextCursor = encodeTimeAddrCursor(last.WindowStart, last.GPUID)
+		nextCursor = encodeTimeCursor(last.WindowStart, last.OrchestratorAddress, last.PipelineID, last.ModelID, last.GPUID)
 		result = result[:limit]
 	}
 	if result == nil {
 		result = []types.StreamingGPUMetricRow{}
 	}
 	return result, nextCursor, nil
-}
-
-// Shared cursor helpers for (time, string) keyset pagination.
-func encodeTimeAddrCursor(t time.Time, addr string) string {
-	return encodeCursorValues(fmt.Sprintf("%d", t.UnixMilli()), addr)
-}
-
-func decodeTimeAddrCursor(cursor string) (time.Time, string, error) {
-	vals, err := decodeCursorValues(cursor, 2)
-	if err != nil {
-		return time.Time{}, "", err
-	}
-	if vals == nil {
-		return time.Time{}, "", nil
-	}
-	var ms int64
-	_, err = fmt.Sscanf(vals[0], "%d", &ms)
-	if err != nil {
-		return time.Time{}, "", fmt.Errorf("%w: bad timestamp", types.ErrInvalidCursor)
-	}
-	return time.UnixMilli(ms).UTC(), vals[1], nil
 }

@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | **Status** | Active |
-| **Effective date** | 2026-04-09 |
+| **Effective date** | 2026-04-15 |
 | **Ticket** | TASK 7.7 / [#274](https://github.com/livepeer/livepeer-naap-analytics-deployment/issues/274) |
 | **Audience** | External developers, partners, integrators |
 
@@ -19,8 +19,8 @@ Two distinct scoring models are used:
 
 | Model | Purpose | Range | API endpoint |
 |---|---|---|---|
-| **SLA Score** | Per-orchestrator composite reliability and quality score for a given time window. Used for compliance reporting and alerting. | 0–100 | `GET /v1/sla/compliance` |
-| **Leaderboard Score** | Competitive ranking across all orchestrators. Used for the public leaderboard. | 0–100 | _(endpoint removed; score data available via `/v1/sla/compliance`)_ |
+| **SLA Score** | Per-orchestrator composite reliability and quality score for a given time window. Used for compliance reporting and alerting. | 0–100 | `GET /v1/streaming/sla` |
+| **Leaderboard Score** | Competitive ranking logic retained for internal reference only. It is not a public API surface. | 0–100 | _(no public endpoint)_ |
 
 These two scores use different formulas and different inputs — a high leaderboard score does not imply SLA compliance, and vice versa. See §3 for both formulas.
 
@@ -28,14 +28,14 @@ These two scores use different formulas and different inputs — a high leaderbo
 
 | Metric | Primary API endpoint |
 |---|---|
-| Output FPS | `GET /v1/perf/by-model` |
+| Output FPS | `GET /v1/streaming/models` |
 | Jitter Coefficient | _(endpoint removed; metric tracked internally)_ |
 | E2E Latency | _(endpoint removed; metric tracked internally)_ |
-| Failure Rate / Output Viability | `GET /v1/sla/compliance` |
-| Swap Rate | `GET /v1/sla/compliance` |
-| Prompt-to-First-Frame (PTFF) | `GET /v1/gpu/metrics` |
-| SLA Score | `GET /v1/sla/compliance` |
-| Leaderboard Score | _(endpoint removed; score data available via `/v1/sla/compliance`)_ |
+| Failure Rate / Output Viability | `GET /v1/streaming/sla` |
+| Swap Rate | `GET /v1/streaming/sla` |
+| Prompt-to-First-Frame (PTFF) | `GET /v1/streaming/gpu-metrics` |
+| SLA Score | `GET /v1/streaming/sla` |
+| Leaderboard Score | _(no public endpoint)_ |
 
 ---
 
@@ -57,7 +57,7 @@ Samples where `fps = 0` are excluded (they indicate the stream has not yet start
 
 **Degradation flag:** If the average FPS for a window drops ≥ 20% relative to the prior hour bucket for the same orchestrator/pipeline combination, the window is flagged as degraded.
 
-**API endpoint:** `GET /v1/perf/by-model` — FPS broken down by model
+**API endpoint:** `GET /v1/streaming/models` — FPS broken down by model
 
 ---
 
@@ -125,7 +125,7 @@ Session classification (see §6 for full taxonomy):
 
 **Data source:** `canonical_session_current` session outcome fields
 
-**API endpoint:** `GET /v1/sla/compliance`
+**API endpoint:** `GET /v1/streaming/sla`
 
 ---
 
@@ -149,7 +149,7 @@ Where:
 
 **Data source:** `stream_trace` events with `data.type = "orchestrator_swap"`
 
-**API endpoint:** `GET /v1/sla/compliance`
+**API endpoint:** `GET /v1/streaming/sla`
 
 ---
 
@@ -170,7 +170,7 @@ p95_prompt_to_first_frame_ms = p95(prompt_to_playable_latency_ms) per window
 
 **Distinction from startup latency:** `startup_latency_ms` covers orchestrator selection to first output only. PTFF includes all gateway processing time before orchestrator selection, making it the user-perceived latency.
 
-**API endpoint:** `GET /v1/gpu/metrics`
+**API endpoint:** `GET /v1/streaming/gpu-metrics`
 
 ---
 
@@ -231,7 +231,7 @@ additive SLA input surface via the `api_base_*` scoring helpers, then exposed
 through `warehouse/models/api/api_hourly_streaming_sla.sql` as the contracted
 read model.
 
-**API endpoint:** `GET /v1/sla/compliance`
+**API endpoint:** `GET /v1/streaming/sla`
 
 ---
 
@@ -262,7 +262,7 @@ All four inputs are **min-max normalised** across all orchestrators competing in
 
 **Source:** `api/internal/service/service.go` (`scoreLeaderboard`)
 
-**API endpoint:** _(leaderboard endpoints removed; score data available via `GET /v1/sla/compliance`)_
+**API endpoint:** _(leaderboard endpoints removed; no public endpoint)_
 
 ---
 
@@ -276,7 +276,7 @@ All metrics can be filtered and grouped by the following dimensions via API quer
 | Orchestrator address | `orch_address` | `0x1a2b3c…` | Ethereum address identifying the compute node |
 | Pipeline | `pipeline` | `streamdiffusion-sdxl` | AI pipeline type |
 | Model | _(via pipeline)_ | `stabilityai/sdxl-turbo` | Specific model within a pipeline |
-| GPU hardware | _(in response)_ | `A100`, `H100` | GPU model name; available in `/v1/gpu/metrics` |
+| GPU hardware | _(in response)_ | `A100`, `H100` | GPU model name; available in `/v1/streaming/gpu-metrics` |
 | Time window start | `start` / `end` | `2026-03-01T00:00:00Z` | ISO 8601 UTC; windows are hourly |
 | Granularity | `granularity` | `5m`, `1h`, `1d` | Time bucket size; not all endpoints support all granularities |
 

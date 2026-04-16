@@ -16,7 +16,15 @@ with expected as (
         countIf(selection_outcome = 'no_orch') as expected_no_orch_count,
         countIf(success = 1) as expected_success_count,
         sum(toInt64(coalesce(duration_ms, 0))) as expected_duration_ms_sum,
-        sum(toFloat64(coalesce(price_per_unit, 0))) as expected_price_sum
+        sum(toFloat64(coalesce(price_per_unit, 0))) as expected_price_sum,
+        countIf(pipeline = 'llm' and ifNull(llm_model, '') != '') as expected_llm_request_count,
+        countIf(pipeline = 'llm' and ifNull(llm_model, '') != '' and success = 1) as expected_llm_success_count,
+        sumIf(toInt64(coalesce(total_tokens, 0)), pipeline = 'llm' and ifNull(llm_model, '') != '') as expected_llm_total_tokens_sum,
+        countIf(pipeline = 'llm' and ifNull(llm_model, '') != '' and total_tokens is not null) as expected_llm_total_tokens_sample_count,
+        sumIf(toFloat64(coalesce(tokens_per_second, 0)), pipeline = 'llm' and ifNull(llm_model, '') != '') as expected_llm_tokens_per_second_sum,
+        countIf(pipeline = 'llm' and ifNull(llm_model, '') != '' and tokens_per_second is not null) as expected_llm_tokens_per_second_sample_count,
+        sumIf(toFloat64(coalesce(ttft_ms, 0)), pipeline = 'llm' and ifNull(llm_model, '') != '') as expected_llm_ttft_ms_sum,
+        countIf(pipeline = 'llm' and ifNull(llm_model, '') != '' and ttft_ms is not null) as expected_llm_ttft_ms_sample_count
     from {{ ref('canonical_ai_batch_jobs') }}
     where request_id != ''
       and pipeline != ''
@@ -41,7 +49,15 @@ with expected as (
         countIf(selection_outcome = 'no_orch') as expected_no_orch_count,
         countIf(success = 1) as expected_success_count,
         sum(toInt64(coalesce(duration_ms, 0))) as expected_duration_ms_sum,
-        sum(toFloat64(coalesce(price_per_unit, 0))) as expected_price_sum
+        sum(toFloat64(coalesce(price_per_unit, 0))) as expected_price_sum,
+        toUInt64(0) as expected_llm_request_count,
+        toUInt64(0) as expected_llm_success_count,
+        toInt64(0) as expected_llm_total_tokens_sum,
+        toUInt64(0) as expected_llm_total_tokens_sample_count,
+        toFloat64(0) as expected_llm_tokens_per_second_sum,
+        toUInt64(0) as expected_llm_tokens_per_second_sample_count,
+        toFloat64(0) as expected_llm_ttft_ms_sum,
+        toUInt64(0) as expected_llm_ttft_ms_sample_count
     from {{ ref('canonical_byoc_jobs') }}
     where request_id != ''
       and capability != ''
@@ -65,7 +81,15 @@ actual as (
         no_orch_count,
         success_count,
         duration_ms_sum,
-        price_sum
+        price_sum,
+        llm_request_count,
+        llm_success_count,
+        llm_total_tokens_sum,
+        llm_total_tokens_sample_count,
+        llm_tokens_per_second_sum,
+        llm_tokens_per_second_sample_count,
+        llm_ttft_ms_sum,
+        llm_ttft_ms_sample_count
     from {{ ref('api_hourly_request_demand') }}
 )
 select
@@ -91,7 +115,23 @@ select
     e.expected_duration_ms_sum,
     a.duration_ms_sum,
     e.expected_price_sum,
-    a.price_sum
+    a.price_sum,
+    e.expected_llm_request_count,
+    a.llm_request_count,
+    e.expected_llm_success_count,
+    a.llm_success_count,
+    e.expected_llm_total_tokens_sum,
+    a.llm_total_tokens_sum,
+    e.expected_llm_total_tokens_sample_count,
+    a.llm_total_tokens_sample_count,
+    e.expected_llm_tokens_per_second_sum,
+    a.llm_tokens_per_second_sum,
+    e.expected_llm_tokens_per_second_sample_count,
+    a.llm_tokens_per_second_sample_count,
+    e.expected_llm_ttft_ms_sum,
+    a.llm_ttft_ms_sum,
+    e.expected_llm_ttft_ms_sample_count,
+    a.llm_ttft_ms_sample_count
 from expected e
 full outer join actual a
     on e.window_start = a.window_start
@@ -111,3 +151,11 @@ where ifNull(e.expected_job_count, 0) != ifNull(a.job_count, 0)
    or ifNull(e.expected_success_count, 0) != ifNull(a.success_count, 0)
    or ifNull(e.expected_duration_ms_sum, 0) != ifNull(a.duration_ms_sum, 0)
    or abs(ifNull(e.expected_price_sum, 0.0) - ifNull(a.price_sum, 0.0)) > 1e-9
+   or ifNull(e.expected_llm_request_count, 0) != ifNull(a.llm_request_count, 0)
+   or ifNull(e.expected_llm_success_count, 0) != ifNull(a.llm_success_count, 0)
+   or ifNull(e.expected_llm_total_tokens_sum, 0) != ifNull(a.llm_total_tokens_sum, 0)
+   or ifNull(e.expected_llm_total_tokens_sample_count, 0) != ifNull(a.llm_total_tokens_sample_count, 0)
+   or abs(ifNull(e.expected_llm_tokens_per_second_sum, 0.0) - ifNull(a.llm_tokens_per_second_sum, 0.0)) > 1e-9
+   or ifNull(e.expected_llm_tokens_per_second_sample_count, 0) != ifNull(a.llm_tokens_per_second_sample_count, 0)
+   or abs(ifNull(e.expected_llm_ttft_ms_sum, 0.0) - ifNull(a.llm_ttft_ms_sum, 0.0)) > 1e-9
+   or ifNull(e.expected_llm_ttft_ms_sample_count, 0) != ifNull(a.llm_ttft_ms_sample_count, 0)

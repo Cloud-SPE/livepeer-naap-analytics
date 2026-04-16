@@ -1320,7 +1320,7 @@ Current active demand formulas:
 
 `last_error_occurred` alone does not reduce effective success under the current active contract.
 
-Pipeline fallback is allowed at the public demand grain only when exactly one non-empty pipeline exists for the shared `(hour, gateway, region, model)` cohort.
+Pipeline fallback is allowed at the public demand grain only when exactly one non-empty pipeline exists for the shared `(hour, gateway, model)` cohort after collapsing any lower-layer region splits.
 If the fallback pipeline equals model id case-insensitively, canonical public pipeline stays blank.
 
 **Output obligations**
@@ -1521,13 +1521,13 @@ Define what a compliant system must ultimately expose, regardless of storage mod
 The minimum logical output families are:
 
 - GPU metrics
-  - grain: hour x orchestrator x pipeline x model x GPU x region
+  - grain: hour x orchestrator x pipeline x model x GPU
 - network demand
-  - grain: hour x gateway x region x pipeline x model
+  - grain: hour x gateway x pipeline x model
 - GPU-sliced network demand
-  - grain: hour x gateway x orchestrator x region x pipeline x model x GPU
+  - grain: hour x gateway x orchestrator x pipeline x model x GPU
 - SLA compliance
-  - grain: hour x orchestrator x pipeline x model x GPU x region
+  - grain: hour x orchestrator x pipeline x model x GPU
 
 Org-aware variants, when present, must preserve organization or tenant identity at the same logical grain.
 

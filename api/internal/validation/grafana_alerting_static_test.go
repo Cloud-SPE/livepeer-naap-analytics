@@ -489,3 +489,19 @@ func TestAffectedDashboardPanelsUseCollisionAwareLabelsAndStreamingSLA(t *testin
 		t.Fatalf("expected 2 SLA chart panels, found %d", slaChartCount)
 	}
 }
+
+func TestNaapJobsDashboardOrgVariableUsesHourlyRequestDemand(t *testing.T) {
+	root := repoRoot(t)
+	path := filepath.Join(root, "infra", "grafana", "dashboards", "naap-jobs.json")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile %s: %v", path, err)
+	}
+
+	if !strings.Contains(string(body), "SELECT DISTINCT org FROM naap.api_hourly_request_demand") {
+		t.Fatalf("%s should source the org variable from naap.api_hourly_request_demand", path)
+	}
+	if strings.Contains(string(body), "SELECT DISTINCT org FROM (SELECT org FROM naap.api_fact_ai_batch_job") {
+		t.Fatalf("%s still sources the org variable from request job facts", path)
+	}
+}

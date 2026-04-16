@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/livepeer/naap-analytics/internal/types"
@@ -61,6 +62,27 @@ func decodeCursorValues(cursor string, expected int) ([]string, error) {
 		return nil, fmt.Errorf("%w: expected %d values, got %d", types.ErrInvalidCursor, expected, len(values))
 	}
 	return values, nil
+}
+
+func encodeTimeCursor(t time.Time, keys ...string) string {
+	values := []string{strconv.FormatInt(t.UnixMilli(), 10)}
+	values = append(values, keys...)
+	return encodeCursorValues(values...)
+}
+
+func decodeTimeCursor(cursor string, keyCount int) (time.Time, []string, error) {
+	vals, err := decodeCursorValues(cursor, keyCount+1)
+	if err != nil {
+		return time.Time{}, nil, err
+	}
+	if vals == nil {
+		return time.Time{}, nil, nil
+	}
+	ms, err := strconv.ParseInt(vals[0], 10, 64)
+	if err != nil {
+		return time.Time{}, nil, fmt.Errorf("%w: bad timestamp", types.ErrInvalidCursor)
+	}
+	return time.UnixMilli(ms).UTC(), vals[1:], nil
 }
 
 func nullableString(v *string) string {

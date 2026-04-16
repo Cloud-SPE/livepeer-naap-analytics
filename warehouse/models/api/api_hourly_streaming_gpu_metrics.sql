@@ -6,7 +6,6 @@ select
     s.pipeline_id,
     s.model_id,
     s.gpu_id,
-    s.region,
     if(sum(s.status_samples) > 0, sum(s.output_fps_sum) / toFloat64(sum(s.status_samples)), 0.0) as avg_output_fps,
     sum(s.output_fps_sum) as output_fps_sum,
     quantileTDigestMerge(s.output_fps_p95_state) as p95_output_fps,
@@ -56,5 +55,4 @@ group by
     s.orchestrator_address,
     s.pipeline_id,
     s.model_id,
-    s.gpu_id,
-    s.region
+    s.gpu_id

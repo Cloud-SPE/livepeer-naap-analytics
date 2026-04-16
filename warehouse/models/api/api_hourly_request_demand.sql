@@ -16,7 +16,15 @@ with ai_batch as (
         toUInt64(countIf(selection_outcome = 'no_orch')) as no_orch_count,
         toUInt64(countIf(success = 1)) as success_count,
         toInt64(sum(toInt64(coalesce(duration_ms, 0)))) as duration_ms_sum,
-        toFloat64(sum(toFloat64(coalesce(price_per_unit, 0)))) as price_sum
+        toFloat64(sum(toFloat64(coalesce(price_per_unit, 0)))) as price_sum,
+        toUInt64(countIf(pipeline = 'llm' and ifNull(llm_model, '') != '')) as llm_request_count,
+        toUInt64(countIf(pipeline = 'llm' and ifNull(llm_model, '') != '' and success = 1)) as llm_success_count,
+        toInt64(sumIf(toInt64(coalesce(total_tokens, 0)), pipeline = 'llm' and ifNull(llm_model, '') != '')) as llm_total_tokens_sum,
+        toUInt64(countIf(pipeline = 'llm' and ifNull(llm_model, '') != '' and total_tokens is not null)) as llm_total_tokens_sample_count,
+        toFloat64(sumIf(toFloat64(coalesce(tokens_per_second, 0)), pipeline = 'llm' and ifNull(llm_model, '') != '')) as llm_tokens_per_second_sum,
+        toUInt64(countIf(pipeline = 'llm' and ifNull(llm_model, '') != '' and tokens_per_second is not null)) as llm_tokens_per_second_sample_count,
+        toFloat64(sumIf(toFloat64(coalesce(ttft_ms, 0)), pipeline = 'llm' and ifNull(llm_model, '') != '')) as llm_ttft_ms_sum,
+        toUInt64(countIf(pipeline = 'llm' and ifNull(llm_model, '') != '' and ttft_ms is not null)) as llm_ttft_ms_sample_count
     from {{ ref('canonical_ai_batch_jobs') }}
     where request_id != ''
       and pipeline != ''
@@ -40,7 +48,15 @@ byoc as (
         toUInt64(countIf(selection_outcome = 'no_orch')) as no_orch_count,
         toUInt64(countIf(success = 1)) as success_count,
         toInt64(sum(toInt64(coalesce(duration_ms, 0)))) as duration_ms_sum,
-        toFloat64(sum(toFloat64(coalesce(price_per_unit, 0)))) as price_sum
+        toFloat64(sum(toFloat64(coalesce(price_per_unit, 0)))) as price_sum,
+        toUInt64(0) as llm_request_count,
+        toUInt64(0) as llm_success_count,
+        toInt64(0) as llm_total_tokens_sum,
+        toUInt64(0) as llm_total_tokens_sample_count,
+        toFloat64(0) as llm_tokens_per_second_sum,
+        toUInt64(0) as llm_tokens_per_second_sample_count,
+        toFloat64(0) as llm_ttft_ms_sum,
+        toUInt64(0) as llm_ttft_ms_sample_count
     from {{ ref('canonical_byoc_jobs') }}
     where request_id != ''
       and capability != ''

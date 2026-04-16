@@ -2,69 +2,59 @@
 
 **Status:** approved  
 **Priority:** P0 / launch  
-**Requirement IDs:** PERF-001  
-**Source events:** `ai_stream_status`, `network_capabilities`
+**Requirement IDs:** PERF-001 through PERF-003
+**Source surfaces:** `api_hourly_streaming_sla`, `api_hourly_streaming_demand`, `api_hourly_streaming_gpu_metrics`
 
 ## Problem
 
-Consumers need a current performance surface that shows how AI models are
-performing across the network without reconstructing that view from raw status
-history.
+Consumers need streaming performance and quality surfaces that are safe to page
+and safe to aggregate, without rebuilding them from raw session rows.
 
 ## Solution
 
-Serve model-level performance from the published semantic layer through:
+Serve performance and quality from the published hourly `api_*` layer through:
 
 - `GET /v1/streaming/models`
-
-The active product contract for R3 is intentionally limited to the live route
-set. Supporting semantics and lower-layer historical context are preserved in
-[`../references/performance-quality-reference.md`](../references/performance-quality-reference.md).
+- `GET /v1/streaming/sla`
+- `GET /v1/streaming/demand`
+- `GET /v1/streaming/gpu-metrics`
 
 ## Requirements
 
-### PERF-001: Performance by model
+### PERF-001: Model-level performance
 
 `GET /v1/streaming/models`
 
-Returns one row per `(pipeline, model)` for the requested window.
+Required behavior:
 
-**Query params:**
+- one row per live-video-to-video `(pipeline, model)`
+- warm supply comes from current inventory
+- active demand comes from current active stream state
+- 24-hour FPS is recomputed from additive hourly SLA inputs
 
-- `?org=` — optional org filter
-- `?start=` / `?end=` — optional window bounds; default window is the last 24 hours
-- `?pipeline=` — optional pipeline filter
+### PERF-002: Orchestrator SLA compliance
 
-**Response fields:**
+`GET /v1/streaming/sla`
 
-| Field | Meaning |
-|---|---|
-| `ModelID` | Canonical model identifier |
-| `Pipeline` | Canonical pipeline identifier |
-| `AvgFPS` | Weighted average output FPS across the requested window |
-| `P50FPS` | Current schema field; currently approximated from the same hourly aggregate used for `AvgFPS` |
-| `P99FPS` | Current schema field; currently approximated from the same hourly aggregate used for `AvgFPS` |
-| `WarmOrchCount` | Distinct warm orchestrators currently advertising the model |
-| `TotalStreams` | Schema field reserved for stream-volume joins; current implementation may return `0` |
+Required behavior:
 
-**Required behavior:**
+- one row per `(hour, orchestrator, pipeline, model, gpu)` at the public API grain
+- cursor order is stable on the full public row identity
+- `effective_success_rate`, `no_swap_rate`, `avg_output_fps`, and `sla_score` reflect the published hourly SLA contract
 
-- derives FPS from published hourly performance aggregates rather than request-time raw scans
-- joins performance rows with current warm inventory so only currently advertised model and pipeline pairs appear
-- treats warm inventory as orchestrators seen within the active warm-state threshold
-- remains aligned with the live router and OpenAPI schema
+### PERF-003: Gateway demand and GPU metrics
 
-## Data Sources
+`GET /v1/streaming/demand`, `GET /v1/streaming/gpu-metrics`
 
-| Surface field | Source layer |
-|---|---|
-| `AvgFPS`, `P50FPS`, `P99FPS` | published hourly performance aggregate |
-| `WarmOrchCount` | published GPU inventory and warm-orchestrator state |
-| `ModelID`, `Pipeline` | canonical capability inventory and semantic serving layer |
+Required behavior:
+
+- demand rows are unique on `(hour, gateway, pipeline, model)`
+- GPU metric rows are unique on `(hour, orchestrator, pipeline, model, gpu)`
+- additive support fields remain exposed so weighted recomputation stays exact
+- neither route exposes internal region-grain duplication
 
 ## Out of Scope
 
-- per-orchestrator FPS detail as a public route
-- standalone FPS history endpoints
-- standalone discovery-latency or WebRTC-quality endpoints
-- viewer-side delivery quality metrics
+- viewer-side delivery quality
+- legacy performance-route aliases
+- handler-side recomputation from canonical session facts

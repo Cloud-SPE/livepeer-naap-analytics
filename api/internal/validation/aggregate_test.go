@@ -105,7 +105,7 @@ func republishFinalSLAPublicWindow(t *testing.T, h *harness, windowStart time.Ti
 			sla_semantics_version, sla_score, refresh_run_id, artifact_checksum, refreshed_at
 		)
 		SELECT
-			s.window_start, s.org, s.orchestrator_address, s.pipeline_id, s.model_id, s.gpu_id, s.gpu_model_name, s.region,
+			s.window_start, s.org, s.orchestrator_address, s.pipeline_id, s.model_id, s.gpu_id, s.gpu_model_name, cast(null as Nullable(String)),
 			s.known_sessions_count, s.requested_sessions, s.startup_success_sessions, s.no_orch_sessions,
 			s.startup_excused_sessions, s.startup_failed_sessions, s.loading_only_sessions, s.zero_output_fps_sessions,
 			s.output_failed_sessions, s.effective_failed_sessions, s.confirmed_swapped_sessions, s.inferred_swap_sessions,

@@ -93,27 +93,40 @@ func (r *Repo) GetRequestsModels(ctx context.Context) ([]types.RequestsModel, er
 // Orchestrators that advertise any non-streaming capability in the last 30m.
 func (r *Repo) GetRequestsOrchestrators(ctx context.Context) ([]types.RequestsOrchestrator, error) {
 	rows, err := r.conn.Query(ctx, `
+		WITH request_supply AS (
+		    SELECT
+		        orch_address,
+		        orchestrator_uri,
+		        concat(ifNull(canonical_pipeline, capability_name), ':', ifNull(model_id, '')) AS capability,
+		        ifNull(gpu_id, '') AS gpu_id,
+		        last_seen
+		    FROM naap.api_current_capability_offer
+		    WHERE supports_request = 1
+		      AND capability_family = 'builtin'
+		      AND ifNull(canonical_pipeline, capability_name) != ''
+		      AND ifNull(canonical_pipeline, '') != 'live-video-to-video'
+		      AND ifNull(model_id, '') != ''
+		      AND last_seen > now() - INTERVAL 30 MINUTE
+		    UNION ALL
+		    SELECT
+		        orch_address,
+		        orchestrator_uri,
+		        concat(capability_name, ':', ifNull(model, '')) AS capability,
+		        '' AS gpu_id,
+		        last_seen
+		    FROM naap.api_current_byoc_worker
+		    WHERE capability_name != ''
+		      AND ifNull(model, '') != ''
+		      AND last_seen > now() - INTERVAL 30 MINUTE
+		)
 		SELECT
-		    o.orch_address AS address,
-		    anyLast(o.orchestrator_uri) AS uri,
-		    arrayDistinct(groupArrayIf(
-		        concat(
-		            if(p.capability_family = 'byoc', p.offered_name, ifNull(p.canonical_pipeline, p.capability_name)),
-		            '/',
-		            ifNull(p.model_id, '')
-		        ),
-		        ifNull(p.model_id, '') != ''
-		    )) AS capabilities,
-		    toInt64(countDistinctIf(p.gpu_id, ifNull(p.gpu_id, '') != '')) AS gpu_count,
-		    max(o.last_seen) AS last_seen
-		FROM naap.api_current_orchestrator o
-		INNER JOIN naap.api_current_capability_offer p
-		    ON o.orch_address = p.orch_address
-		WHERE o.last_seen > now() - INTERVAL 30 MINUTE
-		  AND p.last_seen > now() - INTERVAL 30 MINUTE
-		  AND p.supports_request = 1
-		  AND ifNull(p.canonical_pipeline, '') != 'live-video-to-video'
-		GROUP BY o.orch_address
+		    orch_address AS address,
+		    anyLast(orchestrator_uri) AS uri,
+		    arraySort(arrayDistinct(groupArray(capability))) AS capabilities,
+		    toInt64(countDistinctIf(gpu_id, gpu_id != '')) AS gpu_count,
+		    max(last_seen) AS last_seen
+		FROM request_supply
+		GROUP BY orch_address
 		HAVING length(capabilities) > 0
 		ORDER BY gpu_count DESC, address ASC
 	`)
@@ -144,16 +157,18 @@ func (r *Repo) GetAIBatchSummary(ctx context.Context, p types.TimeWindowParams) 
 	start, end := defaultWindow(p)
 	rows, err := r.conn.Query(ctx, `
 		SELECT
-		    pipeline,
-		    toInt64(count()) AS total_jobs,
-		    toInt64(countIf(selection_outcome = 'selected')) AS selected_jobs,
-		    toInt64(countIf(selection_outcome = 'no_orch')) AS no_orch_jobs,
-		    countIf(success = 1) / toFloat64(count()) AS success_rate,
-		    sum(toInt64(ifNull(duration_ms, 0))) / toFloat64(count()) AS avg_duration_ms
-		FROM naap.api_fact_ai_batch_job
-		WHERE completed_at >= ? AND completed_at < ?
-		  AND pipeline != ''
-		GROUP BY pipeline
+		    canonical_pipeline AS pipeline,
+		    toInt64(sum(job_count)) AS total_jobs,
+		    toInt64(sum(selected_count)) AS selected_jobs,
+		    toInt64(sum(no_orch_count)) AS no_orch_jobs,
+		    sum(success_count) / nullIf(toFloat64(sum(job_count)), 0) AS success_rate,
+		    sum(duration_ms_sum) / nullIf(toFloat64(sum(job_count)), 0) AS avg_duration_ms
+		FROM naap.api_hourly_request_demand
+		WHERE window_start >= ? AND window_start < ?
+		  AND capability_family = 'builtin'
+		  AND canonical_pipeline != ''
+		  AND canonical_pipeline != 'live-video-to-video'
+		GROUP BY canonical_pipeline
 		ORDER BY total_jobs DESC
 	`, start, end)
 	if err != nil {
@@ -181,9 +196,13 @@ func (r *Repo) ListAIBatchJobs(ctx context.Context, p types.TimeWindowParams) ([
 	start, end := defaultWindow(p)
 	limit := normalizeLimit(p.Limit)
 
-	cursorTs, cursorKey, err := decodeTimeAddrCursor(p.Cursor)
+	cursorTs, cursorKeys, err := decodeTimeCursor(p.Cursor, 1)
 	if err != nil {
 		return nil, "", err
+	}
+	cursorKey := ""
+	if cursorKeys != nil {
+		cursorKey = cursorKeys[0]
 	}
 	cursorMs := int64(0)
 	if !cursorTs.IsZero() {
@@ -234,7 +253,7 @@ func (r *Repo) ListAIBatchJobs(ctx context.Context, p types.TimeWindowParams) ([
 	nextCursor := ""
 	if len(result) > limit {
 		last := result[limit-1]
-		nextCursor = encodeTimeAddrCursor(last.CompletedAt, last.RequestID)
+		nextCursor = encodeTimeCursor(last.CompletedAt, last.RequestID)
 		result = result[:limit]
 	}
 	if result == nil {
@@ -248,16 +267,19 @@ func (r *Repo) GetAIBatchLLMSummary(ctx context.Context, p types.TimeWindowParam
 	start, end := defaultWindow(p)
 	rows, err := r.conn.Query(ctx, `
 		SELECT
-		    ifNull(model, '') AS model,
-		    toInt64(count()) AS total_requests,
-		    countIf(ifNull(error, '') = '') / toFloat64(count()) AS success_rate,
-		    avg(ifNull(tokens_per_second, 0)) AS avg_tokens_per_sec,
-		    avg(ifNull(ttft_ms, 0)) AS avg_ttft_ms,
-		    avg(ifNull(total_tokens, 0)) AS avg_total_tokens
-		FROM naap.api_fact_ai_batch_llm_request
-		WHERE event_ts >= ? AND event_ts < ?
-		  AND ifNull(model, '') != ''
-		GROUP BY model
+		    canonical_model AS model,
+		    toInt64(sum(llm_request_count)) AS total_requests,
+		    sum(llm_success_count) / nullIf(toFloat64(sum(llm_request_count)), 0) AS success_rate,
+		    sum(llm_tokens_per_second_sum) / nullIf(toFloat64(sum(llm_tokens_per_second_sample_count)), 0) AS avg_tokens_per_sec,
+		    sum(llm_ttft_ms_sum) / nullIf(toFloat64(sum(llm_ttft_ms_sample_count)), 0) AS avg_ttft_ms,
+		    sum(llm_total_tokens_sum) / nullIf(toFloat64(sum(llm_total_tokens_sample_count)), 0) AS avg_total_tokens
+		FROM naap.api_hourly_request_demand
+		WHERE window_start >= ? AND window_start < ?
+		  AND capability_family = 'builtin'
+		  AND canonical_pipeline = 'llm'
+		  AND canonical_model != ''
+		  AND llm_request_count > 0
+		GROUP BY canonical_model
 		ORDER BY total_requests DESC
 	`, start, end)
 	if err != nil {
@@ -285,16 +307,17 @@ func (r *Repo) GetBYOCSummary(ctx context.Context, p types.TimeWindowParams) ([]
 	start, end := defaultWindow(p)
 	rows, err := r.conn.Query(ctx, `
 		SELECT
-		    capability,
-		    toInt64(count()) AS total_jobs,
-		    toInt64(countIf(selection_outcome = 'selected')) AS selected_jobs,
-		    toInt64(countIf(selection_outcome = 'no_orch')) AS no_orch_jobs,
-		    countIf(success = 1) / toFloat64(count()) AS success_rate,
-		    sum(toInt64(ifNull(duration_ms, 0))) / toFloat64(count()) AS avg_duration_ms
-		FROM naap.api_fact_byoc_job
-		WHERE completed_at >= ? AND completed_at < ?
-		  AND capability != ''
-		GROUP BY capability
+		    capability_name AS capability,
+		    toInt64(sum(job_count)) AS total_jobs,
+		    toInt64(sum(selected_count)) AS selected_jobs,
+		    toInt64(sum(no_orch_count)) AS no_orch_jobs,
+		    sum(success_count) / nullIf(toFloat64(sum(job_count)), 0) AS success_rate,
+		    sum(duration_ms_sum) / nullIf(toFloat64(sum(job_count)), 0) AS avg_duration_ms
+		FROM naap.api_hourly_request_demand
+		WHERE window_start >= ? AND window_start < ?
+		  AND capability_family = 'byoc'
+		  AND capability_name != ''
+		GROUP BY capability_name
 		ORDER BY total_jobs DESC
 	`, start, end)
 	if err != nil {
@@ -322,9 +345,13 @@ func (r *Repo) ListBYOCJobs(ctx context.Context, p types.TimeWindowParams) ([]ty
 	start, end := defaultWindow(p)
 	limit := normalizeLimit(p.Limit)
 
-	cursorTs, cursorKey, err := decodeTimeAddrCursor(p.Cursor)
+	cursorTs, cursorKeys, err := decodeTimeCursor(p.Cursor, 1)
 	if err != nil {
 		return nil, "", err
+	}
+	cursorKey := ""
+	if cursorKeys != nil {
+		cursorKey = cursorKeys[0]
 	}
 	cursorMs := int64(0)
 	if !cursorTs.IsZero() {
@@ -378,7 +405,7 @@ func (r *Repo) ListBYOCJobs(ctx context.Context, p types.TimeWindowParams) ([]ty
 	nextCursor := ""
 	if len(result) > limit {
 		last := result[limit-1]
-		nextCursor = encodeTimeAddrCursor(last.CompletedAt, last.RequestID)
+		nextCursor = encodeTimeCursor(last.CompletedAt, last.RequestID)
 		result = result[:limit]
 	}
 	if result == nil {

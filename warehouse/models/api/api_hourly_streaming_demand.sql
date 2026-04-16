@@ -3,7 +3,6 @@ select
     s.window_start,
     s.org,
     s.gateway,
-    s.region,
     s.pipeline_id,
     s.model_id,
     sum(s.sessions_count) as sessions_count,
@@ -43,6 +42,5 @@ group by
     s.window_start,
     s.org,
     s.gateway,
-    s.region,
     s.pipeline_id,
     s.model_id

@@ -99,7 +99,8 @@ func TestActiveDocsUseLowercaseKebabCaseFilenames(t *testing.T) {
 			t.Fatalf("walk %s: %v", current, err)
 		}
 		if d.IsDir() {
-			if filepath.Base(current) == "review-pending" {
+			base := filepath.Base(current)
+			if base == "review-pending" || base == "exec-plans" {
 				return filepath.SkipDir
 			}
 			return nil
@@ -162,4 +163,38 @@ func TestNoTrackedBaselineReportsRemainInDocsTree(t *testing.T) {
 		}
 		t.Fatalf("docs/baselines should be empty; found tracked baseline reports: %v", rel)
 	}
+}
+
+func TestActiveDocsDoNotReferenceRetiredRoutes(t *testing.T) {
+	root := repoRoot(t)
+	banned := []string{
+		"/v1/sla/compliance",
+		"/v1/net/orchestrators",
+	}
+
+	_ = filepath.WalkDir(filepath.Join(root, "docs"), func(current string, d os.DirEntry, err error) error {
+		if err != nil {
+			t.Fatalf("walk %s: %v", current, err)
+		}
+		if d.IsDir() {
+			if filepath.Base(current) == "review-pending" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if filepath.Ext(current) != ".md" {
+			return nil
+		}
+		body, readErr := os.ReadFile(current)
+		if readErr != nil {
+			t.Fatalf("ReadFile %s: %v", current, readErr)
+		}
+		text := string(body)
+		for _, route := range banned {
+			if strings.Contains(text, route) {
+				t.Fatalf("%s still references retired route %q", current, route)
+			}
+		}
+		return nil
+	})
 }

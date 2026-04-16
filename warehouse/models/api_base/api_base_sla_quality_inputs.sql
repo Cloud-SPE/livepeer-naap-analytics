@@ -26,7 +26,6 @@ select
     s.model_id as model_id,
     s.gpu_id as gpu_id,
     any(coalesce(s.gpu_model_name, i.gpu_model_name)) as gpu_model_name,
-    s.region as region,
     sum(s.known_sessions_count) as known_sessions_count,
     sum(s.requested_sessions) as requested_sessions,
     sum(s.startup_success_sessions) as startup_success_sessions,
@@ -94,5 +93,4 @@ group by
     s.orchestrator_address,
     s.pipeline_id,
     s.model_id,
-    s.gpu_id,
-    s.region
+    s.gpu_id

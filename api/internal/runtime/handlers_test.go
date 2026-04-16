@@ -2,10 +2,13 @@ package runtime_test
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/livepeer/naap-analytics/internal/config"
 	"github.com/livepeer/naap-analytics/internal/providers"
@@ -269,6 +272,32 @@ func TestRequestsOrchestrators_HappyPath(t *testing.T) {
 	assertJSONArray(t, rr)
 }
 
+func TestRequestsOrchestrators_UsesPipelineColonModelCapabilityStrings(t *testing.T) {
+	srv := newTestServerWithRepo(t, &requestsOrchestratorsRepo{})
+	req := httptest.NewRequest(http.MethodGet, "/v1/requests/orchestrators", nil)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	body := assertJSONArray(t, rr)
+	if len(body) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(body))
+	}
+	row := body[0].(map[string]any)
+	caps, ok := row["capabilities"].([]any)
+	if !ok || len(caps) != 2 {
+		t.Fatalf("expected 2 capabilities, got %v", row["capabilities"])
+	}
+	if caps[0] != "llm:meta-llama/Meta-Llama-3.1-8B-Instruct" {
+		t.Fatalf("unexpected first capability: %v", caps[0])
+	}
+	if caps[1] != "openai-chat-completions:gpt-4.1" {
+		t.Fatalf("unexpected second capability: %v", caps[1])
+	}
+}
+
 func TestAIBatchSummary_HappyPath(t *testing.T) {
 	srv := newTestServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/v1/requests/ai-batch/summary", nil)
@@ -293,6 +322,64 @@ func TestAIBatchJobs_HappyPath(t *testing.T) {
 	assertCursorEnvelope(t, rr)
 }
 
+func TestAIBatchJobs_PaginatesAcrossSameTimestampWithNextCursor(t *testing.T) {
+	srv := newTestServerWithRepo(t, &sameTimestampAIBatchJobsRepo{})
+
+	req1 := httptest.NewRequest(http.MethodGet, "/v1/requests/ai-batch/jobs", nil)
+	rr1 := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr1, req1)
+	if rr1.Code != http.StatusOK {
+		t.Fatalf("expected page 1 status 200, got %d", rr1.Code)
+	}
+	body1 := assertJSON(t, rr1)
+	data1, ok := body1["data"].([]any)
+	if !ok || len(data1) != 1 {
+		t.Fatalf("expected 1 row on page 1, got %v", body1["data"])
+	}
+	row1 := data1[0].(map[string]any)
+	if row1["request_id"] != "req-b" {
+		t.Fatalf("expected first page to return req-b, got %v", row1["request_id"])
+	}
+	pagination1, ok := body1["pagination"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected pagination object, got %v", body1["pagination"])
+	}
+	nextCursor, _ := pagination1["next_cursor"].(string)
+	if nextCursor == "" {
+		t.Fatal("expected non-empty next_cursor on page 1")
+	}
+	cursorTime, cursorKeys := decodeCursor(t, nextCursor)
+	if !cursorTime.Equal(time.Date(2026, 4, 15, 12, 0, 0, 0, time.UTC)) {
+		t.Fatalf("unexpected cursor timestamp: %v", cursorTime)
+	}
+	if len(cursorKeys) != 1 || cursorKeys[0] != "req-b" {
+		t.Fatalf("unexpected cursor keys: %v", cursorKeys)
+	}
+
+	req2 := httptest.NewRequest(http.MethodGet, "/v1/requests/ai-batch/jobs?cursor="+nextCursor, nil)
+	rr2 := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr2, req2)
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("expected page 2 status 200, got %d", rr2.Code)
+	}
+	body2 := assertJSON(t, rr2)
+	data2, ok := body2["data"].([]any)
+	if !ok || len(data2) != 1 {
+		t.Fatalf("expected 1 row on page 2, got %v", body2["data"])
+	}
+	row2 := data2[0].(map[string]any)
+	if row2["request_id"] != "req-a" {
+		t.Fatalf("expected second page to return req-a, got %v", row2["request_id"])
+	}
+	pagination2, ok := body2["pagination"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected pagination object on page 2, got %v", body2["pagination"])
+	}
+	if next, _ := pagination2["next_cursor"].(string); next != "" {
+		t.Fatalf("expected final page next_cursor to be empty, got %q", next)
+	}
+}
+
 func TestAIBatchJobs_RejectsLegacyPagination(t *testing.T) {
 	srv := newTestServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/v1/requests/ai-batch/jobs?offset=10", nil)
@@ -301,6 +388,50 @@ func TestAIBatchJobs_RejectsLegacyPagination(t *testing.T) {
 
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+}
+
+func TestPaginatedRoutes_RejectMalformedCursor(t *testing.T) {
+	srv := newTestServerWithRepo(t, &invalidCursorRepo{})
+	paths := []string{
+		"/v1/streaming/sla?cursor=not-base64",
+		"/v1/streaming/demand?cursor=not-base64",
+		"/v1/streaming/gpu-metrics?cursor=not-base64",
+		"/v1/requests/ai-batch/jobs?cursor=not-base64",
+		"/v1/requests/byoc/jobs?cursor=not-base64",
+	}
+
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			rr := httptest.NewRecorder()
+			srv.Handler().ServeHTTP(rr, req)
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d", rr.Code)
+			}
+		})
+	}
+}
+
+func TestPaginatedRoutes_RejectLegacyPagination(t *testing.T) {
+	srv := newTestServer(t)
+	paths := []string{
+		"/v1/streaming/sla?page=2",
+		"/v1/streaming/demand?offset=10",
+		"/v1/streaming/gpu-metrics?page_size=5",
+		"/v1/requests/ai-batch/jobs?offset=10",
+		"/v1/requests/byoc/jobs?page=2",
+	}
+
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			rr := httptest.NewRecorder()
+			srv.Handler().ServeHTTP(rr, req)
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d", rr.Code)
+			}
+		})
 	}
 }
 
@@ -436,6 +567,122 @@ func TestDiscoverOrchestrators_MultipleRowsPerAddress(t *testing.T) {
 
 type multiRowDiscoverRepo struct {
 	repo.NoopAnalyticsRepo
+}
+
+type invalidCursorRepo struct {
+	repo.NoopAnalyticsRepo
+}
+
+type requestsOrchestratorsRepo struct {
+	repo.NoopAnalyticsRepo
+}
+
+type sameTimestampAIBatchJobsRepo struct {
+	repo.NoopAnalyticsRepo
+}
+
+func (r *invalidCursorRepo) ListStreamingSLA(_ context.Context, p types.TimeWindowParams) ([]types.StreamingSLARow, string, error) {
+	if p.Cursor != "" {
+		return nil, "", types.ErrInvalidCursor
+	}
+	return []types.StreamingSLARow{}, "", nil
+}
+
+func (r *invalidCursorRepo) ListStreamingDemand(_ context.Context, p types.TimeWindowParams) ([]types.StreamingDemandRow, string, error) {
+	if p.Cursor != "" {
+		return nil, "", types.ErrInvalidCursor
+	}
+	return []types.StreamingDemandRow{}, "", nil
+}
+
+func (r *invalidCursorRepo) ListStreamingGPUMetrics(_ context.Context, p types.TimeWindowParams) ([]types.StreamingGPUMetricRow, string, error) {
+	if p.Cursor != "" {
+		return nil, "", types.ErrInvalidCursor
+	}
+	return []types.StreamingGPUMetricRow{}, "", nil
+}
+
+func (r *invalidCursorRepo) ListAIBatchJobs(_ context.Context, p types.TimeWindowParams) ([]types.AIBatchJobRecord, string, error) {
+	if p.Cursor != "" {
+		return nil, "", types.ErrInvalidCursor
+	}
+	return []types.AIBatchJobRecord{}, "", nil
+}
+
+func (r *invalidCursorRepo) ListBYOCJobs(_ context.Context, p types.TimeWindowParams) ([]types.BYOCJobRecord, string, error) {
+	if p.Cursor != "" {
+		return nil, "", types.ErrInvalidCursor
+	}
+	return []types.BYOCJobRecord{}, "", nil
+}
+
+func (r *requestsOrchestratorsRepo) GetRequestsOrchestrators(_ context.Context) ([]types.RequestsOrchestrator, error) {
+	return []types.RequestsOrchestrator{
+		{
+			Address: "0xorch",
+			URI:     "https://orch.example.com:8935",
+			Capabilities: []string{
+				"llm:meta-llama/Meta-Llama-3.1-8B-Instruct",
+				"openai-chat-completions:gpt-4.1",
+			},
+			GPUCount: 2,
+			LastSeen: time.Date(2026, 4, 15, 12, 0, 0, 0, time.UTC),
+		},
+	}, nil
+}
+
+func (r *sameTimestampAIBatchJobsRepo) ListAIBatchJobs(_ context.Context, p types.TimeWindowParams) ([]types.AIBatchJobRecord, string, error) {
+	ts := time.Date(2026, 4, 15, 12, 0, 0, 0, time.UTC)
+	if p.Cursor == "" {
+		return []types.AIBatchJobRecord{
+			{RequestID: "req-b", CompletedAt: ts},
+		}, encodeCursor(ts, "req-b"), nil
+	}
+	cursorTime, cursorKeys, err := decodeCursorValue(p.Cursor)
+	if err != nil {
+		return nil, "", types.ErrInvalidCursor
+	}
+	if cursorTime.Equal(ts) && len(cursorKeys) == 1 && cursorKeys[0] == "req-b" {
+		return []types.AIBatchJobRecord{
+			{RequestID: "req-a", CompletedAt: ts},
+		}, "", nil
+	}
+	return nil, "", types.ErrInvalidCursor
+}
+
+func encodeCursor(ts time.Time, keys ...string) string {
+	values := []string{strconv.FormatInt(ts.UTC().UnixMilli(), 10)}
+	values = append(values, keys...)
+	raw, _ := json.Marshal(values)
+	return base64.RawURLEncoding.EncodeToString(raw)
+}
+
+func decodeCursor(t *testing.T, cursor string) (time.Time, []string) {
+	t.Helper()
+	ts, keys, err := decodeCursorValue(cursor)
+	if err != nil {
+		t.Fatalf("decode cursor: %v", err)
+	}
+	return ts, keys
+}
+
+func decodeCursorValue(cursor string) (time.Time, []string, error) {
+	raw, err := base64.RawURLEncoding.DecodeString(cursor)
+	if err != nil {
+		return time.Time{}, nil, err
+	}
+	var values []string
+	if err := json.Unmarshal(raw, &values); err != nil {
+		return time.Time{}, nil, err
+	}
+	if len(values) == 0 {
+		return time.Time{}, nil, nil
+	}
+	ms, err := strconv.ParseInt(values[0], 10, 64)
+	if err != nil {
+		return time.Time{}, nil, err
+	}
+	return time.UnixMilli(ms).UTC(), values[1:], nil
 }
 
 func (r *multiRowDiscoverRepo) DiscoverOrchestrators(_ context.Context, _ types.DiscoverOrchestratorsParams) ([]types.DiscoverOrchestratorRow, error) {

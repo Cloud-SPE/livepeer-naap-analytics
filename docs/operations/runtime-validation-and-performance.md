@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | **Status** | Active |
-| **Effective date** | 2026-04-09 |
+| **Effective date** | 2026-04-15 |
 | **Audience** | Operators, developers, release reviewers |
 
 Related docs:
@@ -180,7 +180,7 @@ make resolver-logs
 docker stats --no-stream
 curl -sS -o /dev/null -w 'health total=%{time_total} code=%{http_code}\n' http://localhost:8000/healthz
 curl -sS -o /dev/null -w 'kpi total=%{time_total} code=%{http_code}\n' http://localhost:8000/v1/dashboard/kpi
-curl -sS -o /dev/null -w 'sla total=%{time_total} code=%{http_code}\n' 'http://localhost:8000/v1/sla/compliance?limit=10'
+curl -sS -o /dev/null -w 'streaming-sla total=%{time_total} code=%{http_code}\n' 'http://localhost:8000/v1/streaming/sla?limit=10'
 ```
 
 ### Standard script-based measurements
@@ -232,7 +232,7 @@ Required:
 
 - `/healthz` returns `200`
 - `/v1/dashboard/kpi` returns `200`
-- `/v1/sla/compliance` returns `200`
+- `/v1/streaming/sla` returns `200`
 
 Deployment verification should also confirm:
 
@@ -260,8 +260,8 @@ Required:
 - `0 <= output_viability_rate <= 1`
 - `0 <= health_signal_coverage_ratio <= 1`
 - `sla_semantics_version` is the expected active contract
-- cold `/v1/sla/compliance` timing reflects a thin final-store-backed read, not
-  a live benchmark-history recomputation
+- cold `/v1/streaming/sla` timing reflects a thin published-view read over
+  additive SLA inputs and benchmark state, not request-time raw-session scans
 
 ### F. Rollup inflation is not present
 

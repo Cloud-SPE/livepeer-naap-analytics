@@ -3,137 +3,70 @@
 **Status:** approved  
 **Priority:** P0 / launch  
 **Requirement IDs:** NET-001 through NET-003  
-**Source events:** `network_capabilities`, `discovery_results`
+**Source surfaces:** `api_current_orchestrator`, `api_current_capability_offer`, `api_current_capability_hardware`, `api_current_byoc_worker`, `api_hourly_streaming_demand`
 
 ## Problem
 
-API consumers need to understand which orchestrators are active, which models
-are available, and how current supply compares to observed demand.
+API consumers need current orchestrator inventory, model availability, and
+request-serving supply without reconstructing those views from raw capability
+payloads.
 
 ## Solution
 
-Use the latest capability and inventory state published into the semantic
-serving layer to expose three current network-state surfaces:
+Expose the current network-state surfaces from the published `api_*` layer:
 
 - `GET /v1/dashboard/orchestrators`
 - `GET /v1/streaming/models`
-- `GET /v1/streaming/models`
+- `GET /v1/streaming/orchestrators`
+- `GET /v1/requests/models`
+- `GET /v1/requests/orchestrators`
+- `GET /v1/discover/orchestrators`
 
 ## Requirements
 
-### NET-001: Orchestrator list
+### NET-001: Dashboard orchestrator table
 
 `GET /v1/dashboard/orchestrators`
 
-Returns a paginated list of orchestrators ordered by `last_seen` descending.
-
-**Query params:**
-
-- `?org=` — optional org filter
-- `?active_only=true` — optional warm-state filter
-- `?limit=` / `?cursor=` — cursor-pagination controls
-
-**Representative fields:**
-
-| Field | Meaning |
-|---|---|
-| `address` | canonical lowercase orchestrator address |
-| `name` | display name derived from URI hostname when available |
-| `uri` | current orchestrator service URI |
-| `version` | current orchestrator version when present |
-| `last_seen` | last capability/inventory observation timestamp |
-| `is_active` | whether the row falls within the active warm-state threshold |
-| capability payload | current hardware, model, and pricing source payload |
+Returns one row per orchestrator with SLA rollups, current pipeline/model
+inventory, and GPU count. The default window is `7d`.
 
 Required behavior:
 
-- supports `org`, `active_only`, `limit`, and `cursor`
-- returns normalized orchestrator identity and current capability payload
-- lowercases canonical addresses
-- keeps records with missing hardware metadata rather than dropping them
-- orders by most recent `last_seen`
-- returns the shared list envelope `{data, pagination, meta}` with
-  `pagination.next_cursor`, `pagination.has_more`, and `pagination.page_size`
+- one row per orchestrator address
+- SLA metrics are weighted by requested session volume
+- current pipeline and model inventory comes from the published current-state layer
+- GPU count is deduped on orchestrator plus GPU identity
 
-### NET-002: Model availability
+### NET-002: Streaming model availability
 
 `GET /v1/streaming/models`
 
-Returns model availability per pipeline, including warm orchestrator count and
-price range.
-
-**Query params:**
-
-- `?org=` — optional org filter
-- `?pipeline=` — optional pipeline filter
-- `?limit=` — optional result cap
-
-**Representative fields:**
-
-| Field | Meaning |
-|---|---|
-| `pipeline` | canonical pipeline identifier |
-| `model` | canonical model identifier |
-| `warm_orch_count` | count of warm orchestrators advertising the model |
-| `total_capacity` | published capacity for the `(pipeline, model)` pair |
-| `price_*` | min, max, and average published pricing across warm orchestrators |
+Returns current live-video-to-video supply and recent performance by model.
 
 Required behavior:
 
-- supports `org`, `pipeline`, and `limit`
-- derives counts and price range from current capability snapshots
-- exposes only models represented in the current serving contract
-- derives pricing from the published capability pricing data, not ad hoc request-time reconstruction
+- one row per `(pipeline, model)`
+- warm inventory comes from current capability offers
+- active stream count comes from current active stream state
+- 24-hour FPS is recomputed from additive streaming SLA support fields
 
-### NET-003: Network capacity
+### NET-003: Request-serving supply inventory
 
-`GET /v1/streaming/models`
+`GET /v1/requests/models`, `GET /v1/requests/orchestrators`, `GET /v1/discover/orchestrators`
 
-Returns current GPU supply versus active demand grouped by `(pipeline, model)`.
-
-**Query params:**
-
-- `?org=` — optional org filter
-
-**Representative fields:**
-
-| Field | Meaning |
-|---|---|
-| `pipeline` | canonical pipeline identifier |
-| `model` | canonical model identifier |
-| `warm_orch_count` | number of warm orchestrators advertising supply |
-| `active_stream_count` | current active demand count |
-| `utilization` | active demand divided by warm supply |
-| `total_vram` | total advertised VRAM for the supply cohort |
+These routes expose current non-streaming supply, including BYOC worker-backed
+capabilities.
 
 Required behavior:
 
-- supports `org`
-- exposes warm orchestrator count, active stream count, utilization, and total VRAM
-- is computed from published serving state rather than ad hoc raw-table scans
-- keeps supply and demand aligned on the same canonical `(pipeline, model)` vocabulary
-
-## Data Sources
-
-| Surface | Primary source |
-|---|---|
-| orchestrators | latest capability and inventory state |
-| models | capability snapshots and published availability rollups |
-| capacity | published capacity and demand serving models |
-
-## Source Mapping
-
-| Concept | Source event or serving layer |
-|---|---|
-| orchestrator identity | `network_capabilities` snapshots and published latest orchestrator state |
-| hardware inventory | capability hardware payload and published inventory rollups |
-| model support | capability constraints and pricing payloads |
-| active demand | published demand and capacity serving models |
-| warm-state threshold | latest-seen capability freshness policy in the serving layer |
+- request inventory includes both builtin request offers and current BYOC workers
+- `GET /v1/requests/orchestrators` emits `pipeline:model` capability strings
+- `GET /v1/discover/orchestrators` ranks rows by the latest measured score for that pipeline
+- discover `caps` filtering uses OR semantics across repeated `caps` values
 
 ## Out of Scope
 
-- historical GPU inventory trend analysis
-- per-GPU utilization telemetry
-- geographic placement or geolocation enrichment
-- separate public network-summary or GPU-inventory endpoints outside the live `/v1/streaming/*` route set
+- historical GPU inventory trends
+- per-region public inventory breakdowns
+- legacy route aliases

@@ -64,7 +64,10 @@ func TestRuleServing001_APIOutputsExposeStableRequiredFields(t *testing.T) {
 				"window_start", "org", "gateway", "execution_mode", "capability_family",
 				"capability_name", "canonical_pipeline", "canonical_model", "orchestrator_address",
 				"orchestrator_uri", "job_count", "selected_count", "no_orch_count",
-				"success_count", "duration_ms_sum", "price_sum",
+				"success_count", "duration_ms_sum", "price_sum", "llm_request_count",
+				"llm_success_count", "llm_total_tokens_sum", "llm_total_tokens_sample_count",
+				"llm_tokens_per_second_sum", "llm_tokens_per_second_sample_count",
+				"llm_ttft_ms_sum", "llm_ttft_ms_sample_count",
 			},
 		},
 	}

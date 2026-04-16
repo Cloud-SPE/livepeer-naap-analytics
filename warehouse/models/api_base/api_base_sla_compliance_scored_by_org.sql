@@ -14,7 +14,6 @@ with scored_inputs as (
        and i.pipeline_id = b.pipeline_id
        and ifNull(i.model_id, '') = ifNull(b.model_id, '')
        and ifNull(i.gpu_id, '') = ifNull(b.gpu_id, '')
-       and ifNull(i.region, '') = ifNull(b.region, '')
 ),
 component_scores as (
     select
@@ -63,7 +62,6 @@ select
     s.model_id,
     s.gpu_id,
     s.gpu_model_name,
-    s.region,
     s.known_sessions_count,
     s.requested_sessions,
     s.startup_success_sessions,

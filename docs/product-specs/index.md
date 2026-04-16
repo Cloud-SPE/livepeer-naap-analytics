@@ -13,8 +13,8 @@ surface.
 
 | Spec | Req IDs | Status | Description |
 |------|---------|--------|-------------|
-| [`r1-network-state.md`](r1-network-state.md) | NET-001 – NET-003 | approved | Orchestrator list, model availability, and network capacity |
-| [`r3-performance-quality.md`](r3-performance-quality.md) | PERF-001 | approved | Performance by model |
+| [`r1-network-state.md`](r1-network-state.md) | NET-001 – NET-003 | approved | Current orchestrator, model, request-supply, and discover inventory |
+| [`r3-performance-quality.md`](r3-performance-quality.md) | PERF-001 – PERF-003 | approved | Streaming performance, SLA, demand, and GPU quality surfaces |
 
 ## Community Documentation
 
@@ -36,5 +36,7 @@ surface.
 |--------|----------|------|
 | NET-001 | `GET /v1/dashboard/orchestrators` | `r1-network-state.md` |
 | NET-002 | `GET /v1/streaming/models` | `r1-network-state.md` |
-| NET-003 | `GET /v1/streaming/models` | `r1-network-state.md` |
+| NET-003 | `GET /v1/requests/orchestrators` | `r1-network-state.md` |
 | PERF-001 | `GET /v1/streaming/models` | `r3-performance-quality.md` |
+| PERF-002 | `GET /v1/streaming/sla` | `r3-performance-quality.md` |
+| PERF-003 | `GET /v1/streaming/demand` | `r3-performance-quality.md` |

@@ -1,23 +1,3 @@
-with latest_rows as (
-    select
-        window_start,
-        org,
-        orchestrator_address,
-        pipeline_id,
-        ifNull(model_id, '') as model_id_key,
-        ifNull(gpu_id, '') as gpu_id_key,
-        ifNull(region, '') as region_key,
-        argMax(refresh_run_id, refreshed_at) as refresh_run_id
-    from naap.canonical_streaming_sla_hourly_store
-    group by
-        window_start,
-        org,
-        orchestrator_address,
-        pipeline_id,
-        model_id_key,
-        gpu_id_key,
-        region_key
-)
 select
     s.window_start,
     s.org,
@@ -26,7 +6,6 @@ select
     s.model_id,
     s.gpu_id,
     s.gpu_model_name,
-    s.region,
     s.known_sessions_count,
     s.requested_sessions,
     s.startup_success_sessions,
@@ -67,13 +46,4 @@ select
     s.quality_score,
     s.sla_semantics_version,
     s.sla_score
-from naap.canonical_streaming_sla_hourly_store s
-inner join latest_rows l
-    on s.window_start = l.window_start
-   and s.org = l.org
-   and s.orchestrator_address = l.orchestrator_address
-   and s.pipeline_id = l.pipeline_id
-   and ifNull(s.model_id, '') = l.model_id_key
-   and ifNull(s.gpu_id, '') = l.gpu_id_key
-   and ifNull(s.region, '') = l.region_key
-   and s.refresh_run_id = l.refresh_run_id
+from {{ ref('api_base_sla_compliance_scored_by_org') }} s

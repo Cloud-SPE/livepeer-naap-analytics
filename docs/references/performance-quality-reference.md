@@ -8,7 +8,10 @@ route contract itself.
 
 The current public performance surface is:
 
-- `GET /v1/perf/by-model`
+- `GET /v1/streaming/models`
+- `GET /v1/streaming/sla`
+- `GET /v1/streaming/demand`
+- `GET /v1/streaming/gpu-metrics`
 
 This route is defined in:
 
@@ -19,7 +22,8 @@ This route is defined in:
 
 ### Window and filters
 
-- `org`, `start`, `end`, and `pipeline` are the active query parameters
+- `GET /v1/streaming/models` is a current-state inventory view with a fixed 24-hour performance lookback
+- the paginated hourly routes use `start`, `end`, `limit`, and `cursor`
 - if `start` and `end` are omitted, the serving layer defaults to the last 24 hours
 
 ### Data path
