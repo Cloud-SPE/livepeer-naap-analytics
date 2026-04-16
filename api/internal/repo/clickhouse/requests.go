@@ -3,15 +3,18 @@ package clickhouse
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/livepeer/naap-analytics/internal/types"
 )
 
 // GetRequestsModels serves GET /v1/requests/models.
-// Non-streaming capacity and 24h stats come from the capability-aware offer
-// and request-demand surfaces. The public job_type field is derived here from
-// capability_family rather than being treated as a base storage dimension.
+// Non-streaming capacity comes from observed 24h capability and BYOC worker
+// inventory. The public job_type field is derived here from capability_family
+// rather than being treated as a base storage dimension.
 func (r *Repo) GetRequestsModels(ctx context.Context) ([]types.RequestsModel, error) {
+	end := time.Now().UTC()
+	start := end.Add(-observedInventoryHours * time.Hour)
 	rows, err := r.conn.Query(ctx, `
 		WITH offers AS (
 		    SELECT
@@ -20,13 +23,13 @@ func (r *Repo) GetRequestsModels(ctx context.Context) ([]types.RequestsModel, er
 		        capability_family,
 		        toInt64(count(DISTINCT orch_address)) AS warm_orch_count,
 		        toInt64(count(DISTINCT nullIf(ifNull(gpu_id, ''), ''))) AS gpu_slots
-		    FROM naap.api_current_capability_offer
+		    FROM naap.api_observed_capability_offer
 		    WHERE supports_request = 1
 		      AND capability_family = 'builtin'
 		      AND model_id IS NOT NULL AND model_id != ''
 		      AND ifNull(canonical_pipeline, '') != 'live-video-to-video'
 		      AND ifNull(canonical_pipeline, capability_name) != ''
-		      AND last_seen > now() - INTERVAL 30 MINUTE
+		      AND last_seen >= ? AND last_seen < ?
 		    GROUP BY pipeline, model, capability_family
 		    UNION ALL
 		    SELECT
@@ -35,9 +38,9 @@ func (r *Repo) GetRequestsModels(ctx context.Context) ([]types.RequestsModel, er
 		        'byoc' AS capability_family,
 		        toInt64(uniqExact(orch_address)) AS warm_orch_count,
 		        toInt64(0) AS gpu_slots
-		    FROM naap.api_current_byoc_worker
+		    FROM naap.api_observed_byoc_worker
 		    WHERE capability_name != ''
-		      AND last_seen > now() - INTERVAL 30 MINUTE
+		      AND last_seen >= ? AND last_seen < ?
 		    GROUP BY pipeline, model, capability_family
 		),
 		demand AS (
@@ -67,7 +70,7 @@ func (r *Repo) GetRequestsModels(ctx context.Context) ([]types.RequestsModel, er
 		 AND ifNull(d.model, '') = ifNull(o.model, '')
 		 AND d.capability_family = o.capability_family
 		ORDER BY job_count_24h DESC, warm_orch_count DESC, pipeline ASC, model ASC
-	`)
+	`, start, end, start, end)
 	if err != nil {
 		return nil, fmt.Errorf("requests models: %w", err)
 	}
@@ -90,8 +93,10 @@ func (r *Repo) GetRequestsModels(ctx context.Context) ([]types.RequestsModel, er
 }
 
 // GetRequestsOrchestrators serves GET /v1/requests/orchestrators.
-// Orchestrators that advertise any non-streaming capability in the last 30m.
+// Orchestrators observed serving any non-streaming capability in the last 24 hours.
 func (r *Repo) GetRequestsOrchestrators(ctx context.Context) ([]types.RequestsOrchestrator, error) {
+	end := time.Now().UTC()
+	start := end.Add(-observedInventoryHours * time.Hour)
 	rows, err := r.conn.Query(ctx, `
 		WITH request_supply AS (
 		    SELECT
@@ -100,13 +105,13 @@ func (r *Repo) GetRequestsOrchestrators(ctx context.Context) ([]types.RequestsOr
 		        concat(ifNull(canonical_pipeline, capability_name), ':', ifNull(model_id, '')) AS capability,
 		        ifNull(gpu_id, '') AS gpu_id,
 		        last_seen
-		    FROM naap.api_current_capability_offer
+		    FROM naap.api_observed_capability_offer
 		    WHERE supports_request = 1
 		      AND capability_family = 'builtin'
 		      AND ifNull(canonical_pipeline, capability_name) != ''
 		      AND ifNull(canonical_pipeline, '') != 'live-video-to-video'
 		      AND ifNull(model_id, '') != ''
-		      AND last_seen > now() - INTERVAL 30 MINUTE
+		      AND last_seen >= ? AND last_seen < ?
 		    UNION ALL
 		    SELECT
 		        orch_address,
@@ -114,10 +119,10 @@ func (r *Repo) GetRequestsOrchestrators(ctx context.Context) ([]types.RequestsOr
 		        concat(capability_name, ':', ifNull(model, '')) AS capability,
 		        '' AS gpu_id,
 		        last_seen
-		    FROM naap.api_current_byoc_worker
+		    FROM naap.api_observed_byoc_worker
 		    WHERE capability_name != ''
 		      AND ifNull(model, '') != ''
-		      AND last_seen > now() - INTERVAL 30 MINUTE
+		      AND last_seen >= ? AND last_seen < ?
 		)
 		SELECT
 		    orch_address AS address,
@@ -129,7 +134,7 @@ func (r *Repo) GetRequestsOrchestrators(ctx context.Context) ([]types.RequestsOr
 		GROUP BY orch_address
 		HAVING length(capabilities) > 0
 		ORDER BY gpu_count DESC, address ASC
-	`)
+	`, start, end, start, end)
 	if err != nil {
 		return nil, fmt.Errorf("requests orchestrators: %w", err)
 	}
@@ -423,7 +428,7 @@ func (r *Repo) GetBYOCWorkers(ctx context.Context, p types.TimeWindowParams) ([]
 		    toInt64(uniqExact(worker_url)) AS worker_count,
 		    arrayDistinct(groupArrayIf(ifNull(model, ''), ifNull(model, '') != '')) AS models,
 		    avg(ifNull(price_per_unit, 0)) AS avg_price_per_unit
-		FROM naap.api_current_byoc_worker
+		FROM naap.api_observed_byoc_worker
 		WHERE last_seen >= ? AND last_seen < ?
 		  AND capability_name != ''
 		GROUP BY capability

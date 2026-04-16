@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	activeOrchMinutes = 10
-	defaultLimit      = 50
+	defaultLimit           = 50
+	observedInventoryHours = 24
 )
 
 func normalizeLimit(limit int) int {

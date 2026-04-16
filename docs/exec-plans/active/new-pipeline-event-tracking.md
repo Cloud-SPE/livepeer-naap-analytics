@@ -147,7 +147,7 @@ Add to the accepted list (WHERE clause routing `accepted_raw_events` vs `ignored
 **Directory:** `warehouse/models/api/` (serving layer — Go repo reads only these)
 
 - `api_fact_ai_batch_job.sql`, `api_fact_byoc_job.sql`, `api_fact_ai_batch_llm_request.sql`
-- `api_current_byoc_worker.sql`, `api_hourly_byoc_auth.sql`
+- `api_observed_byoc_worker.sql`, `api_hourly_byoc_auth.sql`
 - BYOC payment history no longer has a dedicated public `api_*` contract in the minimal spine; internal economics reads canonical facts directly where needed
 
 ---

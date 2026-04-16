@@ -352,8 +352,8 @@ func TestAffectedDashboardPanelsDeduplicateOrchestratorStateLookups(t *testing.T
 		"Current Gateway -> Orchestrator -> Pipeline Paths":      {},
 		"FPS Average by Orchestrator (1h intervals)":             {},
 		"Jitter Coefficient by Orchestrator":                     {},
-		"GPU Inventory (Latest Snapshots)":                       {},
-		"Latest Quoted Prices by Orchestrator":                   {},
+		"GPU Inventory (Latest Observations)":                    {},
+		"Latest Observed Prices by Orchestrator":                 {},
 	}
 
 	unsafeSnippets := []string{
@@ -415,8 +415,8 @@ func TestAffectedDashboardPanelsUseCollisionAwareLabelsAndStreamingSLA(t *testin
 		"Current Gateway -> Orchestrator -> Pipeline Paths":      {},
 		"FPS Average by Orchestrator (1h intervals)":             {},
 		"Jitter Coefficient by Orchestrator":                     {},
-		"GPU Inventory (Latest Snapshots)":                       {},
-		"Latest Quoted Prices by Orchestrator":                   {},
+		"GPU Inventory (Latest Observations)":                    {},
+		"Latest Observed Prices by Orchestrator":                 {},
 	}
 
 	var slaChartCount int
@@ -447,7 +447,7 @@ func TestAffectedDashboardPanelsUseCollisionAwareLabelsAndStreamingSLA(t *testin
 				if sql == "" {
 					continue
 				}
-				for _, required := range []string{"label_meta AS (", "name_collision_count", "labels AS ("} {
+				for _, required := range []string{"labels AS (", "api_orchestrator_identity", "orch_label"} {
 					if !strings.Contains(sql, required) {
 						t.Fatalf("panel %q in %s missing collision-aware label snippet %q", panel.Title, path, required)
 					}

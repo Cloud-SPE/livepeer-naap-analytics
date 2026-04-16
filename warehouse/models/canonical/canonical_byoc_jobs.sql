@@ -50,6 +50,8 @@ select
     latest.error                 as error,
     latest.model                 as model,
     latest.price_per_unit        as price_per_unit,
+    latest.capability_version_id as capability_version_id,
+    latest.attribution_snapshot_ts as attribution_snapshot_ts,
     latest.gpu_id                as gpu_id,
     latest.gpu_model_name        as gpu_model_name,
     latest.gpu_memory_bytes_total as gpu_memory_bytes_total,

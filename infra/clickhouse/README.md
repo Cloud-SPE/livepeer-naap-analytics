@@ -54,7 +54,7 @@ remains a separate operator step.
 | **MV-populated** | `accepted_raw_events`, `ignored_raw_events`, `normalized_*`, event-driven aggregates | Fires synchronously as Kafka rows are routed by the ingest materialized views |
 | **Worker-populated** | `orch_metadata`, `gateway_metadata` | API enrichment worker polls every 5m and batch-inserts |
 
-Worker-populated tables are applied manually on existing volumes — the bootstrap and any future forward migrations only create the table schema. The enrichment worker will populate them on next startup. GPU inventory is derived natively from `normalized_network_capabilities` through the canonical capability inventory path and is served through `api_current_capability_hardware`.
+Worker-populated tables are applied manually on existing volumes — the bootstrap and any future forward migrations only create the table schema. The enrichment worker will populate them on next startup. Observed capability snapshots, offers, pricing, and GPU inventory are derived natively from `normalized_network_capabilities` through MV-populated canonical capability inventory stores and are served through observed-window capability views.
 
 ### Tier contract
 

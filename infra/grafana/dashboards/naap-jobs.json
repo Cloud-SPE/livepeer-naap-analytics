@@ -1127,7 +1127,7 @@
           "editorType": "sql",
           "format": 2,
           "queryType": "sql",
-          "rawSql": "SELECT capability_name AS capability, uniq(orch_address) AS worker_count,\n    groupUniqArrayIf(model, model != '') AS models,\n    round(avg(price_per_unit), 6) AS avg_price_per_unit\nFROM naap.api_current_byoc_worker\nWHERE last_seen >= $__fromTime AND last_seen <= $__toTime AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY capability ORDER BY worker_count DESC",
+          "rawSql": "SELECT capability_name AS capability, uniq(orch_address) AS worker_count,\n    groupUniqArrayIf(model, model != '') AS models,\n    round(avg(price_per_unit), 6) AS avg_price_per_unit\nFROM naap.api_observed_byoc_worker\nWHERE last_seen >= $__fromTime AND last_seen <= $__toTime AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY capability ORDER BY worker_count DESC",
           "refId": "A"
         }
       ]

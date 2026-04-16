@@ -14,8 +14,6 @@ TRUNCATE TABLE naap.canonical_capability_hardware_inventory;
 TRUNCATE TABLE naap.canonical_capability_hardware_inventory_by_snapshot;
 TRUNCATE TABLE naap.canonical_capability_snapshots_by_address;
 TRUNCATE TABLE naap.canonical_capability_snapshots_by_uri;
-TRUNCATE TABLE naap.canonical_latest_orchestrator_pipeline_inventory_agg;
-
 INSERT INTO naap.normalized_session_trace_rollup_latest
 SELECT
     org,
@@ -239,20 +237,3 @@ SELECT
     orch_uri_norm
 FROM naap.normalized_network_capabilities
 WHERE orch_uri_norm != '';
-
-INSERT INTO naap.canonical_latest_orchestrator_pipeline_inventory_agg
-SELECT
-    org,
-    orch_address,
-    pipeline_id,
-    model_id,
-    gpu_id,
-    argMaxIfState(gpu_id, snapshot_ts, toUInt8(gpu_id != '')) AS gpu_id_state,
-    argMaxIfState(ifNull(gpu_model_name, ''), snapshot_ts, toUInt8(ifNull(gpu_model_name, '') != '')) AS gpu_model_name_state,
-    argMaxIfState(ifNull(gpu_memory_bytes_total, toUInt64(0)), snapshot_ts, toUInt8(ifNull(gpu_memory_bytes_total, toUInt64(0)) > 0)) AS gpu_memory_bytes_total_state,
-    argMaxIfState(ifNull(runner_version, ''), snapshot_ts, toUInt8(ifNull(runner_version, '') != '')) AS runner_version_state,
-    argMaxIfState(ifNull(cuda_version, ''), snapshot_ts, toUInt8(ifNull(cuda_version, '') != '')) AS cuda_version_state,
-    maxState(snapshot_ts) AS last_seen_state
-FROM naap.canonical_capability_hardware_inventory
-WHERE pipeline_id != ''
-GROUP BY org, orch_address, pipeline_id, model_id, gpu_id;

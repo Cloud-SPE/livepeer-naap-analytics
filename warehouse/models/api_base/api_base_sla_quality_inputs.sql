@@ -1,23 +1,6 @@
 {{ config(materialized='view') }}
 
-with {{ latest_value_cte('latest_slices', 'naap.canonical_streaming_sla_input_hourly_store', ['org', 'window_start'], 'refresh_run_id') }},
-inventory_by_org as (
-    select
-        inv.org,
-        inv.orch_address as orchestrator_address,
-        coalesce(nullIf(inv.model_id, ''), nullIf(inv.pipeline_id, '')) as inventory_key,
-        nullIf(argMaxIfMerge(inv.gpu_model_name_state), '') as gpu_model_name
-    from naap.canonical_latest_orchestrator_pipeline_inventory_agg inv
-    group by inv.org, orchestrator_address, inventory_key
-),
-inventory as (
-    select
-        orchestrator_address,
-        inventory_key,
-        any(gpu_model_name) as gpu_model_name
-    from inventory_by_org
-    group by orchestrator_address, inventory_key
-)
+with {{ latest_value_cte('latest_slices', 'naap.canonical_streaming_sla_input_hourly_store', ['org', 'window_start'], 'refresh_run_id') }}
 select
     s.window_start as window_start,
     cast(null as Nullable(String)) as org,
@@ -25,7 +8,7 @@ select
     s.pipeline_id as pipeline_id,
     s.model_id as model_id,
     s.gpu_id as gpu_id,
-    any(coalesce(s.gpu_model_name, i.gpu_model_name)) as gpu_model_name,
+    any(s.gpu_model_name) as gpu_model_name,
     sum(s.known_sessions_count) as known_sessions_count,
     sum(s.requested_sessions) as requested_sessions,
     sum(s.startup_success_sessions) as startup_success_sessions,
@@ -85,9 +68,6 @@ from naap.canonical_streaming_sla_input_hourly_store s
 inner join latest_slices l
     on {{ join_on_columns('s', 'l', ['org', 'window_start']) }}
    and s.refresh_run_id = l.refresh_run_id
-left join inventory i
-    on s.orchestrator_address = i.orchestrator_address
-   and coalesce(nullIf(s.model_id, ''), nullIf(s.pipeline_id, '')) = i.inventory_key
 group by
     s.window_start,
     s.orchestrator_address,

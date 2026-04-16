@@ -15,35 +15,29 @@ func (r *Repo) GetDashboardKPI(ctx context.Context, windowHours int, pipeline, m
 	now := time.Now().UTC()
 	windowStart := now.Add(-time.Duration(windowHours) * time.Hour)
 
-	// Query 1: orchestrator count. When pipeline/model filters are set, restrict
-	// to orchestrators that currently advertise that builtin capability offer.
-	var activeOrch, totalOrch uint64
+	// Query 1: observed orchestrator count in the selected window.
+	var activeOrch uint64
 	if pipeline != "" || modelID != "" {
 		orchCountSQL := `
-			SELECT countIf(s.last_seen > now() - INTERVAL ? MINUTE) AS active,
-			       count() AS total
-			FROM naap.api_current_orchestrator s
-			INNER JOIN (
-				SELECT DISTINCT orch_address
-				FROM naap.api_current_capability_offer
-				WHERE last_seen > now() - INTERVAL ? MINUTE
-				  AND capability_family = 'builtin'
-				  AND (? = '' OR canonical_pipeline = ?)
-				  AND (? = '' OR model_id = ?)
-			) pm ON pm.orch_address = s.orch_address
+			SELECT countDistinct(s.orch_address) AS observed
+			FROM naap.api_observed_capability_offer s
+			WHERE s.last_seen >= ? AND s.last_seen < ?
+			  AND s.capability_family = 'builtin'
+			  AND (? = '' OR s.canonical_pipeline = ?)
+			  AND (? = '' OR s.model_id = ?)
 		`
 		if err := r.conn.QueryRow(ctx, orchCountSQL,
-			activeOrchMinutes, activeOrchMinutes,
+			windowStart, now,
 			pipeline, pipeline, modelID, modelID,
-		).Scan(&activeOrch, &totalOrch); err != nil {
+		).Scan(&activeOrch); err != nil {
 			return nil, fmt.Errorf("dashboard kpi orch count: %w", err)
 		}
 	} else {
 		if err := r.conn.QueryRow(ctx, `
-			SELECT countIf(last_seen > now() - INTERVAL ? MINUTE) AS active,
-			       count() AS total
-			FROM naap.api_current_orchestrator
-		`, activeOrchMinutes).Scan(&activeOrch, &totalOrch); err != nil {
+			SELECT countDistinct(orch_address) AS observed
+			FROM naap.canonical_capability_snapshots_store
+			WHERE snapshot_ts >= ? AND snapshot_ts < ?
+		`, windowStart, now).Scan(&activeOrch); err != nil {
 			return nil, fmt.Errorf("dashboard kpi orch count: %w", err)
 		}
 	}
@@ -344,11 +338,11 @@ func (r *Repo) GetDashboardOrchestrators(ctx context.Context, windowHours int) (
 		}
 	}
 
-	// Enrich with orchestrator state (URI, pipeline models)
+	// Resolve display URI from the latest orchestrator identity helper rather
+	// than rescanning observed inventory for each request.
 	stateRows, err := r.conn.Query(ctx, `
 		SELECT orch_address, ifNull(orchestrator_uri, '') AS orchestrator_uri
-		FROM naap.api_current_orchestrator
-		WHERE last_seen > now() - INTERVAL 30 MINUTE
+		FROM naap.api_orchestrator_identity
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("dashboard orchestrators state: %w", err)
@@ -371,19 +365,18 @@ func (r *Repo) GetDashboardOrchestrators(ctx context.Context, windowHours int) (
 		o.orch.ServiceURI = uri
 	}
 
-	// Pipeline models from live announcements. Pipeline/model membership is
-	// derived from the grouped rows; per-orchestrator GPU totals are computed
-	// separately with a single DISTINCT so GPUs shared across models are not
-	// double-counted.
+	// Pipeline/model membership is derived from observed offers inside the
+	// selected window; per-orchestrator GPU totals are computed separately with a
+	// single DISTINCT so GPUs shared across models are not double-counted.
 	pmRows, err := r.conn.Query(ctx, `
 		SELECT orch_address,
 		       ifNull(nullIf(canonical_pipeline, ''), ifNull(nullIf(offered_name, ''), 'unknown')) AS pipeline_id,
 		       model_id
-		FROM naap.api_current_capability_offer
-		WHERE last_seen > now() - INTERVAL 30 MINUTE
+		FROM naap.api_observed_capability_offer
+		WHERE last_seen >= ? AND last_seen < ?
 		  AND model_id != ''
 		GROUP BY orch_address, pipeline_id, model_id
-	`)
+	`, windowStart, time.Now().UTC())
 	if err != nil {
 		return nil, fmt.Errorf("dashboard orchestrators pipeline models: %w", err)
 	}
@@ -410,11 +403,12 @@ func (r *Repo) GetDashboardOrchestrators(ctx context.Context, windowHours int) (
 
 	gpuRows, err := r.conn.Query(ctx, `
 		SELECT orch_address, toInt64(count(DISTINCT gpu_id)) AS gpu_count
-		FROM naap.api_current_capability_hardware
-		WHERE last_seen > now() - INTERVAL 30 MINUTE
+		FROM naap.api_observed_capability_offer
+		WHERE last_seen >= ? AND last_seen < ?
+		  AND hardware_present = 1
 		  AND gpu_id IS NOT NULL AND gpu_id != ''
 		GROUP BY orch_address
-	`)
+	`, windowStart, time.Now().UTC())
 	if err != nil {
 		return nil, fmt.Errorf("dashboard orchestrators gpu count: %w", err)
 	}
@@ -474,28 +468,21 @@ func (r *Repo) GetDashboardOrchestrators(ctx context.Context, windowHours int) (
 	return result, nil
 }
 
-// GetDashboardGPUCapacity serves GET /v1/dashboard/gpu-capacity.
-// Uses a 30-minute window (not activeOrchMinutes=10) because non-streaming
-// orchestrators advertise less frequently than live-video-to-video ones.
-//
-// Three views of the inventory:
-//   - TotalGPUs: distinct (orch, gpu_id) pairs across the whole network
-//   - Models[]: top-level GPU hardware breakdown (e.g. "RTX 4090: 22 GPUs")
-//   - PipelineGPUs[].Models[]: per-pipeline breakdown where each entry is
-//     the number of distinct GPUs serving a specific AI model on that pipeline
-//     (e.g. "live-video-to-video → streamdiffusion-sdxl: 27 GPUs").
-//     A GPU serving multiple AI models within the same pipeline is counted
-//     once per AI model.
+// GetDashboardGPUCapacity serves GET /v1/dashboard/gpu-capacity using observed
+// 24h offer inventory rows that carry GPU identity and metadata.
 func (r *Repo) GetDashboardGPUCapacity(ctx context.Context) (*types.DashboardGPUCapacity, error) {
+	end := time.Now().UTC()
+	start := end.Add(-observedInventoryHours * time.Hour)
 	rows, err := r.conn.Query(ctx, `
 		SELECT orch_address, canonical_pipeline, model_id, gpu_id,
 		       ifNull(anyLast(gpu_model_name), 'Unknown') AS gpu_model
-		FROM naap.api_current_capability_hardware
-		WHERE last_seen > now() - INTERVAL 30 MINUTE
+		FROM naap.api_observed_capability_offer
+		WHERE last_seen >= ? AND last_seen < ?
+		  AND hardware_present = 1
 		  AND canonical_pipeline != '' AND model_id != ''
 		  AND gpu_id IS NOT NULL AND gpu_id != ''
 		GROUP BY orch_address, canonical_pipeline, model_id, gpu_id
-	`)
+	`, start, end)
 	if err != nil {
 		return nil, fmt.Errorf("dashboard gpu capacity: %w", err)
 	}
@@ -577,14 +564,16 @@ func (r *Repo) GetDashboardGPUCapacity(ctx context.Context) (*types.DashboardGPU
 
 // GetDashboardPipelineCatalog serves GET /v1/dashboard/pipeline-catalog.
 func (r *Repo) GetDashboardPipelineCatalog(ctx context.Context) ([]types.DashboardPipelineCatalogEntry, error) {
+	end := time.Now().UTC()
+	start := end.Add(-observedInventoryHours * time.Hour)
 	rows, err := r.conn.Query(ctx, `
 		SELECT DISTINCT canonical_pipeline, model_id
-		FROM naap.api_current_capability_offer
-		WHERE last_seen > now() - INTERVAL 30 MINUTE
+		FROM naap.api_observed_capability_offer
+		WHERE last_seen >= ? AND last_seen < ?
 		  AND capability_family = 'builtin'
 		  AND canonical_pipeline != '' AND model_id != ''
 		ORDER BY canonical_pipeline, model_id
-	`)
+	`, start, end)
 	if err != nil {
 		return nil, fmt.Errorf("dashboard pipeline catalog: %w", err)
 	}
@@ -620,13 +609,35 @@ func (r *Repo) GetDashboardPipelineCatalog(ctx context.Context) ([]types.Dashboa
 
 // GetDashboardPricing serves GET /v1/dashboard/pricing.
 func (r *Repo) GetDashboardPricing(ctx context.Context) ([]types.DashboardPipelinePricing, error) {
+	end := time.Now().UTC()
+	start := end.Add(-observedInventoryHours * time.Hour)
 	rows, err := r.conn.Query(ctx, `
-		WITH builtin_offer AS (
+		WITH latest_pricing AS (
+		    SELECT *
+		    FROM (
+		        SELECT
+		            p.*,
+		            row_number() OVER (
+		                PARTITION BY p.orch_address,
+		                             ifNull(p.canonical_pipeline, p.external_capability_name),
+		                             ifNull(p.model_id, '')
+		                ORDER BY p.last_seen DESC, p.capability_version_id DESC
+		            ) AS rn
+		        FROM naap.api_observed_capability_pricing p
+		        WHERE p.last_seen >= ? AND p.last_seen < ?
+		          AND p.price_per_unit > 0
+		          AND p.pixels_per_unit > 0
+		          AND ifNull(p.canonical_pipeline, p.external_capability_name) != ''
+		    )
+		    WHERE rn = 1
+		),
+		builtin_offer AS (
 		    SELECT orch_address,
 		           ifNull(canonical_pipeline, '') AS canonical_pipeline,
 		           model_id,
 		           max(toUInt8(hardware_present = 1 OR ifNull(warm, toUInt8(0)) = 1)) AS is_warm
-		    FROM naap.api_current_capability_offer
+		    FROM naap.api_observed_capability_offer
+		    WHERE last_seen >= ? AND last_seen < ?
 		    GROUP BY orch_address, canonical_pipeline, model_id
 		),
 		byoc_offer AS (
@@ -634,9 +645,14 @@ func (r *Repo) GetDashboardPricing(ctx context.Context) ([]types.DashboardPipeli
 		           offered_name,
 		           any(model_id) AS model_id,
 		           max(toUInt8(hardware_present = 1 OR ifNull(warm, toUInt8(0)) = 1)) AS is_warm
-		    FROM naap.api_current_capability_offer
+		    FROM naap.api_observed_capability_offer
 		    WHERE offered_name != ''
+		      AND last_seen >= ? AND last_seen < ?
 		    GROUP BY orch_address, offered_name
+		),
+		orchestrators AS (
+		    SELECT orch_address, ifNull(orchestrator_uri, '') AS orchestrator_uri
+		    FROM naap.api_orchestrator_identity
 		)
 		SELECT
 		    p.orch_address,
@@ -646,8 +662,8 @@ func (r *Repo) GetDashboardPricing(ctx context.Context) ([]types.DashboardPipeli
 		    p.price_per_unit,
 		    p.pixels_per_unit,
 		    greatest(ifNull(builtin_offer.is_warm, toUInt8(0)), ifNull(byoc_offer.is_warm, toUInt8(0))) AS is_warm
-		FROM naap.api_current_capability_pricing p
-		LEFT JOIN naap.api_current_orchestrator o
+		FROM latest_pricing p
+		LEFT JOIN orchestrators o
 		  ON o.orch_address = p.orch_address
 		LEFT JOIN builtin_offer
 		  ON builtin_offer.orch_address = p.orch_address
@@ -656,12 +672,8 @@ func (r *Repo) GetDashboardPricing(ctx context.Context) ([]types.DashboardPipeli
 		LEFT JOIN byoc_offer
 		  ON byoc_offer.orch_address = p.orch_address
 		 AND byoc_offer.offered_name = ifNull(p.external_capability_name, '')
-		WHERE p.last_seen > now() - INTERVAL 30 MINUTE
-		  AND p.price_per_unit > 0
-		  AND p.pixels_per_unit > 0
-		  AND ifNull(p.canonical_pipeline, p.external_capability_name) != ''
 		ORDER BY p.orch_address, pipeline, model_id
-	`)
+	`, start, end, start, end, start, end)
 	if err != nil {
 		return nil, fmt.Errorf("dashboard pricing: %w", err)
 	}
@@ -692,12 +704,11 @@ func (r *Repo) GetDashboardPricing(ctx context.Context) ([]types.DashboardPipeli
 
 // GetDashboardJobFeed serves GET /v1/dashboard/job-feed.
 func (r *Repo) GetDashboardJobFeed(ctx context.Context, limit int) ([]types.DashboardJobFeedItem, error) {
-	// Resolve orch_address -> URI via the current orchestrator spine so callers
-	// receive a real URL in orchestratorUrl rather than the canonical address.
+	// Resolve orch_address -> URI via the latest orchestrator identity helper so
+	// callers receive a stable URL without scanning observed inventory.
 	orchURIRows, err := r.conn.Query(ctx, `
 		SELECT orch_address, ifNull(orchestrator_uri, '') AS uri
-		FROM naap.api_current_orchestrator
-		WHERE last_seen > now() - INTERVAL 30 MINUTE
+		FROM naap.api_orchestrator_identity
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("dashboard job feed orch uri: %w", err)

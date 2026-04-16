@@ -1,12 +1,12 @@
 select
-    row_id as snapshot_row_id,
-    event_id as source_event_id,
-    event_ts as snapshot_ts,
+    snapshot_row_id,
+    source_event_id,
+    snapshot_ts,
     org,
     orch_address,
     orch_name,
     orch_uri,
+    orch_uri_norm,
     version,
     raw_capabilities
-from naap.normalized_network_capabilities
-where row_id != ''
+from naap.canonical_capability_snapshots_store

@@ -99,8 +99,10 @@ paths:
       description: |
         One row per orchestrator for the Orchestrators table, with SLA metrics
         (effective success rate, no-swap rate, SLA score), known session count,
-        advertised pipelines/models, and GPU count. SLA metrics are weighted by
-        requested session volume. Sorted by session volume. Default window is 7 days.
+        observed pipelines/models, and GPU count. Capability inventory fields
+        reflect orchestrators observed in the selected window rather than an
+        authoritative live network state. Sorted by session volume.
+        Default window is 7 days.
       parameters:
         - name: window
           in: query
@@ -122,12 +124,12 @@ paths:
       tags: [Dashboard]
       summary: GPU inventory summary
       description: |
-        GPU inventory snapshot for the dashboard capacity widget. Returns the
+        GPU inventory summary for the dashboard capacity widget. Returns the
         total unique GPU count, a breakdown by GPU model (RTX 4090, 5090, etc.),
         and a per-pipeline breakdown showing which GPU models serve which pipelines.
         A GPU shared across multiple pipelines appears in each pipeline's breakdown
-        but is counted once in the total. Reflects orchestrators active in the last
-        30 minutes.
+        but is counted once in the total. Reflects GPUs observed in the last
+        24 hours.
       responses:
         "200":
           description: GPU capacity payload
@@ -143,9 +145,9 @@ paths:
       summary: Available pipeline + model combinations
       description: |
         Available pipelines and their models, derived from orchestrator capability
-        announcements over the last 30 minutes. Each entry is one pipeline
+        observations over the last 24 hours. Each entry is one pipeline
         (e.g., `live-video-to-video`, `openai-chat-completions`) with the set of
-        models currently offered. Used by the UI to populate filter dropdowns and
+        models observed in that window. Used by the UI to populate filter dropdowns and
         the pipeline catalog view. The `regions` field is reserved for future use
         and is currently empty.
       responses:
@@ -164,12 +166,10 @@ paths:
       tags: [Dashboard]
       summary: Per-orchestrator pricing
       description: |
-        Per-orchestrator price points for the pricing table, parsed from each
-        orchestrator's capability announcement. One row per (orchestrator, pipeline,
-        model) combination with raw wei-per-unit pricing and pixels-per-unit.
-        Orchestrators with a capability-specific price list produce one row per
-        capability; those with only a global `price_info` produce a single fallback
-        row with an empty pipeline.
+        Latest observed per-orchestrator price points in the last 24 hours.
+        One row per (orchestrator, pipeline, model) combination with raw
+        wei-per-unit pricing and pixels-per-unit. Capability-specific quotes
+        win over older quotes in the same window.
       responses:
         "200":
           description: Pricing rows
@@ -213,7 +213,7 @@ paths:
       summary: Streaming model capacity and performance
       description: |
         Per-model capacity and load view for the live-video-to-video streaming page.
-        Each row shows warm orchestrator count, total GPU slots, currently active
+        Each row shows observed warm orchestrator count, observed total GPU slots, currently active
         streams, available capacity (slots minus active), and 24-hour weighted
         average output FPS. Only includes the `live-video-to-video` pipeline.
         A negative `available_capacity` means slots are oversubscribed (multiple
@@ -234,8 +234,8 @@ paths:
       tags: [Streaming]
       summary: Streaming orchestrator inventory
       description: |
-        Orchestrators serving `live-video-to-video` in the last 30 minutes, with
-        their service URI, advertised models, and GPU count. Each orchestrator
+        Orchestrators observed serving `live-video-to-video` in the last 24 hours, with
+        their service URI, observed models, and GPU count. Each orchestrator
         address appears at most once. Sorted by GPU count descending.
       responses:
         "200":
@@ -327,7 +327,7 @@ paths:
       summary: Request-based model capacity and performance
       description: |
         Per-model capacity and load view for non-streaming pipelines
-        (AI Batch + BYOC). Each row shows warm orchestrator count, GPU slots,
+        (AI Batch + BYOC). Each row shows observed warm orchestrator count, observed GPU slots,
         and 24-hour job statistics (count, success rate, average duration).
         The `job_type` field indicates whether the model is served by AI Batch
         or BYOC orchestrators. Sorted by recent job volume.
@@ -347,8 +347,8 @@ paths:
       tags: [Requests]
       summary: Request-based orchestrator inventory
       description: |
-        Orchestrators serving non-streaming pipelines in the last 30 minutes,
-        with their service URI, advertised capabilities (as `pipeline:model`
+        Orchestrators observed serving non-streaming pipelines in the last 24 hours,
+        with their service URI, observed capabilities (as `pipeline:model`
         strings), and GPU count. Each orchestrator address appears at most once.
         Sorted by GPU count descending.
       responses:
@@ -487,7 +487,7 @@ paths:
       summary: BYOC worker inventory by capability
       description: |
         BYOC worker inventory grouped by capability. Each row shows how many
-        distinct workers advertised the capability in the time window, the
+        distinct workers were observed advertising the capability in the time window, the
         models they support, and their average price-per-unit. Use to understand
         supply-side composition for each capability.
       parameters:

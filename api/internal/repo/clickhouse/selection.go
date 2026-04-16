@@ -26,9 +26,8 @@ import (
 //   - builtin capabilities use canonical_pipeline
 //   - BYOC capabilities use capability_name verbatim (no openai-* literal)
 //
-// BYOC offers are drawn from two sources UNION'd together — the capability
-// offer view (if the orch advertised the capability) and api_current_byoc_worker
-// (ground truth from worker lifecycle events) — so workers that registered
+// BYOC offers are drawn from two sources UNION'd together — observed capability
+// offers and observed BYOC worker registrations — so workers that registered
 // without a matching capability offer still surface.
 //
 // The optional caps filter uses OR semantics: a row is emitted whenever its
@@ -37,7 +36,9 @@ import (
 // advertises for that pipeline.
 func (r *Repo) DiscoverOrchestrators(ctx context.Context, p types.DiscoverOrchestratorsParams) ([]types.DiscoverOrchestratorRow, error) {
 	capsFilter := ""
-	args := []any{}
+	end := time.Now().UTC()
+	start := end.Add(-observedInventoryHours * time.Hour)
+	args := []any{start, end, start, end}
 	if len(p.Caps) > 0 {
 		capsFilter = `
 		  AND (p.pipeline_id, p.orch_address) IN (
@@ -51,7 +52,6 @@ func (r *Repo) DiscoverOrchestrators(ctx context.Context, p types.DiscoverOrches
 	query := `
 		WITH
 		  offers AS (
-		    -- Builtin + BYOC offers from the capability offer view.
 		    SELECT
 		      orch_address,
 		      if(capability_family = 'byoc', capability_name, ifNull(canonical_pipeline, capability_name)) AS pipeline_id,
@@ -59,12 +59,10 @@ func (r *Repo) DiscoverOrchestrators(ctx context.Context, p types.DiscoverOrches
 		      last_seen,
 		      capability_family,
 		      supports_stream
-		    FROM naap.api_current_capability_offer
-		    WHERE last_seen > now() - INTERVAL 30 MINUTE
+		    FROM naap.api_observed_capability_offer
+		    WHERE last_seen >= ? AND last_seen < ?
 		      AND if(capability_family = 'byoc', capability_name, ifNull(canonical_pipeline, capability_name)) != ''
 		    UNION ALL
-		    -- BYOC offers sourced from worker lifecycle (may cover workers that
-		    -- never produced a matching capability offer row).
 		    SELECT
 		      orch_address,
 		      capability_name AS pipeline_id,
@@ -72,9 +70,19 @@ func (r *Repo) DiscoverOrchestrators(ctx context.Context, p types.DiscoverOrches
 		      last_seen,
 		      'byoc' AS capability_family,
 		      toUInt8(0) AS supports_stream
-		    FROM naap.api_current_byoc_worker
-		    WHERE last_seen > now() - INTERVAL 30 MINUTE
+		    FROM naap.api_observed_byoc_worker
+		    WHERE last_seen >= ? AND last_seen < ?
 		      AND capability_name != ''
+		  ),
+		  observed_orchestrators AS (
+		    SELECT
+		      o.orch_address,
+		      ifNull(i.orchestrator_uri, '') AS orchestrator_uri,
+		      max(o.last_seen) AS last_seen
+		    FROM offers o
+		    LEFT JOIN naap.api_orchestrator_identity i
+		      ON i.orch_address = o.orch_address
+		    GROUP BY o.orch_address, i.orchestrator_uri
 		  ),
 		  streaming_sla AS (
 		    SELECT
@@ -108,7 +116,7 @@ func (r *Repo) DiscoverOrchestrators(ctx context.Context, p types.DiscoverOrches
 		  toInt64(toUnixTimestamp64Milli(max(o.last_seen))) AS last_seen_ms,
 		  max(o.last_seen) AS last_seen,
 		  (s.score IS NOT NULL OR a.score IS NOT NULL) AS recent_work
-		FROM naap.api_current_orchestrator o
+		FROM observed_orchestrators o
 		INNER JOIN offers p
 		  ON o.orch_address = p.orch_address
 		LEFT JOIN streaming_sla s
@@ -119,9 +127,7 @@ func (r *Repo) DiscoverOrchestrators(ctx context.Context, p types.DiscoverOrches
 		  ON p.supports_stream = 0
 		 AND a.orch_uri = o.orchestrator_uri
 		 AND a.pipeline_id = p.pipeline_id
-		WHERE o.last_seen > now() - INTERVAL 30 MINUTE
-		  AND p.last_seen > now() - INTERVAL 30 MINUTE
-		  AND p.pipeline_id != ''
+		WHERE p.pipeline_id != ''
 		  ` + capsFilter + `
 		GROUP BY o.orch_address, p.pipeline_id, s.score, a.score
 		ORDER BY score DESC, length(capabilities) DESC, address ASC

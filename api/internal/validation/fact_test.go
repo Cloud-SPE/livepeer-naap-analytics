@@ -38,8 +38,8 @@ func TestRuleFact001_HistoricalCapabilitySnapshotsAndLatestStateAreRecoverable(t
 	if h.queryInt(t, `SELECT count() FROM naap.canonical_capability_snapshots WHERE org = ? AND orch_address = ?`, h.org, orchAddr) != 2 {
 		t.Errorf("RULE-FACT-001: expected 2 historical capability rows for %s", orchAddr)
 	}
-	if got := h.queryString(t, `SELECT version FROM naap.canonical_latest_orchestrator_state WHERE orch_address = ?`, orchAddr); got != "0.8.0" {
-		t.Errorf("RULE-FACT-001: latest orchestrator version = %q, want 0.8.0", got)
+	if got := h.queryString(t, `SELECT argMax(version, last_seen) FROM naap.canonical_capability_orchestrator_inventory WHERE org = ? AND orch_address = ?`, h.org, orchAddr); got != "0.8.0" {
+		t.Errorf("RULE-FACT-001: latest observed orchestrator version = %q, want 0.8.0", got)
 	}
 }
 

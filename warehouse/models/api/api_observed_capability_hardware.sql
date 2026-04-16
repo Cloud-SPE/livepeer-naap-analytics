@@ -1,7 +1,10 @@
 select
+    capability_version_id,
+    snapshot_event_id,
     org,
     orch_address,
-    orch_uri,
+    orchestrator_uri,
+    orch_uri_norm,
     last_seen,
     capability_id,
     capability_name,
@@ -14,6 +17,4 @@ select
     gpu_memory_bytes_total,
     supports_stream,
     supports_request
-from {{ ref('canonical_capability_offer_current') }}
-where hardware_present = 1
-  and gpu_id is not null
+from {{ ref('canonical_capability_hardware_observed_inventory') }}

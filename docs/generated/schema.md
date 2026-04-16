@@ -31,10 +31,12 @@ The documented `raw_*`, `normalized_*`, `canonical_*`, `operational_*`, `api_bas
 | `canonical_byoc_job_store` | `ReplacingMergeTree` |
 | `canonical_capability_hardware_inventory` | `ReplacingMergeTree` |
 | `canonical_capability_hardware_inventory_by_snapshot` | `ReplacingMergeTree` |
+| `canonical_capability_offer_inventory_store` | `ReplacingMergeTree` |
+| `canonical_capability_pricing_inventory_store` | `ReplacingMergeTree` |
 | `canonical_capability_snapshot_latest` | `AggregatingMergeTree` |
+| `canonical_capability_snapshots_store` | `ReplacingMergeTree` |
 | `canonical_capability_snapshots_by_address` | `ReplacingMergeTree` |
 | `canonical_capability_snapshots_by_uri` | `ReplacingMergeTree` |
-| `canonical_latest_orchestrator_pipeline_inventory_agg` | `AggregatingMergeTree` |
 | `canonical_orch_capability_intervals` | `ReplacingMergeTree` |
 | `canonical_orch_capability_versions` | `ReplacingMergeTree` |
 | `canonical_payment_links_store` | `ReplacingMergeTree` |
@@ -42,7 +44,6 @@ The documented `raw_*`, `normalized_*`, `canonical_*`, `operational_*`, `api_bas
 | `canonical_selection_attribution_decisions` | `MergeTree` |
 | `canonical_selection_events` | `ReplacingMergeTree` |
 | `canonical_session_attribution_audit` | `MergeTree` |
-| `canonical_session_attribution_current` | `ReplacingMergeTree` |
 | `canonical_session_attribution_latest_store` | `MergeTree` |
 | `canonical_session_current_store` | `ReplacingMergeTree` |
 | `canonical_session_demand_input_current` | `ReplacingMergeTree` |
@@ -82,10 +83,14 @@ The documented `raw_*`, `normalized_*`, `canonical_*`, `operational_*`, `api_bas
 | `status_hour_changes` | `MergeTree` |
 | `mv_canonical_capability_hardware_inventory` | `MaterializedView` |
 | `mv_canonical_capability_hardware_inventory_by_snapshot` | `MaterializedView` |
+| `mv_canonical_capability_offer_inventory_store_builtin` | `MaterializedView` |
+| `mv_canonical_capability_offer_inventory_store_hardware` | `MaterializedView` |
+| `mv_canonical_capability_pricing_inventory_store_capability` | `MaterializedView` |
+| `mv_canonical_capability_pricing_inventory_store_global` | `MaterializedView` |
 | `mv_canonical_capability_snapshot_latest` | `MaterializedView` |
+| `mv_canonical_capability_snapshots_store` | `MaterializedView` |
 | `mv_canonical_capability_snapshots_by_address` | `MaterializedView` |
 | `mv_canonical_capability_snapshots_by_uri` | `MaterializedView` |
-| `mv_canonical_latest_orchestrator_pipeline_inventory_agg` | `MaterializedView` |
 | `mv_discovery_latency_hourly` | `MaterializedView` |
 | `mv_fps_hourly` | `MaterializedView` |
 | `mv_ingest_network_events_accepted` | `MaterializedView` |

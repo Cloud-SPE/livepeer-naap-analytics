@@ -3172,6 +3172,8 @@ func (r *repo) insertSLAComplianceRollups(ctx context.Context, runID, queryID st
 				ifNull(h.orch_address, '') AS orchestrator_address,
 				h.canonical_pipeline AS pipeline_id,
 				h.canonical_model AS model_id,
+				cast(nullIf(fs.gpu_id, ''), 'Nullable(String)') AS session_gpu_id,
+				attr.attribution_snapshot_row_id AS attribution_snapshot_row_id,
 				fs.requested_seen AS requested_seen,
 				fs.resolver_startup_outcome AS startup_outcome,
 				fs.excusal_reason AS excusal_reason,
@@ -3202,43 +3204,34 @@ func (r *repo) insertSLAComplianceRollups(ctx context.Context, runID, queryID st
 				ON rs.query_id = ? AND h.org = rs.org AND h.hour = rs.window_start
 			LEFT JOIN naap.canonical_session_current fs
 				ON h.canonical_session_key = fs.canonical_session_key
+			LEFT JOIN naap.canonical_session_attribution_latest attr
+				ON h.canonical_session_key = attr.canonical_session_key
 			LEFT JOIN status_hour_support sh
 				ON h.org = sh.org
 			   AND h.canonical_session_key = sh.canonical_session_key
 			   AND h.hour = sh.window_start
 			WHERE h.is_terminal_tail_artifact = 0
 		),
-		inventory_keys AS (
-			SELECT DISTINCT
-				org,
-				orchestrator_address,
-				coalesce(nullIf(model_id, ''), nullIf(pipeline_id, '')) AS inventory_key
-			FROM base
-			WHERE orchestrator_address != ''
-		),
 		inventory AS (
 			SELECT
-				inv.org,
-				inv.orch_address AS orchestrator_address,
-				coalesce(nullIf(inv.model_id, ''), nullIf(inv.pipeline_id, '')) AS inventory_key,
-				any(inv.model_id) AS inventory_model_id,
-				cast(nullIf(argMaxIfMerge(inv.gpu_id_state), ''), 'Nullable(String)') AS inventory_gpu_id,
-				nullIf(argMaxIfMerge(inv.gpu_model_name_state), '') AS inventory_gpu_model_name
-			FROM naap.canonical_latest_orchestrator_pipeline_inventory_agg inv
-			INNER JOIN inventory_keys k
-				ON inv.org = k.org
-			   AND inv.orch_address = k.orchestrator_address
-			   AND coalesce(nullIf(inv.model_id, ''), nullIf(inv.pipeline_id, '')) = k.inventory_key
-			GROUP BY inv.org, orchestrator_address, inventory_key
+				snapshot_row_id AS attribution_snapshot_row_id,
+				org,
+				orch_address AS orchestrator_address,
+				pipeline_id,
+				model_id,
+				gpu_id,
+				any(gpu_model_name) AS gpu_model_name
+			FROM naap.canonical_capability_hardware_inventory_by_snapshot
+			GROUP BY attribution_snapshot_row_id, org, orchestrator_address, pipeline_id, model_id, gpu_id
 		)
 		SELECT
 			b.window_start,
 			b.org,
 			b.orchestrator_address,
 			b.pipeline_id,
-			coalesce(b.model_id, i.inventory_model_id) AS model_id,
-			i.inventory_gpu_id AS gpu_id,
-			any(i.inventory_gpu_model_name) AS gpu_model_name,
+			b.model_id AS model_id,
+			b.session_gpu_id AS gpu_id,
+			any(i.gpu_model_name) AS gpu_model_name,
 			cast(null AS Nullable(String)) AS region,
 			toUInt64(countIf(b.requested_seen = 1)) AS known_sessions_count,
 			toUInt64(countIf(b.requested_seen = 1)) AS requested_sessions,
@@ -3327,16 +3320,19 @@ func (r *repo) insertSLAComplianceRollups(ctx context.Context, runID, queryID st
 			now64()
 		FROM base b
 		LEFT JOIN inventory i
-			ON b.org = i.org
+			ON b.attribution_snapshot_row_id = i.attribution_snapshot_row_id
+		   AND b.org = i.org
 		   AND b.orchestrator_address = i.orchestrator_address
-		   AND coalesce(nullIf(b.model_id, ''), nullIf(b.pipeline_id, '')) = i.inventory_key
+		   AND b.pipeline_id = i.pipeline_id
+		   AND ifNull(b.model_id, '') = ifNull(i.model_id, '')
+		   AND ifNull(b.session_gpu_id, '') = ifNull(i.gpu_id, '')
 		GROUP BY
 			b.window_start,
 			b.org,
 			b.orchestrator_address,
 			b.pipeline_id,
-			coalesce(b.model_id, i.inventory_model_id),
-			i.inventory_gpu_id
+			b.model_id,
+			b.session_gpu_id
 	`, queryID, queryID, runID, r.cfg.ResolverVersion)
 }
 
@@ -3417,6 +3413,7 @@ func (r *repo) insertGPUMetricsRollups(ctx context.Context, runID, queryID strin
 				h.canonical_pipeline AS pipeline_id,
 				h.canonical_model AS model_id,
 				cast(nullIf(fs.gpu_id, ''), 'Nullable(String)') AS session_gpu_id,
+				attr.attribution_snapshot_row_id AS attribution_snapshot_row_id,
 				fs.requested_seen AS requested_seen,
 				ifNull(sh.status_samples, h.status_samples) AS status_samples,
 				h.error_samples AS error_status_samples,
@@ -3451,43 +3448,34 @@ func (r *repo) insertGPUMetricsRollups(ctx context.Context, runID, queryID strin
 				ON rs.query_id = ? AND h.org = rs.org AND h.hour = rs.window_start
 			LEFT JOIN naap.canonical_session_current fs
 				ON h.canonical_session_key = fs.canonical_session_key
+			LEFT JOIN naap.canonical_session_attribution_latest attr
+				ON h.canonical_session_key = attr.canonical_session_key
 			LEFT JOIN status_hour_support sh
 				ON h.org = sh.org AND h.canonical_session_key = sh.canonical_session_key AND h.hour = sh.window_start
 			WHERE h.is_terminal_tail_artifact = 0
 		),
-		inventory_keys AS (
-			SELECT DISTINCT
-				org,
-				orchestrator_address,
-				coalesce(nullIf(model_id, ''), nullIf(pipeline_id, '')) AS inventory_key
-			FROM base
-			WHERE orchestrator_address != ''
-		),
 		inventory AS (
 			SELECT
-				inv.org,
-				inv.orch_address AS orchestrator_address,
-				coalesce(nullIf(inv.model_id, ''), nullIf(inv.pipeline_id, '')) AS inventory_key,
-				any(inv.model_id) AS inventory_model_id,
-				cast(nullIf(argMaxIfMerge(inv.gpu_id_state), ''), 'Nullable(String)') AS inventory_gpu_id,
-				nullIf(argMaxIfMerge(inv.gpu_model_name_state), '') AS inventory_gpu_model_name,
-				nullIf(argMaxIfMerge(inv.gpu_memory_bytes_total_state), toUInt64(0)) AS inventory_gpu_memory_bytes_total,
-				nullIf(argMaxIfMerge(inv.runner_version_state), '') AS inventory_runner_version,
-				nullIf(argMaxIfMerge(inv.cuda_version_state), '') AS inventory_cuda_version
-			FROM naap.canonical_latest_orchestrator_pipeline_inventory_agg inv
-			INNER JOIN inventory_keys k
-				ON inv.org = k.org
-			   AND inv.orch_address = k.orchestrator_address
-			   AND coalesce(nullIf(inv.model_id, ''), nullIf(inv.pipeline_id, '')) = k.inventory_key
-			GROUP BY inv.org, orchestrator_address, inventory_key
+				snapshot_row_id AS attribution_snapshot_row_id,
+				org,
+				orch_address AS orchestrator_address,
+				pipeline_id,
+				model_id,
+				gpu_id,
+				any(gpu_model_name) AS gpu_model_name,
+				any(gpu_memory_bytes_total) AS gpu_memory_bytes_total,
+				any(runner_version) AS runner_version,
+				any(cuda_version) AS cuda_version
+			FROM naap.canonical_capability_hardware_inventory_by_snapshot
+			GROUP BY attribution_snapshot_row_id, org, orchestrator_address, pipeline_id, model_id, gpu_id
 		)
 			SELECT
 				b.window_start,
 				b.org,
 				b.orchestrator_address,
 				b.pipeline_id,
-				coalesce(b.model_id, i.inventory_model_id) AS model_id,
-				coalesce(b.session_gpu_id, i.inventory_gpu_id) AS gpu_id,
+				b.model_id AS model_id,
+				b.session_gpu_id AS gpu_id,
 				cast(null AS Nullable(String)) AS region,
 			if(sum(b.status_samples) > 0, sum(b.output_fps_sum) / toFloat64(sum(b.status_samples)), 0.0) AS avg_output_fps,
 			sum(b.output_fps_sum) AS output_fps_sum,
@@ -3506,10 +3494,10 @@ func (r *repo) insertGPUMetricsRollups(ctx context.Context, runID, queryID strin
 				),
 				1.0
 			) AS health_signal_coverage_ratio,
-			i.inventory_gpu_model_name AS gpu_model_name,
-			i.inventory_gpu_memory_bytes_total AS gpu_memory_bytes_total,
-			i.inventory_runner_version AS runner_version,
-			i.inventory_cuda_version AS cuda_version,
+			i.gpu_model_name AS gpu_model_name,
+			i.gpu_memory_bytes_total AS gpu_memory_bytes_total,
+			i.runner_version AS runner_version,
+			i.cuda_version AS cuda_version,
 			if(sum(b.prompt_to_first_frame_sample_count) > 0, sum(b.prompt_to_first_frame_sum_ms) / toFloat64(sum(b.prompt_to_first_frame_sample_count)), cast(null AS Nullable(Float64))) AS avg_prompt_to_first_frame_ms,
 			sum(b.prompt_to_first_frame_sum_ms) AS prompt_to_first_frame_sum_ms,
 			if(sum(b.startup_latency_sample_count) > 0, sum(b.startup_latency_sum_ms) / toFloat64(sum(b.startup_latency_sample_count)), cast(null AS Nullable(Float64))) AS avg_startup_latency_ms,
@@ -3553,21 +3541,24 @@ func (r *repo) insertGPUMetricsRollups(ctx context.Context, runID, queryID strin
 			now64()
 		FROM base b
 		LEFT JOIN inventory i
-			ON b.org = i.org
+			ON b.attribution_snapshot_row_id = i.attribution_snapshot_row_id
+		   AND b.org = i.org
 		   AND b.orchestrator_address = i.orchestrator_address
-		   AND coalesce(nullIf(b.model_id, ''), nullIf(b.pipeline_id, '')) = i.inventory_key
-		WHERE ifNull(coalesce(b.session_gpu_id, i.inventory_gpu_id), '') != ''
+		   AND b.pipeline_id = i.pipeline_id
+		   AND ifNull(b.model_id, '') = ifNull(i.model_id, '')
+		   AND ifNull(b.session_gpu_id, '') = ifNull(i.gpu_id, '')
+		WHERE ifNull(b.session_gpu_id, '') != ''
 		GROUP BY
 			b.window_start,
 			b.org,
 			b.orchestrator_address,
 			b.pipeline_id,
-			coalesce(b.model_id, i.inventory_model_id),
-			coalesce(b.session_gpu_id, i.inventory_gpu_id),
-			i.inventory_gpu_model_name,
-			i.inventory_gpu_memory_bytes_total,
-			i.inventory_runner_version,
-			i.inventory_cuda_version
+			b.model_id,
+			b.session_gpu_id,
+			i.gpu_model_name,
+			i.gpu_memory_bytes_total,
+			i.runner_version,
+			i.cuda_version
 	`, queryID, queryID, runID, r.cfg.ResolverVersion)
 }
 

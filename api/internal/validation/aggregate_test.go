@@ -985,10 +985,10 @@ func TestRuleTypedRaw002_LatestCapabilityStateKeepsNameFallback(t *testing.T) {
 		IngestedAt: ts,
 	}})
 
-	if got := h.queryString(t, `SELECT name FROM naap.canonical_latest_orchestrator_state WHERE orch_address = ?`, orchWithName); got != "friendly-name" {
-		t.Errorf("RULE-TYPED_RAW-002: latest capability name = %q, want friendly-name", got)
+	if got := h.queryString(t, `SELECT any(name) FROM naap.canonical_capability_orchestrator_inventory WHERE org = ? AND orch_address = ?`, h.org, orchWithName); got != "friendly-name" {
+		t.Errorf("RULE-TYPED_RAW-002: observed capability name = %q, want friendly-name", got)
 	}
-	if got := h.queryString(t, `SELECT name FROM naap.canonical_latest_orchestrator_state WHERE orch_address = ?`, orchNoName); got != orchNoName {
-		t.Errorf("RULE-TYPED_RAW-002: latest capability fallback name = %q, want %q", got, orchNoName)
+	if got := h.queryString(t, `SELECT any(name) FROM naap.canonical_capability_orchestrator_inventory WHERE org = ? AND orch_address = ?`, h.org, orchNoName); got != orchNoName {
+		t.Errorf("RULE-TYPED_RAW-002: observed capability fallback name = %q, want %q", got, orchNoName)
 	}
 }

@@ -45,11 +45,11 @@ func TestRuleAttribution001_CapabilitySnapshotsNormalizeAndConverge(t *testing.T
 	if h.queryInt(t, `SELECT count() FROM naap.canonical_capability_snapshot_latest WHERE org = ? AND orch_address = ?`, h.org, wantAddr) != 1 {
 		t.Errorf("RULE-ATTRIBUTION-001: expected 1 latest capability snapshot row for %s", wantAddr)
 	}
-	if h.queryInt(t, `SELECT count() FROM naap.canonical_latest_orchestrator_state WHERE orch_address = ?`, wantAddr) != 1 {
-		t.Errorf("RULE-ATTRIBUTION-001: expected 1 latest orchestrator state row for %s", wantAddr)
+	if h.queryInt(t, `SELECT count() FROM naap.canonical_capability_orchestrator_inventory WHERE org = ? AND orch_address = ?`, h.org, wantAddr) != 2 {
+		t.Errorf("RULE-ATTRIBUTION-001: expected 2 observed orchestrator inventory rows for %s", wantAddr)
 	}
-	if got := h.queryString(t, `SELECT version FROM naap.canonical_latest_orchestrator_state WHERE orch_address = ?`, wantAddr); got != "0.8.0" {
-		t.Errorf("RULE-ATTRIBUTION-001: latest version = %q, want 0.8.0", got)
+	if got := h.queryString(t, `SELECT argMax(version, last_seen) FROM naap.canonical_capability_orchestrator_inventory WHERE org = ? AND orch_address = ?`, h.org, wantAddr); got != "0.8.0" {
+		t.Errorf("RULE-ATTRIBUTION-001: latest observed version = %q, want 0.8.0", got)
 	}
 }
 
@@ -355,17 +355,17 @@ func TestRuleAttribution002_PipelineAndModelStayDistinctAcrossCanonicalAndAPIVie
 	if got := h.queryString(t, `SELECT ifNull(canonical_pipeline, '') FROM naap.canonical_session_current WHERE org = ? AND stream_id = ?`, h.org, streamID); got != "text-to-image" {
 		t.Fatalf("RULE-ATTRIBUTION-002: canonical_pipeline = %q, want text-to-image", got)
 	}
-	if h.queryInt(t, `SELECT count() FROM naap.canonical_capability_hardware_current WHERE org = ? AND orch_address = ? AND canonical_pipeline = 'text-to-image' AND model_id = 'model-a'`, h.org, orchAddr) == 0 {
+	if h.queryInt(t, `SELECT count() FROM naap.canonical_capability_offer_inventory WHERE org = ? AND orch_address = ? AND canonical_pipeline = 'text-to-image' AND model_id = 'model-a' AND hardware_present = 1`, h.org, orchAddr) == 0 {
 		t.Fatalf("RULE-ATTRIBUTION-002: expected hardware inventory row for %s", orchAddr)
 	}
-	if got := h.queryString(t, `SELECT ifNull(canonical_pipeline, '') FROM naap.api_current_capability_hardware WHERE org = ? AND orch_address = ?`, h.org, orchAddr); got != "text-to-image" {
-		t.Fatalf("RULE-ATTRIBUTION-002: api current hardware pipeline = %q, want text-to-image", got)
+	if got := h.queryString(t, `SELECT ifNull(canonical_pipeline, '') FROM naap.api_observed_capability_hardware WHERE org = ? AND orch_address = ?`, h.org, orchAddr); got != "text-to-image" {
+		t.Fatalf("RULE-ATTRIBUTION-002: observed hardware pipeline = %q, want text-to-image", got)
 	}
-	if got := h.queryString(t, `SELECT ifNull(model_id, '') FROM naap.api_current_capability_hardware WHERE org = ? AND orch_address = ?`, h.org, orchAddr); got != "model-a" {
-		t.Fatalf("RULE-ATTRIBUTION-002: api current hardware model_id = %q, want model-a", got)
+	if got := h.queryString(t, `SELECT ifNull(model_id, '') FROM naap.api_observed_capability_hardware WHERE org = ? AND orch_address = ?`, h.org, orchAddr); got != "model-a" {
+		t.Fatalf("RULE-ATTRIBUTION-002: observed hardware model_id = %q, want model-a", got)
 	}
-	if h.queryInt(t, `SELECT count() FROM naap.api_current_capability_hardware WHERE org = ? AND orch_address = ? AND canonical_pipeline = model_id`, h.org, orchAddr) != 0 {
-		t.Fatalf("RULE-ATTRIBUTION-002: API current hardware surface duplicated model identity into pipeline")
+	if h.queryInt(t, `SELECT count() FROM naap.api_observed_capability_hardware WHERE org = ? AND orch_address = ? AND canonical_pipeline = model_id`, h.org, orchAddr) != 0 {
+		t.Fatalf("RULE-ATTRIBUTION-002: observed hardware surface duplicated model identity into pipeline")
 	}
 }
 
@@ -382,14 +382,14 @@ func TestRuleAttribution002_HardwareInventoryCapturesAllGPUEntriesFromArrayShape
 		IngestedAt: ts,
 	}})
 
-	if got := h.queryInt(t, `SELECT count() FROM naap.canonical_capability_hardware_current WHERE org = ? AND orch_address = ? AND canonical_pipeline = 'text-to-image' AND model_id = 'model-array'`, h.org, orchAddr); got != 2 {
+	if got := h.queryInt(t, `SELECT count() FROM naap.canonical_capability_offer_inventory WHERE org = ? AND orch_address = ? AND canonical_pipeline = 'text-to-image' AND model_id = 'model-array' AND hardware_present = 1`, h.org, orchAddr); got != 2 {
 		t.Fatalf("RULE-ATTRIBUTION-002: canonical hardware rows = %d, want 2", got)
 	}
-	if got := h.queryInt(t, `SELECT count() FROM naap.api_current_capability_hardware WHERE org = ? AND orch_address = ? AND canonical_pipeline = 'text-to-image' AND model_id = 'model-array'`, h.org, orchAddr); got != 2 {
-		t.Fatalf("RULE-ATTRIBUTION-002: api current hardware rows = %d, want 2", got)
+	if got := h.queryInt(t, `SELECT count() FROM naap.api_observed_capability_hardware WHERE org = ? AND orch_address = ? AND canonical_pipeline = 'text-to-image' AND model_id = 'model-array'`, h.org, orchAddr); got != 2 {
+		t.Fatalf("RULE-ATTRIBUTION-002: observed hardware rows = %d, want 2", got)
 	}
-	if got := h.queryInt(t, `SELECT count() FROM naap.api_current_capability_hardware WHERE org = ? AND orch_address = ? AND gpu_id IN ('gpu-array-a', 'gpu-array-b')`, h.org, orchAddr); got != 2 {
-		t.Fatalf("RULE-ATTRIBUTION-002: api current hardware missing one or more array GPUs")
+	if got := h.queryInt(t, `SELECT count() FROM naap.api_observed_capability_hardware WHERE org = ? AND orch_address = ? AND gpu_id IN ('gpu-array-a', 'gpu-array-b')`, h.org, orchAddr); got != 2 {
+		t.Fatalf("RULE-ATTRIBUTION-002: observed hardware missing one or more array GPUs")
 	}
 }
 
@@ -406,17 +406,17 @@ func TestRuleAttribution002_HardwareInventoryCapturesAllGPUEntriesFromObjectShap
 		IngestedAt: ts,
 	}})
 
-	if got := h.queryInt(t, `SELECT count() FROM naap.canonical_capability_hardware_current WHERE org = ? AND orch_address = ? AND canonical_pipeline = 'image-to-video' AND model_id = 'model-object'`, h.org, orchAddr); got != 2 {
+	if got := h.queryInt(t, `SELECT count() FROM naap.canonical_capability_offer_inventory WHERE org = ? AND orch_address = ? AND canonical_pipeline = 'image-to-video' AND model_id = 'model-object' AND hardware_present = 1`, h.org, orchAddr); got != 2 {
 		t.Fatalf("RULE-ATTRIBUTION-002: canonical hardware rows = %d, want 2 after skipping empty gpu id", got)
 	}
-	if got := h.queryInt(t, `SELECT count() FROM naap.api_current_capability_hardware WHERE org = ? AND orch_address = ? AND canonical_pipeline = 'image-to-video' AND model_id = 'model-object'`, h.org, orchAddr); got != 2 {
-		t.Fatalf("RULE-ATTRIBUTION-002: api current hardware rows = %d, want 2 after skipping empty gpu id", got)
+	if got := h.queryInt(t, `SELECT count() FROM naap.api_observed_capability_hardware WHERE org = ? AND orch_address = ? AND canonical_pipeline = 'image-to-video' AND model_id = 'model-object'`, h.org, orchAddr); got != 2 {
+		t.Fatalf("RULE-ATTRIBUTION-002: observed hardware rows = %d, want 2 after skipping empty gpu id", got)
 	}
-	if got := h.queryInt(t, `SELECT count() FROM naap.api_current_capability_hardware WHERE org = ? AND orch_address = ? AND gpu_id = ''`, h.org, orchAddr); got != 0 {
-		t.Fatalf("RULE-ATTRIBUTION-002: api current hardware retained empty gpu ids")
+	if got := h.queryInt(t, `SELECT count() FROM naap.api_observed_capability_hardware WHERE org = ? AND orch_address = ? AND gpu_id = ''`, h.org, orchAddr); got != 0 {
+		t.Fatalf("RULE-ATTRIBUTION-002: observed hardware retained empty gpu ids")
 	}
-	if got := h.queryInt(t, `SELECT count() FROM naap.api_current_capability_hardware WHERE org = ? AND orch_address = ? AND gpu_id IN ('gpu-object-a', 'gpu-object-b')`, h.org, orchAddr); got != 2 {
-		t.Fatalf("RULE-ATTRIBUTION-002: api current hardware missing one or more object GPUs")
+	if got := h.queryInt(t, `SELECT count() FROM naap.api_observed_capability_hardware WHERE org = ? AND orch_address = ? AND gpu_id IN ('gpu-object-a', 'gpu-object-b')`, h.org, orchAddr); got != 2 {
+		t.Fatalf("RULE-ATTRIBUTION-002: observed hardware missing one or more object GPUs")
 	}
 }
 

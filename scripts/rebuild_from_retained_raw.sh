@@ -156,15 +156,12 @@ TRUNCATE TABLE IF EXISTS naap.canonical_capability_hardware_inventory;
 TRUNCATE TABLE IF EXISTS naap.canonical_capability_hardware_inventory_by_snapshot;
 TRUNCATE TABLE IF EXISTS naap.canonical_capability_snapshots_by_address;
 TRUNCATE TABLE IF EXISTS naap.canonical_capability_snapshots_by_uri;
-TRUNCATE TABLE IF EXISTS naap.canonical_latest_orchestrator_pipeline_inventory_agg;
-
 TRUNCATE TABLE IF EXISTS naap.canonical_selection_events;
 TRUNCATE TABLE IF EXISTS naap.canonical_selection_attribution_decisions;
 TRUNCATE TABLE IF EXISTS naap.canonical_selection_attribution_current;
 TRUNCATE TABLE IF EXISTS naap.canonical_orch_capability_versions;
 TRUNCATE TABLE IF EXISTS naap.canonical_orch_capability_intervals;
 TRUNCATE TABLE IF EXISTS naap.canonical_session_attribution_audit;
-TRUNCATE TABLE IF EXISTS naap.canonical_session_attribution_current;
 TRUNCATE TABLE IF EXISTS naap.canonical_session_attribution_latest_store;
 TRUNCATE TABLE IF EXISTS naap.canonical_session_current_store;
 TRUNCATE TABLE IF EXISTS naap.canonical_session_demand_input_current;
