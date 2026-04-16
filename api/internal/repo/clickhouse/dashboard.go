@@ -17,36 +17,20 @@ type sessionBucket struct {
 }
 
 // GetDashboardKPI serves GET /v1/dashboard/kpi (streaming portion).
-// Runs 3 parallel ClickHouse queries: orchestrator count, hourly sessions, hourly usage.
+// Reads dashboard KPI inputs from ClickHouse and computes period-over-period deltas.
 func (r *Repo) GetDashboardKPI(ctx context.Context, windowHours int, pipeline, modelID string) (*types.DashboardKPI, error) {
 	now := time.Now().UTC()
-	windowStart := now.Add(-time.Duration(windowHours) * time.Hour)
+	windowDuration := time.Duration(windowHours) * time.Hour
+	windowStart := now.Add(-windowDuration)
+	previousWindowStart := windowStart.Add(-windowDuration)
 
-	// Query 1: observed orchestrator count in the selected window.
-	var activeOrch uint64
-	if pipeline != "" || modelID != "" {
-		orchCountSQL := `
-			SELECT countDistinct(s.orch_address) AS observed
-			FROM naap.api_observed_capability_offer s
-			WHERE s.last_seen >= ? AND s.last_seen < ?
-			  AND s.capability_family = 'builtin'
-			  AND (? = '' OR s.canonical_pipeline = ?)
-			  AND (? = '' OR s.model_id = ?)
-		`
-		if err := r.conn.QueryRow(ctx, orchCountSQL,
-			windowStart, now,
-			pipeline, pipeline, modelID, modelID,
-		).Scan(&activeOrch); err != nil {
-			return nil, fmt.Errorf("dashboard kpi orch count: %w", err)
-		}
-	} else {
-		if err := r.conn.QueryRow(ctx, `
-			SELECT countDistinct(orch_address) AS observed
-			FROM naap.api_observed_orchestrator
-			WHERE last_seen >= ? AND last_seen < ?
-		`, windowStart, now).Scan(&activeOrch); err != nil {
-			return nil, fmt.Errorf("dashboard kpi orch count: %w", err)
-		}
+	activeOrch, err := r.countObservedDashboardOrchestrators(ctx, windowStart, now, pipeline, modelID)
+	if err != nil {
+		return nil, err
+	}
+	previousActiveOrch, err := r.countObservedDashboardOrchestrators(ctx, previousWindowStart, windowStart, pipeline, modelID)
+	if err != nil {
+		return nil, err
 	}
 
 	// Query 2: hourly session counts from the additive streaming demand spine.
@@ -124,12 +108,13 @@ func (r *Repo) GetDashboardKPI(ctx context.Context, windowHours int, pipeline, m
 	// Compute period-over-period deltas
 	successRate := divSafe(float64(totalSuccesses), float64(totalSessions)) * 100
 	successRateDelta := computeSuccessRateDelta(sessionBuckets)
+	orchDelta := computeDeltaFromValues(float64(previousActiveOrch), float64(activeOrch))
 	sessionDelta := computeDelta(hourlySessions)
 	usageDelta := computeDelta(hourlyUsage)
 
 	kpi := &types.DashboardKPI{
 		SuccessRate:         types.MetricDelta{Value: successRate, Delta: successRateDelta},
-		OrchestratorsOnline: types.MetricDelta{Value: float64(activeOrch), Delta: 0},
+		OrchestratorsOnline: types.MetricDelta{Value: float64(activeOrch), Delta: orchDelta},
 		DailyUsageMins:      types.MetricDelta{Value: totalMins, Delta: usageDelta},
 		DailySessionCount:   types.MetricDelta{Value: float64(totalSessions), Delta: sessionDelta},
 		DailyNetworkFeesEth: types.MetricDelta{Value: 0, Delta: 0}, // Phase 4
@@ -139,6 +124,35 @@ func (r *Repo) GetDashboardKPI(ctx context.Context, windowHours int, pipeline, m
 	}
 
 	return kpi, nil
+}
+
+func (r *Repo) countObservedDashboardOrchestrators(ctx context.Context, start, end time.Time, pipeline, modelID string) (uint64, error) {
+	var activeOrch uint64
+	if pipeline != "" || modelID != "" {
+		orchCountSQL := `
+			SELECT countDistinct(s.orch_address) AS observed
+			FROM naap.api_observed_capability_offer s
+			WHERE s.last_seen >= ? AND s.last_seen < ?
+			  AND s.capability_family = 'builtin'
+			  AND (? = '' OR s.canonical_pipeline = ?)
+			  AND (? = '' OR s.model_id = ?)
+		`
+		if err := r.conn.QueryRow(ctx, orchCountSQL,
+			start, end,
+			pipeline, pipeline, modelID, modelID,
+		).Scan(&activeOrch); err != nil {
+			return 0, fmt.Errorf("dashboard kpi orch count: %w", err)
+		}
+	} else {
+		if err := r.conn.QueryRow(ctx, `
+			SELECT countDistinct(orch_address) AS observed
+			FROM naap.api_observed_orchestrator
+			WHERE last_seen >= ? AND last_seen < ?
+		`, start, end).Scan(&activeOrch); err != nil {
+			return 0, fmt.Errorf("dashboard kpi orch count: %w", err)
+		}
+	}
+	return activeOrch, nil
 }
 
 // computeDelta splits hourly buckets at the midpoint and returns the % change.
@@ -154,6 +168,13 @@ func computeDelta(buckets []types.HourlyBucket) float64 {
 	for _, b := range buckets[mid:] {
 		second += b.Value
 	}
+	if first == 0 {
+		return 0
+	}
+	return computeDeltaFromValues(first, second)
+}
+
+func computeDeltaFromValues(first, second float64) float64 {
 	if first == 0 {
 		return 0
 	}

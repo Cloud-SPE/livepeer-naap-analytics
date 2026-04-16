@@ -22,5 +22,6 @@ select
     s.attributed_orch_address
 from {{ ref('canonical_active_stream_state_latest') }} a
 left join {{ ref('canonical_session_current') }} s
-    on a.canonical_session_key = s.canonical_session_key
+    on a.org = s.org
+   and a.canonical_session_key = s.canonical_session_key
 where ifNull(a.stream_id, '') != ''
