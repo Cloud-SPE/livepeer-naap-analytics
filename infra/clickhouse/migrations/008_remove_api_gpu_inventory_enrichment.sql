@@ -164,7 +164,7 @@ WHERE pipeline_id != ''
 
 TRUNCATE TABLE naap.canonical_capability_hardware_inventory;
 TRUNCATE TABLE naap.canonical_capability_hardware_inventory_by_snapshot;
-TRUNCATE TABLE naap.canonical_latest_orchestrator_pipeline_inventory_agg;
+TRUNCATE TABLE IF EXISTS naap.canonical_latest_orchestrator_pipeline_inventory_agg;
 
 INSERT INTO naap.canonical_capability_hardware_inventory
 SELECT
