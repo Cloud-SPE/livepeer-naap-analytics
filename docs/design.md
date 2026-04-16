@@ -81,7 +81,7 @@ exact write ownership and bounded padded reads.
 
 This tier contract is documentation for semantic derivation flow. The physical
 bootstrap also contains infrastructure/runtime namespaces such as `resolver_*`,
-`agg_*`, `kafka_*`, metadata tables, and change/audit tables. Those objects are
+`agg_*`, `kafka_*`, metadata tables, and materialized views. Those objects are
 supported as-is; we are not planning another broad schema rename just to force
 every table into the semantic prefixes.
 

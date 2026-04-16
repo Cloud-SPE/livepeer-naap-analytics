@@ -5,7 +5,7 @@ engine and stores the physical schema used by the analytics stack. Semantic
 tiers still center on `raw_*`, `normalized_*`, `canonical_*`, `operational_*`,
 and `api_*`, but the supported bootstrap also includes infrastructure/runtime
 objects such as `accepted_raw_events`, `ignored_raw_events`, `kafka_*`,
-`resolver_*`, `agg_*`, metadata tables, and change/audit tables.
+`resolver_*`, `agg_*`, metadata tables, and materialized views.
 
 The current fresh-volume bootstrap artifact is [`bootstrap/v1.sql`](bootstrap/v1.sql).
 The generated inventory for that bootstrap lives at [`../../docs/generated/schema.md`](../../docs/generated/schema.md).

@@ -45,8 +45,6 @@ deploy/
 - `make warehouse-run`: Manually run dbt publication for the warehouse serving contracts.
 - `make ch-query`: Open an interactive ClickHouse shell with the local admin user.
 - `make resolver-logs`: Tail resolver logs from the local Compose stack.
-- `scripts/export_retained_raw.sh`: Export retained raw tables for manual retention snapshots and restore workflows.
-- `scripts/import_retained_raw.sh`: Import retained raw table exports into a bootstrapped ClickHouse database.
 
 ## Local Workflow
 

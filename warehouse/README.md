@@ -39,7 +39,7 @@ Tier contract:
 This contract is semantic, not a promise that every physical ClickHouse object
 shares one of those prefixes. The generated bootstrap also includes
 infrastructure/runtime tables such as `accepted_raw_events`, `ignored_raw_events`,
-`kafka_*`, `resolver_*`, `agg_*`, metadata tables, and change/audit tables.
+`kafka_*`, `resolver_*`, `agg_*`, metadata tables, and materialized views.
 Those physical names are part of the supported v1 schema and are not being
 renamed just to force prefix uniformity.
 

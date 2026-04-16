@@ -15,7 +15,7 @@
       }
     ]
   },
-  "description": "AI-batch and BYOC request/response job analytics \u2014 volume, success rate, duration percentiles, and per-orchestrator SLA.",
+  "description": "AI-batch and BYOC request/response job analytics for the selected time range: volume, success rate, duration percentiles, and per-orchestrator SLA.",
   "editable": true,
   "graphTooltip": 1,
   "id": null,
@@ -291,7 +291,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "sql",
-          "rawSql": "SELECT toFloat64(sum(job_count)) FROM naap.api_hourly_request_demand WHERE $__timeFilter(window_start) AND capability_family = 'byoc' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))",
+          "rawSql": "SELECT toFloat64(sum(job_count)) FROM naap.api_hourly_request_demand WHERE $__timeFilter(window_start) AND capability_family = 'byoc' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) AND ('${capability:csv}' = '__all' OR '${capability:csv}' = '' OR has(splitByChar(',', '${capability:csv}'), capability_name))",
           "refId": "A"
         }
       ]
@@ -666,7 +666,7 @@
           "editorType": "sql",
           "format": 2,
           "queryType": "sql",
-          "rawSql": "SELECT ifNull(model,'') AS model, ifNull(capability,'') AS capability, count() AS job_count, round(quantile(0.5)(toFloat64(duration_ms)), 1) AS p50_ms, round(quantile(0.99)(toFloat64(duration_ms)), 1) AS p99_ms, round(countIf(success=1)*100.0/count(), 1) AS success_pct FROM naap.api_fact_byoc_job WHERE $__timeFilter(completed_at) AND capability != '' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) GROUP BY model, capability ORDER BY job_count DESC LIMIT 30",
+          "rawSql": "SELECT ifNull(model,'') AS model, ifNull(capability,'') AS capability, count() AS job_count, round(quantile(0.5)(toFloat64(duration_ms)), 1) AS p50_ms, round(quantile(0.99)(toFloat64(duration_ms)), 1) AS p99_ms, round(countIf(success=1)*100.0/count(), 1) AS success_pct FROM naap.api_fact_byoc_job WHERE $__timeFilter(completed_at) AND capability != '' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) AND ('${capability:csv}' = '__all' OR '${capability:csv}' = '' OR has(splitByChar(',', '${capability:csv}'), capability)) GROUP BY model, capability ORDER BY job_count DESC LIMIT 30",
           "refId": "A"
         }
       ]
@@ -971,7 +971,7 @@
           "editorType": "sql",
           "format": 2,
           "queryType": "sql",
-          "rawSql": "SELECT attribution_status, count() AS jobs,\n    round(count()*100.0/sum(count()) OVER (), 1) AS pct\nFROM naap.api_fact_byoc_job\nWHERE $__timeFilter(completed_at) AND selection_outcome = 'selected' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY attribution_status ORDER BY jobs DESC",
+          "rawSql": "SELECT attribution_status, count() AS jobs,\n    round(count()*100.0/sum(count()) OVER (), 1) AS pct\nFROM naap.api_fact_byoc_job\nWHERE $__timeFilter(completed_at) AND selection_outcome = 'selected' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) AND ('${capability:csv}' = '__all' OR '${capability:csv}' = '' OR has(splitByChar(',', '${capability:csv}'), capability))\nGROUP BY attribution_status ORDER BY jobs DESC",
           "refId": "A"
         }
       ]
@@ -1043,7 +1043,7 @@
           "editorType": "sql",
           "format": 2,
           "queryType": "sql",
-          "rawSql": "SELECT selection_outcome, count() AS jobs,\n    round(count()*100.0/sum(count()) OVER (), 1) AS pct\nFROM naap.api_fact_byoc_job\nWHERE $__timeFilter(completed_at) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY selection_outcome ORDER BY jobs DESC",
+          "rawSql": "SELECT selection_outcome, count() AS jobs,\n    round(count()*100.0/sum(count()) OVER (), 1) AS pct\nFROM naap.api_fact_byoc_job\nWHERE $__timeFilter(completed_at) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) AND ('${capability:csv}' = '__all' OR '${capability:csv}' = '' OR has(splitByChar(',', '${capability:csv}'), capability))\nGROUP BY selection_outcome ORDER BY jobs DESC",
           "refId": "A"
         }
       ]
@@ -1127,7 +1127,7 @@
           "editorType": "sql",
           "format": 2,
           "queryType": "sql",
-          "rawSql": "SELECT capability_name AS capability, uniq(orch_address) AS worker_count,\n    groupUniqArrayIf(model, model != '') AS models,\n    round(avg(price_per_unit), 6) AS avg_price_per_unit\nFROM naap.api_observed_byoc_worker\nWHERE last_seen >= $__fromTime AND last_seen <= $__toTime AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY capability ORDER BY worker_count DESC",
+          "rawSql": "SELECT capability_name AS capability, uniq(orch_address) AS worker_count,\n    groupUniqArrayIf(model, model != '') AS models,\n    round(avg(price_per_unit), 6) AS avg_price_per_unit\nFROM naap.api_observed_byoc_worker\nWHERE last_seen >= $__fromTime AND last_seen <= $__toTime AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) AND ('${capability:csv}' = '__all' OR '${capability:csv}' = '' OR has(splitByChar(',', '${capability:csv}'), capability_name))\nGROUP BY capability ORDER BY worker_count DESC",
           "refId": "A"
         }
       ]
@@ -1175,7 +1175,7 @@
           "editorType": "sql",
           "format": 2,
           "queryType": "sql",
-          "rawSql": "SELECT capability_name AS capability,\n    sum(total_events) AS auth_events,\n    round(sum(success_count)*100.0/nullIf(sum(total_events), 0), 1) AS success_pct,\n    sum(failure_count) AS failure_count\nFROM naap.api_hourly_byoc_auth\nWHERE $__timeFilter(window_start) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY capability ORDER BY auth_events DESC",
+          "rawSql": "SELECT capability_name AS capability,\n    sum(total_events) AS auth_events,\n    round(sum(success_count)*100.0/nullIf(sum(total_events), 0), 1) AS success_pct,\n    sum(failure_count) AS failure_count\nFROM naap.api_hourly_byoc_auth\nWHERE $__timeFilter(window_start) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) AND ('${capability:csv}' = '__all' OR '${capability:csv}' = '' OR has(splitByChar(',', '${capability:csv}'), capability_name))\nGROUP BY capability ORDER BY auth_events DESC",
           "refId": "A"
         }
       ]
@@ -1223,7 +1223,7 @@
           "editorType": "sql",
           "format": 2,
           "queryType": "sql",
-          "rawSql": "SELECT capability, payment_type, count() AS payment_count,\n    round(sum(amount), 4) AS total_amount,\n    any(currency) AS currency,\n    uniq(orch_address) AS unique_orchs\nFROM naap.canonical_byoc_payments\nWHERE $__timeFilter(event_ts) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY capability, payment_type ORDER BY total_amount DESC",
+          "rawSql": "SELECT capability, payment_type, count() AS payment_count,\n    round(sum(amount), 4) AS total_amount,\n    any(currency) AS currency,\n    uniq(orch_address) AS unique_orchs\nFROM naap.canonical_byoc_payments\nWHERE $__timeFilter(event_ts) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) AND ('${capability:csv}' = '__all' OR '${capability:csv}' = '' OR has(splitByChar(',', '${capability:csv}'), capability))\nGROUP BY capability, payment_type ORDER BY total_amount DESC",
           "refId": "A"
         }
       ]
@@ -1264,6 +1264,26 @@
         },
         "definition": "SELECT DISTINCT org FROM naap.api_hourly_request_demand WHERE org != '' ORDER BY org",
         "query": "SELECT DISTINCT org FROM naap.api_hourly_request_demand WHERE org != '' ORDER BY org",
+        "refresh": 1,
+        "sort": 1,
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "${clickhouse_ds}"
+        }
+      },
+      {
+        "name": "capability",
+        "type": "query",
+        "label": "BYOC Capability",
+        "hide": 0,
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "__all"
+        },
+        "definition": "SELECT DISTINCT capability FROM (SELECT capability FROM naap.api_fact_byoc_job WHERE capability != '' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) UNION ALL SELECT capability_name AS capability FROM naap.api_observed_byoc_worker WHERE capability_name != '' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) UNION ALL SELECT capability_name AS capability FROM naap.api_hourly_byoc_auth WHERE capability_name != '' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) UNION ALL SELECT capability FROM naap.canonical_byoc_payments WHERE capability != '' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))) WHERE capability != '' ORDER BY capability",
+        "query": "SELECT DISTINCT capability FROM (SELECT capability FROM naap.api_fact_byoc_job WHERE capability != '' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) UNION ALL SELECT capability_name AS capability FROM naap.api_observed_byoc_worker WHERE capability_name != '' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) UNION ALL SELECT capability_name AS capability FROM naap.api_hourly_byoc_auth WHERE capability_name != '' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) UNION ALL SELECT capability FROM naap.canonical_byoc_payments WHERE capability != '' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))) WHERE capability != '' ORDER BY capability",
         "refresh": 1,
         "sort": 1,
         "datasource": {

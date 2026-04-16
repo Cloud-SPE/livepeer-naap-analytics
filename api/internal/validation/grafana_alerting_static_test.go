@@ -344,17 +344,18 @@ func TestAffectedDashboardPanelsDeduplicateOrchestratorStateLookups(t *testing.T
 
 	affectedTitles := map[string]struct{}{
 		"Gateway -> Orchestrator -> Pipeline Paths (15m)":        {},
-		"Top 20 Orchestrators by SLA Score":                      {},
-		"Top 10 Orchestrators by SLA Score":                      {},
-		"Top Orchestrators (24h: Streams, FPS, Latency)":         {},
+		"Top 20 Orchestrators by SLA Score (selected range)":     {},
+		"Top 10 Orchestrators by SLA Score (selected range)":     {},
+		"Top Orchestrators (selected range summary)":             {},
+		"Top Orchestrators (selected range: Streams, FPS, Latency)": {},
 		"Current Active Streams":                                 {},
 		"Current Known Live Streams":                             {},
 		"Current Streams by Orchestrator (includes zero-active)": {},
-		"Current Gateway -> Orchestrator -> Pipeline Paths":      {},
+		"Current Gateway -> Orchestrator -> Pipeline Paths (120s freshness)": {},
 		"FPS Average by Orchestrator (1h intervals)":             {},
 		"Jitter Coefficient by Orchestrator":                     {},
-		"GPU Inventory (Latest Observations)":                    {},
-		"Latest Observed Prices by Orchestrator":                 {},
+		"Latest GPU Inventory Seen in 24h":                       {},
+		"Latest Pricing Seen in 24h by Orchestrator":             {},
 	}
 
 	unsafeSnippets := []string{
@@ -408,17 +409,18 @@ func TestAffectedDashboardPanelsUseCollisionAwareLabelsAndStreamingSLA(t *testin
 
 	labelTitles := map[string]struct{}{
 		"Gateway -> Orchestrator -> Pipeline Paths (15m)":        {},
-		"Top 20 Orchestrators by SLA Score":                      {},
-		"Top 10 Orchestrators by SLA Score":                      {},
-		"Top Orchestrators (24h: Streams, FPS, Latency)":         {},
+		"Top 20 Orchestrators by SLA Score (selected range)":     {},
+		"Top 10 Orchestrators by SLA Score (selected range)":     {},
+		"Top Orchestrators (selected range summary)":             {},
+		"Top Orchestrators (selected range: Streams, FPS, Latency)": {},
 		"Current Active Streams":                                 {},
 		"Current Known Live Streams":                             {},
 		"Current Streams by Orchestrator (includes zero-active)": {},
-		"Current Gateway -> Orchestrator -> Pipeline Paths":      {},
+		"Current Gateway -> Orchestrator -> Pipeline Paths (120s freshness)": {},
 		"FPS Average by Orchestrator (1h intervals)":             {},
 		"Jitter Coefficient by Orchestrator":                     {},
-		"GPU Inventory (Latest Observations)":                    {},
-		"Latest Observed Prices by Orchestrator":                 {},
+		"Latest GPU Inventory Seen in 24h":                       {},
+		"Latest Pricing Seen in 24h by Orchestrator":             {},
 	}
 
 	var slaChartCount int
@@ -455,7 +457,7 @@ func TestAffectedDashboardPanelsUseCollisionAwareLabelsAndStreamingSLA(t *testin
 					}
 				}
 				switch panel.Title {
-				case "Top 20 Orchestrators by SLA Score", "Top 10 Orchestrators by SLA Score":
+				case "Top 20 Orchestrators by SLA Score (selected range)", "Top 10 Orchestrators by SLA Score (selected range)":
 					slaChartCount++
 					if !strings.Contains(sql, "FROM naap.api_hourly_streaming_sla") {
 						t.Fatalf("panel %q in %s should read from streaming SLA source", panel.Title, path)
@@ -469,7 +471,7 @@ func TestAffectedDashboardPanelsUseCollisionAwareLabelsAndStreamingSLA(t *testin
 					if !strings.Contains(sql, "eligible_orch AS (") || !strings.Contains(sql, "INNER JOIN eligible_orch") {
 						t.Fatalf("panel %q in %s should filter SLA rows through eligible orchestrators", panel.Title, path)
 					}
-				case "Top Orchestrators (24h: Streams, FPS, Latency)":
+				case "Top Orchestrators (selected range: Streams, FPS, Latency)":
 					if !strings.Contains(sql, "FROM naap.api_hourly_streaming_sla") {
 						t.Fatalf("panel %q in %s should join streaming SLA data", panel.Title, path)
 					}

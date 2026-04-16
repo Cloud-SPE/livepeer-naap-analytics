@@ -2,7 +2,7 @@
   "annotations": {
     "list": []
   },
-  "description": "Queries the capability-aware API spine such as api_hourly_streaming_demand; internal v_base_*_by_org views are not dashboard surfaces.",
+  "description": "Economics dashboard. Revenue panels use selected-range payment history; pricing panels show pricing seen in the last 24 hours rather than authoritative current network state.",
   "editable": true,
   "graphTooltip": 0,
   "id": null,
@@ -165,7 +165,7 @@
           "refId": "A"
         }
       ],
-      "title": "Gateway Ticket Face Value (ETH, hourly)",
+      "title": "Gateway Ticket Face Value (ETH, selected range)",
       "type": "timeseries"
     },
     {
@@ -223,7 +223,7 @@
           "refId": "A"
         }
       ],
-      "title": "Latest Observed Prices by Orchestrator",
+      "title": "Latest Pricing Seen in 24h by Orchestrator",
       "type": "table"
     }
   ],
@@ -255,14 +255,14 @@
           "text": "All",
           "value": "__all"
         },
-        "definition": "SELECT DISTINCT org FROM naap.api_orchestrator_identity WHERE org != '' ORDER BY org",
+        "definition": "SELECT DISTINCT org FROM naap.api_observed_capability_pricing WHERE org != '' AND last_seen >= now() - INTERVAL 24 HOUR ORDER BY org",
         "hide": 0,
         "includeAll": true,
         "label": "Org",
         "multi": true,
         "name": "org",
         "options": [],
-        "query": "SELECT DISTINCT org FROM naap.api_orchestrator_identity WHERE org != '' ORDER BY org",
+        "query": "SELECT DISTINCT org FROM naap.api_observed_capability_pricing WHERE org != '' AND last_seen >= now() - INTERVAL 24 HOUR ORDER BY org",
         "refresh": 1,
         "sort": 1,
         "type": "query",
@@ -276,14 +276,14 @@
           "text": "All",
           "value": "__all"
         },
-        "definition": "SELECT DISTINCT model_id FROM naap.api_observed_capability_offer WHERE model_id != '' AND hardware_present = 1 AND last_seen >= now() - INTERVAL 24 HOUR AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address)) ORDER BY model_id",
+        "definition": "SELECT DISTINCT model_id FROM naap.api_observed_capability_pricing WHERE model_id != '' AND last_seen >= now() - INTERVAL 24 HOUR AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) ORDER BY model_id",
         "hide": 0,
         "includeAll": true,
         "label": "Model",
         "multi": true,
         "name": "model",
         "options": [],
-        "query": "SELECT DISTINCT model_id FROM naap.api_observed_capability_offer WHERE model_id != '' AND hardware_present = 1 AND last_seen >= now() - INTERVAL 24 HOUR AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address)) ORDER BY model_id",
+        "query": "SELECT DISTINCT model_id FROM naap.api_observed_capability_pricing WHERE model_id != '' AND last_seen >= now() - INTERVAL 24 HOUR AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) ORDER BY model_id",
         "refresh": 1,
         "sort": 1,
         "type": "query",
@@ -297,14 +297,14 @@
           "text": "All",
           "value": "__all"
         },
-        "definition": "SELECT orch_address AS __value, orch_label AS __text FROM naap.api_orchestrator_identity WHERE ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) ORDER BY __text",
+        "definition": "SELECT i.orch_address AS __value, i.orch_label AS __text FROM naap.api_orchestrator_identity i INNER JOIN (SELECT DISTINCT orch_address FROM naap.api_observed_capability_pricing WHERE last_seen >= now() - INTERVAL 24 HOUR AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(model_id, '')))) p ON p.orch_address = i.orch_address ORDER BY __text",
         "hide": 0,
         "includeAll": true,
         "label": "Orchestrator (ENS)",
         "multi": true,
         "name": "orchestrator",
         "options": [],
-        "query": "SELECT orch_address AS __value, orch_label AS __text FROM naap.api_orchestrator_identity WHERE ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) ORDER BY __text",
+        "query": "SELECT i.orch_address AS __value, i.orch_label AS __text FROM naap.api_orchestrator_identity i INNER JOIN (SELECT DISTINCT orch_address FROM naap.api_observed_capability_pricing WHERE last_seen >= now() - INTERVAL 24 HOUR AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(model_id, '')))) p ON p.orch_address = i.orch_address ORDER BY __text",
         "refresh": 1,
         "sort": 1,
         "type": "query",

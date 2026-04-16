@@ -33,8 +33,6 @@ make up-tooling
 make warehouse-run
 make test-validation-clean
 make bootstrap-extract
-scripts/export_retained_raw.sh .local/raw-export/<snapshot>
-scripts/import_retained_raw.sh .local/raw-export/<snapshot>
 ```
 
 `make up` does not start the optional long-lived `warehouse` tooling container or any validation-only services. Those stay behind dedicated Compose profiles so the default runtime only includes the always-on system components plus a one-shot `warehouse-init` publication step.

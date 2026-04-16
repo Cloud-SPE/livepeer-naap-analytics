@@ -15,7 +15,7 @@ The supported serving spine is:
 1. Kafka topics land in ClickHouse Kafka Engine tables.
 2. Ingest materialized views route records into `accepted_raw_events` and `ignored_raw_events`.
 3. `normalized_*` tables capture event-family facts.
-4. The resolver publishes corrected current and serving state into `canonical_*_store` and `api_*_store`.
+4. The resolver publishes corrected latest-state and serving inputs into `canonical_*_store` and selected `api_*_store` tables.
 5. dbt publishes `canonical_*`, internal `api_base_*`, and public `api_*` views.
 6. The Go API and Grafana read those serving contracts.
 
