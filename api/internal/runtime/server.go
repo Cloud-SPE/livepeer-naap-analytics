@@ -113,6 +113,10 @@ func (s *Server) buildRouter() chi.Router {
 		// Streaming — live-video-to-video session analytics.
 		r.Route("/streaming", func(r chi.Router) {
 			r.Get("/models", s.handleGetStreamingModels)
+			r.Get("/orchestrators", s.handleGetStreamingOrchestrators)
+			r.Get("/sla", s.handleListStreamingSLA)
+			r.Get("/demand", s.handleListStreamingDemand)
+			r.Get("/gpu-metrics", s.handleListStreamingGPUMetrics)
 		})
 
 		// Discover — ranked orchestrator list for routing/selection decisions.
@@ -120,15 +124,21 @@ func (s *Server) buildRouter() chi.Router {
 			r.Get("/orchestrators", s.handleDiscoverOrchestrators)
 		})
 
-		// Net — discovery-compatible orchestrator inventory route kept for the
-		// current OpenAPI contract.
-		r.Route("/net", func(r chi.Router) {
-			r.Get("/orchestrators", s.handleDiscoverOrchestrators)
-		})
-
-		// Requests — non-streaming AI capabilities (model inventory only).
+		// Requests — non-streaming AI capabilities (AI Batch + BYOC).
 		r.Route("/requests", func(r chi.Router) {
 			r.Get("/models", s.handleGetRequestsModels)
+			r.Get("/orchestrators", s.handleGetRequestsOrchestrators)
+			r.Route("/ai-batch", func(r chi.Router) {
+				r.Get("/summary", s.handleGetAIBatchSummary)
+				r.Get("/jobs", s.handleListAIBatchJobs)
+				r.Get("/llm-summary", s.handleGetAIBatchLLMSummary)
+			})
+			r.Route("/byoc", func(r chi.Router) {
+				r.Get("/summary", s.handleGetBYOCSummary)
+				r.Get("/jobs", s.handleListBYOCJobs)
+				r.Get("/workers", s.handleGetBYOCWorkers)
+				r.Get("/auth", s.handleGetBYOCAuth)
+			})
 		})
 	})
 

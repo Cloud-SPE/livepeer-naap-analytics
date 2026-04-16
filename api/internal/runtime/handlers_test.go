@@ -209,6 +209,175 @@ func TestRequestsModels_HappyPath(t *testing.T) {
 	assertJSONArray(t, rr)
 }
 
+func TestStreamingOrchestrators_HappyPath(t *testing.T) {
+	srv := newTestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/v1/streaming/orchestrators", nil)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	assertJSONArray(t, rr)
+}
+
+func TestStreamingSLA_HappyPath(t *testing.T) {
+	srv := newTestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/v1/streaming/sla", nil)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	assertCursorEnvelope(t, rr)
+}
+
+func TestStreamingDemand_HappyPath(t *testing.T) {
+	srv := newTestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/v1/streaming/demand", nil)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	assertCursorEnvelope(t, rr)
+}
+
+func TestStreamingGPUMetrics_HappyPath(t *testing.T) {
+	srv := newTestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/v1/streaming/gpu-metrics", nil)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	assertCursorEnvelope(t, rr)
+}
+
+func TestRequestsOrchestrators_HappyPath(t *testing.T) {
+	srv := newTestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/v1/requests/orchestrators", nil)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	assertJSONArray(t, rr)
+}
+
+func TestAIBatchSummary_HappyPath(t *testing.T) {
+	srv := newTestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/v1/requests/ai-batch/summary", nil)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	assertJSONArray(t, rr)
+}
+
+func TestAIBatchJobs_HappyPath(t *testing.T) {
+	srv := newTestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/v1/requests/ai-batch/jobs", nil)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	assertCursorEnvelope(t, rr)
+}
+
+func TestAIBatchJobs_RejectsLegacyPagination(t *testing.T) {
+	srv := newTestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/v1/requests/ai-batch/jobs?offset=10", nil)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+}
+
+func TestAIBatchLLMSummary_HappyPath(t *testing.T) {
+	srv := newTestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/v1/requests/ai-batch/llm-summary", nil)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	assertJSONArray(t, rr)
+}
+
+func TestBYOCSummary_HappyPath(t *testing.T) {
+	srv := newTestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/v1/requests/byoc/summary", nil)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	assertJSONArray(t, rr)
+}
+
+func TestBYOCJobs_HappyPath(t *testing.T) {
+	srv := newTestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/v1/requests/byoc/jobs", nil)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	assertCursorEnvelope(t, rr)
+}
+
+func TestBYOCWorkers_HappyPath(t *testing.T) {
+	srv := newTestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/v1/requests/byoc/workers", nil)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	assertJSONArray(t, rr)
+}
+
+func TestBYOCAuth_HappyPath(t *testing.T) {
+	srv := newTestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/v1/requests/byoc/auth", nil)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	assertJSONArray(t, rr)
+}
+
+func assertCursorEnvelope(t *testing.T, rr *httptest.ResponseRecorder) {
+	t.Helper()
+	body := assertJSON(t, rr)
+	if _, ok := body["data"]; !ok {
+		t.Fatalf("cursor envelope missing 'data': %v", body)
+	}
+	if _, ok := body["pagination"]; !ok {
+		t.Fatalf("cursor envelope missing 'pagination': %v", body)
+	}
+	if _, ok := body["meta"]; !ok {
+		t.Fatalf("cursor envelope missing 'meta': %v", body)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Discover
 // ---------------------------------------------------------------------------

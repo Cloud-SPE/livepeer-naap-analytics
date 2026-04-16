@@ -27,9 +27,21 @@ type AnalyticsService interface {
 
 	// Streaming
 	GetStreamingModels(ctx context.Context) ([]types.StreamingModel, error)
+	GetStreamingOrchestrators(ctx context.Context) ([]types.StreamingOrchestrator, error)
+	ListStreamingSLA(ctx context.Context, p types.TimeWindowParams) ([]types.StreamingSLARow, string, error)
+	ListStreamingDemand(ctx context.Context, p types.TimeWindowParams) ([]types.StreamingDemandRow, string, error)
+	ListStreamingGPUMetrics(ctx context.Context, p types.TimeWindowParams) ([]types.StreamingGPUMetricRow, string, error)
 
 	// Requests
 	GetRequestsModels(ctx context.Context) ([]types.RequestsModel, error)
+	GetRequestsOrchestrators(ctx context.Context) ([]types.RequestsOrchestrator, error)
+	GetAIBatchSummary(ctx context.Context, p types.TimeWindowParams) ([]types.AIBatchSummaryRow, error)
+	ListAIBatchJobs(ctx context.Context, p types.TimeWindowParams) ([]types.AIBatchJobRecord, string, error)
+	GetAIBatchLLMSummary(ctx context.Context, p types.TimeWindowParams) ([]types.AIBatchLLMSummaryRow, error)
+	GetBYOCSummary(ctx context.Context, p types.TimeWindowParams) ([]types.BYOCSummaryRow, error)
+	ListBYOCJobs(ctx context.Context, p types.TimeWindowParams) ([]types.BYOCJobRecord, string, error)
+	GetBYOCWorkers(ctx context.Context, p types.TimeWindowParams) ([]types.BYOCWorkerRow, error)
+	GetBYOCAuth(ctx context.Context, p types.TimeWindowParams) ([]types.BYOCAuthRow, error)
 
 	// Discover
 	DiscoverOrchestrators(ctx context.Context, p types.DiscoverOrchestratorsParams) ([]types.DiscoverOrchestratorRow, error)
@@ -144,6 +156,102 @@ func (s *analyticsService) GetRequestsModels(ctx context.Context) ([]types.Reque
 	v, err := s.repo.GetRequestsModels(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("get requests models: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) GetStreamingOrchestrators(ctx context.Context) ([]types.StreamingOrchestrator, error) {
+	v, err := s.repo.GetStreamingOrchestrators(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get streaming orchestrators: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) ListStreamingSLA(ctx context.Context, p types.TimeWindowParams) ([]types.StreamingSLARow, string, error) {
+	v, c, err := s.repo.ListStreamingSLA(ctx, p)
+	if err != nil {
+		return nil, "", fmt.Errorf("list streaming sla: %w", err)
+	}
+	return v, c, nil
+}
+
+func (s *analyticsService) ListStreamingDemand(ctx context.Context, p types.TimeWindowParams) ([]types.StreamingDemandRow, string, error) {
+	v, c, err := s.repo.ListStreamingDemand(ctx, p)
+	if err != nil {
+		return nil, "", fmt.Errorf("list streaming demand: %w", err)
+	}
+	return v, c, nil
+}
+
+func (s *analyticsService) ListStreamingGPUMetrics(ctx context.Context, p types.TimeWindowParams) ([]types.StreamingGPUMetricRow, string, error) {
+	v, c, err := s.repo.ListStreamingGPUMetrics(ctx, p)
+	if err != nil {
+		return nil, "", fmt.Errorf("list streaming gpu metrics: %w", err)
+	}
+	return v, c, nil
+}
+
+func (s *analyticsService) GetRequestsOrchestrators(ctx context.Context) ([]types.RequestsOrchestrator, error) {
+	v, err := s.repo.GetRequestsOrchestrators(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get requests orchestrators: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) GetAIBatchSummary(ctx context.Context, p types.TimeWindowParams) ([]types.AIBatchSummaryRow, error) {
+	v, err := s.repo.GetAIBatchSummary(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("get ai-batch summary: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) ListAIBatchJobs(ctx context.Context, p types.TimeWindowParams) ([]types.AIBatchJobRecord, string, error) {
+	v, c, err := s.repo.ListAIBatchJobs(ctx, p)
+	if err != nil {
+		return nil, "", fmt.Errorf("list ai-batch jobs: %w", err)
+	}
+	return v, c, nil
+}
+
+func (s *analyticsService) GetAIBatchLLMSummary(ctx context.Context, p types.TimeWindowParams) ([]types.AIBatchLLMSummaryRow, error) {
+	v, err := s.repo.GetAIBatchLLMSummary(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("get ai-batch llm summary: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) GetBYOCSummary(ctx context.Context, p types.TimeWindowParams) ([]types.BYOCSummaryRow, error) {
+	v, err := s.repo.GetBYOCSummary(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("get byoc summary: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) ListBYOCJobs(ctx context.Context, p types.TimeWindowParams) ([]types.BYOCJobRecord, string, error) {
+	v, c, err := s.repo.ListBYOCJobs(ctx, p)
+	if err != nil {
+		return nil, "", fmt.Errorf("list byoc jobs: %w", err)
+	}
+	return v, c, nil
+}
+
+func (s *analyticsService) GetBYOCWorkers(ctx context.Context, p types.TimeWindowParams) ([]types.BYOCWorkerRow, error) {
+	v, err := s.repo.GetBYOCWorkers(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("get byoc workers: %w", err)
+	}
+	return v, nil
+}
+
+func (s *analyticsService) GetBYOCAuth(ctx context.Context, p types.TimeWindowParams) ([]types.BYOCAuthRow, error) {
+	v, err := s.repo.GetBYOCAuth(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("get byoc auth: %w", err)
 	}
 	return v, nil
 }
