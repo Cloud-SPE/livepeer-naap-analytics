@@ -1,7 +1,7 @@
 openapi: "3.0.3"
 info:
-  title: NAAP Analytics API v2
-  version: "2"
+  title: NAAP Analytics API
+  version: "1"
   description: |
     Read-only analytics API for the Livepeer AI network, backed by ClickHouse.
 

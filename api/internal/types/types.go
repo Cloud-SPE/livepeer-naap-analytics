@@ -1,4 +1,4 @@
-// Package types defines domain types for the NAAP Analytics API v2.
+// Package types defines domain types for the NAAP Analytics API.
 // This is layer 1 — no imports from other internal packages.
 package types
 

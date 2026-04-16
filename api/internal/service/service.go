@@ -1,4 +1,4 @@
-// Package service implements business logic for the NAAP Analytics API v2.
+// Package service implements business logic for the NAAP Analytics API.
 // This is layer 4 — depends on types, config, and repo interfaces.
 // Thin delegation to repo; business logic added as needed.
 package service
