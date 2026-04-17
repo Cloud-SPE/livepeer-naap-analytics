@@ -11,7 +11,6 @@
 # here with no corresponding violation is fine (tolerated as
 # harmless) but should be cleaned up when noticed.
 
-api/internal/repo/clickhouse/selection.go:57	phase-4-unified-capability-spine
-api/internal/repo/clickhouse/selection.go:65	phase-4-unified-capability-spine
-api/internal/repo/clickhouse/selection.go:101	phase-4-unified-capability-spine
-api/internal/repo/clickhouse/requests.go:49	phase-4-unified-capability-spine
+# phase-4-unified-capability-spine entries retired: pipeline_id is now
+# denormalized onto naap.api_observed_capability_offer,
+# naap.api_observed_byoc_worker, and naap.api_hourly_request_demand.

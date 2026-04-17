@@ -50,6 +50,21 @@ select
         if(i.hardware_present = 1, i.offered_name, c_id.capability_name),
         'Nullable(String)'
     ) as offered_name,
+    -- Phase 4 unified capability spine: one pipeline_id per row so handlers
+    -- no longer have to branch on capability_family. byoc rows carry the
+    -- external capability_name verbatim; builtin rows use canonical_pipeline
+    -- with a capability_name fallback for entries the catalog has not
+    -- backfilled yet.
+    if(
+        if(i.hardware_present = 1,
+           ifNull(c_pipeline.capability_family, 'byoc'),
+           c_id.capability_family) = 'byoc',
+        if(i.hardware_present = 1, i.offered_name, c_id.capability_name),
+        ifNull(
+            if(i.hardware_present = 1, c_pipeline.canonical_pipeline, c_id.canonical_pipeline),
+            if(i.hardware_present = 1, i.offered_name, c_id.capability_name)
+        )
+    ) as pipeline_id,
     i.model_id,
     i.warm,
     i.advertised_capacity,

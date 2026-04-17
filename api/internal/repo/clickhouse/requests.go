@@ -46,7 +46,7 @@ func (r *Repo) GetRequestsModels(ctx context.Context) ([]types.RequestsModel, er
 		),
 		demand AS (
 		    SELECT
-		        if(capability_family = 'byoc', capability_name, ifNull(canonical_pipeline, capability_name)) AS pipeline,
+		        pipeline_id AS pipeline,
 		        canonical_model AS model,
 		        capability_family,
 		        toInt64(sum(job_count)) AS job_count_24h,

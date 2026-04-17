@@ -8,6 +8,9 @@ with ai_batch as (
         pipeline as capability_name,
         cast(null, 'Nullable(UInt16)') as capability_id,
         cast(pipeline, 'Nullable(String)') as canonical_pipeline,
+        -- Phase 4 unified spine: ai_batch rows are builtin, so pipeline_id
+        -- is the builtin pipeline name — never the raw capability_name.
+        pipeline as pipeline_id,
         cast(model_id, 'Nullable(String)') as canonical_model,
         cast('', 'String') as orchestrator_address,
         ifNull(orch_url_norm, '') as orchestrator_uri,
@@ -28,7 +31,7 @@ with ai_batch as (
     from {{ ref('canonical_ai_batch_jobs') }}
     where request_id != ''
       and pipeline != ''
-    group by window_start, org, gateway, execution_mode, capability_family, capability_name, canonical_pipeline, canonical_model, orchestrator_address, orchestrator_uri
+    group by window_start, org, gateway, execution_mode, capability_family, capability_name, canonical_pipeline, pipeline_id, canonical_model, orchestrator_address, orchestrator_uri
 ),
 byoc as (
     select
@@ -40,6 +43,8 @@ byoc as (
         capability as capability_name,
         cast(37, 'Nullable(UInt16)') as capability_id,
         cast(null, 'Nullable(String)') as canonical_pipeline,
+        -- Phase 4 unified spine: byoc rows carry the external capability name.
+        capability as pipeline_id,
         cast(model, 'Nullable(String)') as canonical_model,
         ifNull(orch_address, '') as orchestrator_address,
         ifNull(orch_url_norm, '') as orchestrator_uri,
@@ -60,7 +65,7 @@ byoc as (
     from {{ ref('canonical_byoc_jobs') }}
     where request_id != ''
       and capability != ''
-    group by window_start, org, gateway, execution_mode, capability_family, capability_name, capability_id, canonical_pipeline, canonical_model, orchestrator_address, orchestrator_uri
+    group by window_start, org, gateway, execution_mode, capability_family, capability_name, capability_id, canonical_pipeline, pipeline_id, canonical_model, orchestrator_address, orchestrator_uri
 )
 select * from ai_batch
 union all

@@ -54,7 +54,7 @@ func (r *Repo) DiscoverOrchestrators(ctx context.Context, p types.DiscoverOrches
 		  offers AS (
 		    SELECT
 		      orch_address,
-		      if(capability_family = 'byoc', capability_name, ifNull(canonical_pipeline, capability_name)) AS pipeline_id,
+		      pipeline_id,
 		      model_id,
 		      last_seen,
 		      ifNull(orchestrator_uri, '') AS orchestrator_uri,
@@ -62,11 +62,11 @@ func (r *Repo) DiscoverOrchestrators(ctx context.Context, p types.DiscoverOrches
 		      supports_stream
 		    FROM naap.api_observed_capability_offer
 		    WHERE last_seen >= ? AND last_seen < ?
-		      AND if(capability_family = 'byoc', capability_name, ifNull(canonical_pipeline, capability_name)) != ''
+		      AND pipeline_id != ''
 		    UNION ALL
 		    SELECT
 		      orch_address,
-		      capability_name AS pipeline_id,
+		      pipeline_id,
 		      model AS model_id,
 		      last_seen,
 		      ifNull(orchestrator_uri, '') AS orchestrator_uri,
@@ -74,7 +74,7 @@ func (r *Repo) DiscoverOrchestrators(ctx context.Context, p types.DiscoverOrches
 		      toUInt8(0) AS supports_stream
 		    FROM naap.api_observed_byoc_worker
 		    WHERE last_seen >= ? AND last_seen < ?
-		      AND capability_name != ''
+		      AND pipeline_id != ''
 		  ),
 		  observed_orchestrators AS (
 		    SELECT
@@ -98,7 +98,7 @@ func (r *Repo) DiscoverOrchestrators(ctx context.Context, p types.DiscoverOrches
 		  request_sla AS (
 		    SELECT
 		      orchestrator_uri AS orch_uri,
-		      if(capability_family = 'byoc', capability_name, ifNull(canonical_pipeline, capability_name)) AS pipeline_id,
+		      pipeline_id,
 		      sum(success_count) / nullIf(toFloat64(sum(job_count)), 0.0) AS score
 		    FROM naap.api_hourly_request_demand
 		    WHERE window_start >= now() - INTERVAL 2 HOUR
