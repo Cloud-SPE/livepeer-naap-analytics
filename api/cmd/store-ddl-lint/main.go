@@ -170,20 +170,23 @@ func loadDeclared(dir string) ([]declaredTable, error) {
 }
 
 func parseDDL(body string) (declaredTable, error) {
-	tm := tableRE.FindStringSubmatch(body)
-	if len(tm) < 2 {
+	tm := tableRE.FindStringSubmatchIndex(body)
+	if len(tm) < 4 {
 		return declaredTable{}, fmt.Errorf("no CREATE TABLE match")
 	}
-	name := tm[1]
+	name := body[tm[2]:tm[3]]
 
-	// Extract just the column list — everything between the first `(`
-	// after the CREATE TABLE and the closing `)` before ENGINE.
-	start := strings.Index(body, "(")
-	engineIdx := strings.Index(strings.ToUpper(body), ") ENGINE")
-	if start < 0 || engineIdx < 0 || engineIdx <= start {
+	// Anchor the column-list search AFTER the `CREATE TABLE ... naap.<name>`
+	// prefix — otherwise a `(` inside a comment above the statement (e.g.
+	// a parenthetical in a doc-header) is incorrectly treated as the start
+	// of the column list.
+	after := body[tm[3]:]
+	openIdx := strings.Index(after, "(")
+	engineRel := strings.Index(strings.ToUpper(after), ") ENGINE")
+	if openIdx < 0 || engineRel < 0 || engineRel <= openIdx {
 		return declaredTable{}, fmt.Errorf("could not locate column list")
 	}
-	colList := body[start+1 : engineIdx]
+	colList := after[openIdx+1 : engineRel]
 
 	cols := map[string]string{}
 	for _, pair := range splitColumnsList(colList) {

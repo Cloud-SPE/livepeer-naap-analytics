@@ -2595,6 +2595,12 @@ func (r *repo) publishServingRollups(ctx context.Context, runID string, now time
 	if err := r.insertSLAComplianceRollups(ctx, runID, now, queryID); err != nil {
 		return err
 	}
+	// Phase 2: pre-compute daily benchmark cohort BEFORE the final scoring
+	// step, so insertFinalSLAComplianceRollups can look up 7-day benchmarks
+	// as O(1) per row instead of arrayJoin + quantileTDigestIfMerge.
+	if err := r.insertSLABenchmarkDaily(ctx, runID, now); err != nil {
+		return err
+	}
 	if err := r.insertFinalSLAComplianceRollups(ctx, runID, now, queryID); err != nil {
 		return err
 	}
@@ -3233,6 +3239,80 @@ func (r *repo) insertSLAComplianceRollups(ctx context.Context, runID string, now
 	`, queryID, queryID, runID, r.cfg.ResolverVersion, now)
 }
 
+// insertSLABenchmarkDaily aggregates canonical_streaming_sla_input_hourly_store
+// into daily scalar percentiles per (pipeline_id, model_id, cohort_date) and
+// writes them to canonical_sla_benchmark_daily_store. This replaces the
+// view-based api_base_sla_quality_cohort_daily_state whose AggregateFunction
+// states forced a 7-day arrayJoin + quantileTDigestIfMerge on every scoring
+// pass. The store is populated for EVERY cohort_date the input store holds
+// (not just the current run's slices) so the 7-day lookback in
+// insertFinalSLAComplianceRollups always finds benchmarks for the past week.
+//
+// ReplacingMergeTree(refreshed_at) on the target plus refresh_run_id in the
+// ORDER BY key means each resolver run is additive; readers use argMax.
+func (r *repo) insertSLABenchmarkDaily(ctx context.Context, runID string, now time.Time) error {
+	return r.conn.Exec(ctx, `
+		INSERT INTO naap.canonical_sla_benchmark_daily_store
+		(
+			cohort_date, pipeline_id, model_id,
+			ptff_p50, ptff_p90, ptff_row_count,
+			e2e_p50, e2e_p90, e2e_row_count,
+			fps_p10, fps_p50, fps_row_count,
+			refresh_run_id, artifact_checksum, refreshed_at
+		)
+		WITH latest_slices AS (
+			SELECT org, window_start, argMax(refresh_run_id, refreshed_at) AS refresh_run_id
+			FROM naap.canonical_streaming_sla_input_hourly_store
+			GROUP BY org, window_start
+		),
+		-- The input store keeps additive sums + counts; re-aggregate per
+		-- (window_start, orchestrator, pipeline, model, gpu) the same way
+		-- the scoring path will later, so the benchmark's per-row sample
+		-- unit matches the scored row grain exactly. Nullable avg is
+		-- derived from sum/count to mirror api_base_sla_quality_inputs_by_org.
+		latest_inputs AS (
+			SELECT
+				toDate(s.window_start) AS cohort_date,
+				s.pipeline_id          AS pipeline_id,
+				s.model_id             AS model_id,
+				if(sum(s.prompt_to_first_frame_sample_count) > 0,
+					sum(s.prompt_to_first_frame_sum_ms) / toFloat64(sum(s.prompt_to_first_frame_sample_count)),
+					CAST(NULL, 'Nullable(Float64)'))                             AS avg_prompt_to_first_frame_ms,
+				if(sum(s.e2e_latency_sample_count) > 0,
+					sum(s.e2e_latency_sum_ms) / toFloat64(sum(s.e2e_latency_sample_count)),
+					CAST(NULL, 'Nullable(Float64)'))                             AS avg_e2e_latency_ms,
+				if(sum(s.status_samples) > 0,
+					sum(s.output_fps_sum) / toFloat64(sum(s.status_samples)),
+					CAST(NULL, 'Nullable(Float64)'))                             AS avg_output_fps
+			FROM naap.canonical_streaming_sla_input_hourly_store s
+			INNER JOIN latest_slices l
+				ON  s.org = l.org
+				AND s.window_start = l.window_start
+				AND s.refresh_run_id = l.refresh_run_id
+			WHERE s.pipeline_id != ''
+			GROUP BY
+				cohort_date, s.pipeline_id, s.model_id,
+				s.window_start, s.orchestrator_address, s.gpu_id
+		)
+		SELECT
+			cohort_date,
+			pipeline_id,
+			model_id,
+			quantileTDigestIf(0.5)(ifNull(avg_prompt_to_first_frame_ms, 0.), avg_prompt_to_first_frame_ms IS NOT NULL) AS ptff_p50,
+			quantileTDigestIf(0.9)(ifNull(avg_prompt_to_first_frame_ms, 0.), avg_prompt_to_first_frame_ms IS NOT NULL) AS ptff_p90,
+			toUInt64(countIf(avg_prompt_to_first_frame_ms IS NOT NULL))                                                AS ptff_row_count,
+			quantileTDigestIf(0.5)(ifNull(avg_e2e_latency_ms, 0.),           avg_e2e_latency_ms IS NOT NULL)           AS e2e_p50,
+			quantileTDigestIf(0.9)(ifNull(avg_e2e_latency_ms, 0.),           avg_e2e_latency_ms IS NOT NULL)           AS e2e_p90,
+			toUInt64(countIf(avg_e2e_latency_ms IS NOT NULL))                                                          AS e2e_row_count,
+			quantileTDigestIf(0.1)(ifNull(avg_output_fps, 0.),               avg_output_fps IS NOT NULL)               AS fps_p10,
+			quantileTDigestIf(0.5)(ifNull(avg_output_fps, 0.),               avg_output_fps IS NOT NULL)               AS fps_p50,
+			toUInt64(countIf(avg_output_fps IS NOT NULL))                                                              AS fps_row_count,
+			?, ?, ?
+		FROM latest_inputs
+		GROUP BY cohort_date, pipeline_id, model_id
+	`, runID, r.cfg.ResolverVersion, now)
+}
+
 func (r *repo) insertFinalSLAComplianceRollups(ctx context.Context, runID string, now time.Time, queryID string) error {
 	return r.conn.Exec(ctx, `
 		INSERT INTO naap.api_hourly_streaming_sla_store
@@ -3249,26 +3329,282 @@ func (r *repo) insertFinalSLAComplianceRollups(ctx context.Context, runID string
 			reliability_score, ptff_score, e2e_score, latency_score, fps_score, quality_score,
 			sla_semantics_version, sla_score, refresh_run_id, artifact_checksum, refreshed_at
 		)
-		WITH owned_windows AS (
+		WITH
+		-- Phase 2: scoring math runs inline. No more api_base_sla_* chain.
+		-- owned_windows scopes the write to the current resolver run's slices.
+		owned_windows AS (
 			SELECT DISTINCT window_start
 			FROM naap.resolver_query_window_slices
 			WHERE query_id = ?
+		),
+		-- Latest input slice per (org, window_start) — the same pattern
+		-- api_base_sla_quality_inputs_by_org used before Phase 2.
+		latest_input_slices AS (
+			SELECT org, window_start, argMax(refresh_run_id, refreshed_at) AS refresh_run_id
+			FROM naap.canonical_streaming_sla_input_hourly_store
+			GROUP BY org, window_start
+		),
+		-- Collapse inputs to the (window_start, org, orch, pipeline, model, gpu)
+		-- grain. Additive primitives (sessions, samples) sum; ratios recompute
+		-- from sums. This replaces api_base_sla_quality_inputs_by_org.
+		inputs AS (
+			SELECT
+				s.window_start AS window_start,
+				s.org AS org,
+				s.orchestrator_address AS orchestrator_address,
+				s.pipeline_id AS pipeline_id,
+				s.model_id AS model_id,
+				s.gpu_id AS gpu_id,
+				any(s.gpu_model_name) AS gpu_model_name,
+				sum(s.known_sessions_count)                                            AS known_sessions_count,
+				sum(s.requested_sessions)                                              AS requested_sessions,
+				sum(s.startup_success_sessions)                                        AS startup_success_sessions,
+				sum(s.no_orch_sessions)                                                AS no_orch_sessions,
+				sum(s.startup_excused_sessions)                                        AS startup_excused_sessions,
+				sum(s.startup_failed_sessions)                                         AS startup_failed_sessions,
+				sum(s.loading_only_sessions)                                           AS loading_only_sessions,
+				sum(s.zero_output_fps_sessions)                                        AS zero_output_fps_sessions,
+				sum(s.output_failed_sessions)                                          AS output_failed_sessions,
+				sum(s.effective_failed_sessions)                                       AS effective_failed_sessions,
+				sum(s.confirmed_swapped_sessions)                                      AS confirmed_swapped_sessions,
+				sum(s.inferred_swap_sessions)                                          AS inferred_swap_sessions,
+				sum(s.total_swapped_sessions)                                          AS total_swapped_sessions,
+				sum(s.sessions_ending_in_error)                                        AS sessions_ending_in_error,
+				sum(s.error_status_samples)                                            AS error_status_samples,
+				sum(s.health_signal_count)                                             AS health_signal_count,
+				sum(s.health_expected_signal_count)                                    AS health_expected_signal_count,
+				least(if(sum(s.health_expected_signal_count) > 0,
+					sum(s.health_signal_count) / toFloat64(sum(s.health_expected_signal_count)),
+					1.), 1.)                                                           AS health_signal_coverage_ratio,
+				if(sum(s.requested_sessions) > 0,
+					sum(s.startup_success_sessions) / toFloat64(sum(s.requested_sessions)),
+					CAST(NULL, 'Nullable(Float64)'))                                    AS startup_success_rate,
+				if(sum(s.requested_sessions) > 0,
+					sum(s.startup_excused_sessions) / toFloat64(sum(s.requested_sessions)),
+					CAST(NULL, 'Nullable(Float64)'))                                    AS excused_failure_rate,
+				if(sum(s.requested_sessions) > 0,
+					1. - (sum(s.effective_failed_sessions) / toFloat64(sum(s.requested_sessions))),
+					CAST(NULL, 'Nullable(Float64)'))                                    AS effective_success_rate,
+				if(sum(s.requested_sessions) > 0,
+					1. - (sum(s.total_swapped_sessions) / toFloat64(sum(s.requested_sessions))),
+					CAST(NULL, 'Nullable(Float64)'))                                    AS no_swap_rate,
+				if(sum(s.requested_sessions) > 0,
+					1. - (sum(s.output_failed_sessions) / toFloat64(sum(s.requested_sessions))),
+					CAST(NULL, 'Nullable(Float64)'))                                    AS output_viability_rate,
+				sum(s.output_fps_sum)                                                  AS output_fps_sum,
+				sum(s.status_samples)                                                  AS status_samples,
+				if(sum(s.status_samples) > 0,
+					sum(s.output_fps_sum) / toFloat64(sum(s.status_samples)),
+					CAST(NULL, 'Nullable(Float64)'))                                    AS avg_output_fps,
+				sum(s.prompt_to_first_frame_sum_ms)                                    AS prompt_to_first_frame_sum_ms,
+				sum(s.prompt_to_first_frame_sample_count)                              AS prompt_to_first_frame_sample_count,
+				if(sum(s.prompt_to_first_frame_sample_count) > 0,
+					sum(s.prompt_to_first_frame_sum_ms) / toFloat64(sum(s.prompt_to_first_frame_sample_count)),
+					CAST(NULL, 'Nullable(Float64)'))                                    AS avg_prompt_to_first_frame_ms,
+				sum(s.e2e_latency_sum_ms)                                              AS e2e_latency_sum_ms,
+				sum(s.e2e_latency_sample_count)                                        AS e2e_latency_sample_count,
+				if(sum(s.e2e_latency_sample_count) > 0,
+					sum(s.e2e_latency_sum_ms) / toFloat64(sum(s.e2e_latency_sample_count)),
+					CAST(NULL, 'Nullable(Float64)'))                                    AS avg_e2e_latency_ms
+			FROM naap.canonical_streaming_sla_input_hourly_store s
+			INNER JOIN latest_input_slices l
+				ON  s.org = l.org
+				AND s.window_start = l.window_start
+				AND s.refresh_run_id = l.refresh_run_id
+			INNER JOIN owned_windows w
+				ON s.window_start = w.window_start
+			GROUP BY s.window_start, s.org, s.orchestrator_address, s.pipeline_id, s.model_id, s.gpu_id
+		),
+		-- Latest benchmark slice per (pipeline_id, model_id, cohort_date).
+		latest_benchmark_slices AS (
+			SELECT pipeline_id, model_id, cohort_date,
+				argMax(refresh_run_id, refreshed_at) AS refresh_run_id
+			FROM naap.canonical_sla_benchmark_daily_store
+			GROUP BY pipeline_id, model_id, cohort_date
+		),
+		benchmarks AS (
+			SELECT b.*
+			FROM naap.canonical_sla_benchmark_daily_store b
+			INNER JOIN latest_benchmark_slices l
+				ON  b.pipeline_id = l.pipeline_id
+				AND ifNull(b.model_id, '') = ifNull(l.model_id, '')
+				AND b.cohort_date = l.cohort_date
+				AND b.refresh_run_id = l.refresh_run_id
+		),
+		-- Per-input 7-day benchmark aggregation. ClickHouse JOINs require
+		-- equality on ON clauses, so we fan each input row into 7 rows —
+		-- one per cohort_date in [window_start - 7d, window_start - 1d] —
+		-- then JOIN the benchmark store on equality. Daily scalar
+		-- percentiles are row-count-weighted averaged to approximate the
+		-- 7-day percentile. On the daily fixture this is row-equal to the
+		-- legacy arrayJoin+quantileTDigestIfMerge path within float
+		-- tolerance; the parity test guards the contract.
+		input_cohort_dates AS (
+			SELECT
+				i.*,
+				arrayJoin(arrayMap(off -> toDate(i.window_start) - off, range(1, 8))) AS cohort_date
+			FROM inputs i
+		),
+		cohort AS (
+			SELECT
+				i.window_start, i.org, i.orchestrator_address, i.pipeline_id, i.model_id, i.gpu_id,
+				i.gpu_model_name, i.known_sessions_count, i.requested_sessions,
+				i.startup_success_sessions, i.no_orch_sessions, i.startup_excused_sessions,
+				i.startup_failed_sessions, i.loading_only_sessions, i.zero_output_fps_sessions,
+				i.output_failed_sessions, i.effective_failed_sessions, i.confirmed_swapped_sessions,
+				i.inferred_swap_sessions, i.total_swapped_sessions, i.sessions_ending_in_error,
+				i.error_status_samples, i.health_signal_count, i.health_expected_signal_count,
+				i.health_signal_coverage_ratio, i.startup_success_rate, i.excused_failure_rate,
+				i.effective_success_rate, i.no_swap_rate, i.output_viability_rate, i.output_fps_sum,
+				i.status_samples, i.avg_output_fps, i.prompt_to_first_frame_sum_ms,
+				i.prompt_to_first_frame_sample_count, i.avg_prompt_to_first_frame_ms,
+				i.e2e_latency_sum_ms, i.e2e_latency_sample_count, i.avg_e2e_latency_ms,
+				sum(ifNull(b.ptff_row_count, toUInt64(0)))                                                          AS ptff_benchmark_row_count,
+				sum(ifNull(b.e2e_row_count, toUInt64(0)))                                                           AS e2e_benchmark_row_count,
+				sum(ifNull(b.fps_row_count, toUInt64(0)))                                                           AS fps_benchmark_row_count,
+				if(sum(ifNull(b.ptff_row_count, toUInt64(0))) > 0,
+					sum(ifNull(b.ptff_p50, 0.) * ifNull(b.ptff_row_count, toUInt64(0))) / sum(ifNull(b.ptff_row_count, toUInt64(0))),
+					CAST(NULL, 'Nullable(Float64)'))                                                                AS ptff_p50,
+				if(sum(ifNull(b.ptff_row_count, toUInt64(0))) > 0,
+					sum(ifNull(b.ptff_p90, 0.) * ifNull(b.ptff_row_count, toUInt64(0))) / sum(ifNull(b.ptff_row_count, toUInt64(0))),
+					CAST(NULL, 'Nullable(Float64)'))                                                                AS ptff_p90,
+				if(sum(ifNull(b.e2e_row_count, toUInt64(0))) > 0,
+					sum(ifNull(b.e2e_p50, 0.) * ifNull(b.e2e_row_count, toUInt64(0))) / sum(ifNull(b.e2e_row_count, toUInt64(0))),
+					CAST(NULL, 'Nullable(Float64)'))                                                                AS e2e_p50,
+				if(sum(ifNull(b.e2e_row_count, toUInt64(0))) > 0,
+					sum(ifNull(b.e2e_p90, 0.) * ifNull(b.e2e_row_count, toUInt64(0))) / sum(ifNull(b.e2e_row_count, toUInt64(0))),
+					CAST(NULL, 'Nullable(Float64)'))                                                                AS e2e_p90,
+				if(sum(ifNull(b.fps_row_count, toUInt64(0))) > 0,
+					sum(ifNull(b.fps_p10, 0.) * ifNull(b.fps_row_count, toUInt64(0))) / sum(ifNull(b.fps_row_count, toUInt64(0))),
+					CAST(NULL, 'Nullable(Float64)'))                                                                AS fps_p10,
+				if(sum(ifNull(b.fps_row_count, toUInt64(0))) > 0,
+					sum(ifNull(b.fps_p50, 0.) * ifNull(b.fps_row_count, toUInt64(0))) / sum(ifNull(b.fps_row_count, toUInt64(0))),
+					CAST(NULL, 'Nullable(Float64)'))                                                                AS fps_p50
+			FROM input_cohort_dates i
+			LEFT JOIN benchmarks b
+				ON  b.pipeline_id = i.pipeline_id
+				AND ifNull(b.model_id, '') = ifNull(i.model_id, '')
+				AND b.cohort_date = i.cohort_date
+			GROUP BY i.window_start, i.org, i.orchestrator_address, i.pipeline_id, i.model_id, i.gpu_id,
+					 i.gpu_model_name, i.known_sessions_count, i.requested_sessions,
+					 i.startup_success_sessions, i.no_orch_sessions, i.startup_excused_sessions,
+					 i.startup_failed_sessions, i.loading_only_sessions, i.zero_output_fps_sessions,
+					 i.output_failed_sessions, i.effective_failed_sessions, i.confirmed_swapped_sessions,
+					 i.inferred_swap_sessions, i.total_swapped_sessions, i.sessions_ending_in_error,
+					 i.error_status_samples, i.health_signal_count, i.health_expected_signal_count,
+					 i.health_signal_coverage_ratio, i.startup_success_rate, i.excused_failure_rate,
+					 i.effective_success_rate, i.no_swap_rate, i.output_viability_rate, i.output_fps_sum,
+					 i.status_samples, i.avg_output_fps, i.prompt_to_first_frame_sum_ms,
+					 i.prompt_to_first_frame_sample_count, i.avg_prompt_to_first_frame_ms,
+					 i.e2e_latency_sum_ms, i.e2e_latency_sample_count, i.avg_e2e_latency_ms
+		),
+		-- Raw per-metric scores (0..1) from percentile position. Uses
+		-- ptff_benchmark_row_count >= 48 as a sample-size gate, same as the
+		-- pre-Phase-2 logic.
+		raw_scores AS (
+			SELECT
+				c.*,
+				if(c.avg_prompt_to_first_frame_ms IS NULL OR c.ptff_benchmark_row_count < 48, 0.5,
+					if(c.ptff_p90 <= c.ptff_p50,
+						if(c.avg_prompt_to_first_frame_ms <= c.ptff_p50, 1., 0.),
+						multiIf(
+							c.avg_prompt_to_first_frame_ms <= c.ptff_p50, 1.,
+							c.avg_prompt_to_first_frame_ms >= c.ptff_p90, 0.,
+							1. - ((c.avg_prompt_to_first_frame_ms - c.ptff_p50) / (c.ptff_p90 - c.ptff_p50))
+						))
+				) AS ptff_score_raw,
+				if(c.avg_e2e_latency_ms IS NULL OR c.e2e_benchmark_row_count < 48, 0.5,
+					if(c.e2e_p90 <= c.e2e_p50,
+						if(c.avg_e2e_latency_ms <= c.e2e_p50, 1., 0.),
+						multiIf(
+							c.avg_e2e_latency_ms <= c.e2e_p50, 1.,
+							c.avg_e2e_latency_ms >= c.e2e_p90, 0.,
+							1. - ((c.avg_e2e_latency_ms - c.e2e_p50) / (c.e2e_p90 - c.e2e_p50))
+						))
+				) AS e2e_score_raw,
+				if(c.avg_output_fps IS NULL OR c.fps_benchmark_row_count < 48, 0.5,
+					if(c.fps_p50 <= c.fps_p10,
+						if(c.avg_output_fps >= c.fps_p50, 1., 0.),
+						multiIf(
+							c.avg_output_fps >= c.fps_p50, 1.,
+							c.avg_output_fps <= c.fps_p10, 0.,
+							(c.avg_output_fps - c.fps_p10) / (c.fps_p50 - c.fps_p10)
+						))
+				) AS fps_score_raw
+			FROM cohort c
+		),
+		-- Component scores with sample-count dampening.
+		component_scores AS (
+			SELECT
+				r.*,
+				if(r.requested_sessions > 0,
+					least(greatest(
+						(0.4 * r.startup_success_rate) + (0.2 * r.no_swap_rate) + (0.4 * r.output_viability_rate),
+						0.), 1.),
+					CAST(NULL, 'Nullable(Float64)')) AS reliability_score,
+				least(greatest(0.5 + (least(r.prompt_to_first_frame_sample_count / 10., 1.) * (r.ptff_score_raw - 0.5)), 0.), 1.) AS ptff_score,
+				least(greatest(0.5 + (least(r.e2e_latency_sample_count / 10., 1.) * (r.e2e_score_raw - 0.5)), 0.), 1.)             AS e2e_score,
+				least(greatest(0.5 + (least(r.status_samples / 30., 1.) * (r.fps_score_raw - 0.5)), 0.), 1.)                       AS fps_score
+			FROM raw_scores r
 		)
 		SELECT
-			s.window_start, s.org, s.orchestrator_address, s.pipeline_id, s.model_id, s.gpu_id, s.gpu_model_name, cast(null as Nullable(String)),
-			s.known_sessions_count, s.requested_sessions, s.startup_success_sessions, s.no_orch_sessions,
-			s.startup_excused_sessions, s.startup_failed_sessions, s.loading_only_sessions, s.zero_output_fps_sessions,
-			s.output_failed_sessions, s.effective_failed_sessions, s.confirmed_swapped_sessions, s.inferred_swap_sessions,
-			s.total_swapped_sessions, s.sessions_ending_in_error, s.error_status_samples, s.health_signal_count,
-			s.health_expected_signal_count, s.health_signal_coverage_ratio, s.startup_success_rate, s.excused_failure_rate,
-			s.effective_success_rate, s.no_swap_rate, s.output_viability_rate, s.output_fps_sum, s.status_samples,
-			s.avg_output_fps, s.prompt_to_first_frame_sum_ms, s.prompt_to_first_frame_sample_count,
-			s.avg_prompt_to_first_frame_ms, s.e2e_latency_sum_ms, s.e2e_latency_sample_count, s.avg_e2e_latency_ms,
-			s.reliability_score, s.ptff_score, s.e2e_score, s.latency_score, s.fps_score, s.quality_score,
-			s.sla_semantics_version, s.sla_score, ?, ?, ?
-		FROM naap.api_base_sla_compliance_scored_by_org s
-		INNER JOIN owned_windows w
-			ON s.window_start = w.window_start
+			s.window_start,
+			s.org,
+			s.orchestrator_address,
+			s.pipeline_id,
+			s.model_id,
+			s.gpu_id,
+			s.gpu_model_name,
+			CAST(NULL, 'Nullable(String)') AS region,
+			s.known_sessions_count,
+			s.requested_sessions,
+			s.startup_success_sessions,
+			s.no_orch_sessions,
+			s.startup_excused_sessions,
+			s.startup_failed_sessions,
+			s.loading_only_sessions,
+			s.zero_output_fps_sessions,
+			s.output_failed_sessions,
+			s.effective_failed_sessions,
+			s.confirmed_swapped_sessions,
+			s.inferred_swap_sessions,
+			s.total_swapped_sessions,
+			s.sessions_ending_in_error,
+			s.error_status_samples,
+			s.health_signal_count,
+			s.health_expected_signal_count,
+			s.health_signal_coverage_ratio,
+			s.startup_success_rate,
+			s.excused_failure_rate,
+			s.effective_success_rate,
+			s.no_swap_rate,
+			s.output_viability_rate,
+			s.output_fps_sum,
+			s.status_samples,
+			s.avg_output_fps,
+			s.prompt_to_first_frame_sum_ms,
+			s.prompt_to_first_frame_sample_count,
+			s.avg_prompt_to_first_frame_ms,
+			s.e2e_latency_sum_ms,
+			s.e2e_latency_sample_count,
+			s.avg_e2e_latency_ms,
+			s.reliability_score,
+			s.ptff_score,
+			s.e2e_score,
+			least(greatest((0.6 * s.ptff_score) + (0.4 * s.e2e_score), 0.), 1.) AS latency_score,
+			s.fps_score,
+			least(greatest((0.6 * ((0.6 * s.ptff_score) + (0.4 * s.e2e_score))) + (0.4 * s.fps_score), 0.), 1.) AS quality_score,
+			'quality-benchmark-v1' AS sla_semantics_version,
+			if(s.requested_sessions > 0,
+				least(greatest(
+					(100. * s.health_signal_coverage_ratio) *
+					((0.7 * s.reliability_score) + (0.3 * least(greatest(
+						(0.6 * ((0.6 * s.ptff_score) + (0.4 * s.e2e_score))) + (0.4 * s.fps_score),
+						0.), 1.))),
+					0.), 100.),
+				CAST(NULL, 'Nullable(Float64)')) AS sla_score,
+			?, ?, ?
+		FROM component_scores s
 	`, queryID, runID, r.cfg.ResolverVersion, now)
 }
 

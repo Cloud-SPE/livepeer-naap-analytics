@@ -64,6 +64,8 @@ var tablesByLayer = map[Layer][]string{
 		"canonical_selection_events",
 		"canonical_session_current_store",
 		"canonical_session_demand_input_current",
+		// Phase 2: resolver pre-computes daily SLA benchmark cohort here.
+		"canonical_sla_benchmark_daily_store",
 		"canonical_status_hours_store",
 		"canonical_status_samples_recent_store",
 		"canonical_streaming_demand_hourly_store",
