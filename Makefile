@@ -1,4 +1,4 @@
-.PHONY: up up-tooling down build test test-integration bench load-test lint dev-api setup fmt ch-smoke ch-query push push-api push-clickhouse push-dbt push-resolver push-mcp warehouse-run warehouse-test warehouse-compile test-validation test-validation-host test-validation-docker test-validation-clean measure-baseline measure-refactor-replay migrate-status migrate-validate migrate-up bootstrap-extract resolver-logs resolver-auto resolver-bootstrap resolver-tail resolver-backfill resolver-repair-window parity-verify replay replay-build replay-fetch-fixture replay-fetch-fixture-force replay-verify replay-verify-full
+.PHONY: up up-tooling down build test test-integration bench load-test lint dev-api setup fmt ch-smoke ch-query push push-api push-clickhouse push-dbt push-resolver push-mcp warehouse-run warehouse-test warehouse-compile test-validation test-validation-host test-validation-docker test-validation-clean measure-baseline measure-refactor-replay migrate-status migrate-validate migrate-up bootstrap-extract resolver-logs resolver-auto resolver-bootstrap resolver-tail resolver-backfill resolver-repair-window parity-verify replay replay-build replay-fetch-fixture replay-fetch-fixture-force replay-verify replay-verify-full lint-medallion lint-core-logic lint-grafana lint-grafana-build lint-dbt-layer-discipline lint-dbt-additive-primitives
 
 REGISTRY  ?= tztcloud
 IMAGE_TAG ?= latest
@@ -253,6 +253,31 @@ replay-verify: replay-build
 	    --output target/replay \
 	    --skip-load \
 	    --compare-to target/replay/first.json
+
+# ── Medallion lints (serving-layer-v2 Phase 0) ─────────────────────────────
+# Four machine-checked rules from docs/design-docs/api-table-contract.md.
+# Each lint supports an allowlist so known-scheduled violations don't
+# block CI; the allowlist entries disappear as the plan's phases land.
+
+lint-medallion: lint-core-logic lint-grafana lint-dbt-layer-discipline lint-dbt-additive-primitives
+	@echo "lint-medallion: all four rules clean"
+
+lint-core-logic:
+	@bash scripts/core-logic-lint.sh
+
+lint-grafana-build:
+	cd api && go build -o ../bin/grafana-lint ./cmd/grafana-lint
+
+lint-grafana: lint-grafana-build
+	./bin/grafana-lint
+
+# dbt tests run against the live warehouse container. The compose
+# service has its own ClickHouse connection (uses CLICKHOUSE_ADMIN_*).
+lint-dbt-layer-discipline:
+	docker compose --profile tooling run --rm warehouse test --select test_layer_discipline
+
+lint-dbt-additive-primitives:
+	docker compose --profile tooling run --rm warehouse test --select test_api_hourly_additive_primitives
 
 replay-verify-full: replay-build
 	./bin/replay \
