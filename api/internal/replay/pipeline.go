@@ -38,6 +38,15 @@ type Config struct {
 	// resolver. Checksum phase still runs. Dev-only; CI always rebuilds.
 	SkipResolver bool
 
+	// SkipDBT bypasses the api-layer view refresh. The checksum phase
+	// still runs against whatever view definitions already exist in
+	// ClickHouse. Dev-only; CI always rebuilds.
+	SkipDBT bool
+
+	// DBT configures the docker-compose-based dbt invocation the api
+	// phase issues. Only read when the layers list includes LayerAPI.
+	DBT DBTConfig
+
 	// PauseIngestion tells the harness to DETACH the ingest MVs before
 	// doing any work and re-ATTACH them at the end, so live Kafka traffic
 	// cannot contaminate the fixture state during the run. Default true;
@@ -121,6 +130,19 @@ func Run(ctx context.Context, conn ch.Conn, cfg Config) (*Report, error) {
 	if !cfg.SkipResolver && contains(layers, LayerCanonical) {
 		if err := runCanonicalPhase(ctx, conn, cfg, manifest); err != nil {
 			return report, fmt.Errorf("canonical phase: %w", err)
+		}
+	}
+
+	// API layer refreshes view definitions via dbt before checksumming.
+	// Views are views, so this does not move data — it catches model
+	// changes on the branch that have not yet been dbt-run into CH.
+	if !cfg.SkipDBT && contains(layers, LayerAPI) {
+		log := cfg.Logger
+		if log == nil {
+			log = zap.NewNop()
+		}
+		if err := RunDBT(ctx, log, cfg.DBT); err != nil {
+			return report, fmt.Errorf("api phase: %w", err)
 		}
 	}
 

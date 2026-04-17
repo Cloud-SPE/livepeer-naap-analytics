@@ -71,14 +71,21 @@ func Checksum(ctx context.Context, conn ch.Conn, database, table string) (TableR
 }
 
 // rollupColumns returns the ordered column list used to build the row tuple.
-// We exclude DEFAULT `now64()` columns like `ingested_at` on accepted_raw_events
-// because they are populated by the server at insert time and would make the
-// checksum dependent on wall clock. The harness re-injects known-good values
-// for these columns during fixture load so the upstream content is still
-// captured deterministically.
+//
+//   - ALIAS / MATERIALIZED columns are excluded because they are computed at
+//     read time from other columns and would be redundant in the fingerprint.
+//   - AggregateFunction state columns (emitted by some api_base_* views that
+//     feed cohort benchmarks) are excluded because sipHash64 cannot hash the
+//     opaque binary state; any change to a state column still propagates
+//     into the fingerprint through the scalar column that materialises the
+//     state at query time (e.g. `avg_prompt_to_first_frame_ms` alongside
+//     `ptff_p90_state`).
+//
+// Every remaining column is wrapped in `ifNull(toString(col), '\x00NULL')`
+// in joinColumns so NULL hashes deterministically and distinctly.
 func rollupColumns(ctx context.Context, conn ch.Conn, database, table string) ([]string, error) {
 	q := `
-        SELECT name
+        SELECT name, type
         FROM system.columns
         WHERE database = ? AND table = ?
           AND default_kind != 'ALIAS'
@@ -92,13 +99,35 @@ func rollupColumns(ctx context.Context, conn ch.Conn, database, table string) ([
 	defer rows.Close()
 	var out []string
 	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
+		var name, typ string
+		if err := rows.Scan(&name, &typ); err != nil {
 			return nil, err
+		}
+		if isAggregateFunctionType(typ) {
+			continue
 		}
 		out = append(out, name)
 	}
 	return out, rows.Err()
+}
+
+// isAggregateFunctionType reports whether a ClickHouse type is an
+// AggregateFunction / SimpleAggregateFunction state. Matches both the bare
+// form and Nullable(...) / Array(...) wrappers.
+func isAggregateFunctionType(typ string) bool {
+	return containsSubstring(typ, "AggregateFunction")
+}
+
+func containsSubstring(s, sub string) bool {
+	if len(sub) == 0 {
+		return true
+	}
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
 }
 
 func tableEngine(ctx context.Context, conn ch.Conn, database, table string) (string, error) {

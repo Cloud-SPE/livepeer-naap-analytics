@@ -20,10 +20,19 @@ checksums every `normalized_*` table.
 row-level timestamp the resolver writes (refreshed_at, materialized_at,
 decision_id-embedded nonce) is deterministic.
 
-**PR 3 (current):** canonical layer. When `--layers` includes `canonical`
-the harness also truncates `resolver_*` bookkeeping + `canonical_*_store`,
+**PR 3:** canonical layer. When `--layers` includes `canonical` the
+harness also truncates `resolver_*` bookkeeping + `canonical_*_store`,
 invokes the resolver in-process with `RunRequest.Mode = ModeBackfill` and
 a pinned Now, and checksums the 17 canonical tables the resolver writes.
+
+**PR 4 (current):** API layer. When `--layers` includes `api` the
+harness invokes `dbt run --select api api_base` via the compose-based
+`warehouse` service (view refresh; a no-op for row content but catches
+schema-drift vs. the branch's view definitions), then checksums all 22
+api/api_base view outputs. AggregateFunction columns (cohort-state
+percentile sketches on `api_base_sla_quality_cohort_daily_state`) are
+excluded from the tuple since sipHash64 cannot hash the opaque binary
+state; scalar sibling columns preserve the signal.
 
 ### Why HTTP, not the native protocol
 
@@ -36,10 +45,10 @@ timeout fires long before a large batch finishes. One streaming HTTP
 POST keeps the whole pipeline on the server side, back-pressure and
 all. Expect CH to peg 1–3 cores and hold ~5 GB RSS during a full load.
 
-**Later PRs:** api layer (run `dbt build --select tag:api` and checksum
-`api_*`), smaller dev fixtures for fast iteration (see performance note
-below), a `--skip-resolver` twin for the fast determinism gate, and the
-CI workflow wiring.
+**Later PRs:** smaller dev fixtures for fast iteration (see performance
+note below), lint scripts (`assert_layer_discipline`, `grafana-lint`,
+core-logic recalc grep), dbt store-table ownership move (Phase 0
+closeout), and CI workflow wiring.
 
 ## Repository layout
 
@@ -90,6 +99,50 @@ defers. If you force-kill a replay run, reattach manually:
 ```bash
 for mv in mv_ingest_network_events_accepted mv_ingest_network_events_ignored \
          mv_ingest_streaming_events_accepted mv_ingest_streaming_events_ignored; do
+  curl -sS -u "naap_admin:${CLICKHOUSE_ADMIN_PASSWORD}" \
+    --data-binary "ATTACH TABLE IF NOT EXISTS naap.${mv}" \
+    "http://localhost:8123/"
+done
+```
+
+### API-phase caveats
+
+The harness runs `dbt run --select api api_base` via
+`docker compose --profile tooling run --rm warehouse ...`. This requires
+the `warehouse` service image to be built (`make up` or
+`docker compose --profile tooling up --build -d warehouse`) and
+ClickHouse to be healthy. The `warehouse` service depends on
+ClickHouse's healthcheck, so it waits for readiness automatically.
+
+Determinism of api views depends on the canonical layer being stable.
+Running `--layers api --skip-load --skip-resolver --skip-dbt` twice
+back-to-back **will diverge** on any environment with a live Kafka
+producer, because canonical_capability_* MV chains keep ingesting
+between runs. Two mitigations:
+
+- **Compose stack:** run with `make up` + stop the resolver; ingest
+  MVs are paused automatically during each harness run, but the
+  between-runs gap (while the shell advances from one `./bin/replay`
+  invocation to the next) is not covered.
+- **Ephemeral CI:** no Kafka producer is wired, so there is nothing
+  to drift; `--pause-ingestion=false` is safe and slightly faster.
+
+For bit-identical back-to-back runs on the compose stack, pause ingest
+once manually before the test sequence:
+
+```bash
+for mv in mv_ingest_{network,streaming}_events_{accepted,ignored}; do
+  curl -sS -u "naap_admin:${CLICKHOUSE_ADMIN_PASSWORD}" \
+    --data-binary "DETACH TABLE IF EXISTS naap.${mv} SYNC" \
+    "http://localhost:8123/"
+done
+
+./bin/replay --layers api --skip-load --skip-resolver --pause-ingestion=false ...
+./bin/replay --layers api --skip-load --skip-resolver --pause-ingestion=false \
+    --compare-to target/replay/first.json ...
+
+# re-attach when done
+for mv in mv_ingest_{network,streaming}_events_{accepted,ignored}; do
   curl -sS -u "naap_admin:${CLICKHOUSE_ADMIN_PASSWORD}" \
     --data-binary "ATTACH TABLE IF NOT EXISTS naap.${mv}" \
     "http://localhost:8123/"
@@ -172,7 +225,7 @@ table's rollup drifts, naming the first-divergent layer and table.
 ./bin/replay \
   --fixture tests/fixtures/raw_events_golden.ndjson.zst \
   --manifest tests/fixtures/raw_events_golden.manifest.json \
-  --layers raw,normalized \
+  --layers raw,normalized,canonical,api \
   --output target/replay \
   --compare-to target/replay/first.json
 
@@ -186,12 +239,20 @@ table's rollup drifts, naming the first-divergent layer and table.
 # without paying the 30-60 min resolver cost each time.
 ./bin/replay --skip-resolver ...
 
+# Skip the dbt view refresh (reuse existing api_* view definitions).
+# Useful when iterating on the checksum function or comparing runs
+# without paying the dbt subprocess cost (~5s cold, ~1s warm).
+./bin/replay --skip-dbt ...
+
 # Pin the resolver's Now to a specific instant (defaults to the
 # fixture window_end).
 ./bin/replay --resolver-now 2026-04-16T18:00:00Z ...
 
 # Disable ingest pause on ephemeral CI (no Kafka producer to contaminate).
 ./bin/replay --pause-ingestion=false ...
+
+# Override the dbt selector (defaults to "api api_base").
+./bin/replay --dbt-selector "api_hourly_streaming_sla" ...
 ```
 
 All flags have env-var-friendly defaults (see `--help`).

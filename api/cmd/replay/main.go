@@ -62,6 +62,10 @@ func main() {
 			"skip fixture load; checksum whatever state is already in ClickHouse (dev-only)")
 		skipResolver = flag.Bool("skip-resolver", false,
 			"skip canonical-layer rebuild; checksum existing canonical_* state (dev-only)")
+		skipDBT = flag.Bool("skip-dbt", false,
+			"skip api-layer dbt run; checksum existing api_* views (dev-only)")
+		dbtSelector = flag.String("dbt-selector", "api api_base",
+			"dbt --select expression used during the api phase")
 		pauseIngestion = flag.Bool("pause-ingestion", true,
 			"detach Kafka ingest MVs while the harness runs; turn off on environments with no Kafka producer")
 		resolverNow = flag.String("resolver-now", "",
@@ -123,6 +127,7 @@ func main() {
 		MVFlushTimeout: *mvFlush,
 		SkipLoad:       *skipLoad,
 		SkipResolver:   *skipResolver,
+		SkipDBT:        *skipDBT,
 		PauseIngestion: *pauseIngestion,
 		Loader: replay.LoadConfig{
 			Database: *database,
@@ -137,6 +142,9 @@ func main() {
 			ClickHouseDB:       *database,
 			ClickHouseUser:     *user,
 			ClickHousePassword: *password,
+		},
+		DBT: replay.DBTConfig{
+			Selector: *dbtSelector,
 		},
 		Logger: log,
 	})

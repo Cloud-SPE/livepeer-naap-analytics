@@ -66,9 +66,36 @@ var tablesByLayer = map[Layer][]string{
 		"canonical_streaming_sla_hourly_store",
 		"canonical_streaming_sla_input_hourly_store",
 	},
-	// API layer is populated in a later PR once dbt is wired into the
-	// pipeline.
-	LayerAPI: {},
+	// API layer — the serving contract. Every entry here is a dbt-managed
+	// model under warehouse/models/{api,api_base}/. All are views over
+	// canonical_* state; a deterministic canonical snapshot + deterministic
+	// view definitions => deterministic api rows. The api_base_* tier is
+	// slated for removal in Phase 5 of the plan; the table list will
+	// shrink to just api/ once that lands.
+	LayerAPI: {
+		"api_base_sla_compliance_scored",
+		"api_base_sla_compliance_scored_by_org",
+		"api_base_sla_quality_benchmarks",
+		"api_base_sla_quality_benchmarks_by_org",
+		"api_base_sla_quality_cohort_daily_state",
+		"api_base_sla_quality_inputs",
+		"api_base_sla_quality_inputs_by_org",
+		"api_current_active_stream_state",
+		"api_fact_ai_batch_job",
+		"api_fact_ai_batch_llm_request",
+		"api_fact_byoc_job",
+		"api_hourly_byoc_auth",
+		"api_hourly_request_demand",
+		"api_hourly_streaming_demand",
+		"api_hourly_streaming_gpu_metrics",
+		"api_hourly_streaming_sla",
+		"api_observed_byoc_worker",
+		"api_observed_capability_hardware",
+		"api_observed_capability_offer",
+		"api_observed_capability_pricing",
+		"api_observed_orchestrator",
+		"api_orchestrator_identity",
+	},
 }
 
 // resolverBookkeepingTables lists the resolver_* tables the harness
