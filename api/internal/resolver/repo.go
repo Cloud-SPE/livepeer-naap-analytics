@@ -2610,6 +2610,9 @@ func (r *repo) publishServingRollups(ctx context.Context, runID string, now time
 	if err := r.insertHourlyRequestDemand(ctx, runID, now, queryID); err != nil {
 		return err
 	}
+	if err := r.insertHourlyBYOCAuth(ctx, runID, now, queryID); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -4627,6 +4630,40 @@ func (r *repo) insertHourlyRequestDemand(ctx context.Context, runID string, now 
 			UNION ALL
 			SELECT * FROM byoc
 		)
+	`, queryID, runID, r.cfg.ResolverVersion, now)
+}
+
+// insertHourlyBYOCAuth aggregates normalized_byoc_auth (one row per auth
+// event) into the pre-rolled hourly store the /v1/requests/byoc/auth
+// endpoint reads. Scoped to owned_windows so only the current run's
+// (org, window_start) slices are republished; latest-slice argMax at read
+// time picks the freshest refresh_run_id.
+func (r *repo) insertHourlyBYOCAuth(ctx context.Context, runID string, now time.Time, queryID string) error {
+	return r.conn.Exec(ctx, `
+		INSERT INTO naap.api_hourly_byoc_auth_store
+		(
+			window_start, org, capability_name, total_events, success_count, failure_count,
+			refresh_run_id, artifact_checksum, refreshed_at
+		)
+		WITH owned_windows AS (
+			SELECT DISTINCT org, window_start
+			FROM naap.resolver_query_window_slices
+			WHERE query_id = ?
+		)
+		SELECT
+			toStartOfHour(a.event_ts)       AS window_start,
+			a.org                           AS org,
+			a.capability                    AS capability_name,
+			toUInt64(count())               AS total_events,
+			toUInt64(countIf(a.success = 1)) AS success_count,
+			toUInt64(countIf(a.success = 0)) AS failure_count,
+			?, ?, ?
+		FROM naap.normalized_byoc_auth a
+		INNER JOIN owned_windows w
+			ON  w.org = a.org
+			AND w.window_start = toStartOfHour(a.event_ts)
+		WHERE a.capability != ''
+		GROUP BY window_start, org, capability_name
 	`, queryID, runID, r.cfg.ResolverVersion, now)
 }
 
