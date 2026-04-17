@@ -2292,7 +2292,7 @@ func (r *repo) failRepairRequest(ctx context.Context, requestID, ownerID, errSum
 	return r.insertRepairRequestState(ctx, *current)
 }
 
-func (r *repo) insertSelectionEvents(ctx context.Context, runID string, rows []SelectionEvent) error {
+func (r *repo) insertSelectionEvents(ctx context.Context, runID string, now time.Time, rows []SelectionEvent) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -2309,7 +2309,6 @@ func (r *repo) insertSelectionEvents(ctx context.Context, runID string, rows []S
 	if err != nil {
 		return fmt.Errorf("prepare selection event batch: %w", err)
 	}
-	now := time.Now().UTC()
 	for _, row := range rows {
 		if err := batch.Append(
 			row.ID, row.Org, row.SessionKey, row.Seq, row.SelectionTS.UTC(),
@@ -2325,7 +2324,7 @@ func (r *repo) insertSelectionEvents(ctx context.Context, runID string, rows []S
 	return batch.Send()
 }
 
-func (r *repo) insertCapabilityVersions(ctx context.Context, runID string, rows []CapabilityVersion) error {
+func (r *repo) insertCapabilityVersions(ctx context.Context, runID string, now time.Time, rows []CapabilityVersion) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -2340,7 +2339,6 @@ func (r *repo) insertCapabilityVersions(ctx context.Context, runID string, rows 
 	if err != nil {
 		return fmt.Errorf("prepare capability version batch: %w", err)
 	}
-	now := time.Now().UTC()
 	for _, row := range rows {
 		if err := batch.Append(
 			row.ID, row.Org, row.OrchAddress, nullableStringValue(row.OrchURI), row.OrchURINorm, nullableStringValue(row.LocalAddress),
@@ -2353,7 +2351,7 @@ func (r *repo) insertCapabilityVersions(ctx context.Context, runID string, rows 
 	return batch.Send()
 }
 
-func (r *repo) insertCapabilityIntervals(ctx context.Context, runID string, rows []CapabilityInterval) error {
+func (r *repo) insertCapabilityIntervals(ctx context.Context, runID string, now time.Time, rows []CapabilityInterval) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -2369,7 +2367,6 @@ func (r *repo) insertCapabilityIntervals(ctx context.Context, runID string, rows
 	if err != nil {
 		return fmt.Errorf("prepare capability interval batch: %w", err)
 	}
-	now := time.Now().UTC()
 	for _, row := range rows {
 		if err := batch.Append(
 			row.VersionID, row.Org, row.OrchAddress, nullableStringValue(row.OrchURI), row.OrchURINorm, row.ValidFromTS.UTC(),
@@ -2383,7 +2380,7 @@ func (r *repo) insertCapabilityIntervals(ctx context.Context, runID string, rows
 	return batch.Send()
 }
 
-func (r *repo) insertDecisionRows(ctx context.Context, runID string, rows []SelectionDecision) error {
+func (r *repo) insertDecisionRows(ctx context.Context, runID string, now time.Time, rows []SelectionDecision) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -2413,8 +2410,10 @@ func (r *repo) insertDecisionRows(ctx context.Context, runID string, rows []Sele
 	if err != nil {
 		return fmt.Errorf("prepare current decision batch: %w", err)
 	}
-	now := time.Now().UTC()
 	for _, row := range rows {
+		// decision_id is deliberately derived from `now` so re-running the
+		// same RunRequest (same Now) produces identical decision_ids — this
+		// is the invariant the determinism harness asserts.
 		decisionID := stableHash(row.SelectionEventID, row.Status, row.Reason, row.Method, row.InputHash, now.Format(time.RFC3339Nano))
 		if err := decisions.Append(
 			decisionID, row.SelectionEventID, row.Org, row.SessionKey, row.SelectionTS.UTC(),
@@ -2446,7 +2445,7 @@ func (r *repo) insertDecisionRows(ctx context.Context, runID string, rows []Sele
 	return nil
 }
 
-func (r *repo) insertSessionCurrentRows(ctx context.Context, runID string, rows []SessionCurrentRow) error {
+func (r *repo) insertSessionCurrentRows(ctx context.Context, runID string, now time.Time, rows []SessionCurrentRow) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -2469,7 +2468,6 @@ func (r *repo) insertSessionCurrentRows(ctx context.Context, runID string, rows 
 	if err != nil {
 		return fmt.Errorf("prepare session current batch: %w", err)
 	}
-	now := time.Now().UTC()
 	for _, row := range rows {
 		if err := store.Append(
 			row.SessionKey, row.Org, row.StreamID, row.RequestID, nullableStringValue(row.CurrentSelectionEventID),
@@ -2493,7 +2491,7 @@ func (r *repo) insertSessionCurrentRows(ctx context.Context, runID string, rows 
 	return nil
 }
 
-func (r *repo) insertStatusHourRows(ctx context.Context, runID string, rows []StatusHourRow) error {
+func (r *repo) insertStatusHourRows(ctx context.Context, runID string, now time.Time, rows []StatusHourRow) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -2512,7 +2510,6 @@ func (r *repo) insertStatusHourRows(ctx context.Context, runID string, rows []St
 	if err != nil {
 		return fmt.Errorf("prepare status hour batch: %w", err)
 	}
-	now := time.Now().UTC()
 	for _, row := range rows {
 		if err := store.Append(
 			row.SessionKey, row.Org, row.Hour.UTC(), row.StreamID, row.RequestID, row.CanonicalPipeline,
@@ -2533,7 +2530,7 @@ func (r *repo) insertStatusHourRows(ctx context.Context, runID string, rows []St
 	return nil
 }
 
-func (r *repo) insertSessionDemandInputRows(ctx context.Context, runID string, rows []SessionCurrentRow) error {
+func (r *repo) insertSessionDemandInputRows(ctx context.Context, runID string, now time.Time, rows []SessionCurrentRow) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -2550,7 +2547,6 @@ func (r *repo) insertSessionDemandInputRows(ctx context.Context, runID string, r
 	if err != nil {
 		return fmt.Errorf("prepare session demand input batch: %w", err)
 	}
-	now := time.Now().UTC()
 	for _, row := range rows {
 		windowStart := row.LastSeen.UTC().Truncate(time.Hour)
 		if row.StartedAt != nil {
@@ -2576,7 +2572,7 @@ func (r *repo) insertSessionDemandInputRows(ctx context.Context, runID string, r
 	return batch.Send()
 }
 
-func (r *repo) publishServingRollups(ctx context.Context, runID string, slices []windowSliceRef) error {
+func (r *repo) publishServingRollups(ctx context.Context, runID string, now time.Time, slices []windowSliceRef) error {
 	if len(slices) == 0 {
 		return nil
 	}
@@ -2584,31 +2580,31 @@ func (r *repo) publishServingRollups(ctx context.Context, runID string, slices [
 	if err != nil {
 		return fmt.Errorf("stage window slices: %w", err)
 	}
-	if err := r.insertCanonicalStatusSamples(ctx, runID, queryID); err != nil {
+	if err := r.insertCanonicalStatusSamples(ctx, runID, now, queryID); err != nil {
 		return err
 	}
-	if err := r.insertCanonicalActiveStreamState(ctx, runID, queryID); err != nil {
+	if err := r.insertCanonicalActiveStreamState(ctx, runID, now, queryID); err != nil {
 		return err
 	}
-	if err := r.insertPaymentLinkRows(ctx, runID, queryID); err != nil {
+	if err := r.insertPaymentLinkRows(ctx, runID, now, queryID); err != nil {
 		return err
 	}
-	if err := r.insertNetworkDemandRollups(ctx, runID, queryID); err != nil {
+	if err := r.insertNetworkDemandRollups(ctx, runID, now, queryID); err != nil {
 		return err
 	}
-	if err := r.insertSLAComplianceRollups(ctx, runID, queryID); err != nil {
+	if err := r.insertSLAComplianceRollups(ctx, runID, now, queryID); err != nil {
 		return err
 	}
-	if err := r.insertFinalSLAComplianceRollups(ctx, runID, queryID); err != nil {
+	if err := r.insertFinalSLAComplianceRollups(ctx, runID, now, queryID); err != nil {
 		return err
 	}
-	if err := r.insertGPUMetricsRollups(ctx, runID, queryID); err != nil {
+	if err := r.insertGPUMetricsRollups(ctx, runID, now, queryID); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (r *repo) insertCanonicalStatusSamples(ctx context.Context, runID, queryID string) error {
+func (r *repo) insertCanonicalStatusSamples(ctx context.Context, runID string, now time.Time, queryID string) error {
 	return r.conn.Exec(ctx, `
 		INSERT INTO naap.canonical_status_samples_recent_store
 		(
@@ -2655,14 +2651,14 @@ func (r *repo) insertCanonicalStatusSamples(ctx context.Context, runID, queryID 
 			if(fs.attribution_status = 'resolved', toUInt8(1), toUInt8(0)) AS is_attributed,
 			?,
 			?,
-			now64()
+			?
 		FROM status_events s
 		LEFT JOIN naap.canonical_session_current fs
 			ON fs.canonical_session_key = s.canonical_session_key
-	`, queryID, runID, r.cfg.ResolverVersion)
+	`, queryID, runID, r.cfg.ResolverVersion, now)
 }
 
-func (r *repo) insertCanonicalActiveStreamState(ctx context.Context, runID, queryID string) error {
+func (r *repo) insertCanonicalActiveStreamState(ctx context.Context, runID string, now time.Time, queryID string) error {
 	return r.conn.Exec(ctx, `
 		INSERT INTO naap.canonical_active_stream_state_latest_store
 		(
@@ -2738,11 +2734,11 @@ func (r *repo) insertCanonicalActiveStreamState(ctx context.Context, runID, quer
 			completed,
 			?,
 			?,
-			now64()
+			?
 		FROM status_enriched
 		ORDER BY canonical_session_key, sample_ts DESC, event_id DESC
 		LIMIT 1 BY canonical_session_key
-	`, queryID, runID, r.cfg.ResolverVersion)
+	`, queryID, runID, r.cfg.ResolverVersion, now)
 }
 
 // insertPaymentLinkRows writes one row per payment event into
@@ -2752,7 +2748,7 @@ func (r *repo) insertCanonicalActiveStreamState(ctx context.Context, runID, quer
 // LEFT JOINs canonical_session_current_store for the request_id → session link.
 // ReplacingMergeTree(refreshed_at) on the store means re-runs overwrite stale
 // rows, so re-linking as sessions resolve is free.
-func (r *repo) insertPaymentLinkRows(ctx context.Context, runID, queryID string) error {
+func (r *repo) insertPaymentLinkRows(ctx context.Context, runID string, now time.Time, queryID string) error {
 	return r.conn.Exec(ctx, `
 		INSERT INTO naap.canonical_payment_links_store
 		(
@@ -2788,7 +2784,7 @@ func (r *repo) insertPaymentLinkRows(ctx context.Context, runID, queryID string)
 			if(isNotNull(canonical_session_key), 'resolved', 'unresolved')                                 AS link_status,
 			?,
 			?,
-			now64()
+			?
 		FROM naap.accepted_raw_events p
 		INNER JOIN naap.resolver_query_window_slices w
 			ON  w.query_id = ?
@@ -2800,10 +2796,10 @@ func (r *repo) insertPaymentLinkRows(ctx context.Context, runID, queryID string)
 			AND JSONExtractString(p.data, 'requestID') != ''
 		WHERE p.event_type = 'create_new_payment'
 		  AND p.event_id   != ''
-	`, runID, r.cfg.ResolverVersion, queryID)
+	`, runID, r.cfg.ResolverVersion, now, queryID)
 }
 
-func (r *repo) insertNetworkDemandRollups(ctx context.Context, runID, queryID string) error {
+func (r *repo) insertNetworkDemandRollups(ctx context.Context, runID string, now time.Time, queryID string) error {
 	return r.conn.Exec(ctx, `
 		INSERT INTO naap.canonical_streaming_demand_hourly_store
 		(
@@ -3029,13 +3025,13 @@ func (r *repo) insertNetworkDemandRollups(ctx context.Context, runID, queryID st
 			sum(ticket_face_value_eth) AS ticket_face_value_eth,
 			?,
 			?,
-			now64()
+			?
 		FROM session_union
 		GROUP BY window_start, org, gateway, region, pipeline_id, model_id
-	`, queryID, queryID, runID, r.cfg.ResolverVersion)
+	`, queryID, queryID, runID, r.cfg.ResolverVersion, now)
 }
 
-func (r *repo) insertSLAComplianceRollups(ctx context.Context, runID, queryID string) error {
+func (r *repo) insertSLAComplianceRollups(ctx context.Context, runID string, now time.Time, queryID string) error {
 	// This canonical store remains the source of truth for additive
 	// SLA facts. Final scored serving rows are published immediately afterward
 	// from the api_base_* helper relations so the API never scores on the hot path.
@@ -3218,7 +3214,7 @@ func (r *repo) insertSLAComplianceRollups(ctx context.Context, runID, queryID st
 			toUInt64(sum(b.e2e_latency_sample_count)) AS e2e_latency_sample_count,
 			?,
 			?,
-			now64()
+			?
 		FROM base b
 		LEFT JOIN inventory i
 			ON b.attribution_snapshot_row_id = i.attribution_snapshot_row_id
@@ -3234,10 +3230,10 @@ func (r *repo) insertSLAComplianceRollups(ctx context.Context, runID, queryID st
 			b.pipeline_id,
 			b.model_id,
 			b.session_gpu_id
-	`, queryID, queryID, runID, r.cfg.ResolverVersion)
+	`, queryID, queryID, runID, r.cfg.ResolverVersion, now)
 }
 
-func (r *repo) insertFinalSLAComplianceRollups(ctx context.Context, runID, queryID string) error {
+func (r *repo) insertFinalSLAComplianceRollups(ctx context.Context, runID string, now time.Time, queryID string) error {
 	return r.conn.Exec(ctx, `
 		INSERT INTO naap.canonical_streaming_sla_hourly_store
 		(
@@ -3269,14 +3265,14 @@ func (r *repo) insertFinalSLAComplianceRollups(ctx context.Context, runID, query
 			s.avg_output_fps, s.prompt_to_first_frame_sum_ms, s.prompt_to_first_frame_sample_count,
 			s.avg_prompt_to_first_frame_ms, s.e2e_latency_sum_ms, s.e2e_latency_sample_count, s.avg_e2e_latency_ms,
 			s.reliability_score, s.ptff_score, s.e2e_score, s.latency_score, s.fps_score, s.quality_score,
-			s.sla_semantics_version, s.sla_score, ?, ?, now64()
+			s.sla_semantics_version, s.sla_score, ?, ?, ?
 		FROM naap.api_base_sla_compliance_scored_by_org s
 		INNER JOIN owned_windows w
 			ON s.window_start = w.window_start
-	`, queryID, runID, r.cfg.ResolverVersion)
+	`, queryID, runID, r.cfg.ResolverVersion, now)
 }
 
-func (r *repo) insertGPUMetricsRollups(ctx context.Context, runID, queryID string) error {
+func (r *repo) insertGPUMetricsRollups(ctx context.Context, runID string, now time.Time, queryID string) error {
 	return r.conn.Exec(ctx, `
 		INSERT INTO naap.canonical_streaming_gpu_metrics_hourly_store
 		(
@@ -3439,7 +3435,7 @@ func (r *repo) insertGPUMetricsRollups(ctx context.Context, runID, queryID strin
 			ifNull(toFloat64(countIf(b.requested_seen = 1 AND b.swap_count > 0)) / nullIf(toFloat64(countIf(b.requested_seen = 1)), 0.0), 0.0) AS swap_rate,
 			?,
 			?,
-			now64()
+			?
 		FROM base b
 		LEFT JOIN inventory i
 			ON b.attribution_snapshot_row_id = i.attribution_snapshot_row_id
@@ -3460,7 +3456,7 @@ func (r *repo) insertGPUMetricsRollups(ctx context.Context, runID, queryID strin
 			i.gpu_memory_bytes_total,
 			i.runner_version,
 			i.cuda_version
-	`, queryID, queryID, runID, r.cfg.ResolverVersion)
+	`, queryID, queryID, runID, r.cfg.ResolverVersion, now)
 }
 
 func (r *repo) ownerID() string {
@@ -4124,7 +4120,7 @@ func (r *repo) fetchWorkerLifecycleSnapshots(ctx context.Context, spec WindowSpe
 // relies on that invariant when it projects the latest attributed job row.
 // The ReplacingMergeTree on materialized_at means a later write for the same
 // (org, request_id, completed_at) supersedes the previous one.
-func (r *repo) insertAIBatchJobRows(ctx context.Context, runID string, rows []AIBatchJobRow) error {
+func (r *repo) insertAIBatchJobRows(ctx context.Context, runID string, now time.Time, rows []AIBatchJobRow) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -4146,7 +4142,6 @@ func (r *repo) insertAIBatchJobRows(ctx context.Context, runID string, rows []AI
 	if err != nil {
 		return fmt.Errorf("prepare ai batch job row batch: %w", err)
 	}
-	now := time.Now().UTC()
 	for _, row := range rows {
 		if err := batch.Append(
 			row.RequestID, row.Org, row.Gateway, row.Pipeline, row.ModelID,
@@ -4174,7 +4169,7 @@ func (r *repo) insertAIBatchJobRows(ctx context.Context, runID string, rows []AI
 // `(org, event_id)` for the window being processed. The ReplacingMergeTree on
 // materialized_at means a later write for the same (org, event_id,
 // completed_at) supersedes the previous one.
-func (r *repo) insertBYOCJobRows(ctx context.Context, runID string, rows []BYOCJobRow) error {
+func (r *repo) insertBYOCJobRows(ctx context.Context, runID string, now time.Time, rows []BYOCJobRow) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -4196,7 +4191,6 @@ func (r *repo) insertBYOCJobRows(ctx context.Context, runID string, rows []BYOCJ
 	if err != nil {
 		return fmt.Errorf("prepare byoc job row batch: %w", err)
 	}
-	now := time.Now().UTC()
 	for _, row := range rows {
 		if err := batch.Append(
 			row.EventID, row.Org, row.Gateway, row.Capability, row.CompletedAt.UTC(),

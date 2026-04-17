@@ -28,6 +28,28 @@ type RunRequest struct {
 	End                 *time.Time
 	Step                time.Duration
 	DryRun              bool
+
+	// Now is the frozen wall clock this run uses for every row-level
+	// timestamp it writes (refreshed_at, materialized_at, built_at,
+	// decided_at, rebuilt_at). A zero value falls back to time.Now().UTC()
+	// at execution start, so production daemon usage keeps working
+	// unchanged; the replay harness and determinism tests pin Now so two
+	// runs over the same raw events produce byte-identical canonical state.
+	//
+	// Scheduling clocks (tail intervals, lateness cutoffs, dirty-window
+	// readiness, claim TTLs) deliberately still read the real wall clock
+	// — those control the daemon's behaviour, not the data it writes.
+	Now time.Time
+}
+
+// EffectiveNow returns the frozen Now when set, otherwise the current wall
+// clock. Callers inside the execute path should call this exactly once per
+// run and thread the result to every writer.
+func (r RunRequest) EffectiveNow() time.Time {
+	if r.Now.IsZero() {
+		return time.Now().UTC()
+	}
+	return r.Now.UTC()
 }
 
 type WindowSpec struct {

@@ -895,6 +895,10 @@ func (e *Engine) executeRepairRequest(ctx context.Context, req RunRequest, reque
 func (e *Engine) executeWindow(ctx context.Context, req RunRequest) (stats RunStats, runStatus string, err error) {
 	runStatus = "success"
 	startedAt := time.Now().UTC()
+	// `now` is the frozen row-level clock for every persistent write in this
+	// run. The replay harness and determinism tests set req.Now; production
+	// daemon usage leaves it zero and falls through to wall clock.
+	now := req.EffectiveNow()
 	runID := stableHash(string(req.Mode), req.Org, windowRangeLabel(req.Start, req.End), startedAt.Format(time.RFC3339Nano))
 	errSummary := ""
 	logStage := func(stage string, stageStarted time.Time, fields ...zap.Field) {
@@ -1007,16 +1011,16 @@ func (e *Engine) executeWindow(ctx context.Context, req RunRequest) (stats RunSt
 
 	if req.Mutates() {
 		stageStarted = time.Now()
-		if err := e.repo.insertSelectionEvents(ctx, runID, selectionEvents); err != nil {
+		if err := e.repo.insertSelectionEvents(ctx, runID, now, selectionEvents); err != nil {
 			return stats, runStatus, err
 		}
-		if err := e.repo.insertCapabilityVersions(ctx, runID, versions); err != nil {
+		if err := e.repo.insertCapabilityVersions(ctx, runID, now, versions); err != nil {
 			return stats, runStatus, err
 		}
-		if err := e.repo.insertCapabilityIntervals(ctx, runID, intervals); err != nil {
+		if err := e.repo.insertCapabilityIntervals(ctx, runID, now, intervals); err != nil {
 			return stats, runStatus, err
 		}
-		if err := e.repo.insertDecisionRows(ctx, runID, decisions); err != nil {
+		if err := e.repo.insertDecisionRows(ctx, runID, now, decisions); err != nil {
 			return stats, runStatus, err
 		}
 		logStage("persist_selection_state", stageStarted,
@@ -1070,7 +1074,7 @@ func (e *Engine) executeWindow(ctx context.Context, req RunRequest) (stats RunSt
 	// Non-mutating runs must exercise the full resolver graph and skip only the
 	// final inserts/publication steps.
 	stageStarted = time.Now()
-	aiBatchRows, err := e.executeAIBatchAttribution(ctx, spec, req, runID)
+	aiBatchRows, err := e.executeAIBatchAttribution(ctx, spec, req, runID, now)
 	if err != nil {
 		return stats, runStatus, err
 	}
@@ -1081,7 +1085,7 @@ func (e *Engine) executeWindow(ctx context.Context, req RunRequest) (stats RunSt
 
 	// BYOC attribution phase — independent from AI batch and live V2V.
 	stageStarted = time.Now()
-	byocRows, err := e.executeBYOCAttribution(ctx, spec, req, runID)
+	byocRows, err := e.executeBYOCAttribution(ctx, spec, req, runID, now)
 	if err != nil {
 		return stats, runStatus, err
 	}
@@ -1113,13 +1117,13 @@ func (e *Engine) executeWindow(ctx context.Context, req RunRequest) (stats RunSt
 	)
 
 	stageStarted = time.Now()
-	if err := e.repo.insertSessionCurrentRows(ctx, runID, changedSessionRows); err != nil {
+	if err := e.repo.insertSessionCurrentRows(ctx, runID, now, changedSessionRows); err != nil {
 		return stats, runStatus, err
 	}
-	if err := e.repo.insertStatusHourRows(ctx, runID, changedStatusRows); err != nil {
+	if err := e.repo.insertStatusHourRows(ctx, runID, now, changedStatusRows); err != nil {
 		return stats, runStatus, err
 	}
-	if err := e.repo.insertSessionDemandInputRows(ctx, runID, changedSessionRows); err != nil {
+	if err := e.repo.insertSessionDemandInputRows(ctx, runID, now, changedSessionRows); err != nil {
 		return stats, runStatus, err
 	}
 	logStage("persist_current_rows", stageStarted,
@@ -1129,7 +1133,7 @@ func (e *Engine) executeWindow(ctx context.Context, req RunRequest) (stats RunSt
 
 	stageStarted = time.Now()
 	windowSlices := collectWindowSlices(changedSessionRows, changedStatusRows)
-	if err := e.repo.publishServingRollups(ctx, runID, windowSlices); err != nil {
+	if err := e.repo.publishServingRollups(ctx, runID, now, windowSlices); err != nil {
 		return stats, runStatus, err
 	}
 	e.setTailWatermark(req.End)
@@ -1144,7 +1148,7 @@ func (e *Engine) executeWindow(ctx context.Context, req RunRequest) (stats RunSt
 // It fetches candidates, builds an independent capability snapshot set keyed
 // by orch URI (the only identity available in batch events), resolves
 // attribution decisions, and writes the results to canonical_ai_batch_job_store.
-func (e *Engine) executeAIBatchAttribution(ctx context.Context, spec WindowSpec, req RunRequest, runID string) (int, error) {
+func (e *Engine) executeAIBatchAttribution(ctx context.Context, spec WindowSpec, req RunRequest, runID string, now time.Time) (int, error) {
 	jobs, err := e.repo.fetchAIBatchJobCandidates(ctx, spec)
 	if err != nil {
 		return 0, fmt.Errorf("fetch ai batch job candidates: %w", err)
@@ -1179,7 +1183,7 @@ func (e *Engine) executeAIBatchAttribution(ctx context.Context, spec WindowSpec,
 	if !req.Mutates() {
 		return len(rows), nil
 	}
-	if err := e.repo.insertAIBatchJobRows(ctx, runID, rows); err != nil {
+	if err := e.repo.insertAIBatchJobRows(ctx, runID, now, rows); err != nil {
 		return 0, fmt.Errorf("insert ai batch job rows: %w", err)
 	}
 	return len(rows), nil
@@ -1189,7 +1193,7 @@ func (e *Engine) executeAIBatchAttribution(ctx context.Context, spec WindowSpec,
 // It fetches job candidates, builds an independent capability snapshot set
 // keyed by both orch address and URI, resolves worker lifecycle model data,
 // resolves attribution decisions, and writes results to canonical_byoc_job_store.
-func (e *Engine) executeBYOCAttribution(ctx context.Context, spec WindowSpec, req RunRequest, runID string) (int, error) {
+func (e *Engine) executeBYOCAttribution(ctx context.Context, spec WindowSpec, req RunRequest, runID string, now time.Time) (int, error) {
 	jobs, err := e.repo.fetchBYOCJobCandidates(ctx, spec)
 	if err != nil {
 		return 0, fmt.Errorf("fetch byoc job candidates: %w", err)
@@ -1237,7 +1241,7 @@ func (e *Engine) executeBYOCAttribution(ctx context.Context, spec WindowSpec, re
 	if !req.Mutates() {
 		return len(rows), nil
 	}
-	if err := e.repo.insertBYOCJobRows(ctx, runID, rows); err != nil {
+	if err := e.repo.insertBYOCJobRows(ctx, runID, now, rows); err != nil {
 		return 0, fmt.Errorf("insert byoc job rows: %w", err)
 	}
 	return len(rows), nil
