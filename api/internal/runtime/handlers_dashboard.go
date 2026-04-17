@@ -112,7 +112,7 @@ func (s *Server) handleGetDashboardPipelines(w http.ResponseWriter, r *http.Requ
 
 // handleGetDashboardOrchestrators serves GET /v1/dashboard/orchestrators
 func (s *Server) handleGetDashboardOrchestrators(w http.ResponseWriter, r *http.Request) {
-	hours := parseDashboardWindow(r, 168, 720)
+	hours := parseDashboardWindow(r, 24, 168)
 
 	result, err := s.svc.GetDashboardOrchestrators(r.Context(), hours)
 	if err != nil {

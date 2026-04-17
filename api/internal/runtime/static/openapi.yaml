@@ -102,12 +102,12 @@ paths:
         observed pipelines/models, and GPU count. Capability inventory fields
         reflect orchestrators observed in the selected window rather than an
         authoritative live network state. Sorted by session volume.
-        Default window is 7 days.
+        Default window is 24 hours.
       parameters:
         - name: window
           in: query
-          schema: { type: string, default: "7d" }
-          description: "Time window (e.g. 24h, 7d). Max 30d."
+          schema: { type: string, default: "24h" }
+          description: "Time window (e.g. 1h, 24h, 7d). Max 7d."
       responses:
         "200":
           description: Orchestrator list
