@@ -1,4 +1,4 @@
-.PHONY: up up-tooling down build test test-integration bench load-test lint dev-api setup fmt ch-smoke ch-query push push-api push-clickhouse push-dbt push-resolver push-mcp warehouse-run warehouse-test warehouse-compile test-validation test-validation-host test-validation-docker test-validation-clean measure-baseline measure-refactor-replay migrate-status migrate-validate migrate-up bootstrap-extract resolver-logs resolver-auto resolver-bootstrap resolver-tail resolver-backfill resolver-repair-window parity-verify replay replay-build replay-fetch-fixture replay-fetch-fixture-force replay-verify replay-verify-full lint-medallion lint-core-logic lint-grafana lint-grafana-build lint-dbt-layer-discipline lint-dbt-additive-primitives
+.PHONY: up up-tooling down build test test-integration bench load-test lint dev-api setup fmt ch-smoke ch-query push push-api push-clickhouse push-dbt push-resolver push-mcp warehouse-run warehouse-test warehouse-compile test-validation test-validation-host test-validation-docker test-validation-clean measure-baseline measure-refactor-replay migrate-status migrate-validate migrate-up bootstrap-extract resolver-logs resolver-auto resolver-bootstrap resolver-tail resolver-backfill resolver-repair-window parity-verify replay replay-build replay-fetch-fixture replay-fetch-fixture-force replay-verify replay-verify-full lint-medallion lint-core-logic lint-grafana lint-grafana-build lint-dbt-layer-discipline lint-dbt-additive-primitives replay-fetch-fixture-daily replay-fetch-fixture-daily-force replay-daily replay-verify-canonical
 
 REGISTRY  ?= tztcloud
 IMAGE_TAG ?= latest
@@ -218,6 +218,16 @@ replay-fetch-fixture:
 replay-fetch-fixture-force:
 	@bash scripts/fetch-golden-fixture.sh --force
 
+# 24h dev-iteration fixture. Trims the full-pipeline replay from ~90 min
+# to ~10 min so developers can run the determinism gate while working.
+# Use the golden fixture for the CI determinism gate and phase-exit
+# criteria; the daily is a local-only aide.
+replay-fetch-fixture-daily:
+	@bash scripts/fetch-daily-fixture.sh
+
+replay-fetch-fixture-daily-force:
+	@bash scripts/fetch-daily-fixture.sh --force
+
 replay-build:
 	cd api && go build -o ../bin/replay ./cmd/replay
 
@@ -291,4 +301,33 @@ replay-verify-full: replay-build
 	    --manifest tests/fixtures/raw_events_golden.manifest.json \
 	    --layers raw,normalized \
 	    --output target/replay \
+	    --compare-to target/replay/first.json
+
+# Run the harness over the daily dev fixture. Full 4-layer pipeline
+# (raw → normalized → canonical → api). Typical runtime: ~10 min.
+replay-daily: replay-build
+	./bin/replay \
+	    --fixture tests/fixtures/raw_events_daily.ndjson.zst \
+	    --manifest tests/fixtures/raw_events_daily.manifest.json \
+	    --layers raw,normalized,canonical,api \
+	    --output target/replay
+
+# Four-layer determinism gate against the daily fixture. Use this
+# during Phase 1–8 development; the golden fixture's equivalent
+# (replay-verify-full-canonical, not yet wired) is the CI-gating one.
+replay-verify-canonical: replay-build
+	./bin/replay \
+	    --fixture tests/fixtures/raw_events_daily.ndjson.zst \
+	    --manifest tests/fixtures/raw_events_daily.manifest.json \
+	    --layers raw,normalized,canonical,api \
+	    --output target/replay
+	mv target/replay/latest.json target/replay/first.json
+	./bin/replay \
+	    --fixture tests/fixtures/raw_events_daily.ndjson.zst \
+	    --manifest tests/fixtures/raw_events_daily.manifest.json \
+	    --layers raw,normalized,canonical,api \
+	    --output target/replay \
+	    --skip-load \
+	    --skip-resolver \
+	    --skip-dbt \
 	    --compare-to target/replay/first.json

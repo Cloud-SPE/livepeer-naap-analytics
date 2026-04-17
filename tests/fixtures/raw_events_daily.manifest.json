@@ -1,0 +1,27 @@
+{
+  "name": "raw_events_daily",
+  "window_start": "2026-04-15 18:00:00",
+  "window_end": "2026-04-16 18:00:00",
+  "source": "local",
+  "database": "naap",
+  "row_count": 744351,
+  "ndjson_sha256": "0758b512c70494c80ca96d17f6863845f207bbe8a0bf8383e18f6ca3de92fb63",
+  "archive_sha256": "90bcc2be7c1dacb12230c4ff478cd6c226d33b34d70d25f62848205fcaf35652",
+  "archive_bytes": 71190693,
+  "archive_codec": "zstd-10",
+  "schema_columns": [
+    "event_id",
+    "event_type",
+    "event_subtype",
+    "event_ts",
+    "org",
+    "gateway",
+    "data",
+    "source_topic",
+    "source_partition",
+    "source_offset",
+    "payload_hash",
+    "schema_version",
+    "ingested_at"
+  ]
+}

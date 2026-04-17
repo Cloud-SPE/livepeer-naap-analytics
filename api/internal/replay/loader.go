@@ -86,12 +86,16 @@ func LoadFixture(
 	// the raw INSERT *and* every cascading MV write (16 MVs plus their
 	// AggregatingMergeTree state columns), so it is not directly comparable
 	// to the manifest's raw-only row count.
-	var accepted int64
+	//
+	// clickhouse-go v2 in strict mode rejects converting UInt64 to *int64,
+	// so we scan into uint64 and narrow afterwards.
+	var acceptedU uint64
 	if err := conn.QueryRow(ctx,
 		fmt.Sprintf("SELECT count() FROM %s.accepted_raw_events", lc.Database),
-	).Scan(&accepted); err != nil {
+	).Scan(&acceptedU); err != nil {
 		return 0, fmt.Errorf("validate accepted_raw_events count: %w", err)
 	}
+	accepted := int64(acceptedU)
 	if manifest != nil && manifest.RowCount > 0 {
 		delta := accepted - manifest.RowCount
 		if delta < 0 {

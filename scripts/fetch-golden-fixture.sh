@@ -1,39 +1,51 @@
 #!/usr/bin/env bash
-# Fetch the golden raw-event fixture for the replay harness.
+# Fetch a pinned raw-event fixture for the replay harness.
 #
-# Pulls a pinned 8-day window from a ClickHouse `raw_events` table and writes
-# a deterministic NDJSON archive plus a manifest (row count, checksum, window
+# Pulls a fixed window from a ClickHouse `raw_events` table and writes a
+# deterministic NDJSON archive plus a manifest (row count, checksum, window
 # bounds). The archive is git-ignored; the manifest is committed so CI can
 # verify that a locally-fetched fixture matches the pinned snapshot.
 #
+# Defaults target the 8-day "golden" fixture used by the determinism
+# gate. Override with flags for shorter dev-iteration windows (see
+# scripts/fetch-daily-fixture.sh for the 24h preset).
+#
 # Usage:
 #   scripts/fetch-golden-fixture.sh [--source staging|local] [--force]
+#                                   [--window-start "YYYY-MM-DD HH:MM:SS"]
+#                                   [--window-end   "YYYY-MM-DD HH:MM:SS"]
+#                                   [--fixture-name NAME]
 #
 # Defaults: source=staging. Reads ClickHouse connection from env/.env.
 set -euo pipefail
 
-# Pinned window — changing these values changes the semantic identity of the
-# fixture and requires the manifest to be regenerated in the same commit.
-readonly FIXTURE_WINDOW_START="2026-04-08 18:00:00"
-readonly FIXTURE_WINDOW_END="2026-04-16 18:00:00"
-readonly FIXTURE_NAME="raw_events_golden"
+# Default pinned window — changing these values changes the semantic
+# identity of the fixture and requires the manifest to be regenerated
+# in the same commit.
+FIXTURE_WINDOW_START="2026-04-08 18:00:00"
+FIXTURE_WINDOW_END="2026-04-16 18:00:00"
+FIXTURE_NAME="raw_events_golden"
 
 readonly REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly FIXTURE_DIR="${REPO_ROOT}/tests/fixtures"
-readonly ARCHIVE_PATH="${FIXTURE_DIR}/${FIXTURE_NAME}.ndjson.zst"
-readonly MANIFEST_PATH="${FIXTURE_DIR}/${FIXTURE_NAME}.manifest.json"
 
 SOURCE="staging"
 FORCE="0"
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --source) SOURCE="$2"; shift 2 ;;
-    --force)  FORCE="1"; shift ;;
+    --source)       SOURCE="$2"; shift 2 ;;
+    --force)        FORCE="1"; shift ;;
+    --window-start) FIXTURE_WINDOW_START="$2"; shift 2 ;;
+    --window-end)   FIXTURE_WINDOW_END="$2"; shift 2 ;;
+    --fixture-name) FIXTURE_NAME="$2"; shift 2 ;;
     -h|--help)
-      sed -n '2,13p' "$0"; exit 0 ;;
+      sed -n '2,18p' "$0"; exit 0 ;;
     *) echo "unknown flag: $1" >&2; exit 2 ;;
   esac
 done
+
+ARCHIVE_PATH="${FIXTURE_DIR}/${FIXTURE_NAME}.ndjson.zst"
+MANIFEST_PATH="${FIXTURE_DIR}/${FIXTURE_NAME}.manifest.json"
 
 # Load .env so local runs pick up connection details without export.
 # Using a line-by-line parser instead of `source` because .env contains

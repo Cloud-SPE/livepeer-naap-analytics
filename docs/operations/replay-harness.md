@@ -187,22 +187,35 @@ golden fixture this is an intensive job:
 #   CLICKHOUSE_STAGING_URL=https://<staging-ch-host>
 #   CLICKHOUSE_STAGING_USER=naap_reader
 #   CLICKHOUSE_STAGING_PASSWORD=...
+
+# Golden — 8 days, the CI determinism gate and phase-exit criterion.
 make replay-fetch-fixture
+
+# Daily — 24h, the dev-iteration fixture. Trims a full 4-layer replay
+# from ~90 min to ~6 min. Use it while working; the golden is the
+# "official" one.
+make replay-fetch-fixture-daily
 ```
 
-The fetcher pulls the pinned 8-day window (`2026-04-08 18:00 UTC` to
-`2026-04-16 18:00 UTC`) as NDJSON, compresses it with zstd level 19, and
-writes both the archive and an updated manifest. Re-running is idempotent
-— it exits early unless `--force` is passed:
+Fetchers pull the pinned windows as NDJSON, compress with zstd level
+10 (multithreaded, ~30s on the host), and write both the archive and
+a manifest. Re-running is idempotent — pass `-force` suffix targets
+to regenerate:
 
 ```bash
 make replay-fetch-fixture-force
+make replay-fetch-fixture-daily-force
 ```
+
+| Fixture | Window | Rows | Archive size | Full 4-layer replay |
+|---|---|---|---|---|
+| golden | 8 days | 5.76M | 548 MB | ~90 min |
+| daily  | 24h   | 744k  | 71 MB   | ~6 min |
 
 ### 2. Run the harness
 
 ```bash
-# Full stack (raw + normalized for PR 1):
+# Raw + normalized against the golden 8-day fixture (~12 min):
 make replay
 
 # Fast determinism gate — loads once, re-checksums on the same state,
@@ -214,9 +227,18 @@ make replay-verify
 # anywhere in the full pipeline including INSERT behaviour under MV
 # backpressure. Slower; use in CI and at phase boundaries.
 make replay-verify-full
+
+# Full 4-layer replay against the daily fixture (~6 min). Exercises
+# load + resolver + dbt + checksum across all 56 tables.
+make replay-daily
+
+# 4-layer determinism gate against the daily fixture — loads + rebuilds
+# + checksums, then re-checksums the same state and diffs. Use during
+# Phase 1–8 development.
+make replay-verify-canonical
 ```
 
-Both gate targets fail with a formatted divergence report if any
+All gate targets fail with a formatted divergence report if any
 table's rollup drifts, naming the first-divergent layer and table.
 
 ### 3. Direct CLI
