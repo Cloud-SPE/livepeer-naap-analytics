@@ -168,6 +168,12 @@ func runCanonicalPhase(ctx context.Context, conn ch.Conn, cfg Config, manifest *
 	if err := truncateLayers(ctx, conn, cfg.Database, LayerCanonical); err != nil {
 		return fmt.Errorf("truncate canonical layer: %w", err)
 	}
+	// api_*_store tables live under LayerAPI but the resolver writes them.
+	// Truncate them here so a rerun does not accumulate rows on top of
+	// prior resolver output.
+	if err := truncateResolverWrittenAPIStores(ctx, conn, cfg.Database); err != nil {
+		return fmt.Errorf("truncate resolver-written api stores: %w", err)
+	}
 
 	rc := cfg.Resolver
 	if rc.WindowStart.IsZero() || rc.WindowEnd.IsZero() {
@@ -212,6 +218,16 @@ func runCanonicalPhase(ctx context.Context, conn ch.Conn, cfg Config, manifest *
 
 func truncateResolverBookkeeping(ctx context.Context, conn ch.Conn, database string) error {
 	for _, t := range resolverBookkeepingTables {
+		stmt := fmt.Sprintf("TRUNCATE TABLE IF EXISTS %s.%s", database, t)
+		if err := conn.Exec(ctx, stmt); err != nil {
+			return fmt.Errorf("truncate %s.%s: %w", database, t, err)
+		}
+	}
+	return nil
+}
+
+func truncateResolverWrittenAPIStores(ctx context.Context, conn ch.Conn, database string) error {
+	for _, t := range resolverWrittenApiStores {
 		stmt := fmt.Sprintf("TRUNCATE TABLE IF EXISTS %s.%s", database, t)
 		if err := conn.Exec(ctx, stmt); err != nil {
 			return fmt.Errorf("truncate %s.%s: %w", database, t, err)

@@ -90,7 +90,7 @@ func republishFinalSLAPublicWindow(t *testing.T, h *harness, windowStart time.Ti
 	t.Helper()
 	refreshRunID := fmt.Sprintf("seed-final-public-%d", time.Now().UTC().UnixNano())
 	if err := h.conn.Exec(context.Background(), `
-		INSERT INTO naap.canonical_streaming_sla_hourly_store
+		INSERT INTO naap.api_hourly_streaming_sla_store
 		(
 			window_start, org, orchestrator_address, pipeline_id, model_id, gpu_id, gpu_model_name, region,
 			known_sessions_count, requested_sessions, startup_success_sessions, no_orch_sessions,

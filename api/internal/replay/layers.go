@@ -47,6 +47,11 @@ var tablesByLayer = map[Layer][]string{
 	// content the API layer serves. Every table here has a refreshed_at /
 	// materialized_at column sourced from RunRequest.Now, so a replay with
 	// the same fixture + same Now produces byte-identical rows.
+	//
+	// Phase 1 of serving-layer-v2 moved the SLA scored rollup out of the
+	// canonical layer and into the API layer as
+	// `api_hourly_streaming_sla_store` — it is checksummed under LayerAPI
+	// now, as the physical backing for the api_hourly_streaming_sla view.
 	LayerCanonical: {
 		"canonical_active_stream_state_latest_store",
 		"canonical_ai_batch_job_store",
@@ -63,7 +68,6 @@ var tablesByLayer = map[Layer][]string{
 		"canonical_status_samples_recent_store",
 		"canonical_streaming_demand_hourly_store",
 		"canonical_streaming_gpu_metrics_hourly_store",
-		"canonical_streaming_sla_hourly_store",
 		"canonical_streaming_sla_input_hourly_store",
 	},
 	// API layer — the serving contract. Every entry here is a dbt-managed
@@ -89,6 +93,9 @@ var tablesByLayer = map[Layer][]string{
 		"api_hourly_streaming_demand",
 		"api_hourly_streaming_gpu_metrics",
 		"api_hourly_streaming_sla",
+		// Phase 1: physical backing of api_hourly_streaming_sla. The
+		// view is a thin latest-slice reader; the row data lives here.
+		"api_hourly_streaming_sla_store",
 		"api_observed_byoc_worker",
 		"api_observed_capability_hardware",
 		"api_observed_capability_offer",
@@ -96,6 +103,25 @@ var tablesByLayer = map[Layer][]string{
 		"api_observed_orchestrator",
 		"api_orchestrator_identity",
 	},
+}
+
+// resolverWrittenApiStores lists the api_*_store tables the resolver
+// writes to. These are physical tables whose canonical declaration lives
+// under warehouse/ddl/stores/, but they back an api_* view (via the
+// latest-slice alias pattern) rather than serving as canonical_* rollups.
+//
+// Before each canonical phase the harness must truncate these alongside
+// the canonical_*_store tables — otherwise a prior run's rows would
+// accumulate and break determinism. They are NOT in LayerCanonical (where
+// truncateLayers(LayerCanonical) runs) because they are checksummed as
+// part of LayerAPI; keeping the two concerns separate lets the table
+// categorization reflect the API contract, not the data-authorship story.
+//
+// Phase 1 added api_hourly_streaming_sla_store. Subsequent phases that
+// promote other canonical stores into the api layer will append to this
+// list in lockstep with the rename.
+var resolverWrittenApiStores = []string{
+	"api_hourly_streaming_sla_store",
 }
 
 // resolverBookkeepingTables lists the resolver_* tables the harness

@@ -1,3 +1,20 @@
+-- Phase 1: read pre-scored rows from api_hourly_streaming_sla_store
+-- directly. The resolver writes this table on every refresh run (the
+-- scoring math still flows through api_base_sla_compliance_scored_by_org
+-- at write time), so an API-layer query is now an O(window_start) primary
+-- key lookup plus a latest-slice pick — instead of the 6-scan join graph
+-- and on-demand benchmark cohort calculation the view used to compose.
+--
+-- api_base_* is no longer in this path. Phase 5 retires it entirely once
+-- Phase 2 moves the benchmark cohort build into the resolver too.
+
+{{ config(materialized='view') }}
+
+with latest_slices as (
+    select window_start, argMax(refresh_run_id, refreshed_at) as refresh_run_id
+    from naap.api_hourly_streaming_sla_store
+    group by window_start
+)
 select
     s.window_start,
     s.org,
@@ -46,4 +63,7 @@ select
     s.quality_score,
     s.sla_semantics_version,
     s.sla_score
-from {{ ref('api_base_sla_compliance_scored_by_org') }} s
+from naap.api_hourly_streaming_sla_store as s
+inner join latest_slices as l
+    on  s.window_start = l.window_start
+    and s.refresh_run_id = l.refresh_run_id

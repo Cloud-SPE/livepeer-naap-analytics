@@ -3235,7 +3235,7 @@ func (r *repo) insertSLAComplianceRollups(ctx context.Context, runID string, now
 
 func (r *repo) insertFinalSLAComplianceRollups(ctx context.Context, runID string, now time.Time, queryID string) error {
 	return r.conn.Exec(ctx, `
-		INSERT INTO naap.canonical_streaming_sla_hourly_store
+		INSERT INTO naap.api_hourly_streaming_sla_store
 		(
 			window_start, org, orchestrator_address, pipeline_id, model_id, gpu_id, gpu_model_name, region,
 			known_sessions_count, requested_sessions, startup_success_sessions, no_orch_sessions,
