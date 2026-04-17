@@ -70,33 +70,22 @@ func (r *Repo) GetStreamingModels(ctx context.Context) ([]types.StreamingModel, 
 
 // GetStreamingOrchestrators serves GET /v1/streaming/orchestrators.
 // Orchestrators observed offering live-video-to-video in the last 24 hours.
+//
+// Phase 6.3/6.5 — the 24h window, capability filter, and URI/GPU rollup all
+// live in the resolver-written api_current_orchestrator store. Handler is
+// now a single SELECT with no WHERE timestamps, no GROUP BY, no JOIN.
 func (r *Repo) GetStreamingOrchestrators(ctx context.Context) ([]types.StreamingOrchestrator, error) {
-	end := time.Now().UTC()
-	start := end.Add(-observedInventoryHours * time.Hour)
 	rows, err := r.conn.Query(ctx, `
-		WITH supply AS (
-		    SELECT
-		        orch_address,
-		        ifNull(anyLast(orchestrator_uri), '') AS orchestrator_uri,
-		        arrayDistinct(groupArrayIf(model_id, ifNull(model_id, '') != '')) AS models,
-		        toInt64(countDistinctIf(gpu_id, ifNull(gpu_id, '') != '')) AS gpu_count,
-		        max(last_seen) AS last_seen
-		    FROM naap.api_observed_capability_offer
-		    WHERE last_seen >= ? AND last_seen < ?
-		      AND canonical_pipeline = 'live-video-to-video'
-		      AND capability_family = 'builtin'
-		    GROUP BY orch_address
-		)
 		SELECT
-		    s.orch_address AS address,
-		    s.orchestrator_uri AS uri,
-		    s.models,
-		    s.gpu_count,
-		    s.last_seen
-		FROM supply s
-		WHERE length(s.models) > 0
+		    orch_address   AS address,
+		    orchestrator_uri AS uri,
+		    streaming_models AS models,
+		    toInt64(gpu_count) AS gpu_count,
+		    last_seen
+		FROM naap.api_current_orchestrator
+		WHERE length(streaming_models) > 0
 		ORDER BY gpu_count DESC, address ASC
-	`, start, end)
+	`)
 	if err != nil {
 		return nil, fmt.Errorf("streaming orchestrators: %w", err)
 	}

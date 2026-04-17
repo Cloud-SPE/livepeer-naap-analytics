@@ -95,47 +95,23 @@ func (r *Repo) GetRequestsModels(ctx context.Context) ([]types.RequestsModel, er
 
 // GetRequestsOrchestrators serves GET /v1/requests/orchestrators.
 // Orchestrators observed serving any non-streaming capability in the last 24 hours.
+//
+// Phase 6.3/6.5 — capabilities are already denormalized onto
+// api_current_orchestrator as request_capability_pairs. Handler formats
+// them as "pipeline:model" strings to preserve the public API shape.
 func (r *Repo) GetRequestsOrchestrators(ctx context.Context) ([]types.RequestsOrchestrator, error) {
-	end := time.Now().UTC()
-	start := end.Add(-observedInventoryHours * time.Hour)
 	rows, err := r.conn.Query(ctx, `
-		WITH request_supply AS (
-		    SELECT
-		        orch_address,
-		        orchestrator_uri,
-		        concat(ifNull(canonical_pipeline, capability_name), ':', ifNull(model_id, '')) AS capability,
-		        ifNull(gpu_id, '') AS gpu_id,
-		        last_seen
-		    FROM naap.api_observed_capability_offer
-		    WHERE supports_request = 1
-		      AND capability_family = 'builtin'
-		      AND ifNull(canonical_pipeline, capability_name) != ''
-		      AND ifNull(canonical_pipeline, '') != 'live-video-to-video'
-		      AND ifNull(model_id, '') != ''
-		      AND last_seen >= ? AND last_seen < ?
-		    UNION ALL
-		    SELECT
-		        orch_address,
-		        orchestrator_uri,
-		        concat(capability_name, ':', ifNull(model, '')) AS capability,
-		        '' AS gpu_id,
-		        last_seen
-		    FROM naap.api_observed_byoc_worker
-		    WHERE capability_name != ''
-		      AND ifNull(model, '') != ''
-		      AND last_seen >= ? AND last_seen < ?
-		)
 		SELECT
 		    orch_address AS address,
-		    anyLast(orchestrator_uri) AS uri,
-		    arraySort(arrayDistinct(groupArray(capability))) AS capabilities,
-		    toInt64(countDistinctIf(gpu_id, gpu_id != '')) AS gpu_count,
-		    max(last_seen) AS last_seen
-		FROM request_supply
-		GROUP BY orch_address
-		HAVING length(capabilities) > 0
+		    orchestrator_uri AS uri,
+		    arraySort(arrayMap(p -> concat(tupleElement(p, 1), ':', tupleElement(p, 2)),
+		                       request_capability_pairs)) AS capabilities,
+		    toInt64(gpu_count) AS gpu_count,
+		    last_seen
+		FROM naap.api_current_orchestrator
+		WHERE length(request_capability_pairs) > 0
 		ORDER BY gpu_count DESC, address ASC
-	`, start, end, start, end)
+	`)
 	if err != nil {
 		return nil, fmt.Errorf("requests orchestrators: %w", err)
 	}

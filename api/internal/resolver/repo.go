@@ -2613,6 +2613,14 @@ func (r *repo) publishServingRollups(ctx context.Context, runID string, now time
 	if err := r.insertHourlyBYOCAuth(ctx, runID, now, queryID); err != nil {
 		return err
 	}
+	// Phase 6.3: denormalized current-orchestrator snapshot. Runs once per
+	// resolver backfill (no per-window scoping) because it represents the
+	// "last 24h activity" view that the 3 orchestrator-listing endpoints
+	// read. Must run AFTER insertFinalSLAComplianceRollups so the latest
+	// SLA scores are visible when composed.
+	if err := r.insertCurrentOrchestratorState(ctx, runID, now); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -4631,6 +4639,183 @@ func (r *repo) insertHourlyRequestDemand(ctx context.Context, runID string, now 
 			SELECT * FROM byoc
 		)
 	`, queryID, runID, r.cfg.ResolverVersion, now)
+}
+
+// insertCurrentOrchestratorState composes a denormalized snapshot per
+// (org, orch_address) with identity, capability membership, GPU count,
+// and the latest 24h of SLA/reliability. Three handlers — streaming,
+// requests, and dashboard orchestrator listings — now read this store
+// with a single MergeTree scan each instead of the prior 3–4 query
+// fan-out that rejoined in Go.
+//
+// Runs once per resolver backfill (no owned_windows scoping) because it
+// represents "current activity in the last 24h" anchored to RunRequest.Now.
+//
+// Data sources:
+//   - canonical_capability_offer_inventory (builtin + byoc offers,
+//     hardware_present=1 rows are the primary source of GPU identity)
+//   - canonical_byoc_workers (byoc capability membership for workers
+//     that registered without a matching offer)
+//   - canonical_capability_orchestrator_identity_latest (uri, name, label)
+//   - api_hourly_streaming_sla_store (latest SLA score + windowed
+//     aggregate reliability metrics)
+func (r *repo) insertCurrentOrchestratorState(ctx context.Context, runID string, now time.Time) error {
+	return r.conn.Exec(ctx, `
+		INSERT INTO naap.api_current_orchestrator_store
+		(
+			orch_address, orchestrator_uri, orch_name, orch_label,
+			last_seen, gpu_count,
+			streaming_models, request_capability_pairs, pipelines, pipeline_model_pairs,
+			known_sessions_count, success_sessions, requested_sessions,
+			effective_success_rate, no_swap_rate,
+			latest_sla_score, latest_sla_window_start,
+			refresh_run_id, artifact_checksum, refreshed_at
+		)
+		WITH
+		offers_24h AS (
+			SELECT
+				o.orch_address,
+				o.orchestrator_uri,
+				o.pipeline_id,
+				ifNull(o.model_id, '')        AS model_id_key,
+				ifNull(o.gpu_id, '')          AS gpu_id_key,
+				o.canonical_pipeline,
+				o.capability_family,
+				o.supports_stream,
+				o.supports_request,
+				o.last_seen
+			FROM naap.canonical_capability_offer_inventory o
+			WHERE o.last_seen >= toDateTime(?, 'UTC') - INTERVAL 24 HOUR
+			  AND o.orch_address != ''
+		),
+		offers_rollup AS (
+			SELECT
+				orch_address,
+				anyLast(orchestrator_uri)                                               AS orchestrator_uri,
+				max(last_seen)                                                          AS last_seen,
+				toUInt64(countDistinctIf(concat(orch_address, '|', gpu_id_key), gpu_id_key != '')) AS gpu_count,
+				arrayDistinct(groupArrayIf(model_id_key,
+					capability_family = 'builtin'
+					AND supports_stream = 1
+					AND canonical_pipeline = 'live-video-to-video'
+					AND model_id_key != ''))                                            AS streaming_models,
+				arrayDistinct(groupArrayIf((pipeline_id, model_id_key),
+					pipeline_id != ''
+					AND model_id_key != ''
+					AND (capability_family = 'byoc' OR supports_request = 1)
+					AND ifNull(canonical_pipeline, '') != 'live-video-to-video'))       AS request_capability_pairs,
+				arrayDistinct(groupArrayIf(pipeline_id, pipeline_id != ''))             AS pipelines,
+				arrayDistinct(groupArrayIf((pipeline_id, model_id_key),
+					pipeline_id != '' AND model_id_key != ''))                          AS pipeline_model_pairs
+			FROM offers_24h
+			GROUP BY orch_address
+		),
+		-- BYOC workers that registered without a matching capability offer
+		-- still surface as request capabilities — matches the UNION semantics
+		-- in the pre-6.3 handler queries.
+		byoc_workers_24h AS (
+			SELECT
+				w.orch_address,
+				max(w.event_ts)                                                         AS last_seen,
+				anyLast(w.orch_url_norm)                                                AS orchestrator_uri,
+				arrayDistinct(groupArrayIf((w.capability, ifNull(w.model, '')),
+					w.capability != ''
+					AND ifNull(w.model, '') != ''))                                     AS request_capability_pairs
+			FROM naap.canonical_byoc_workers w
+			WHERE w.event_ts >= toDateTime(?, 'UTC') - INTERVAL 24 HOUR
+			  AND w.orch_address != ''
+			  AND w.capability != ''
+			GROUP BY w.orch_address
+		),
+		combined AS (
+			SELECT
+				o.orch_address                                                          AS orch_address,
+				coalesce(nullIf(o.orchestrator_uri, ''),
+				         ifNull(w.orchestrator_uri, ''))                                AS orchestrator_uri,
+				greatest(o.last_seen, ifNull(w.last_seen, toDateTime64(0, 3, 'UTC')))   AS last_seen,
+				o.gpu_count                                                             AS gpu_count,
+				o.streaming_models                                                      AS streaming_models,
+				arrayDistinct(arrayConcat(
+					o.request_capability_pairs,
+					ifNull(w.request_capability_pairs, CAST([], 'Array(Tuple(String, String))'))
+				))                                                                      AS request_capability_pairs,
+				o.pipelines                                                             AS pipelines,
+				o.pipeline_model_pairs                                                  AS pipeline_model_pairs
+			FROM offers_rollup o
+			LEFT JOIN byoc_workers_24h w
+				ON w.orch_address = o.orch_address
+			UNION ALL
+			SELECT
+				w.orch_address                                                          AS orch_address,
+				w.orchestrator_uri                                                      AS orchestrator_uri,
+				w.last_seen                                                             AS last_seen,
+				toUInt64(0)                                                             AS gpu_count,
+				CAST([] AS Array(String))                                               AS streaming_models,
+				w.request_capability_pairs                                              AS request_capability_pairs,
+				arrayDistinct(arrayMap(p -> tupleElement(p, 1), w.request_capability_pairs)) AS pipelines,
+				w.request_capability_pairs                                              AS pipeline_model_pairs
+			FROM byoc_workers_24h w
+			LEFT ANTI JOIN offers_rollup o
+				ON o.orch_address = w.orch_address
+		),
+		identity AS (
+			SELECT
+				orch_address,
+				ifNull(orchestrator_uri, '') AS orchestrator_uri,
+				coalesce(nullIf(orch_name, ''), orch_address) AS orch_name,
+				ifNull(orch_label, '') AS orch_label
+			FROM naap.canonical_capability_orchestrator_identity_latest
+		),
+		sla_24h AS (
+			SELECT
+				orchestrator_address                                                    AS orch_address,
+				toUInt64(sum(known_sessions_count))                                     AS known_sessions_total,
+				toUInt64(sum(startup_success_sessions))                                 AS success_sessions_total,
+				toUInt64(sum(requested_sessions))                                       AS requested_sessions_total,
+				sum(ifNull(effective_success_rate, 0) * requested_sessions)
+					/ nullIf(toFloat64(sum(requested_sessions)), 0)                     AS effective_success_rate_weighted,
+				sum(ifNull(no_swap_rate, 0) * requested_sessions)
+					/ nullIf(toFloat64(sum(requested_sessions)), 0)                     AS no_swap_rate_weighted
+			FROM naap.api_hourly_streaming_sla
+			WHERE window_start >= toDateTime(?, 'UTC') - INTERVAL 24 HOUR
+			  AND orchestrator_address != ''
+			GROUP BY orch_address
+		),
+		sla_latest AS (
+			SELECT
+				orchestrator_address AS orch_address,
+				argMax(sla_score, window_start) AS latest_sla_score,
+				max(window_start)               AS latest_sla_window_start
+			FROM naap.api_hourly_streaming_sla
+			WHERE window_start >= toDateTime(?, 'UTC') - INTERVAL 24 HOUR
+			  AND orchestrator_address != ''
+			  AND sla_score IS NOT NULL
+			GROUP BY orch_address
+		)
+		SELECT
+			c.orch_address,
+			coalesce(nullIf(c.orchestrator_uri, ''), ifNull(i.orchestrator_uri, ''))    AS orchestrator_uri,
+			ifNull(i.orch_name, c.orch_address)                                         AS orch_name,
+			ifNull(i.orch_label, '')                                                    AS orch_label,
+			c.last_seen,
+			c.gpu_count,
+			c.streaming_models,
+			c.request_capability_pairs,
+			c.pipelines,
+			c.pipeline_model_pairs,
+			ifNull(s24.known_sessions_total, toUInt64(0))                               AS known_sessions_count,
+			ifNull(s24.success_sessions_total, toUInt64(0))                             AS success_sessions,
+			ifNull(s24.requested_sessions_total, toUInt64(0))                           AS requested_sessions,
+			s24.effective_success_rate_weighted                                         AS effective_success_rate,
+			s24.no_swap_rate_weighted                                                   AS no_swap_rate,
+			sl.latest_sla_score                                                         AS latest_sla_score,
+			sl.latest_sla_window_start                                                  AS latest_sla_window_start,
+			?, ?, ?
+		FROM combined c
+		LEFT JOIN identity  i  ON i.orch_address  = c.orch_address
+		LEFT JOIN sla_24h   s24 ON s24.orch_address = c.orch_address
+		LEFT JOIN sla_latest sl ON sl.orch_address  = c.orch_address
+	`, now.UTC(), now.UTC(), now.UTC(), now.UTC(), runID, r.cfg.ResolverVersion, now)
 }
 
 // insertHourlyBYOCAuth aggregates normalized_byoc_auth (one row per auth

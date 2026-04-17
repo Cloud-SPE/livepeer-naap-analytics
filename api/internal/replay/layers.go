@@ -80,6 +80,10 @@ var tablesByLayer = map[Layer][]string{
 	// writes to api_hourly_streaming_sla_store directly.
 	LayerAPI: {
 		"api_current_active_stream_state",
+		// Phase 6.3: denormalized orchestrator snapshot; view is a
+		// latest-slice reader, rows live here.
+		"api_current_orchestrator",
+		"api_current_orchestrator_store",
 		"api_fact_ai_batch_job",
 		"api_fact_ai_batch_llm_request",
 		"api_fact_byoc_job",
@@ -121,6 +125,7 @@ var tablesByLayer = map[Layer][]string{
 // promote other canonical stores into the api layer will append to this
 // list in lockstep with the rename.
 var resolverWrittenApiStores = []string{
+	"api_current_orchestrator_store",
 	"api_hourly_byoc_auth_store",
 	"api_hourly_request_demand_store",
 	"api_hourly_streaming_sla_store",
