@@ -40,6 +40,33 @@ func LoadManifest(path string) (*Manifest, error) {
 	return &m, nil
 }
 
+// parseWindow converts the manifest's string timestamps into UTC time.Time
+// values. The manifest emits "YYYY-MM-DD HH:MM:SS" from scripts/fetch-golden-fixture.sh.
+func (m *Manifest) parseWindow() (time.Time, time.Time, error) {
+	layouts := []string{
+		"2006-01-02 15:04:05",
+		time.RFC3339,
+		time.RFC3339Nano,
+	}
+	parse := func(s string) (time.Time, error) {
+		for _, layout := range layouts {
+			if t, err := time.ParseInLocation(layout, s, time.UTC); err == nil {
+				return t, nil
+			}
+		}
+		return time.Time{}, fmt.Errorf("unrecognised time format: %q", s)
+	}
+	start, err := parse(m.WindowStart)
+	if err != nil {
+		return time.Time{}, time.Time{}, fmt.Errorf("window_start: %w", err)
+	}
+	end, err := parse(m.WindowEnd)
+	if err != nil {
+		return time.Time{}, time.Time{}, fmt.Errorf("window_end: %w", err)
+	}
+	return start, end, nil
+}
+
 // Report is what the harness writes to ./target/replay/ after a run.
 // A second run over the same fixture must produce byte-identical rollups.
 type Report struct {

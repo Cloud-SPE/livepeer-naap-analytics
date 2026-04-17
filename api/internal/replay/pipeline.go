@@ -7,6 +7,7 @@ import (
 	"time"
 
 	ch "github.com/ClickHouse/clickhouse-go/v2"
+	"go.uber.org/zap"
 )
 
 // Config parameterises a harness run.
@@ -32,12 +33,25 @@ type Config struct {
 	// Dev-only; CI always runs a full reload.
 	SkipLoad bool
 
+	// SkipResolver bypasses the canonical-layer rebuild — the harness will
+	// not truncate resolver_* / canonical_*_store or re-invoke the
+	// resolver. Checksum phase still runs. Dev-only; CI always rebuilds.
+	SkipResolver bool
+
 	// PauseIngestion tells the harness to DETACH the ingest MVs before
 	// doing any work and re-ATTACH them at the end, so live Kafka traffic
 	// cannot contaminate the fixture state during the run. Default true;
 	// callers can disable for environments that have no Kafka consumer
 	// running (ephemeral CI).
 	PauseIngestion bool
+
+	// Resolver configures the canonical-layer phase. Only read when the
+	// layers list includes LayerCanonical.
+	Resolver ResolverConfig
+
+	// Logger is used by the resolver invocation. If nil, a no-op logger
+	// is substituted so the harness stays quiet by default.
+	Logger *zap.Logger
 }
 
 // Run executes the configured layers in forward order and returns the
@@ -101,6 +115,15 @@ func Run(ctx context.Context, conn ch.Conn, cfg Config) (*Report, error) {
 		}
 	}
 
+	// Canonical layer needs the resolver to run before we can checksum its
+	// tables. Decoupled from SkipLoad so a developer can leave normalized
+	// state in place and iterate on just the resolver path.
+	if !cfg.SkipResolver && contains(layers, LayerCanonical) {
+		if err := runCanonicalPhase(ctx, conn, cfg, manifest); err != nil {
+			return report, fmt.Errorf("canonical phase: %w", err)
+		}
+	}
+
 	for _, layer := range layers {
 		lr, err := runLayer(ctx, conn, cfg.Database, layer)
 		if err != nil {
@@ -110,6 +133,69 @@ func Run(ctx context.Context, conn ch.Conn, cfg Config) (*Report, error) {
 	}
 	report.FinishedAt = time.Now().UTC()
 	return report, nil
+}
+
+// runCanonicalPhase truncates resolver bookkeeping + canonical tables,
+// then invokes a resolver backfill pinned to cfg.Resolver.Now. The window
+// defaults to the fixture manifest's [window_start, window_end] so the
+// resolver processes exactly the raw events the fixture holds.
+func runCanonicalPhase(ctx context.Context, conn ch.Conn, cfg Config, manifest *Manifest) error {
+	if err := truncateResolverBookkeeping(ctx, conn, cfg.Database); err != nil {
+		return fmt.Errorf("truncate resolver state: %w", err)
+	}
+	if err := truncateLayers(ctx, conn, cfg.Database, LayerCanonical); err != nil {
+		return fmt.Errorf("truncate canonical layer: %w", err)
+	}
+
+	rc := cfg.Resolver
+	if rc.WindowStart.IsZero() || rc.WindowEnd.IsZero() {
+		winStart, winEnd, err := manifest.parseWindow()
+		if err != nil {
+			return fmt.Errorf("derive resolver window from manifest: %w", err)
+		}
+		if rc.WindowStart.IsZero() {
+			rc.WindowStart = winStart
+		}
+		if rc.WindowEnd.IsZero() {
+			rc.WindowEnd = winEnd
+		}
+	}
+	if rc.Now.IsZero() {
+		// Default: pin Now to the fixture window end. Any row-level
+		// timestamp inside the run becomes "the moment the window closed",
+		// which is the most semantically defensible choice for a replay.
+		rc.Now = rc.WindowEnd
+	}
+
+	log := cfg.Logger
+	if log == nil {
+		log = zap.NewNop()
+	}
+	stats, err := RunResolverBackfill(ctx, log, rc)
+	if err != nil {
+		return err
+	}
+	log.Info("replay: resolver backfill complete",
+		zap.Int("selection_events", stats.SelectionEvents),
+		zap.Int("capability_versions", stats.CapabilityVersions),
+		zap.Int("capability_intervals", stats.CapabilityIntervals),
+		zap.Int("decisions", stats.Decisions),
+		zap.Int("session_rows", stats.SessionRows),
+		zap.Int("status_hour_rows", stats.StatusHourRows),
+		zap.Int("ai_batch_job_rows", stats.AIBatchJobRows),
+		zap.Int("byoc_job_rows", stats.BYOCJobRows),
+	)
+	return nil
+}
+
+func truncateResolverBookkeeping(ctx context.Context, conn ch.Conn, database string) error {
+	for _, t := range resolverBookkeepingTables {
+		stmt := fmt.Sprintf("TRUNCATE TABLE IF EXISTS %s.%s", database, t)
+		if err := conn.Exec(ctx, stmt); err != nil {
+			return fmt.Errorf("truncate %s.%s: %w", database, t, err)
+		}
+	}
+	return nil
 }
 
 func runLayer(ctx context.Context, conn ch.Conn, database string, layer Layer) (LayerReport, error) {

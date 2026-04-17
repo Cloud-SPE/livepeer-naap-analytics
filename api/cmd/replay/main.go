@@ -19,6 +19,7 @@ import (
 	"time"
 
 	ch "github.com/ClickHouse/clickhouse-go/v2"
+	"go.uber.org/zap"
 
 	"github.com/livepeer/naap-analytics/internal/replay"
 )
@@ -59,8 +60,14 @@ func main() {
 			"time to wait for downstream MVs to settle after fixture load")
 		skipLoad = flag.Bool("skip-load", false,
 			"skip fixture load; checksum whatever state is already in ClickHouse (dev-only)")
+		skipResolver = flag.Bool("skip-resolver", false,
+			"skip canonical-layer rebuild; checksum existing canonical_* state (dev-only)")
 		pauseIngestion = flag.Bool("pause-ingestion", true,
 			"detach Kafka ingest MVs while the harness runs; turn off on environments with no Kafka producer")
+		resolverNow = flag.String("resolver-now", "",
+			"RFC3339 timestamp used as the frozen wall clock for the canonical phase; empty => fixture window_end")
+		resolverStep = flag.Duration("resolver-step", 24*time.Hour,
+			"backfill partition step the resolver processes in one executeWindow call")
 	)
 	flag.Parse()
 
@@ -93,6 +100,21 @@ func main() {
 	}
 	defer conn.Close()
 
+	var now time.Time
+	if *resolverNow != "" {
+		parsed, parseErr := time.Parse(time.RFC3339, *resolverNow)
+		if parseErr != nil {
+			fatal("invalid --resolver-now %q: %v", *resolverNow, parseErr)
+		}
+		now = parsed.UTC()
+	}
+
+	log, logErr := zap.NewDevelopment()
+	if logErr != nil {
+		log = zap.NewNop()
+	}
+	defer func() { _ = log.Sync() }()
+
 	report, err := replay.Run(ctx, conn, replay.Config{
 		Database:       *database,
 		Layers:         layers,
@@ -100,6 +122,7 @@ func main() {
 		ManifestPath:   *manifestPath,
 		MVFlushTimeout: *mvFlush,
 		SkipLoad:       *skipLoad,
+		SkipResolver:   *skipResolver,
 		PauseIngestion: *pauseIngestion,
 		Loader: replay.LoadConfig{
 			Database: *database,
@@ -107,6 +130,15 @@ func main() {
 			User:     *user,
 			Password: *password,
 		},
+		Resolver: replay.ResolverConfig{
+			Now:                now,
+			Step:               *resolverStep,
+			ClickHouseAddr:     *addr,
+			ClickHouseDB:       *database,
+			ClickHouseUser:     *user,
+			ClickHousePassword: *password,
+		},
+		Logger: log,
 	})
 	if err != nil {
 		fatal("replay: %v", err)

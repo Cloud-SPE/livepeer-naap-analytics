@@ -12,9 +12,18 @@ Every phase of that rewrite has an exit criterion of the form
 
 ## Scope
 
-**PR 1 (current):** raw → normalized only. The harness loads the fixture
-into `naap.accepted_raw_events`, waits for the cascading MVs to settle,
-and checksums every `normalized_*` table.
+**PR 1:** raw → normalized. The harness loads the fixture into
+`naap.accepted_raw_events`, waits for the cascading MVs to settle, and
+checksums every `normalized_*` table.
+
+**PR 2:** resolver clock-freeze — `RunRequest.Now` is pinned so every
+row-level timestamp the resolver writes (refreshed_at, materialized_at,
+decision_id-embedded nonce) is deterministic.
+
+**PR 3 (current):** canonical layer. When `--layers` includes `canonical`
+the harness also truncates `resolver_*` bookkeeping + `canonical_*_store`,
+invokes the resolver in-process with `RunRequest.Mode = ModeBackfill` and
+a pinned Now, and checksums the 17 canonical tables the resolver writes.
 
 ### Why HTTP, not the native protocol
 
@@ -27,8 +36,10 @@ timeout fires long before a large batch finishes. One streaming HTTP
 POST keeps the whole pipeline on the server side, back-pressure and
 all. Expect CH to peg 1–3 cores and hold ~5 GB RSS during a full load.
 
-**Later PRs:** extend to the canonical layer (drive the resolver with a
-frozen `RunRequest.Now`) and the api layer (run `dbt build --select tag:api`).
+**Later PRs:** api layer (run `dbt build --select tag:api` and checksum
+`api_*`), smaller dev fixtures for fast iteration (see performance note
+below), a `--skip-resolver` twin for the fast determinism gate, and the
+CI workflow wiring.
 
 ## Repository layout
 
@@ -72,6 +83,47 @@ Kafka traffic from writing new rows into `accepted_raw_events` mid-run
 
 The pause/resume pair uses a detached context for the resume so a
 cancelled or failed run still reattaches the MVs before exiting.
+
+**Caveat:** `SIGKILL` (including `kill -9` and `pkill -9`) bypasses Go
+defers. If you force-kill a replay run, reattach manually:
+
+```bash
+for mv in mv_ingest_network_events_accepted mv_ingest_network_events_ignored \
+         mv_ingest_streaming_events_accepted mv_ingest_streaming_events_ignored; do
+  curl -sS -u "naap_admin:${CLICKHOUSE_ADMIN_PASSWORD}" \
+    --data-binary "ATTACH TABLE IF NOT EXISTS naap.${mv}" \
+    "http://localhost:8123/"
+done
+```
+
+### Canonical-phase performance
+
+The canonical phase invokes the full resolver backfill over the fixture
+window, partitioned by `--resolver-step` (default 24h). On the 8-day
+golden fixture this is an intensive job:
+
+- ClickHouse memory climbs to ~22 GB during the capability-interval
+  reconstruction phase (the resolver fans out over the full
+  `canonical_capability_snapshots` history per partition).
+- Throughput on a local Docker stack runs at ~1–2k canonical-store
+  rows/second, so a full 8-day replay takes **30–60 minutes**.
+- This is expected for now — the serving-layer-v2 plan moves the
+  capability-snapshot scan behind an index in Phase 4 (unified capability
+  spine). Until then, prefer smaller fixtures for dev iteration.
+
+**Dev iteration pattern:**
+
+```bash
+# Load once (12 min for full fixture):
+./bin/replay --layers raw,normalized --output target/replay
+
+# Iterate on canonical without reloading:
+./bin/replay --layers raw,normalized,canonical --skip-load --output target/replay
+
+# Checksum-only (30s) on an already-built canonical layer:
+./bin/replay --layers raw,normalized,canonical --skip-load --skip-resolver \
+  --output target/replay
+```
 
 ## Usage
 
@@ -128,6 +180,15 @@ table's rollup drifts, naming the first-divergent layer and table.
 # Useful when iterating on the checksum function or adding tables to
 # the layer map.
 ./bin/replay --skip-load ...
+
+# Skip the canonical rebuild (reuse existing canonical_*_store state).
+# Useful when iterating on the checksum function or comparing runs
+# without paying the 30-60 min resolver cost each time.
+./bin/replay --skip-resolver ...
+
+# Pin the resolver's Now to a specific instant (defaults to the
+# fixture window_end).
+./bin/replay --resolver-now 2026-04-16T18:00:00Z ...
 
 # Disable ingest pause on ephemeral CI (no Kafka producer to contaminate).
 ./bin/replay --pause-ingestion=false ...
