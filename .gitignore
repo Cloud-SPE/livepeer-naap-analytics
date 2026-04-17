@@ -50,3 +50,5 @@ docs/generated/*.md
 warehouse/target/
 warehouse/logs/
 .codex
+bin/
+target/

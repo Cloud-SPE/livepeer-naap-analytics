@@ -1,4 +1,4 @@
-.PHONY: up up-tooling down build test test-integration bench load-test lint dev-api setup fmt ch-smoke ch-query push push-api push-clickhouse push-dbt push-resolver push-mcp warehouse-run warehouse-test warehouse-compile test-validation test-validation-host test-validation-docker test-validation-clean measure-baseline measure-refactor-replay migrate-status migrate-validate migrate-up bootstrap-extract resolver-logs resolver-auto resolver-bootstrap resolver-tail resolver-backfill resolver-repair-window parity-verify
+.PHONY: up up-tooling down build test test-integration bench load-test lint dev-api setup fmt ch-smoke ch-query push push-api push-clickhouse push-dbt push-resolver push-mcp warehouse-run warehouse-test warehouse-compile test-validation test-validation-host test-validation-docker test-validation-clean measure-baseline measure-refactor-replay migrate-status migrate-validate migrate-up bootstrap-extract resolver-logs resolver-auto resolver-bootstrap resolver-tail resolver-backfill resolver-repair-window parity-verify replay replay-build replay-fetch-fixture replay-fetch-fixture-force replay-verify replay-verify-full
 
 REGISTRY  ?= tztcloud
 IMAGE_TAG ?= latest
@@ -205,3 +205,65 @@ measure-baseline:
 
 measure-refactor-replay:
 	python3 scripts/measure_refactor_replay.py
+
+# ── Replay harness ────────────────────────────────────────────────────────────
+# Drives the medallion pipeline over a pinned raw-event fixture and records
+# a per-layer artifact_checksum rollup. A second run over the same fixture
+# must produce byte-identical rollups; divergence localises to the layer
+# that broke determinism. See docs/operations/replay-harness.md.
+
+replay-fetch-fixture:
+	@bash scripts/fetch-golden-fixture.sh
+
+replay-fetch-fixture-force:
+	@bash scripts/fetch-golden-fixture.sh --force
+
+replay-build:
+	cd api && go build -o ../bin/replay ./cmd/replay
+
+replay: replay-build
+	./bin/replay \
+	    --fixture tests/fixtures/raw_events_golden.ndjson.zst \
+	    --manifest tests/fixtures/raw_events_golden.manifest.json \
+	    --layers raw,normalized \
+	    --output target/replay
+
+# Run replay twice and diff; any divergence fails the target.
+# This is the determinism gate — used by CI and as an exit criterion for
+# every phase of the serving-layer-v2 rollout.
+#
+# Both runs pause Kafka ingest MVs while they execute, so live traffic on
+# a compose stack cannot contaminate the comparison. The first run loads
+# the fixture; the second skips the load and re-checksums the same state,
+# proving the checksum itself is deterministic and the pipeline is stable.
+#
+# For a truly full determinism check (load → checksum → load again →
+# checksum), use `make replay-verify-full`.
+replay-verify: replay-build
+	./bin/replay \
+	    --fixture tests/fixtures/raw_events_golden.ndjson.zst \
+	    --manifest tests/fixtures/raw_events_golden.manifest.json \
+	    --layers raw,normalized \
+	    --output target/replay
+	mv target/replay/latest.json target/replay/first.json
+	./bin/replay \
+	    --fixture tests/fixtures/raw_events_golden.ndjson.zst \
+	    --manifest tests/fixtures/raw_events_golden.manifest.json \
+	    --layers raw,normalized \
+	    --output target/replay \
+	    --skip-load \
+	    --compare-to target/replay/first.json
+
+replay-verify-full: replay-build
+	./bin/replay \
+	    --fixture tests/fixtures/raw_events_golden.ndjson.zst \
+	    --manifest tests/fixtures/raw_events_golden.manifest.json \
+	    --layers raw,normalized \
+	    --output target/replay
+	mv target/replay/latest.json target/replay/first.json
+	./bin/replay \
+	    --fixture tests/fixtures/raw_events_golden.ndjson.zst \
+	    --manifest tests/fixtures/raw_events_golden.manifest.json \
+	    --layers raw,normalized \
+	    --output target/replay \
+	    --compare-to target/replay/first.json

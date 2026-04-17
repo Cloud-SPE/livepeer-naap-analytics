@@ -1,0 +1,27 @@
+{
+  "name": "raw_events_golden",
+  "window_start": "2026-04-08 18:00:00",
+  "window_end": "2026-04-16 18:00:00",
+  "source": "local",
+  "database": "naap",
+  "row_count": 5761225,
+  "ndjson_sha256": "aaf771aae34e9d34c0eb659d5aa4fd30b9e10219f992fd746a9a07eccbd2032a",
+  "archive_sha256": "89506a0bc84fa9da9f935f10f83fe8572eebab58eb1943fb981a1bd1fc7ecd0b",
+  "archive_bytes": 548328381,
+  "archive_codec": "zstd-10",
+  "schema_columns": [
+    "event_id",
+    "event_type",
+    "event_subtype",
+    "event_ts",
+    "org",
+    "gateway",
+    "data",
+    "source_topic",
+    "source_partition",
+    "source_offset",
+    "payload_hash",
+    "schema_version",
+    "ingested_at"
+  ]
+}

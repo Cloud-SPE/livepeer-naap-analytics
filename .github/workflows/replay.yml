@@ -1,0 +1,82 @@
+# Replay harness CI — STUBBED, NOT YET WIRED.
+#
+# See docs/operations/replay-harness.md for the bring-up checklist. This
+# workflow stays `if: false` until:
+#   1. Canonical and API layers are extended into api/internal/replay
+#   2. S3 upload of the golden fixture archive is in place
+#   3. A repo secret set (CLICKHOUSE_STAGING_URL/USER/PASSWORD or S3 creds)
+#
+# Do not remove this stub; it documents the expected CI shape so reviewers
+# can tell what will eventually gate PRs.
+
+name: replay-harness
+
+on:
+  pull_request:
+    branches: [refactor/medallion-v2]
+  schedule:
+    - cron: "0 6 * * *" # nightly 06:00 UTC against refactor/medallion-v2
+
+jobs:
+  replay-verify:
+    if: false # <<< remove to activate
+    runs-on: ubuntu-latest
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:24.3
+        ports:
+          - 8123:8123
+          - 9000:9000
+        options: >-
+          --health-cmd "wget -qO- http://localhost:8123/ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache-dependency-path: api/go.sum
+
+      # Fetch the pinned fixture archive from S3 by its archive_sha256.
+      # The bucket + path + creds are set in repo secrets.
+      - name: Fetch golden fixture
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.REPLAY_FIXTURE_S3_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.REPLAY_FIXTURE_S3_SECRET }}
+          S3_BUCKET: ${{ vars.REPLAY_FIXTURE_S3_BUCKET }}
+        run: |
+          set -euo pipefail
+          SHA=$(jq -r .archive_sha256 tests/fixtures/raw_events_golden.manifest.json)
+          aws s3 cp \
+            "s3://${S3_BUCKET}/replay/fixtures/${SHA}.ndjson.zst" \
+            tests/fixtures/raw_events_golden.ndjson.zst
+          echo "${SHA}  tests/fixtures/raw_events_golden.ndjson.zst" | sha256sum -c
+
+      - name: Apply ClickHouse bootstrap
+        run: |
+          set -euo pipefail
+          until wget -qO- http://localhost:8123/ping >/dev/null; do sleep 1; done
+          # Create database and apply bootstrap DDL.
+          echo 'CREATE DATABASE IF NOT EXISTS naap' | \
+            curl -s 'http://localhost:8123/' --data-binary @-
+          cat infra/clickhouse/bootstrap/v1.sql | \
+            curl -s 'http://localhost:8123/?database=naap' --data-binary @-
+
+      - name: Run replay with determinism gate
+        env:
+          CLICKHOUSE_ADDR: localhost:9000
+          CLICKHOUSE_DB: naap
+          CLICKHOUSE_WRITER_USER: default
+          CLICKHOUSE_WRITER_PASSWORD: ""
+        run: |
+          make replay-verify
+
+      - name: Upload artefacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: replay-reports
+          path: target/replay/
