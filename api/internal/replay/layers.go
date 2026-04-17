@@ -73,19 +73,12 @@ var tablesByLayer = map[Layer][]string{
 		"canonical_streaming_sla_input_hourly_store",
 	},
 	// API layer — the serving contract. Every entry here is a dbt-managed
-	// model under warehouse/models/{api,api_base}/. All are views over
-	// canonical_* state; a deterministic canonical snapshot + deterministic
-	// view definitions => deterministic api rows. The api_base_* tier is
-	// slated for removal in Phase 5 of the plan; the table list will
-	// shrink to just api/ once that lands.
+	// model under warehouse/models/api/. All are views over canonical_*
+	// state; a deterministic canonical snapshot + deterministic view
+	// definitions => deterministic api rows. The legacy api_base_* tier
+	// was retired in Phase 5 — scoring runs inline in the resolver and
+	// writes to api_hourly_streaming_sla_store directly.
 	LayerAPI: {
-		"api_base_sla_compliance_scored",
-		"api_base_sla_compliance_scored_by_org",
-		"api_base_sla_quality_benchmarks",
-		"api_base_sla_quality_benchmarks_by_org",
-		"api_base_sla_quality_cohort_daily_state",
-		"api_base_sla_quality_inputs",
-		"api_base_sla_quality_inputs_by_org",
 		"api_current_active_stream_state",
 		"api_fact_ai_batch_job",
 		"api_fact_ai_batch_llm_request",

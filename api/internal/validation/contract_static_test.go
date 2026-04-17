@@ -36,20 +36,6 @@ func collectSQLFiles(t *testing.T, root string) []string {
 	return files
 }
 
-func isInternalAPIBaseDependency(sql, needle string) bool {
-	if !strings.Contains(sql, needle) {
-		return false
-	}
-	switch needle {
-	case "ref('api_", `ref("api_`:
-		return strings.Contains(sql, "ref('api_base_") || strings.Contains(sql, `ref("api_base_`)
-	case "from naap.api_":
-		return strings.Contains(sql, "from naap.api_base_")
-	default:
-		return false
-	}
-}
-
 func TestTierContract_APIModelsDoNotBypassCanonicalOrServingLayers(t *testing.T) {
 	root := repoRoot(t)
 	for _, file := range collectSQLFiles(t, filepath.Join(root, "warehouse", "models", "api")) {
@@ -61,10 +47,11 @@ func TestTierContract_APIModelsDoNotBypassCanonicalOrServingLayers(t *testing.T)
 		if strings.Contains(sql, "canonical_session_latest") {
 			t.Fatalf("%s still depends on removed compatibility surface canonical_session_latest", file)
 		}
+		// Phase 5 retired the api_base_* tier; api views may only depend on
+		// canonical_* or on api_*_store (the physical backing for latest-slice
+		// aliases). No ref() to other api_* views, no chain back into raw /
+		// normalized / operational.
 		for _, forbidden := range []string{"ref('raw_", `ref("raw_`, "from naap.raw_", "ref('normalized_", `ref("normalized_`, "from naap.normalized_", "ref('operational_", `ref("operational_`, "from naap.operational_", "ref('api_", `ref("api_`} {
-			if isInternalAPIBaseDependency(sql, forbidden) {
-				continue
-			}
 			if strings.Contains(sql, forbidden) {
 				t.Fatalf("%s bypasses the serving contract with forbidden dependency %q", file, forbidden)
 			}
@@ -72,9 +59,6 @@ func TestTierContract_APIModelsDoNotBypassCanonicalOrServingLayers(t *testing.T)
 		for _, line := range strings.Split(sql, "\n") {
 			trimmed := strings.TrimSpace(line)
 			if !strings.Contains(trimmed, "from naap.api_") {
-				continue
-			}
-			if strings.Contains(trimmed, "from naap.api_base_") {
 				continue
 			}
 			if strings.Contains(trimmed, "_store") {
@@ -173,9 +157,6 @@ func TestTierContract_NonAPIModelsDoNotDeriveTruthFromAPIModels(t *testing.T) {
 			}
 			sql := strings.ToLower(string(body))
 			for _, forbidden := range []string{"ref('api_", `ref("api_`, "from naap.api_"} {
-				if isInternalAPIBaseDependency(sql, forbidden) {
-					continue
-				}
 				if strings.Contains(sql, forbidden) {
 					if strings.Contains(sql, "from naap.api_") && strings.Contains(sql, "_store") {
 						continue
@@ -281,45 +262,9 @@ func TestTierContract_RollupSafetyRuleIsDocumented(t *testing.T) {
 	}
 }
 
-func TestTierContract_SLABenchmarkStateUsesAdditiveInputsOnly(t *testing.T) {
-	root := repoRoot(t)
-	checks := map[string][]string{
-		filepath.Join(root, "warehouse", "models", "api_base", "api_base_sla_quality_cohort_daily_state.sql"): {
-			"ref('api_base_sla_quality_inputs_by_org')",
-		},
-		filepath.Join(root, "warehouse", "models", "api_base", "api_base_sla_quality_benchmarks.sql"): {
-			"ref('api_base_sla_quality_inputs')",
-			"ref('api_base_sla_quality_cohort_daily_state')",
-		},
-		filepath.Join(root, "warehouse", "models", "api_base", "api_base_sla_quality_benchmarks_by_org.sql"): {
-			"ref('api_base_sla_quality_inputs_by_org')",
-			"ref('api_base_sla_quality_cohort_daily_state')",
-		},
-		filepath.Join(root, "warehouse", "models", "api_base", "api_base_sla_compliance_scored.sql"): {
-			"ref('api_base_sla_quality_inputs')",
-			"ref('api_base_sla_quality_benchmarks')",
-		},
-		filepath.Join(root, "warehouse", "models", "api_base", "api_base_sla_compliance_scored_by_org.sql"): {
-			"ref('api_base_sla_quality_inputs_by_org')",
-			"ref('api_base_sla_quality_benchmarks_by_org')",
-		},
-	}
-
-	for file, requiredSnippets := range checks {
-		body, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatalf("ReadFile %s: %v", file, err)
-		}
-		text := strings.ToLower(string(body))
-		for _, snippet := range requiredSnippets {
-			if !strings.Contains(text, strings.ToLower(snippet)) {
-				t.Fatalf("%s is missing required benchmark-state dependency %q", file, snippet)
-			}
-		}
-		for _, forbidden := range []string{"quality_cohort_level", "quality_history_window_count", "ref('api_hourly_streaming_sla", `ref("api_hourly_streaming_sla`} {
-			if strings.Contains(text, forbidden) {
-				t.Fatalf("%s illegally depends on previously scored SLA outputs via %q", file, forbidden)
-			}
-		}
-	}
-}
+// Phase 5 retired TestTierContract_SLABenchmarkStateUsesAdditiveInputsOnly:
+// the test asserted api_base_* view dependencies that no longer exist. The
+// invariant it protected — benchmark math runs over additive inputs only —
+// now lives in the resolver's insertSLABenchmarkDaily SQL, whose shape is
+// exercised end-to-end by test_canonical_sla_benchmark_daily_store_grain_unique
+// and the replay harness's canonical-layer checksum.

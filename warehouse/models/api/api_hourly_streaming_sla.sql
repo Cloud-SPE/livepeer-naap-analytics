@@ -1,12 +1,10 @@
--- Phase 1: read pre-scored rows from api_hourly_streaming_sla_store
--- directly. The resolver writes this table on every refresh run (the
--- scoring math still flows through api_base_sla_compliance_scored_by_org
--- at write time), so an API-layer query is now an O(window_start) primary
--- key lookup plus a latest-slice pick — instead of the 6-scan join graph
--- and on-demand benchmark cohort calculation the view used to compose.
---
--- api_base_* is no longer in this path. Phase 5 retires it entirely once
--- Phase 2 moves the benchmark cohort build into the resolver too.
+-- Reads pre-scored rows from api_hourly_streaming_sla_store directly. The
+-- resolver's insertFinalSLAComplianceRollups writes a scored row per
+-- (window_start, orchestrator_address, pipeline_id, model_id, gpu_id) on
+-- every refresh run, so an API-layer query is an O(window_start) primary-key
+-- lookup plus a latest-slice pick — no per-request scoring, no benchmark
+-- cohort recomputation. api_base_* was retired in Phase 5; scoring math now
+-- lives inline in the resolver (see docs/exec-plans/active/serving-layer-v2.md).
 
 {{ config(materialized='view') }}
 

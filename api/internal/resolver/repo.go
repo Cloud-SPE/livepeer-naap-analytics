@@ -3050,9 +3050,10 @@ func (r *repo) insertNetworkDemandRollups(ctx context.Context, runID string, now
 }
 
 func (r *repo) insertSLAComplianceRollups(ctx context.Context, runID string, now time.Time, queryID string) error {
-	// This canonical store remains the source of truth for additive
-	// SLA facts. Final scored serving rows are published immediately afterward
-	// from the api_base_* helper relations so the API never scores on the hot path.
+	// This canonical store remains the source of truth for additive SLA
+	// facts. Final scored serving rows are published immediately afterward
+	// (insertFinalSLAComplianceRollups) via inline Phase 2 scoring so the
+	// API never scores on the hot path.
 	return r.conn.Exec(ctx, `
 		INSERT INTO naap.canonical_streaming_sla_input_hourly_store
 		(
@@ -3253,10 +3254,10 @@ func (r *repo) insertSLAComplianceRollups(ctx context.Context, runID string, now
 
 // insertSLABenchmarkDaily aggregates canonical_streaming_sla_input_hourly_store
 // into daily scalar percentiles per (pipeline_id, model_id, cohort_date) and
-// writes them to canonical_sla_benchmark_daily_store. This replaces the
-// view-based api_base_sla_quality_cohort_daily_state whose AggregateFunction
-// states forced a 7-day arrayJoin + quantileTDigestIfMerge on every scoring
-// pass. The store is populated for EVERY cohort_date the input store holds
+// writes them to canonical_sla_benchmark_daily_store. Phase 2 replaced the
+// legacy AggregateFunction-state view that forced a 7-day arrayJoin +
+// quantileTDigestIfMerge on every scoring pass with this pre-computed scalar
+// store. The store is populated for EVERY cohort_date the input store holds
 // (not just the current run's slices) so the 7-day lookback in
 // insertFinalSLAComplianceRollups always finds benchmarks for the past week.
 //
@@ -3281,7 +3282,7 @@ func (r *repo) insertSLABenchmarkDaily(ctx context.Context, runID string, now ti
 		-- (window_start, orchestrator, pipeline, model, gpu) the same way
 		-- the scoring path will later, so the benchmark's per-row sample
 		-- unit matches the scored row grain exactly. Nullable avg is
-		-- derived from sum/count to mirror api_base_sla_quality_inputs_by_org.
+		-- derived from sum/count so per-row grain matches the scoring path.
 		latest_inputs AS (
 			SELECT
 				toDate(s.window_start) AS cohort_date,
@@ -3342,8 +3343,8 @@ func (r *repo) insertFinalSLAComplianceRollups(ctx context.Context, runID string
 			sla_semantics_version, sla_score, refresh_run_id, artifact_checksum, refreshed_at
 		)
 		WITH
-		-- Phase 2: scoring math runs inline. No more api_base_sla_* chain.
-		-- owned_windows scopes the write to the current resolver run's slices.
+		-- Phase 2: scoring math runs inline. owned_windows scopes the write
+		-- to the current resolver run's slices.
 		owned_windows AS (
 			SELECT DISTINCT window_start
 			FROM naap.resolver_query_window_slices
@@ -3356,8 +3357,8 @@ func (r *repo) insertFinalSLAComplianceRollups(ctx context.Context, runID string
 			SELECT orch_address, ifNull(orchestrator_uri, '') AS orchestrator_uri
 			FROM naap.canonical_capability_orchestrator_identity_latest
 		),
-		-- Latest input slice per (org, window_start) — the same pattern
-		-- api_base_sla_quality_inputs_by_org used before Phase 2.
+		-- Latest input slice per (org, window_start) — argMax by refreshed_at
+		-- ensures re-runs only read the most recent resolver output.
 		latest_input_slices AS (
 			SELECT org, window_start, argMax(refresh_run_id, refreshed_at) AS refresh_run_id
 			FROM naap.canonical_streaming_sla_input_hourly_store
@@ -3365,7 +3366,7 @@ func (r *repo) insertFinalSLAComplianceRollups(ctx context.Context, runID string
 		),
 		-- Collapse inputs to the (window_start, org, orch, pipeline, model, gpu)
 		-- grain. Additive primitives (sessions, samples) sum; ratios recompute
-		-- from sums. This replaces api_base_sla_quality_inputs_by_org.
+		-- from sums.
 		inputs AS (
 			SELECT
 				s.window_start AS window_start,
@@ -3518,8 +3519,8 @@ func (r *repo) insertFinalSLAComplianceRollups(ctx context.Context, runID string
 					 i.e2e_latency_sum_ms, i.e2e_latency_sample_count, i.avg_e2e_latency_ms
 		),
 		-- Raw per-metric scores (0..1) from percentile position. Uses
-		-- ptff_benchmark_row_count >= 48 as a sample-size gate, same as the
-		-- pre-Phase-2 logic.
+		-- ptff_benchmark_row_count >= 48 as a sample-size gate (≈2 days of
+		-- hourly observations) so sparse benchmarks default to neutral 0.5.
 		raw_scores AS (
 			SELECT
 				c.*,

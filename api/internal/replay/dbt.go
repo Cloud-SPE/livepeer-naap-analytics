@@ -47,13 +47,14 @@ func RunDBT(ctx context.Context, log *zap.Logger, dc DBTConfig) error {
 	}
 	selector := dc.Selector
 	if selector == "" {
-		// `+api +api_base` rebuilds every downstream-facing api view AND
-		// every canonical view they depend on. Without `+` the canonical
-		// views keep whatever CREATE VIEW definition bootstrap left them
-		// with, which breaks phases that denormalize new columns onto
-		// canonical views (Phase 3, Phase 4). Canonical views are cheap
-		// to rebuild (~1 s on the daily fixture).
-		selector = "+api +api_base"
+		// `+api` rebuilds every downstream-facing api view AND every
+		// canonical view they depend on. Without `+` the canonical views
+		// keep whatever CREATE VIEW definition bootstrap left them with,
+		// which breaks phases that denormalize new columns onto canonical
+		// views (Phase 3, Phase 4). Canonical views are cheap to rebuild
+		// (~1 s on the daily fixture). Phase 5 retired api_base_* so there
+		// is no longer a second top-level selector to pass.
+		selector = "+api"
 	}
 
 	args := []string{"compose", "--profile", "tooling", "run", "--rm", "warehouse",

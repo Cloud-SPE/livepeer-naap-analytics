@@ -64,7 +64,7 @@ func main() {
 			"skip canonical-layer rebuild; checksum existing canonical_* state (dev-only)")
 		skipDBT = flag.Bool("skip-dbt", false,
 			"skip api-layer dbt run; checksum existing api_* views (dev-only)")
-		dbtSelector = flag.String("dbt-selector", "+api +api_base",
+		dbtSelector = flag.String("dbt-selector", "+api",
 			"dbt --select expression used during the api phase")
 		pauseIngestion = flag.Bool("pause-ingestion", true,
 			"detach Kafka ingest MVs while the harness runs; turn off on environments with no Kafka producer")

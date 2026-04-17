@@ -20,6 +20,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/livepeer/naap-analytics/internal/resolver"
 )
 
 type slaStoreSeed struct {
@@ -89,36 +91,20 @@ func insertSLAStoreSeed(t *testing.T, h *harness, seed slaStoreSeed) {
 func republishFinalSLAPublicWindow(t *testing.T, h *harness, windowStart time.Time) {
 	t.Helper()
 	refreshRunID := fmt.Sprintf("seed-final-public-%d", time.Now().UTC().UnixNano())
-	if err := h.conn.Exec(context.Background(), `
-		INSERT INTO naap.api_hourly_streaming_sla_store
-		(
-			window_start, org, orchestrator_address, pipeline_id, model_id, gpu_id, gpu_model_name, region,
-			known_sessions_count, requested_sessions, startup_success_sessions, no_orch_sessions,
-			startup_excused_sessions, startup_failed_sessions, loading_only_sessions, zero_output_fps_sessions,
-			output_failed_sessions, effective_failed_sessions, confirmed_swapped_sessions, inferred_swap_sessions,
-			total_swapped_sessions, sessions_ending_in_error, error_status_samples, health_signal_count,
-			health_expected_signal_count, health_signal_coverage_ratio, startup_success_rate, excused_failure_rate,
-			effective_success_rate, no_swap_rate, output_viability_rate, output_fps_sum, status_samples,
-			avg_output_fps, prompt_to_first_frame_sum_ms, prompt_to_first_frame_sample_count,
-			avg_prompt_to_first_frame_ms, e2e_latency_sum_ms, e2e_latency_sample_count, avg_e2e_latency_ms,
-			reliability_score, ptff_score, e2e_score, latency_score, fps_score, quality_score,
-			sla_semantics_version, sla_score, refresh_run_id, artifact_checksum, refreshed_at
-		)
-		SELECT
-			s.window_start, s.org, s.orchestrator_address, s.pipeline_id, s.model_id, s.gpu_id, s.gpu_model_name, cast(null as Nullable(String)),
-			s.known_sessions_count, s.requested_sessions, s.startup_success_sessions, s.no_orch_sessions,
-			s.startup_excused_sessions, s.startup_failed_sessions, s.loading_only_sessions, s.zero_output_fps_sessions,
-			s.output_failed_sessions, s.effective_failed_sessions, s.confirmed_swapped_sessions, s.inferred_swap_sessions,
-			s.total_swapped_sessions, s.sessions_ending_in_error, s.error_status_samples, s.health_signal_count,
-			s.health_expected_signal_count, s.health_signal_coverage_ratio, s.startup_success_rate, s.excused_failure_rate,
-			s.effective_success_rate, s.no_swap_rate, s.output_viability_rate, s.output_fps_sum, s.status_samples,
-			s.avg_output_fps, s.prompt_to_first_frame_sum_ms, s.prompt_to_first_frame_sample_count,
-			s.avg_prompt_to_first_frame_ms, s.e2e_latency_sum_ms, s.e2e_latency_sample_count, s.avg_e2e_latency_ms,
-			s.reliability_score, s.ptff_score, s.e2e_score, s.latency_score, s.fps_score, s.quality_score,
-			s.sla_semantics_version, s.sla_score, ?, 'validation', now64()
-		FROM naap.api_base_sla_compliance_scored_by_org s
-		WHERE s.window_start = ?
-	`, refreshRunID, windowStart); err != nil {
+	// Phase 5 retired api_base_sla_compliance_scored_by_org; scoring now runs
+	// inline in the resolver. The helper below reuses the exact same SQL by
+	// staging a synthetic resolver_query_window_slices row for the seeded
+	// window and invoking insertSLABenchmarkDaily + insertFinalSLAComplianceRollups.
+	if err := resolver.PublishSLAForWindow(
+		context.Background(),
+		h.conn,
+		nil,
+		"validation",
+		refreshRunID,
+		time.Now().UTC(),
+		[]string{h.org},
+		windowStart,
+	); err != nil {
 		t.Fatalf("republish public final sla window: %v", err)
 	}
 }
@@ -733,16 +719,20 @@ func TestRuleAggregate005_BenchmarkStateUsesAdditiveInputs(t *testing.T) {
 		HealthExpectedSignalCount: 10,
 	})
 
-	if got := h.queryInt(t, `SELECT sumMerge(ptff_row_count_state) FROM naap.api_base_sla_quality_cohort_daily_state WHERE cohort_date = ? AND pipeline_id = 'text-to-image' AND model_id = 'model-benchmark-state'`, benchmarkDay); got != 1 {
+	// Phase 5: benchmarks are scalar percentiles in canonical_sla_benchmark_daily_store,
+	// not AggregateFunction states. argMax picks the latest refresh_run_id slice,
+	// matching how insertFinalSLAComplianceRollups reads them.
+	latestRunSuffix := " AND refresh_run_id = (SELECT argMax(refresh_run_id, refreshed_at) FROM naap.canonical_sla_benchmark_daily_store WHERE cohort_date = ? AND pipeline_id = 'text-to-image' AND ifNull(model_id, '') = 'model-benchmark-state')"
+	if got := h.queryInt(t, `SELECT ptff_row_count FROM naap.canonical_sla_benchmark_daily_store WHERE cohort_date = ? AND pipeline_id = 'text-to-image' AND ifNull(model_id, '') = 'model-benchmark-state'`+latestRunSuffix, benchmarkDay, benchmarkDay); got != 1 {
 		t.Fatalf("RULE-AGGREGATE-005: ptff benchmark row count = %d, want 1", got)
 	}
-	if got := h.queryInt(t, `SELECT sumMerge(e2e_row_count_state) FROM naap.api_base_sla_quality_cohort_daily_state WHERE cohort_date = ? AND pipeline_id = 'text-to-image' AND model_id = 'model-benchmark-state'`, benchmarkDay); got != 1 {
+	if got := h.queryInt(t, `SELECT e2e_row_count FROM naap.canonical_sla_benchmark_daily_store WHERE cohort_date = ? AND pipeline_id = 'text-to-image' AND ifNull(model_id, '') = 'model-benchmark-state'`+latestRunSuffix, benchmarkDay, benchmarkDay); got != 1 {
 		t.Fatalf("RULE-AGGREGATE-005: e2e benchmark row count = %d, want 1", got)
 	}
-	if got := h.queryInt(t, `SELECT sumMerge(fps_row_count_state) FROM naap.api_base_sla_quality_cohort_daily_state WHERE cohort_date = ? AND pipeline_id = 'text-to-image' AND model_id = 'model-benchmark-state'`, benchmarkDay); got != 1 {
+	if got := h.queryInt(t, `SELECT fps_row_count FROM naap.canonical_sla_benchmark_daily_store WHERE cohort_date = ? AND pipeline_id = 'text-to-image' AND ifNull(model_id, '') = 'model-benchmark-state'`+latestRunSuffix, benchmarkDay, benchmarkDay); got != 1 {
 		t.Fatalf("RULE-AGGREGATE-005: fps benchmark row count = %d, want 1", got)
 	}
-	if got := h.queryFloat(t, `SELECT toFloat64(round(quantileTDigestIfMerge(0.5)(ptff_p50_state), 6)) FROM naap.api_base_sla_quality_cohort_daily_state WHERE cohort_date = ? AND pipeline_id = 'text-to-image' AND model_id = 'model-benchmark-state'`, benchmarkDay); got != 1000 {
+	if got := h.queryFloat(t, `SELECT toFloat64(round(ifNull(ptff_p50, 0.), 6)) FROM naap.canonical_sla_benchmark_daily_store WHERE cohort_date = ? AND pipeline_id = 'text-to-image' AND ifNull(model_id, '') = 'model-benchmark-state'`+latestRunSuffix, benchmarkDay, benchmarkDay); got != 1000 {
 		t.Fatalf("RULE-AGGREGATE-005: ptff p50 benchmark = %v, want 1000", got)
 	}
 }

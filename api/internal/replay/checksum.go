@@ -74,8 +74,8 @@ func Checksum(ctx context.Context, conn ch.Conn, database, table string) (TableR
 //
 //   - ALIAS / MATERIALIZED columns are excluded because they are computed at
 //     read time from other columns and would be redundant in the fingerprint.
-//   - AggregateFunction state columns (emitted by some api_base_* views that
-//     feed cohort benchmarks) are excluded because sipHash64 cannot hash the
+//   - AggregateFunction state columns (emitted by a few canonical rollups that
+//     still carry p95 state for diagnostic queries) are excluded because sipHash64 cannot hash the
 //     opaque binary state; any change to a state column still propagates
 //     into the fingerprint through the scalar column that materialises the
 //     state at query time (e.g. `avg_prompt_to_first_frame_ms` alongside
