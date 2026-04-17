@@ -279,9 +279,12 @@ func (r *Repo) GetDashboardPipelines(ctx context.Context, limit int, windowHours
 func (r *Repo) GetDashboardOrchestrators(ctx context.Context, windowHours int) ([]types.DashboardOrchestrator, error) {
 	windowStart := time.Now().UTC().Add(-time.Duration(windowHours) * time.Hour)
 
-	// SLA compliance data
+	// SLA compliance data. orchestrator_uri is denormalized onto the store
+	// (Phase 3), so hydrating ServiceURI no longer needs a second identity
+	// query — any() picks the non-empty value stamped at resolver-write time.
 	slaRows, err := r.conn.Query(ctx, `
 		SELECT orchestrator_address, pipeline_id, ifNull(model_id, '') AS m_id, ifNull(gpu_id, '') AS g_id,
+		       ifNull(anyLast(nullIf(orchestrator_uri, '')), '') AS orchestrator_uri,
 		       sum(requested_sessions) AS total_requested,
 		       sum(ifNull(known_sessions_count, 0)) AS known_sessions,
 		       sum(ifNull(startup_success_sessions, 0)) AS success_sessions,
@@ -307,10 +310,10 @@ func (r *Repo) GetDashboardOrchestrators(ctx context.Context, windowHours int) (
 	orchMap := map[string]*orchData{}
 
 	for slaRows.Next() {
-		var addr, pipelineID, modelID, gpuID string
+		var addr, pipelineID, modelID, gpuID, uri string
 		var requested, knownSessions, successSessions uint64
 		var effRate, noSwap, sla *float64
-		if err := slaRows.Scan(&addr, &pipelineID, &modelID, &gpuID, &requested, &knownSessions, &successSessions, &effRate, &noSwap, &sla); err != nil {
+		if err := slaRows.Scan(&addr, &pipelineID, &modelID, &gpuID, &uri, &requested, &knownSessions, &successSessions, &effRate, &noSwap, &sla); err != nil {
 			return nil, fmt.Errorf("dashboard orchestrators sla scan: %w", err)
 		}
 
@@ -321,6 +324,9 @@ func (r *Repo) GetDashboardOrchestrators(ctx context.Context, windowHours int) (
 				pipelineModelMap: map[string]map[string]bool{},
 			}
 			orchMap[addr] = o
+		}
+		if o.orch.ServiceURI == "" && uri != "" {
+			o.orch.ServiceURI = uri
 		}
 		o.totalRequested += int64(requested)
 		if effRate != nil {
@@ -383,38 +389,15 @@ func (r *Repo) GetDashboardOrchestrators(ctx context.Context, windowHours int) (
 		}
 	}
 
-	// Resolve display URI from the latest orchestrator identity helper rather
-	// than rescanning observed inventory for each request.
-	stateRows, err := r.conn.Query(ctx, `
-		SELECT orch_address, ifNull(orchestrator_uri, '') AS orchestrator_uri
-		FROM naap.api_orchestrator_identity
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("dashboard orchestrators state: %w", err)
-	}
-	defer stateRows.Close()
-
-	for stateRows.Next() {
-		var addr, uri string
-		if err := stateRows.Scan(&addr, &uri); err != nil {
-			return nil, fmt.Errorf("dashboard orchestrators state scan: %w", err)
-		}
-		o, ok := orchMap[addr]
-		if !ok {
-			o = &orchData{
-				orch:             types.DashboardOrchestrator{Address: addr},
-				pipelineModelMap: map[string]map[string]bool{},
-			}
-			orchMap[addr] = o
-		}
-		o.orch.ServiceURI = uri
-	}
-
 	// Pipeline/model membership is derived from observed offers inside the
 	// selected window; per-orchestrator GPU totals are computed separately with a
-	// single DISTINCT so GPUs shared across models are not double-counted.
+	// single DISTINCT so GPUs shared across models are not double-counted. URI
+	// is pulled from the same offer rows (Phase 3 carries orchestrator_uri
+	// through the inventory) so any orch observed offering in-window gets a
+	// ServiceURI without a separate identity lookup.
 	pmRows, err := r.conn.Query(ctx, `
 		SELECT orch_address,
+		       ifNull(anyLast(nullIf(orchestrator_uri, '')), '') AS orchestrator_uri,
 		       ifNull(nullIf(canonical_pipeline, ''), ifNull(nullIf(offered_name, ''), 'unknown')) AS pipeline_id,
 		       model_id
 		FROM naap.api_observed_capability_offer
@@ -428,8 +411,8 @@ func (r *Repo) GetDashboardOrchestrators(ctx context.Context, windowHours int) (
 	defer pmRows.Close()
 
 	for pmRows.Next() {
-		var addr, pipelineID, modelID string
-		if err := pmRows.Scan(&addr, &pipelineID, &modelID); err != nil {
+		var addr, uri, pipelineID, modelID string
+		if err := pmRows.Scan(&addr, &uri, &pipelineID, &modelID); err != nil {
 			return nil, fmt.Errorf("dashboard orchestrators pm scan: %w", err)
 		}
 		o, ok := orchMap[addr]
@@ -439,6 +422,9 @@ func (r *Repo) GetDashboardOrchestrators(ctx context.Context, windowHours int) (
 				pipelineModelMap: map[string]map[string]bool{},
 			}
 			orchMap[addr] = o
+		}
+		if o.orch.ServiceURI == "" && uri != "" {
+			o.orch.ServiceURI = uri
 		}
 		if _, ok := o.pipelineModelMap[pipelineID]; !ok {
 			o.pipelineModelMap[pipelineID] = map[string]bool{}
@@ -714,22 +700,16 @@ func (r *Repo) GetDashboardPricing(ctx context.Context) ([]types.DashboardPipeli
 		    WHERE offered_name != ''
 		      AND last_seen >= ? AND last_seen < ?
 		    GROUP BY orch_address, offered_name
-		),
-		orchestrators AS (
-		    SELECT orch_address, ifNull(orchestrator_uri, '') AS orchestrator_uri
-		    FROM naap.api_orchestrator_identity
 		)
 		SELECT
 		    p.orch_address,
-		    ifNull(o.orchestrator_uri, '') AS orchestrator_uri,
+		    ifNull(p.orchestrator_uri, '') AS orchestrator_uri,
 		    ifNull(p.canonical_pipeline, p.external_capability_name) AS pipeline,
 		    ifNull(nullIf(p.model_id, ''), ifNull(byoc_offer.model_id, ifNull(p.external_capability_name, ''))) AS model_id,
 		    p.price_per_unit,
 		    p.pixels_per_unit,
 		    greatest(ifNull(builtin_offer.is_warm, toUInt8(0)), ifNull(byoc_offer.is_warm, toUInt8(0))) AS is_warm
 		FROM latest_pricing p
-		LEFT JOIN orchestrators o
-		  ON o.orch_address = p.orch_address
 		LEFT JOIN builtin_offer
 		  ON builtin_offer.orch_address = p.orch_address
 		 AND builtin_offer.model_id = p.model_id
@@ -769,29 +749,13 @@ func (r *Repo) GetDashboardPricing(ctx context.Context) ([]types.DashboardPipeli
 
 // GetDashboardJobFeed serves GET /v1/dashboard/job-feed.
 func (r *Repo) GetDashboardJobFeed(ctx context.Context, limit int) ([]types.DashboardJobFeedItem, error) {
-	// Resolve orch_address -> URI via the latest orchestrator identity helper so
-	// callers receive a stable URL without scanning observed inventory.
-	orchURIRows, err := r.conn.Query(ctx, `
-		SELECT orch_address, ifNull(orchestrator_uri, '') AS uri
-		FROM naap.api_orchestrator_identity
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("dashboard job feed orch uri: %w", err)
-	}
-	defer orchURIRows.Close()
-
-	orchURI := map[string]string{}
-	for orchURIRows.Next() {
-		var addr, uri string
-		if err := orchURIRows.Scan(&addr, &uri); err != nil {
-			return nil, fmt.Errorf("dashboard job feed orch uri scan: %w", err)
-		}
-		orchURI[addr] = uri
-	}
-
+	// Phase 3: orchestrator_uri is denormalized onto the active stream state
+	// store — the resolver stamps it at write time from identity_latest — so
+	// the API layer reads a pre-joined column instead of a second lookup.
 	rows, err := r.conn.Query(ctx, `
 		SELECT event_id, pipeline, ifNull(model_id, '') AS model_id,
-		       gateway, ifNull(orch_address, '') AS orch_address, state,
+		       gateway, ifNull(orch_address, '') AS orch_address,
+		       ifNull(orchestrator_uri, '') AS orchestrator_uri, state,
 		       output_fps, input_fps, ifNull(started_at, last_seen) AS started_at, last_seen
 		FROM naap.api_current_active_stream_state
 		ORDER BY last_seen DESC
@@ -805,10 +769,10 @@ func (r *Repo) GetDashboardJobFeed(ctx context.Context, limit int) ([]types.Dash
 	now := time.Now().UTC()
 	result := make([]types.DashboardJobFeedItem, 0, limit)
 	for rows.Next() {
-		var eventID, pipeline, modelID, gateway, orchAddr, state string
+		var eventID, pipeline, modelID, gateway, orchAddr, orchURI, state string
 		var outputFPS, inputFPS float64
 		var startedAt, lastSeen time.Time
-		if err := rows.Scan(&eventID, &pipeline, &modelID, &gateway, &orchAddr, &state,
+		if err := rows.Scan(&eventID, &pipeline, &modelID, &gateway, &orchAddr, &orchURI, &state,
 			&outputFPS, &inputFPS, &startedAt, &lastSeen); err != nil {
 			return nil, fmt.Errorf("dashboard job feed scan: %w", err)
 		}
@@ -819,7 +783,7 @@ func (r *Repo) GetDashboardJobFeed(ctx context.Context, limit int) ([]types.Dash
 			Model:               modelID,
 			Gateway:             gateway,
 			OrchestratorAddress: orchAddr,
-			OrchestratorURL:     orchURI[orchAddr],
+			OrchestratorURL:     orchURI,
 			State:               state,
 			InputFPS:            inputFPS,
 			OutputFPS:           outputFPS,

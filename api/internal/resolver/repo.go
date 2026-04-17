@@ -2669,7 +2669,7 @@ func (r *repo) insertCanonicalActiveStreamState(ctx context.Context, runID strin
 		INSERT INTO naap.canonical_active_stream_state_latest_store
 		(
 			canonical_session_key, event_id, sample_ts, org, stream_id, request_id, gateway,
-			pipeline, model_id, orch_address, attribution_status, attribution_reason, state,
+			pipeline, model_id, orch_address, orchestrator_uri, attribution_status, attribution_reason, state,
 			output_fps, input_fps, e2e_latency_ms, started_at, last_seen, completed,
 			refresh_run_id, artifact_checksum, refreshed_at
 		)
@@ -2705,6 +2705,7 @@ func (r *repo) insertCanonicalActiveStreamState(ctx context.Context, runID strin
 				fs.canonical_pipeline AS pipeline,
 				cast(nullIf(fs.canonical_model, ''), 'Nullable(String)') AS model_id,
 				cast(nullIf(fs.attributed_orch_address, ''), 'Nullable(String)') AS orch_address,
+				fs.attributed_orch_address AS attributed_orch_address_key,
 				fs.attribution_status AS attribution_status,
 				fs.attribution_reason AS attribution_reason,
 				s.state AS state,
@@ -2717,33 +2718,44 @@ func (r *repo) insertCanonicalActiveStreamState(ctx context.Context, runID strin
 			FROM status_events s
 			LEFT JOIN naap.canonical_session_current fs
 				ON fs.canonical_session_key = s.canonical_session_key
+		),
+		orch_uri_latest AS (
+			-- Phase 3: pre-materialize the orch_address -> uri lookup. The
+			-- identity_latest view is a multi-CTE join chain; flattening it
+			-- into a single-column CTE sidesteps ClickHouse analyzer scope
+			-- issues when it sits alongside other JOINs in status_enriched.
+			SELECT orch_address, ifNull(orchestrator_uri, '') AS orchestrator_uri
+			FROM naap.canonical_capability_orchestrator_identity_latest
 		)
 		SELECT
-			canonical_session_key,
-			event_id,
-			sample_ts,
-			org,
-			stream_id,
-			request_id,
-			gateway,
-			pipeline,
-			model_id,
-			orch_address,
-			attribution_status,
-			attribution_reason,
-			state,
-			output_fps,
-			input_fps,
-			e2e_latency_ms,
-			started_at,
-			last_seen,
-			completed,
+			se.canonical_session_key,
+			se.event_id,
+			se.sample_ts,
+			se.org,
+			se.stream_id,
+			se.request_id,
+			se.gateway,
+			se.pipeline,
+			se.model_id,
+			se.orch_address,
+			ifNull(oi.orchestrator_uri, '') AS orchestrator_uri,
+			se.attribution_status,
+			se.attribution_reason,
+			se.state,
+			se.output_fps,
+			se.input_fps,
+			se.e2e_latency_ms,
+			se.started_at,
+			se.last_seen,
+			se.completed,
 			?,
 			?,
 			?
-		FROM status_enriched
-		ORDER BY canonical_session_key, sample_ts DESC, event_id DESC
-		LIMIT 1 BY canonical_session_key
+		FROM status_enriched se
+		LEFT JOIN orch_uri_latest oi
+			ON oi.orch_address = se.attributed_orch_address_key
+		ORDER BY se.canonical_session_key, se.sample_ts DESC, se.event_id DESC
+		LIMIT 1 BY se.canonical_session_key
 	`, queryID, runID, r.cfg.ResolverVersion, now)
 }
 
@@ -3317,7 +3329,7 @@ func (r *repo) insertFinalSLAComplianceRollups(ctx context.Context, runID string
 	return r.conn.Exec(ctx, `
 		INSERT INTO naap.api_hourly_streaming_sla_store
 		(
-			window_start, org, orchestrator_address, pipeline_id, model_id, gpu_id, gpu_model_name, region,
+			window_start, org, orchestrator_address, orchestrator_uri, pipeline_id, model_id, gpu_id, gpu_model_name, region,
 			known_sessions_count, requested_sessions, startup_success_sessions, no_orch_sessions,
 			startup_excused_sessions, startup_failed_sessions, loading_only_sessions, zero_output_fps_sessions,
 			output_failed_sessions, effective_failed_sessions, confirmed_swapped_sessions, inferred_swap_sessions,
@@ -3336,6 +3348,13 @@ func (r *repo) insertFinalSLAComplianceRollups(ctx context.Context, runID string
 			SELECT DISTINCT window_start
 			FROM naap.resolver_query_window_slices
 			WHERE query_id = ?
+		),
+		-- Phase 3: pre-materialize the orchestrator_address -> uri lookup so the
+		-- LEFT JOIN against the multi-CTE identity view is planned as a single
+		-- join step against a flat CTE instead of being re-expanded inline.
+		orch_uri_latest AS (
+			SELECT orch_address, ifNull(orchestrator_uri, '') AS orchestrator_uri
+			FROM naap.canonical_capability_orchestrator_identity_latest
 		),
 		-- Latest input slice per (org, window_start) — the same pattern
 		-- api_base_sla_quality_inputs_by_org used before Phase 2.
@@ -3551,6 +3570,7 @@ func (r *repo) insertFinalSLAComplianceRollups(ctx context.Context, runID string
 			s.window_start,
 			s.org,
 			s.orchestrator_address,
+			ifNull(oi.orchestrator_uri, '') AS orchestrator_uri,
 			s.pipeline_id,
 			s.model_id,
 			s.gpu_id,
@@ -3605,6 +3625,8 @@ func (r *repo) insertFinalSLAComplianceRollups(ctx context.Context, runID string
 				CAST(NULL, 'Nullable(Float64)')) AS sla_score,
 			?, ?, ?
 		FROM component_scores s
+		LEFT JOIN orch_uri_latest oi
+			ON oi.orch_address = s.orchestrator_address
 	`, queryID, runID, r.cfg.ResolverVersion, now)
 }
 

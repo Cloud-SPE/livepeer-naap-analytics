@@ -17,6 +17,7 @@ select
     s.pipeline,
     s.model_id,
     s.orch_address,
+    s.orchestrator_uri,
     s.attribution_status,
     s.attribution_reason,
     s.state,

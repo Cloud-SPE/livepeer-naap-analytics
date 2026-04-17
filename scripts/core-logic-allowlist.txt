@@ -12,6 +12,6 @@
 # harmless) but should be cleaned up when noticed.
 
 api/internal/repo/clickhouse/selection.go:57	phase-4-unified-capability-spine
-api/internal/repo/clickhouse/selection.go:64	phase-4-unified-capability-spine
+api/internal/repo/clickhouse/selection.go:65	phase-4-unified-capability-spine
 api/internal/repo/clickhouse/selection.go:101	phase-4-unified-capability-spine
 api/internal/repo/clickhouse/requests.go:49	phase-4-unified-capability-spine

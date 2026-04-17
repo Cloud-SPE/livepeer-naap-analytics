@@ -19,6 +19,7 @@ select
     s.window_start,
     s.org,
     s.orchestrator_address,
+    s.orchestrator_uri,
     s.pipeline_id,
     s.model_id,
     s.gpu_id,

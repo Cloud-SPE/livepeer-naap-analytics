@@ -77,6 +77,7 @@ func (r *Repo) GetStreamingOrchestrators(ctx context.Context) ([]types.Streaming
 		WITH supply AS (
 		    SELECT
 		        orch_address,
+		        ifNull(anyLast(orchestrator_uri), '') AS orchestrator_uri,
 		        arrayDistinct(groupArrayIf(model_id, ifNull(model_id, '') != '')) AS models,
 		        toInt64(countDistinctIf(gpu_id, ifNull(gpu_id, '') != '')) AS gpu_count,
 		        max(last_seen) AS last_seen
@@ -88,13 +89,11 @@ func (r *Repo) GetStreamingOrchestrators(ctx context.Context) ([]types.Streaming
 		)
 		SELECT
 		    s.orch_address AS address,
-		    ifNull(i.orchestrator_uri, '') AS uri,
+		    s.orchestrator_uri AS uri,
 		    s.models,
 		    s.gpu_count,
 		    s.last_seen
 		FROM supply s
-		LEFT JOIN naap.api_orchestrator_identity i
-		    ON i.orch_address = s.orch_address
 		WHERE length(s.models) > 0
 		ORDER BY gpu_count DESC, address ASC
 	`, start, end)

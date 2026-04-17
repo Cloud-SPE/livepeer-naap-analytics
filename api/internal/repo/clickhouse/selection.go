@@ -57,6 +57,7 @@ func (r *Repo) DiscoverOrchestrators(ctx context.Context, p types.DiscoverOrches
 		      if(capability_family = 'byoc', capability_name, ifNull(canonical_pipeline, capability_name)) AS pipeline_id,
 		      model_id,
 		      last_seen,
+		      ifNull(orchestrator_uri, '') AS orchestrator_uri,
 		      capability_family,
 		      supports_stream
 		    FROM naap.api_observed_capability_offer
@@ -68,6 +69,7 @@ func (r *Repo) DiscoverOrchestrators(ctx context.Context, p types.DiscoverOrches
 		      capability_name AS pipeline_id,
 		      model AS model_id,
 		      last_seen,
+		      ifNull(orchestrator_uri, '') AS orchestrator_uri,
 		      'byoc' AS capability_family,
 		      toUInt8(0) AS supports_stream
 		    FROM naap.api_observed_byoc_worker
@@ -77,12 +79,10 @@ func (r *Repo) DiscoverOrchestrators(ctx context.Context, p types.DiscoverOrches
 		  observed_orchestrators AS (
 		    SELECT
 		      o.orch_address,
-		      ifNull(i.orchestrator_uri, '') AS orchestrator_uri,
+		      anyLast(o.orchestrator_uri) AS orchestrator_uri,
 		      max(o.last_seen) AS last_seen
 		    FROM offers o
-		    LEFT JOIN naap.api_orchestrator_identity i
-		      ON i.orch_address = o.orch_address
-		    GROUP BY o.orch_address, i.orchestrator_uri
+		    GROUP BY o.orch_address
 		  ),
 		  streaming_sla AS (
 		    SELECT
