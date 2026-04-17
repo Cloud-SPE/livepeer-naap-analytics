@@ -74,8 +74,34 @@ case "${SOURCE}" in
     CH_USER="${CLICKHOUSE_ADMIN_USER:-naap_admin}"
     CH_PASSWORD="${CLICKHOUSE_ADMIN_PASSWORD:-changeme}"
     ;;
+  s3)
+    # CI path: pull a pre-uploaded archive from S3 keyed by the
+    # manifest's archive_sha256. Skips ClickHouse entirely; the manifest
+    # must already exist in the repo and contain the expected sha.
+    : "${REPLAY_FIXTURE_S3_BUCKET:?set REPLAY_FIXTURE_S3_BUCKET (bucket name, no s3:// prefix)}"
+    if ! command -v aws >/dev/null 2>&1; then
+      echo "required tool missing: aws (install AWS CLI)" >&2; exit 1
+    fi
+    if [[ ! -f "${MANIFEST_PATH}" ]]; then
+      echo "manifest not found: ${MANIFEST_PATH}" >&2
+      echo "an S3 fetch validates the archive against the committed manifest;" >&2
+      echo "commit a manifest first or use --source staging|local to generate one." >&2
+      exit 1
+    fi
+    ARCHIVE_SHA="$(jq -r .archive_sha256 "${MANIFEST_PATH}")"
+    if [[ -z "${ARCHIVE_SHA}" || "${ARCHIVE_SHA}" == "null" ]]; then
+      echo "manifest ${MANIFEST_PATH} is missing archive_sha256" >&2; exit 1
+    fi
+    S3_KEY="replay/fixtures/${ARCHIVE_SHA}.ndjson.zst"
+    echo "fetching s3://${REPLAY_FIXTURE_S3_BUCKET}/${S3_KEY}"
+    mkdir -p "${FIXTURE_DIR}"
+    aws s3 cp "s3://${REPLAY_FIXTURE_S3_BUCKET}/${S3_KEY}" "${ARCHIVE_PATH}"
+    echo "${ARCHIVE_SHA}  ${ARCHIVE_PATH}" | sha256sum -c
+    echo "fetched ${ARCHIVE_PATH} ($(stat -c %s "${ARCHIVE_PATH}") bytes)"
+    exit 0
+    ;;
   *)
-    echo "unknown --source: ${SOURCE} (expected staging|local)" >&2; exit 2 ;;
+    echo "unknown --source: ${SOURCE} (expected staging|local|s3)" >&2; exit 2 ;;
 esac
 
 CH_DATABASE="${CLICKHOUSE_DATABASE:-naap}"

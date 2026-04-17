@@ -342,32 +342,93 @@ The archive itself is never committed — `tests/fixtures/.gitignore` keeps
 it local. Eventually it will be fetched from S3 at CI setup time (see
 "CI plan" below).
 
-## CI plan (not yet wired)
+## CI
 
-Stubbed at `.github/workflows/replay.yml` with `if: false` so it does not
-run. Bring-up steps when ready:
+Two workflows, both live under `.github/workflows/`:
 
-1. **Trigger** — `on: pull_request` + nightly `on: schedule` against
-   `refactor/medallion-v2`.
-2. **Runner** — `ubuntu-latest`.
-3. **Setup** — checkout, `actions/setup-go@v5` (Go 1.24.x),
-   `actions/setup-python@v5` (only when the dbt phase is wired).
-4. **Ephemeral ClickHouse** — start
-   `clickhouse/clickhouse-server:24.3` as a service container with a
-   tmpfs data dir and the bootstrap SQL mounted. No Kafka service — the
-   harness inserts directly into `accepted_raw_events`.
-5. **Fetch fixture** — pull `raw_events_golden.ndjson.zst` from S3
-   by `archive_sha256` in the committed manifest. Cache by SHA.
-6. **Migrations + dbt** — `make migrate-up && make warehouse-run` against
-   the ephemeral ClickHouse.
-7. **Harness** — `make replay-verify`. Artefact upload
-   `target/replay/*.json` on failure.
-8. **Caching** — cache Go modules by `go.sum`, dbt target by project
-   hash, fixture by `archive_sha256`.
-9. **Matrix (later)** — once more fixtures exist (`boundary-cases`,
-   `week-rollup`), run them as a matrix.
-10. **Required check** — mark `replay-verify` a required status check
-    on PRs targeting `refactor/medallion-v2`.
+### `medallion-lints` (fast, every PR)
+
+Runs the four lint rules defined in
+[`medallion-lints.md`](medallion-lints.md), minus the
+additive-primitives test (which needs loaded data and therefore lives
+in the replay workflow). Three jobs in parallel:
+
+- `core-logic-lint` — `scripts/core-logic-lint.sh`, no deps
+- `grafana-lint` — `go build` + run, no deps
+- `layer-discipline-lint` — ephemeral ClickHouse + `dbt parse` + `dbt test --select test_layer_discipline`
+
+Typical runtime: under 3 minutes. Zero required secrets — runs on
+forks, every push, every PR.
+
+### `replay-harness` (daily fixture determinism gate)
+
+Runs the 4-layer pipeline over the daily fixture (fetched from S3),
+then re-checksums and diffs. Additional runs
+`test_api_hourly_additive_primitives` once the api layer is
+populated. Typical runtime: ~10 minutes on a `ubuntu-latest` runner.
+
+**Required repo configuration** — without these the job skips
+gracefully with no error:
+
+| Setting | Type | Value |
+|---|---|---|
+| `REPLAY_FIXTURE_S3_BUCKET` | variable | bucket name (no `s3://` prefix) |
+| `AWS_DEFAULT_REGION` | variable (optional) | default `us-east-1` |
+| `AWS_ACCESS_KEY_ID` | secret | IAM user with `s3:GetObject` on the bucket |
+| `AWS_SECRET_ACCESS_KEY` | secret | matching secret key |
+
+The IAM principal only needs read; `s3:PutObject` is required by
+operators running `scripts/upload-fixture-to-s3.sh` — keep those
+credentials local.
+
+### S3 fixture bucket layout
+
+```
+s3://<REPLAY_FIXTURE_S3_BUCKET>/replay/fixtures/<archive_sha256>.ndjson.zst
+```
+
+Archives are keyed by their SHA-256 so identical content de-dupes
+naturally. The committed manifest (`tests/fixtures/*.manifest.json`)
+is the only link CI trusts between a branch and the bytes in the
+bucket — changing a manifest without uploading the matching archive
+breaks the fetch.
+
+### Updating a fixture (3-step dance)
+
+1. **Fetch locally from the authoritative source** — writes both
+   the archive and a new manifest:
+   ```bash
+   make replay-fetch-fixture-daily-force
+   # or, for the golden:
+   make replay-fetch-fixture-force
+   ```
+2. **Upload the archive to S3** — keyed by the new manifest's
+   `archive_sha256`:
+   ```bash
+   scripts/upload-fixture-to-s3.sh daily
+   scripts/upload-fixture-to-s3.sh golden
+   ```
+3. **Commit the manifest change.** CI's next run will download the
+   new archive by the new sha.
+
+### Triage recipe when CI fails
+
+The replay workflow uploads `target/replay/*.json` as an artefact on
+failure. Download it, run the diff locally:
+
+```bash
+./bin/replay \
+  --fixture tests/fixtures/raw_events_daily.ndjson.zst \
+  --manifest tests/fixtures/raw_events_daily.manifest.json \
+  --layers raw,normalized,canonical,api \
+  --output target/replay \
+  --skip-load --skip-resolver --skip-dbt \
+  --compare-to <downloaded-first.json>
+```
+
+The output names the first-divergent layer and table — that is the
+root cause most of the time. Everything downstream of the root is
+typically a consequence.
 
 ## Extending coverage
 
