@@ -85,6 +85,9 @@ var tablesByLayer = map[Layer][]string{
 		"api_fact_byoc_job",
 		"api_hourly_byoc_auth",
 		"api_hourly_request_demand",
+		// Phase 6.1: physical backing of api_hourly_request_demand. View
+		// is a latest-slice reader; rows live here.
+		"api_hourly_request_demand_store",
 		"api_hourly_streaming_demand",
 		"api_hourly_streaming_gpu_metrics",
 		"api_hourly_streaming_sla",
@@ -116,6 +119,7 @@ var tablesByLayer = map[Layer][]string{
 // promote other canonical stores into the api layer will append to this
 // list in lockstep with the rename.
 var resolverWrittenApiStores = []string{
+	"api_hourly_request_demand_store",
 	"api_hourly_streaming_sla_store",
 }
 

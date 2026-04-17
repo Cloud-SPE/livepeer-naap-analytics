@@ -2607,6 +2607,9 @@ func (r *repo) publishServingRollups(ctx context.Context, runID string, now time
 	if err := r.insertGPUMetricsRollups(ctx, runID, now, queryID); err != nil {
 		return err
 	}
+	if err := r.insertHourlyRequestDemand(ctx, runID, now, queryID); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -4471,6 +4474,160 @@ func (r *repo) fetchWorkerLifecycleSnapshots(ctx context.Context, spec WindowSpe
 		out = append(out, s)
 	}
 	return out, rows.Err()
+}
+
+// insertHourlyRequestDemand aggregates canonical_ai_batch_job_store and
+// canonical_byoc_job_store into the pre-rolled hourly store the request
+// serving endpoints read. Scoped to owned_windows so a replay / partial
+// refresh only republishes the rows it actually touched; the store is
+// MergeTree (not Replacing) with refresh_run_id + refreshed_at in the
+// ORDER BY, so the latest-slice argMax pattern in api_hourly_request_demand
+// naturally picks the most recent run's row per grain.
+//
+// Dedup against ReplacingMergeTree on the upstream job stores is applied
+// inline via argMax(..., materialized_at) by (org, request_id) / (org,
+// event_id); running SELECT FINAL on those stores would be equivalent but
+// materialized_at is already the dedup key so the explicit argMax keeps
+// the plan readable.
+//
+// LLM supplementary fields are joined from canonical_ai_llm_requests (dbt
+// dedup view over stg_ai_llm_requests); canonical BYOC jobs have no LLM
+// metrics so those columns are zero for the byoc branch.
+func (r *repo) insertHourlyRequestDemand(ctx context.Context, runID string, now time.Time, queryID string) error {
+	return r.conn.Exec(ctx, `
+		INSERT INTO naap.api_hourly_request_demand_store
+		(
+			window_start, org, gateway, execution_mode, capability_family, capability_name, capability_id,
+			canonical_pipeline, pipeline_id, canonical_model, orchestrator_address, orchestrator_uri,
+			job_count, selected_count, no_orch_count, success_count, duration_ms_sum, price_sum,
+			llm_request_count, llm_success_count, llm_total_tokens_sum, llm_total_tokens_sample_count,
+			llm_tokens_per_second_sum, llm_tokens_per_second_sample_count, llm_ttft_ms_sum, llm_ttft_ms_sample_count,
+			refresh_run_id, artifact_checksum, refreshed_at
+		)
+		WITH owned_windows AS (
+			SELECT DISTINCT window_start
+			FROM naap.resolver_query_window_slices
+			WHERE query_id = ?
+		),
+		ai_batch_latest AS (
+			SELECT
+				org,
+				request_id,
+				argMax(pipeline,            materialized_at) AS pipeline,
+				argMax(model_id,            materialized_at) AS model_id,
+				argMax(gateway,             materialized_at) AS gateway,
+				argMax(completed_at,        materialized_at) AS completed_at,
+				argMax(received_at,         materialized_at) AS received_at,
+				argMax(success,             materialized_at) AS success,
+				argMax(selection_outcome,   materialized_at) AS selection_outcome,
+				argMax(duration_ms,         materialized_at) AS duration_ms,
+				argMax(price_per_unit,      materialized_at) AS price_per_unit,
+				argMax(orch_url_norm,       materialized_at) AS orch_url_norm
+			FROM naap.canonical_ai_batch_job_store
+			GROUP BY org, request_id
+		),
+		ai_batch AS (
+			SELECT
+				toStartOfHour(coalesce(j.completed_at, j.received_at)) AS window_start,
+				j.org                                                   AS org,
+				ifNull(j.gateway, '')                                   AS gateway,
+				'request'                                               AS execution_mode,
+				'builtin'                                               AS capability_family,
+				j.pipeline                                              AS capability_name,
+				cast(NULL, 'Nullable(UInt16)')                          AS capability_id,
+				cast(j.pipeline, 'Nullable(String)')                    AS canonical_pipeline,
+				j.pipeline                                              AS pipeline_id,
+				cast(j.model_id, 'Nullable(String)')                    AS canonical_model,
+				cast('', 'String')                                      AS orchestrator_address,
+				ifNull(j.orch_url_norm, '')                             AS orchestrator_uri,
+				toUInt64(count())                                       AS job_count,
+				toUInt64(countIf(j.selection_outcome = 'selected'))     AS selected_count,
+				toUInt64(countIf(j.selection_outcome = 'no_orch'))      AS no_orch_count,
+				toUInt64(countIf(j.success = 1))                        AS success_count,
+				toInt64(sum(toInt64(coalesce(j.duration_ms, 0))))       AS duration_ms_sum,
+				toFloat64(sum(toFloat64(coalesce(j.price_per_unit, 0))))AS price_sum,
+				toUInt64(countIf(j.pipeline = 'llm' AND ifNull(l.model, '') != ''))                                          AS llm_request_count,
+				toUInt64(countIf(j.pipeline = 'llm' AND ifNull(l.model, '') != '' AND j.success = 1))                        AS llm_success_count,
+				toInt64(sumIf(toInt64(coalesce(l.total_tokens, 0)),     j.pipeline = 'llm' AND ifNull(l.model, '') != ''))   AS llm_total_tokens_sum,
+				toUInt64(countIf(j.pipeline = 'llm' AND ifNull(l.model, '') != '' AND l.total_tokens IS NOT NULL))           AS llm_total_tokens_sample_count,
+				toFloat64(sumIf(toFloat64(coalesce(l.tokens_per_second, 0)), j.pipeline = 'llm' AND ifNull(l.model, '') != ''))   AS llm_tokens_per_second_sum,
+				toUInt64(countIf(j.pipeline = 'llm' AND ifNull(l.model, '') != '' AND l.tokens_per_second IS NOT NULL))      AS llm_tokens_per_second_sample_count,
+				toFloat64(sumIf(toFloat64(coalesce(l.ttft_ms, 0)),      j.pipeline = 'llm' AND ifNull(l.model, '') != ''))   AS llm_ttft_ms_sum,
+				toUInt64(countIf(j.pipeline = 'llm' AND ifNull(l.model, '') != '' AND l.ttft_ms IS NOT NULL))                AS llm_ttft_ms_sample_count
+			FROM ai_batch_latest j
+			INNER JOIN owned_windows w
+				ON w.window_start = toStartOfHour(coalesce(j.completed_at, j.received_at))
+			LEFT JOIN naap.canonical_ai_llm_requests l
+				ON l.org = j.org AND l.request_id = j.request_id
+			WHERE j.request_id != '' AND j.pipeline != ''
+			GROUP BY window_start, org, gateway, execution_mode, capability_family, capability_name,
+				canonical_pipeline, pipeline_id, canonical_model, orchestrator_address, orchestrator_uri
+		),
+		byoc_latest AS (
+			SELECT
+				org,
+				event_id,
+				argMax(capability,        materialized_at) AS capability,
+				argMax(model,             materialized_at) AS model,
+				argMax(gateway,           materialized_at) AS gateway,
+				argMax(completed_at,      materialized_at) AS completed_at,
+				argMax(success,           materialized_at) AS success,
+				argMax(selection_outcome, materialized_at) AS selection_outcome,
+				argMax(duration_ms,       materialized_at) AS duration_ms,
+				argMax(price_per_unit,    materialized_at) AS price_per_unit,
+				argMax(orch_address,      materialized_at) AS orch_address,
+				argMax(orch_url_norm,     materialized_at) AS orch_url_norm
+			FROM naap.canonical_byoc_job_store
+			GROUP BY org, event_id
+		),
+		byoc AS (
+			SELECT
+				toStartOfHour(j.completed_at)                           AS window_start,
+				j.org                                                   AS org,
+				ifNull(j.gateway, '')                                   AS gateway,
+				'request'                                               AS execution_mode,
+				'byoc'                                                  AS capability_family,
+				j.capability                                            AS capability_name,
+				cast(37, 'Nullable(UInt16)')                            AS capability_id,
+				cast(NULL, 'Nullable(String)')                          AS canonical_pipeline,
+				j.capability                                            AS pipeline_id,
+				cast(j.model, 'Nullable(String)')                       AS canonical_model,
+				ifNull(j.orch_address, '')                              AS orchestrator_address,
+				ifNull(j.orch_url_norm, '')                             AS orchestrator_uri,
+				toUInt64(count())                                       AS job_count,
+				toUInt64(countIf(j.selection_outcome = 'selected'))     AS selected_count,
+				toUInt64(countIf(j.selection_outcome = 'no_orch'))      AS no_orch_count,
+				toUInt64(countIf(j.success = 1))                        AS success_count,
+				toInt64(sum(toInt64(coalesce(j.duration_ms, 0))))       AS duration_ms_sum,
+				toFloat64(sum(toFloat64(coalesce(j.price_per_unit, 0))))AS price_sum,
+				toUInt64(0)                                             AS llm_request_count,
+				toUInt64(0)                                             AS llm_success_count,
+				toInt64(0)                                              AS llm_total_tokens_sum,
+				toUInt64(0)                                             AS llm_total_tokens_sample_count,
+				toFloat64(0)                                            AS llm_tokens_per_second_sum,
+				toUInt64(0)                                             AS llm_tokens_per_second_sample_count,
+				toFloat64(0)                                            AS llm_ttft_ms_sum,
+				toUInt64(0)                                             AS llm_ttft_ms_sample_count
+			FROM byoc_latest j
+			INNER JOIN owned_windows w
+				ON w.window_start = toStartOfHour(j.completed_at)
+			WHERE j.event_id != '' AND j.capability != ''
+			GROUP BY window_start, org, gateway, execution_mode, capability_family, capability_name, capability_id,
+				canonical_pipeline, pipeline_id, canonical_model, orchestrator_address, orchestrator_uri
+		)
+		SELECT
+			window_start, org, gateway, execution_mode, capability_family, capability_name, capability_id,
+			canonical_pipeline, pipeline_id, canonical_model, orchestrator_address, orchestrator_uri,
+			job_count, selected_count, no_orch_count, success_count, duration_ms_sum, price_sum,
+			llm_request_count, llm_success_count, llm_total_tokens_sum, llm_total_tokens_sample_count,
+			llm_tokens_per_second_sum, llm_tokens_per_second_sample_count, llm_ttft_ms_sum, llm_ttft_ms_sample_count,
+			?, ?, ?
+		FROM (
+			SELECT * FROM ai_batch
+			UNION ALL
+			SELECT * FROM byoc
+		)
+	`, queryID, runID, r.cfg.ResolverVersion, now)
 }
 
 // insertAIBatchJobRows upserts AI batch job attribution rows into

@@ -1,72 +1,53 @@
-with ai_batch as (
+-- Phase 6.1: read pre-aggregated rows from api_hourly_request_demand_store.
+-- The resolver writes one row per (org, window_start, gateway, capability,
+-- pipeline_id, model, orchestrator) grain via insertHourlyRequestDemand on
+-- every refresh run, so an API-layer query is an O(window_start) primary-key
+-- lookup plus a latest-slice pick — no per-request rescan of the two canonical
+-- job feeds.
+--
+-- The previous on-demand view UNION-ed canonical_ai_batch_jobs and
+-- canonical_byoc_jobs with duplicated column lists; the resolver writer now
+-- owns that shape and the view becomes a thin alias.
+
+{{ config(materialized='view') }}
+
+with latest_slices as (
     select
-        toStartOfHour(coalesce(completed_at, received_at)) as window_start,
         org,
-        ifNull(gateway, '') as gateway,
-        'request' as execution_mode,
-        'builtin' as capability_family,
-        pipeline as capability_name,
-        cast(null, 'Nullable(UInt16)') as capability_id,
-        cast(pipeline, 'Nullable(String)') as canonical_pipeline,
-        -- Phase 4 unified spine: ai_batch rows are builtin, so pipeline_id
-        -- is the builtin pipeline name — never the raw capability_name.
-        pipeline as pipeline_id,
-        cast(model_id, 'Nullable(String)') as canonical_model,
-        cast('', 'String') as orchestrator_address,
-        ifNull(orch_url_norm, '') as orchestrator_uri,
-        toUInt64(count()) as job_count,
-        toUInt64(countIf(selection_outcome = 'selected')) as selected_count,
-        toUInt64(countIf(selection_outcome = 'no_orch')) as no_orch_count,
-        toUInt64(countIf(success = 1)) as success_count,
-        toInt64(sum(toInt64(coalesce(duration_ms, 0)))) as duration_ms_sum,
-        toFloat64(sum(toFloat64(coalesce(price_per_unit, 0)))) as price_sum,
-        toUInt64(countIf(pipeline = 'llm' and ifNull(llm_model, '') != '')) as llm_request_count,
-        toUInt64(countIf(pipeline = 'llm' and ifNull(llm_model, '') != '' and success = 1)) as llm_success_count,
-        toInt64(sumIf(toInt64(coalesce(total_tokens, 0)), pipeline = 'llm' and ifNull(llm_model, '') != '')) as llm_total_tokens_sum,
-        toUInt64(countIf(pipeline = 'llm' and ifNull(llm_model, '') != '' and total_tokens is not null)) as llm_total_tokens_sample_count,
-        toFloat64(sumIf(toFloat64(coalesce(tokens_per_second, 0)), pipeline = 'llm' and ifNull(llm_model, '') != '')) as llm_tokens_per_second_sum,
-        toUInt64(countIf(pipeline = 'llm' and ifNull(llm_model, '') != '' and tokens_per_second is not null)) as llm_tokens_per_second_sample_count,
-        toFloat64(sumIf(toFloat64(coalesce(ttft_ms, 0)), pipeline = 'llm' and ifNull(llm_model, '') != '')) as llm_ttft_ms_sum,
-        toUInt64(countIf(pipeline = 'llm' and ifNull(llm_model, '') != '' and ttft_ms is not null)) as llm_ttft_ms_sample_count
-    from {{ ref('canonical_ai_batch_jobs') }}
-    where request_id != ''
-      and pipeline != ''
-    group by window_start, org, gateway, execution_mode, capability_family, capability_name, canonical_pipeline, pipeline_id, canonical_model, orchestrator_address, orchestrator_uri
-),
-byoc as (
-    select
-        toStartOfHour(coalesce(completed_at, submitted_at)) as window_start,
-        org,
-        ifNull(gateway, '') as gateway,
-        'request' as execution_mode,
-        'byoc' as capability_family,
-        capability as capability_name,
-        cast(37, 'Nullable(UInt16)') as capability_id,
-        cast(null, 'Nullable(String)') as canonical_pipeline,
-        -- Phase 4 unified spine: byoc rows carry the external capability name.
-        capability as pipeline_id,
-        cast(model, 'Nullable(String)') as canonical_model,
-        ifNull(orch_address, '') as orchestrator_address,
-        ifNull(orch_url_norm, '') as orchestrator_uri,
-        toUInt64(count()) as job_count,
-        toUInt64(countIf(selection_outcome = 'selected')) as selected_count,
-        toUInt64(countIf(selection_outcome = 'no_orch')) as no_orch_count,
-        toUInt64(countIf(success = 1)) as success_count,
-        toInt64(sum(toInt64(coalesce(duration_ms, 0)))) as duration_ms_sum,
-        toFloat64(sum(toFloat64(coalesce(price_per_unit, 0)))) as price_sum,
-        toUInt64(0) as llm_request_count,
-        toUInt64(0) as llm_success_count,
-        toInt64(0) as llm_total_tokens_sum,
-        toUInt64(0) as llm_total_tokens_sample_count,
-        toFloat64(0) as llm_tokens_per_second_sum,
-        toUInt64(0) as llm_tokens_per_second_sample_count,
-        toFloat64(0) as llm_ttft_ms_sum,
-        toUInt64(0) as llm_ttft_ms_sample_count
-    from {{ ref('canonical_byoc_jobs') }}
-    where request_id != ''
-      and capability != ''
-    group by window_start, org, gateway, execution_mode, capability_family, capability_name, capability_id, canonical_pipeline, pipeline_id, canonical_model, orchestrator_address, orchestrator_uri
+        window_start,
+        argMax(refresh_run_id, refreshed_at) as refresh_run_id
+    from naap.api_hourly_request_demand_store
+    group by org, window_start
 )
-select * from ai_batch
-union all
-select * from byoc
+select
+    s.window_start,
+    s.org,
+    s.gateway,
+    s.execution_mode,
+    s.capability_family,
+    s.capability_name,
+    s.capability_id,
+    s.canonical_pipeline,
+    s.pipeline_id,
+    s.canonical_model,
+    s.orchestrator_address,
+    s.orchestrator_uri,
+    s.job_count,
+    s.selected_count,
+    s.no_orch_count,
+    s.success_count,
+    s.duration_ms_sum,
+    s.price_sum,
+    s.llm_request_count,
+    s.llm_success_count,
+    s.llm_total_tokens_sum,
+    s.llm_total_tokens_sample_count,
+    s.llm_tokens_per_second_sum,
+    s.llm_tokens_per_second_sample_count,
+    s.llm_ttft_ms_sum,
+    s.llm_ttft_ms_sample_count
+from naap.api_hourly_request_demand_store as s
+inner join latest_slices as l
+    on  s.org = l.org
+    and s.window_start = l.window_start
+    and s.refresh_run_id = l.refresh_run_id
