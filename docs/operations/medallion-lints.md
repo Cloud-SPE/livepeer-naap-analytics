@@ -18,6 +18,25 @@ phase references tracking to
 
 ## Rules
 
+### 5. Store-DDL drift (Go)
+
+**Target:** `warehouse/ddl/stores/*.sql`. **Rule:** every declared
+`_store` table's live schema (columns + types) must match the
+checked-in declaration. Catches silent drift between operator-applied
+migrations and the committed source of truth.
+
+**Implementation:** `api/cmd/store-ddl-lint/main.go`. Parses the
+declared DDL with a paren-depth-aware tokeniser (so nested types like
+`AggregateFunction(argMaxIf, String, DateTime64(3, 'UTC'), UInt8)`
+stay intact), queries `system.columns` for the live schema, and
+reports `MISSING_IN_DECL`, `MISSING_IN_LIVE`, or `TYPE_DRIFT` per
+mismatch.
+
+**Run:** `make lint-store-ddl`
+
+See [`store-ddl-ownership.md`](store-ddl-ownership.md) for the
+workflow around adding / changing a store table.
+
 ### 1. Layer discipline (dbt)
 
 **Target:** the `{{ ref() }}` graph. **Rule:**
@@ -81,7 +100,7 @@ API-serving boundary.
 
 **Run:** `make lint-core-logic`
 
-## Current state (Phase 0)
+## Current state (Phase 0 closed)
 
 | Lint | unexpected | allowlisted | notes |
 |---|---|---|---|
@@ -89,6 +108,7 @@ API-serving boundary.
 | Grafana | 0 | 22 | 22 panels query canonical/normalized/agg — cleared in Phase 7 |
 | Additive primitives | 0 | 0 | all 44 primitives across 5 api_hourly_* models present + non-null |
 | Core-logic recalc | 0 | 4 | 4 `capability_family = 'byoc'` branches — cleared in Phase 4 |
+| Store-DDL drift | 0 | 0 | all 15 `_store` tables match their checked-in declarations |
 
 A failure under "unexpected" fails CI. A failure under "allowlisted"
 means a known-scheduled violation is still there and the plan's

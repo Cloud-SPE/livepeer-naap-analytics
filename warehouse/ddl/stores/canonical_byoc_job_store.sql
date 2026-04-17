@@ -1,0 +1,7 @@
+-- Canonical DDL for naap.canonical_byoc_job_store.
+-- Source of truth: this file. The resolver and MVs write rows;
+-- this declaration governs the physical schema.
+-- Apply with scripts/apply-store-ddl.sh; drift is caught by
+-- warehouse/tests/test_store_ddl_drift.sql.
+
+CREATE TABLE IF NOT EXISTS naap.canonical_byoc_job_store (`event_id` String, `org` LowCardinality(String), `gateway` String, `capability` String, `completed_at` DateTime64(3, 'UTC'), `success` Nullable(UInt8), `duration_ms` Int64, `http_status` UInt16, `orch_address` String, `orch_url` String, `orch_url_norm` String, `selection_outcome` LowCardinality(String) DEFAULT 'unknown', `worker_url` String, `charged_compute` UInt8, `error` String, `model` Nullable(String), `price_per_unit` Float64, `attribution_status` LowCardinality(String), `attribution_reason` LowCardinality(String), `attribution_method` LowCardinality(String), `attribution_confidence` LowCardinality(String), `attributed_orch_uri` Nullable(String), `capability_version_id` Nullable(String), `attribution_snapshot_ts` Nullable(DateTime64(3, 'UTC')), `gpu_id` Nullable(String), `gpu_model_name` Nullable(String), `gpu_memory_bytes_total` Nullable(UInt64), `resolver_run_id` String DEFAULT '', `materialized_at` DateTime64(3, 'UTC') DEFAULT now64()) ENGINE = ReplacingMergeTree(materialized_at) PARTITION BY (org, toYYYYMM(completed_at)) ORDER BY (org, event_id, completed_at) TTL toDateTime(completed_at) + toIntervalDay(90) SETTINGS index_granularity = 8192;

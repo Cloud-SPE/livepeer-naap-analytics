@@ -1,4 +1,4 @@
-.PHONY: up up-tooling down build test test-integration bench load-test lint dev-api setup fmt ch-smoke ch-query push push-api push-clickhouse push-dbt push-resolver push-mcp warehouse-run warehouse-test warehouse-compile test-validation test-validation-host test-validation-docker test-validation-clean measure-baseline measure-refactor-replay migrate-status migrate-validate migrate-up bootstrap-extract resolver-logs resolver-auto resolver-bootstrap resolver-tail resolver-backfill resolver-repair-window parity-verify replay replay-build replay-fetch-fixture replay-fetch-fixture-force replay-verify replay-verify-full lint-medallion lint-core-logic lint-grafana lint-grafana-build lint-dbt-layer-discipline lint-dbt-additive-primitives replay-fetch-fixture-daily replay-fetch-fixture-daily-force replay-daily replay-verify-canonical
+.PHONY: up up-tooling down build test test-integration bench load-test lint dev-api setup fmt ch-smoke ch-query push push-api push-clickhouse push-dbt push-resolver push-mcp warehouse-run warehouse-test warehouse-compile test-validation test-validation-host test-validation-docker test-validation-clean measure-baseline measure-refactor-replay migrate-status migrate-validate migrate-up bootstrap-extract resolver-logs resolver-auto resolver-bootstrap resolver-tail resolver-backfill resolver-repair-window parity-verify replay replay-build replay-fetch-fixture replay-fetch-fixture-force replay-verify replay-verify-full lint-medallion lint-core-logic lint-grafana lint-grafana-build lint-dbt-layer-discipline lint-dbt-additive-primitives replay-fetch-fixture-daily replay-fetch-fixture-daily-force replay-daily replay-verify-canonical apply-store-ddl lint-store-ddl lint-store-ddl-build
 
 REGISTRY  ?= tztcloud
 IMAGE_TAG ?= latest
@@ -269,8 +269,8 @@ replay-verify: replay-build
 # Each lint supports an allowlist so known-scheduled violations don't
 # block CI; the allowlist entries disappear as the plan's phases land.
 
-lint-medallion: lint-core-logic lint-grafana lint-dbt-layer-discipline lint-dbt-additive-primitives
-	@echo "lint-medallion: all four rules clean"
+lint-medallion: lint-core-logic lint-grafana lint-dbt-layer-discipline lint-dbt-additive-primitives lint-store-ddl
+	@echo "lint-medallion: all five rules clean"
 
 lint-core-logic:
 	@bash scripts/core-logic-lint.sh
@@ -288,6 +288,24 @@ lint-dbt-layer-discipline:
 
 lint-dbt-additive-primitives:
 	docker compose --profile tooling run --rm warehouse test --select test_api_hourly_additive_primitives
+
+# ── Store-table DDL ownership (serving-layer-v2 Phase 0 PR 8) ─────────────
+# The canonical declaration for every resolver-written _store MergeTree
+# lives under warehouse/ddl/stores/. Physical tables are still created
+# via infra/clickhouse/migrations/ at bootstrap, but drift between the
+# live schema and the checked-in declaration is caught by lint-store-ddl.
+# New store tables: drop a file in warehouse/ddl/stores/ + an ALTER-safe
+# migration under infra/clickhouse/migrations/ so fresh stacks bootstrap
+# correctly.
+
+apply-store-ddl:
+	@bash scripts/apply-store-ddl.sh
+
+lint-store-ddl-build:
+	cd api && go build -o ../bin/store-ddl-lint ./cmd/store-ddl-lint
+
+lint-store-ddl: lint-store-ddl-build
+	./bin/store-ddl-lint
 
 replay-verify-full: replay-build
 	./bin/replay \

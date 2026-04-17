@@ -1,10 +1,32 @@
 # Plan: Serving Layer v2 — Three-Families Medallion Rewrite
 
-**Status:** active
+**Status:** Phase 0 complete; Phase 1 next.
 **Started:** 2026-04-17
 **Depends on:** Phase 11 (minimal canonical analytics model)
 **Blocks:** retirement of `api_base_*` tier, resolver store-table consolidation, Grafana serving-contract enforcement
 **Supersedes (partial):** ADR-003 — removes the `api_base_*` tier; collapses serving into three `api_*` families
+
+## Phase 0 shipped commits
+
+| PR | Commit | Lands |
+|---|---|---|
+| PR 1 | `c45967b` | Replay harness scaffold + golden fixture (raw, normalized). |
+| PR 2 | `4e01d63` | Resolver clock freeze — `RunRequest.Now` threaded through every persistent write. |
+| PR 3 | `e97da55` | Canonical-phase extension of the harness. |
+| PR 4 | `86724c3` | API-phase extension via dbt. |
+| PR 5 | `e902b75` | Medallion lints (layer discipline, grafana, additive primitives, core-logic recalc). |
+| PR 6 | `729094a` | Daily dev fixture (744k rows, 6-min four-layer replay). |
+| PR 7 | `5467d6d` | CI activation — lint workflow, replay gate, S3 fetch path. |
+| PR 8 | *this* | Store-DDL ownership under `warehouse/ddl/stores/` + drift lint. |
+
+Phase 0 deliberately narrowed Phase 8's original "every `_store` moves
+to `materialized='table'`" into "DDL declaration moves to
+`warehouse/ddl/stores/` with a drift lint." Full dbt materialization
+ownership would require a custom non-dropping materialization and
+wholesale ALTER migration for 15 tables — a larger scope than Phase 0
+closeout should carry. The current shape gives the plan the property
+that matters (**`warehouse/` is the source of truth for every table
+shape, drift is caught in CI**) without the data-loss risk.
 
 ## Goal
 
