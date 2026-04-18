@@ -1,10 +1,12 @@
 # Plan: Serving Layer v2 — Three-Families Medallion Rewrite
 
-**Status:** Phase 0 complete; Phase 1 next.
+**Status:** completed (Phases 0–8 shipped on `refactor/medallion-v2`).
 **Started:** 2026-04-17
+**Completed:** 2026-04-18
 **Depends on:** Phase 11 (minimal canonical analytics model)
-**Blocks:** retirement of `api_base_*` tier, resolver store-table consolidation, Grafana serving-contract enforcement
-**Supersedes (partial):** ADR-003 — removes the `api_base_*` tier; collapses serving into three `api_*` families
+**Implemented contract:** [`../../design-docs/api-table-contract.md`](../../design-docs/api-table-contract.md)
+**Supersedes (partial):** ADR-003 — removed the `api_base_*` tier (Phase 5); collapsed serving into three `api_*` families
+**Final shipping commits:** Phase 1 `f0147f5`, Phase 2 `db9bada`, Phase 3 `04980be`, Phase 4 `9c3cf97`, Phase 5 `bbdcce2`, Phase 6 (`3a24119`, `bf0b312`, `26cad7a`, `7ddd3a0`, `05cd65a`), Phase 7 `d2f1ca4`, Phase 8 `fc4e9e0` (drops legacy `agg_*` via migration 022).
 
 ## Phase 0 shipped commits
 
@@ -179,7 +181,7 @@ This reclaims the single largest latency win with near-zero new code.
    - dbt uniqueness on `(window_start, orchestrator_address, pipeline_id, ifNull(model_id, ''), ifNull(gpu_id, ''), refresh_run_id)`.
    - Parity test: new view returns the same rows as the previous `api_base_sla_compliance_scored_by_org` view on the golden window.
 
-5. **Benchmark** both `EXPLAIN PLAN indexes=1` outputs and recorded p50/p95 query durations, committed as `docs/exec-plans/active/serving-layer-v2-phase1-bench.md`.
+5. **Benchmark** both `EXPLAIN PLAN indexes=1` outputs and recorded p50/p95 query durations (originally planned to land as a separate `serving-layer-v2-phase1-bench.md`; not separately committed at completion).
 
 **Exit criteria:** staging SLA endpoint p95 within 2× of prod baseline; all tests green; `make replay-phase-1` (layers: canonical, api) green with byte-identical rollups at both boundaries.
 
@@ -364,11 +366,11 @@ Sequential, one engineer: **~3.5 weeks** (Phase 0 expanded by 1–2 days to buil
 
 ## Deliverables
 
-- `docs/exec-plans/active/serving-layer-v2.md` — this plan
+- `docs/exec-plans/completed/serving-layer-v2.md` — this plan
 - `docs/design-docs/api-table-contract.md` — three-families contract
 - Amended `docs/design.md`, `docs/design-docs/architecture.md`, ADR-003
 - Per-phase PRs to `refactor/medallion-v2`, each self-contained
-- `docs/exec-plans/active/serving-layer-v2-phase1-bench.md` and `-phase8-bench.md` — latency before/after reports
+- `docs/exec-plans/active/serving-layer-v2-phase1-bench.md` and `-phase8-bench.md` — latency before/after reports (originally planned; not separately committed)
 
 ## Non-goals
 

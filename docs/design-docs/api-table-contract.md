@@ -1,8 +1,8 @@
 # API Table Contract — Three-Families Serving Layer
 
-**Status:** draft
-**Date:** 2026-04-17
-**Related:** [`../exec-plans/active/serving-layer-v2.md`](../exec-plans/active/serving-layer-v2.md), [ADR-003](adr-003-tiered-serving-contract.md) (amended)
+**Status:** current — implemented by serving-layer-v2 phases 0–8 (shipped 2026-04-18)
+**Date:** 2026-04-17 (verified 2026-04-18)
+**Related:** [`../exec-plans/completed/serving-layer-v2.md`](../exec-plans/completed/serving-layer-v2.md), [ADR-003](adr-003-tiered-serving-contract.md) (amended)
 
 ## Summary
 

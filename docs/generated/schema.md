@@ -4,7 +4,7 @@ This reference is generated from the checked-in bootstrap baseline in [`v1.sql`]
 
 Regenerate this inventory with `make bootstrap-extract`. If the physical bootstrap changes, update [`v1.sql`](../../infra/clickhouse/bootstrap/v1.sql) first and rerun the generator in the same change.
 
-The documented `raw_*`, `normalized_*`, `canonical_*`, `operational_*`, `api_base_*`, and `api_*` tiers are semantic/modeling guidance. This inventory is the supported physical schema, so it also includes infrastructure/runtime objects such as `accepted_raw_events`, `ignored_raw_events`, `kafka_*`, `resolver_*`, `agg_*`, metadata tables, and materialized views.
+The documented `raw_*`, `normalized_*`, `canonical_*`, `operational_*`, `api_base_*`, and `api_*` tiers are semantic/modeling guidance. This inventory is the supported physical schema, so it also includes infrastructure/runtime objects such as `accepted_raw_events`, `ignored_raw_events`, `kafka_*`, `resolver_*`, `agg_*`, metadata tables, and change/audit tables.
 
 ## Included Objects
 
@@ -13,28 +13,25 @@ The documented `raw_*`, `normalized_*`, `canonical_*`, `operational_*`, `api_bas
 | `kafka_network_events` | `Kafka` |
 | `kafka_streaming_events` | `Kafka` |
 | `accepted_raw_events` | `ReplacingMergeTree` |
-| `agg_discovery_latency_hourly` | `SummingMergeTree` |
-| `agg_fps_hourly` | `SummingMergeTree` |
-| `agg_orch_reliability_hourly` | `SummingMergeTree` |
-| `agg_orch_state` | `ReplacingMergeTree` |
-| `agg_payment_hourly` | `SummingMergeTree` |
-| `agg_stream_hourly` | `SummingMergeTree` |
-| `agg_stream_state` | `ReplacingMergeTree` |
-| `agg_stream_status_samples` | `MergeTree` |
-| `agg_webrtc_hourly` | `SummingMergeTree` |
-| `canonical_streaming_demand_hourly_store` | `MergeTree` |
 | `canonical_streaming_gpu_metrics_hourly_store` | `MergeTree` |
-| `canonical_streaming_sla_hourly_store` | `MergeTree` |
+| `canonical_streaming_demand_hourly_store` | `MergeTree` |
 | `canonical_streaming_sla_input_hourly_store` | `MergeTree` |
+| `canonical_sla_benchmark_daily_store` | `ReplacingMergeTree` |
+| `api_current_gpu_inventory_store` | `MergeTree` |
+| `api_orchestrator_identity_store` | `MergeTree` |
+| `api_current_orchestrator_store` | `MergeTree` |
+| `api_hourly_byoc_auth_store` | `MergeTree` |
+| `api_hourly_request_demand_store` | `MergeTree` |
+| `api_hourly_streaming_sla_store` | `MergeTree` |
 | `canonical_active_stream_state_latest_store` | `MergeTree` |
 | `canonical_ai_batch_job_store` | `ReplacingMergeTree` |
 | `canonical_byoc_job_store` | `ReplacingMergeTree` |
+| `canonical_capability_snapshots_store` | `ReplacingMergeTree` |
 | `canonical_capability_hardware_inventory` | `ReplacingMergeTree` |
 | `canonical_capability_hardware_inventory_by_snapshot` | `ReplacingMergeTree` |
 | `canonical_capability_offer_inventory_store` | `ReplacingMergeTree` |
 | `canonical_capability_pricing_inventory_store` | `ReplacingMergeTree` |
 | `canonical_capability_snapshot_latest` | `AggregatingMergeTree` |
-| `canonical_capability_snapshots_store` | `ReplacingMergeTree` |
 | `canonical_orch_capability_intervals` | `ReplacingMergeTree` |
 | `canonical_orch_capability_versions` | `ReplacingMergeTree` |
 | `canonical_payment_links_store` | `ReplacingMergeTree` |
@@ -74,6 +71,8 @@ The documented `raw_*`, `normalized_*`, `canonical_*`, `operational_*`, `api_bas
 | `resolver_repair_requests` | `ReplacingMergeTree` |
 | `resolver_runtime_state` | `ReplacingMergeTree` |
 | `resolver_window_claims` | `ReplacingMergeTree` |
+| `capability_catalog` | `MergeTree` |
+| `mv_canonical_capability_snapshots_store` | `MaterializedView` |
 | `mv_canonical_capability_hardware_inventory` | `MaterializedView` |
 | `mv_canonical_capability_hardware_inventory_by_snapshot` | `MaterializedView` |
 | `mv_canonical_capability_offer_inventory_store_builtin` | `MaterializedView` |
@@ -81,9 +80,6 @@ The documented `raw_*`, `normalized_*`, `canonical_*`, `operational_*`, `api_bas
 | `mv_canonical_capability_pricing_inventory_store_capability` | `MaterializedView` |
 | `mv_canonical_capability_pricing_inventory_store_global` | `MaterializedView` |
 | `mv_canonical_capability_snapshot_latest` | `MaterializedView` |
-| `mv_canonical_capability_snapshots_store` | `MaterializedView` |
-| `mv_discovery_latency_hourly` | `MaterializedView` |
-| `mv_fps_hourly` | `MaterializedView` |
 | `mv_ingest_network_events_accepted` | `MaterializedView` |
 | `mv_ingest_network_events_ignored` | `MaterializedView` |
 | `mv_ingest_streaming_events_accepted` | `MaterializedView` |
@@ -102,13 +98,6 @@ The documented `raw_*`, `normalized_*`, `canonical_*`, `operational_*`, `api_bas
 | `mv_normalized_session_status_rollup_latest` | `MaterializedView` |
 | `mv_normalized_session_trace_rollup_latest` | `MaterializedView` |
 | `mv_normalized_stream_trace` | `MaterializedView` |
-| `mv_orch_reliability_hourly` | `MaterializedView` |
-| `mv_orch_state` | `MaterializedView` |
-| `mv_payment_hourly` | `MaterializedView` |
-| `mv_stream_hourly` | `MaterializedView` |
-| `mv_stream_state` | `MaterializedView` |
-| `mv_stream_status_samples` | `MaterializedView` |
-| `mv_webrtc_hourly` | `MaterializedView` |
 | `ignored_raw_event_diagnostics` | `View` |
 | `raw_events` | `View` |
 

@@ -6,7 +6,7 @@ deterministic `artifact_checksum` rollup per table. A second run over the
 same fixture must produce byte-identical rollups; any divergence localises
 to the first layer whose rollup changed.
 
-The harness is the verification substrate for [`serving-layer-v2`](../exec-plans/active/serving-layer-v2.md).
+The harness is the verification substrate for [`serving-layer-v2`](../exec-plans/completed/serving-layer-v2.md).
 Every phase of that rewrite has an exit criterion of the form
 `make replay-phase-N green`.
 
@@ -335,7 +335,7 @@ Run `make replay-fetch-fixture-force` after any intentional change to the
 fixture window, the `raw_events` schema, or the source environment. Commit
 the resulting `raw_events_golden.manifest.json` change in the same PR
 that justifies the regeneration, and update
-[`serving-layer-v2.md`](../exec-plans/active/serving-layer-v2.md) if the
+[`serving-layer-v2.md`](../exec-plans/completed/serving-layer-v2.md) if the
 change affects downstream expected rollups.
 
 The archive itself is never committed — `tests/fixtures/.gitignore` keeps

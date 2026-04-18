@@ -14,7 +14,7 @@ make lint-medallion
 
 Runs all four rules. Output for each is `ALLOWLISTED / FORBIDDEN` with
 phase references tracking to
-[`../exec-plans/active/serving-layer-v2.md`](../exec-plans/active/serving-layer-v2.md).
+[`../exec-plans/completed/serving-layer-v2.md`](../exec-plans/completed/serving-layer-v2.md).
 
 ## Rules
 

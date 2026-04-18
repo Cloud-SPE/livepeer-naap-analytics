@@ -1,5 +1,8 @@
 # Plan: Add New Pipeline Event Tracking to livepeer-naap-analytics
 
+**Status:** completed — AI batch and BYOC ingest, normalization, canonical, and serving layers are live (`normalized_ai_batch_job`, `normalized_byoc_job`, `normalized_byoc_auth`, `normalized_worker_lifecycle`, `normalized_byoc_payment`; `stg_*` and `canonical_*` models; `api_fact_ai_batch_job`, `api_fact_ai_batch_llm_request`, `api_fact_byoc_job`, `api_hourly_byoc_auth`, `api_observed_byoc_worker`). All 12 endpoints under `/v1/requests/{ai-batch,byoc}/*` are routable. Inspector tool extraction (Phase 5) is the only sub-item not separately verified.
+**Note on file paths below:** the plan references `warehouse/models/marts/fct_*.sql`, but the implementation landed under `warehouse/models/api/api_fact_*.sql` (canonical layer naming aligned with the medallion v2 spine).
+
 ## Context
 
 The analytics system ingests all Kafka events but only processes 7 event types into `accepted_raw_events`. Everything else lands in `ignored_raw_events`. Real Kafka data shows significant unhandled event volume:

@@ -3,7 +3,7 @@
 # Each entry is:  <repo-relative-path>:<line-number>	<phase-reference>
 # The tab separator matters — the lint splits on it.
 #
-# Phase references map to docs/exec-plans/active/serving-layer-v2.md.
+# Phase references map to docs/exec-plans/completed/serving-layer-v2.md.
 # When the referenced phase lands, the violation must be removed and
 # the allowlist entry deleted in the same PR.
 #

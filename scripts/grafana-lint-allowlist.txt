@@ -3,7 +3,7 @@
 # Each entry is: <dashboard.json> / <panel title>\t<phase-reference>
 # (the separator between location and phase is a literal tab.)
 #
-# Phase references map to docs/exec-plans/active/serving-layer-v2.md.
+# Phase references map to docs/exec-plans/completed/serving-layer-v2.md.
 # When Phase 7 (Grafana cleanup) lands, every entry here must be
 # removed in the same PR that retires the last violation.
 #

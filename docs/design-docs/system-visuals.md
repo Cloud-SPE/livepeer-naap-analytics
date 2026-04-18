@@ -14,10 +14,9 @@ flowchart LR
     RAW[accepted_raw_events / ignored_raw_events]
     NORM[normalized_* tables and rollups]
     RES[resolver]
-    CSTORE[canonical_*_store tables]
+    CSTORE[canonical_*_store and api_*_store tables]
     DBT[dbt semantic publish]
     CVIEW[canonical_* views]
-    ABASE[api_base_* views]
     AVIEW[api_* views]
     API[Go API]
     GRAF[Grafana]
@@ -30,8 +29,7 @@ flowchart LR
     RES --> CSTORE
     CSTORE --> DBT
     DBT --> CVIEW
-    DBT --> ABASE
-    ABASE --> AVIEW
+    DBT --> AVIEW
     AVIEW --> API
     AVIEW --> GRAF
 ```
@@ -48,15 +46,13 @@ flowchart TB
     subgraph Warehouse
         DBT[dbt models]
         CAN[canonical_* semantic views]
-        APIB[api_base_* semantic helper views]
         APIV[api_* semantic views]
     end
 
     INGEST --> PHYS
     PHYS --> DBT
     DBT --> CAN
-    DBT --> APIB
-    APIB --> APIV
+    DBT --> APIV
 ```
 
 ## Resolver Publication Spine
@@ -117,4 +113,4 @@ flowchart LR
 
 - API-first reads come from resolver-fed org/window serving stores and their dbt-published `api_*` views.
 - Ingest and replay correctness come next: accepted raw, normalized tables, and resolver repair state are optimized for append and bounded repair.
-- Dashboards should prefer published `api_*` views and `agg_*` tables rather than rebuilding semantics from raw history.
+- Dashboards should read published `api_*` views; the legacy `agg_*` tier was dropped in migration 022 (Phase 8).

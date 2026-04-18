@@ -71,7 +71,7 @@
           "refId": "A"
         }
       ],
-      "description": "Moved from naap-jobs.json by Phase 7 of serving-layer-v2. See docs/exec-plans/active/serving-layer-v2.md.",
+      "description": "Moved from naap-jobs.json by Phase 7 of serving-layer-v2. See docs/exec-plans/completed/serving-layer-v2.md.",
       "meta": {
         "backing_table": "naap.canonical_byoc_jobs"
       }
@@ -133,7 +133,7 @@
       ],
       "title": "Live Status/Trace/Capability Event Tape (30m)",
       "type": "table",
-      "description": "Moved from naap-live-operations.json by Phase 7 of serving-layer-v2. See docs/exec-plans/active/serving-layer-v2.md.",
+      "description": "Moved from naap-live-operations.json by Phase 7 of serving-layer-v2. See docs/exec-plans/completed/serving-layer-v2.md.",
       "meta": {
         "backing_table": "naap.accepted_raw_events"
       }
@@ -200,7 +200,7 @@
       ],
       "title": "Top Live Video Prompts (selected range)",
       "type": "table",
-      "description": "Latest prompt seen per live-video session in the selected range. This panel reads normalized live-video status directly, matches the dashboard model filter against both live-video pipeline hints and embedded model ids, and groups structured prompts by hash when they are not plain strings.\n\nMoved from naap-overview.json by Phase 7 of serving-layer-v2. See docs/exec-plans/active/serving-layer-v2.md.",
+      "description": "Latest prompt seen per live-video session in the selected range. This panel reads normalized live-video status directly, matches the dashboard model filter against both live-video pipeline hints and embedded model ids, and groups structured prompts by hash when they are not plain strings.\n\nMoved from naap-overview.json by Phase 7 of serving-layer-v2. See docs/exec-plans/completed/serving-layer-v2.md.",
       "meta": {
         "backing_table": "naap.normalized_ai_stream_status"
       }
@@ -266,7 +266,7 @@
           "refId": "A"
         }
       ],
-      "description": "Moved from naap-jobs.json by Phase 7 of serving-layer-v2. See docs/exec-plans/active/serving-layer-v2.md.",
+      "description": "Moved from naap-jobs.json by Phase 7 of serving-layer-v2. See docs/exec-plans/completed/serving-layer-v2.md.",
       "meta": {
         "backing_table": "naap.canonical_ai_batch_jobs"
       }
@@ -367,7 +367,7 @@
       ],
       "title": "Stage Throughput (selected range)",
       "type": "timeseries",
-      "description": "Moved from naap-live-operations.json by Phase 7 of serving-layer-v2. See docs/exec-plans/active/serving-layer-v2.md.",
+      "description": "Moved from naap-live-operations.json by Phase 7 of serving-layer-v2. See docs/exec-plans/completed/serving-layer-v2.md.",
       "meta": {
         "backing_table": "naap.accepted_raw_events"
       }
@@ -407,7 +407,7 @@
           "refId": "A"
         }
       ],
-      "description": "Moved from naap-jobs.json by Phase 7 of serving-layer-v2. See docs/exec-plans/active/serving-layer-v2.md.",
+      "description": "Moved from naap-jobs.json by Phase 7 of serving-layer-v2. See docs/exec-plans/completed/serving-layer-v2.md.",
       "meta": {
         "backing_table": "naap.normalized_ai_batch_job"
       }
@@ -447,7 +447,7 @@
           "refId": "A"
         }
       ],
-      "description": "Moved from naap-jobs.json by Phase 7 of serving-layer-v2. See docs/exec-plans/active/serving-layer-v2.md.",
+      "description": "Moved from naap-jobs.json by Phase 7 of serving-layer-v2. See docs/exec-plans/completed/serving-layer-v2.md.",
       "meta": {
         "backing_table": "naap.canonical_byoc_payments"
       }

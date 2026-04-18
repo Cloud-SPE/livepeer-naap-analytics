@@ -49,12 +49,17 @@ The semantic storage contract is:
 - `normalized_*` event-family records
 - `canonical_*` authoritative corrected facts
 - `operational_*` live-ops helper surfaces
-- `api_base_*` internal semantic helper views
-- `api_*` published API and dashboard read models
+- `api_*` published API and dashboard read models, organized into three
+  physical families: `api_hourly_*`, `api_current_*`, `api_fact_*`
+  (see [`api-table-contract.md`](api-table-contract.md))
 
 Not every physical ClickHouse object uses those prefixes. The active bootstrap
 also includes supported runtime tables such as `accepted_raw_events`,
-`ignored_raw_events`, `resolver_*`, `agg_*`, metadata tables, and change tables.
+`ignored_raw_events`, `resolver_*`, metadata tables, and change tables.
+
+The legacy `api_base_*` intermediate tier was retired in Phase 5 of the
+serving-layer-v2 refactor; the legacy `agg_*` rollups were dropped in Phase 8
+(migration 022).
 
 Allowed semantic flow:
 
@@ -62,15 +67,13 @@ Allowed semantic flow:
 accepted_raw_events / raw-like inputs
   -> normalized_*
   -> canonical_*
-  -> api_base_*
   -> api_*
 ```
 
 Forbidden semantic flow:
 
 - `api_*` back into `canonical_*`
-- `api_*` back into `api_base_*`
-- downstream truth derived from `api_base_*` or `api_*`
+- downstream truth derived from `api_*`
 - operational/live helper surfaces treated as long-term truth
 
 ## Warehouse And Runtime Ownership

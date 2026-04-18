@@ -1,7 +1,7 @@
 # ADR-003: Tiered Serving Contract
 
-**Status:** accepted  
-**Date:** 2026-03-27
+**Status:** accepted; amended by [`api-table-contract.md`](api-table-contract.md) (Phase 5 of serving-layer-v2 retired the `api_base_*` tier)
+**Date:** 2026-03-27 (amended 2026-04-18)
 
 ## Summary
 
@@ -12,11 +12,15 @@ The analytics serving contract is intentionally tiered:
 | `raw_*` | Accepted raw envelopes | Kafka ingest |
 | `normalized_*` | Normalized event-family records | `raw_*` via materialized views |
 | `canonical_*` | Authoritative corrected derivation source | `normalized_*` via resolver and dbt |
-| `api_base_*` | Internal semantic helpers used to publish API models | `canonical_*` only |
-| `api_*` | Service-facing read models | `canonical_*` and `api_base_*` only |
+| `api_*` | Service-facing read models, organized into three families: `api_hourly_*`, `api_current_*`, `api_fact_*` | `canonical_*` only |
 | `operational_*` | Low-latency live-ops tables | `raw_*` / `normalized_*` / curated read-only canonical inputs |
 
-Consumers must derive truth from `canonical_*`, not from `api_base_*`, `api_*`, or `operational_*`.
+Consumers must derive truth from `canonical_*`, not from `api_*` or `operational_*`.
+
+The previously documented `api_base_*` intermediate tier was retired in Phase 5
+of the serving-layer-v2 refactor. Intermediate computation now lives in the
+resolver (stateful) or in MV definitions (stateless); see
+[`api-table-contract.md`](api-table-contract.md) for the three-families shape.
 
 ## Enforcement
 

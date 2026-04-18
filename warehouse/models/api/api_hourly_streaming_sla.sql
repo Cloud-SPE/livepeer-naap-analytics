@@ -4,7 +4,7 @@
 -- every refresh run, so an API-layer query is an O(window_start) primary-key
 -- lookup plus a latest-slice pick — no per-request scoring, no benchmark
 -- cohort recomputation. api_base_* was retired in Phase 5; scoring math now
--- lives inline in the resolver (see docs/exec-plans/active/serving-layer-v2.md).
+-- lives inline in the resolver (see docs/exec-plans/completed/serving-layer-v2.md).
 
 {{ config(materialized='view') }}
 
