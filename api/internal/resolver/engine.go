@@ -1020,7 +1020,10 @@ func (e *Engine) executeWindow(ctx context.Context, req RunRequest) (stats RunSt
 		if err := e.repo.insertCapabilityIntervals(ctx, runID, now, intervals); err != nil {
 			return stats, runStatus, err
 		}
-		if err := e.repo.insertDecisionRows(ctx, runID, now, decisions); err != nil {
+		if err := e.repo.insertDecisionHistoryRows(ctx, runID, now, decisions); err != nil {
+			return stats, runStatus, err
+		}
+		if err := e.repo.insertDecisionCurrentRows(ctx, runID, now, decisions); err != nil {
 			return stats, runStatus, err
 		}
 		logStage("persist_selection_state", stageStarted,

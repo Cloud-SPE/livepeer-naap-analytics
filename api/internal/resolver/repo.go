@@ -2380,7 +2380,11 @@ func (r *repo) insertCapabilityIntervals(ctx context.Context, runID string, now 
 	return batch.Send()
 }
 
-func (r *repo) insertDecisionRows(ctx context.Context, runID string, now time.Time, rows []SelectionDecision) error {
+// insertDecisionHistoryRows appends to canonical_selection_attribution_decisions
+// — the immutable, append-only history keyed on decision_id. Phase 8 split
+// this out of the prior insertDecisionRows so every resolver writer targets
+// exactly one table (single-responsibility invariant).
+func (r *repo) insertDecisionHistoryRows(ctx context.Context, runID string, now time.Time, rows []SelectionDecision) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -2397,6 +2401,36 @@ func (r *repo) insertDecisionRows(ctx context.Context, runID string, now time.Ti
 	if err != nil {
 		return fmt.Errorf("prepare decision batch: %w", err)
 	}
+	for _, row := range rows {
+		// decision_id is derived from `now` so re-running the same RunRequest
+		// (same Now) produces identical decision_ids — the determinism
+		// invariant the replay harness asserts.
+		decisionID := stableHash(row.SelectionEventID, row.Status, row.Reason, row.Method, row.InputHash, now.Format(time.RFC3339Nano))
+		if err := decisions.Append(
+			decisionID, row.SelectionEventID, row.Org, row.SessionKey, row.SelectionTS.UTC(),
+			row.Status, row.Reason, row.Method, row.Confidence,
+			nullableStringValue(row.CapabilityVersionID), nullableStringValue(row.SnapshotEventID), nullableTimeValue(row.SnapshotTS),
+			nullableStringValue(row.AttributedOrchAddress), nullableStringValue(row.AttributedOrchURI),
+			nullableStringValue(row.CanonicalPipeline), nullableStringValue(row.CanonicalModel), nullableStringValue(row.GPUID),
+			row.InputHash, r.cfg.ResolverVersion, runID, now,
+		); err != nil {
+			return fmt.Errorf("append decision row: %w", err)
+		}
+	}
+	if err := decisions.Send(); err != nil {
+		return fmt.Errorf("send decision rows: %w", err)
+	}
+	return nil
+}
+
+// insertDecisionCurrentRows writes the latest-only projection of the same
+// rows to canonical_selection_attribution_current. Paired with
+// insertDecisionHistoryRows — the caller invokes both per engine step
+// (engine.go), keeping each writer single-target.
+func (r *repo) insertDecisionCurrentRows(ctx context.Context, runID string, now time.Time, rows []SelectionDecision) error {
+	if len(rows) == 0 {
+		return nil
+	}
 	current, err := r.conn.PrepareBatch(ctx, `
 		INSERT INTO naap.canonical_selection_attribution_current
 		(
@@ -2411,20 +2445,6 @@ func (r *repo) insertDecisionRows(ctx context.Context, runID string, now time.Ti
 		return fmt.Errorf("prepare current decision batch: %w", err)
 	}
 	for _, row := range rows {
-		// decision_id is deliberately derived from `now` so re-running the
-		// same RunRequest (same Now) produces identical decision_ids — this
-		// is the invariant the determinism harness asserts.
-		decisionID := stableHash(row.SelectionEventID, row.Status, row.Reason, row.Method, row.InputHash, now.Format(time.RFC3339Nano))
-		if err := decisions.Append(
-			decisionID, row.SelectionEventID, row.Org, row.SessionKey, row.SelectionTS.UTC(),
-			row.Status, row.Reason, row.Method, row.Confidence,
-			nullableStringValue(row.CapabilityVersionID), nullableStringValue(row.SnapshotEventID), nullableTimeValue(row.SnapshotTS),
-			nullableStringValue(row.AttributedOrchAddress), nullableStringValue(row.AttributedOrchURI),
-			nullableStringValue(row.CanonicalPipeline), nullableStringValue(row.CanonicalModel), nullableStringValue(row.GPUID),
-			row.InputHash, r.cfg.ResolverVersion, runID, now,
-		); err != nil {
-			return fmt.Errorf("append decision row: %w", err)
-		}
 		if err := current.Append(
 			row.SelectionEventID, row.Org, row.SessionKey, row.SelectionTS.UTC(), row.Status,
 			row.Reason, row.Method, row.Confidence, nullableStringValue(row.CapabilityVersionID),
@@ -2435,9 +2455,6 @@ func (r *repo) insertDecisionRows(ctx context.Context, runID string, now time.Ti
 		); err != nil {
 			return fmt.Errorf("append current decision row: %w", err)
 		}
-	}
-	if err := decisions.Send(); err != nil {
-		return fmt.Errorf("send decision rows: %w", err)
 	}
 	if err := current.Send(); err != nil {
 		return fmt.Errorf("send current decision rows: %w", err)

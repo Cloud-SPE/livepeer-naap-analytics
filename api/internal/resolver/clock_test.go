@@ -81,8 +81,8 @@ func TestDecisionIDIsDeterministicUnderFrozenNow(t *testing.T) {
 	}
 
 	// This is the exact shape of decisionID derivation in
-	// repo.insertDecisionRows — if that shape changes, this test must
-	// change in lockstep.
+	// repo.insertDecisionHistoryRows — if that shape changes, this test
+	// must change in lockstep.
 	id1 := stableHash(row.SelectionEventID, row.Status, row.Reason, row.Method, row.InputHash, now.Format(time.RFC3339Nano))
 	id2 := stableHash(row.SelectionEventID, row.Status, row.Reason, row.Method, row.InputHash, now.Format(time.RFC3339Nano))
 	if id1 != id2 {

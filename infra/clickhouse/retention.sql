@@ -32,13 +32,11 @@ ALTER TABLE naap.ignored_raw_events
     MODIFY TTL toDateTime(event_ts) + toIntervalDay(90);
 
 -- ------------------------------------------------------------
--- Tier 2: Aggregate samples (30 days)
--- Rationale: matches the naap.analytics.aggregated Kafka topic
--- retention. Consumers have a 30-day catch-up window.
+-- Tier 2: Aggregate samples (RETIRED Phase 8)
+-- The legacy agg_* tables were unreferenced after Phase 6 moved the
+-- serving layer onto api_hourly_* and api_current_* stores; migration
+-- 022 drops them. No TTL to carry forward.
 -- ------------------------------------------------------------
-
-ALTER TABLE naap.agg_stream_status_samples
-    MODIFY TTL toDateTime(sample_ts) + toIntervalDay(30);
 
 -- ------------------------------------------------------------
 -- Tier 3: Entity metadata / cache (7 days)
@@ -117,8 +115,6 @@ ALTER TABLE naap.normalized_byoc_payment
 -- to align with raw event retention. File a follow-up ticket
 -- before applying any ALTER to these tables in production.
 --
--- ALTER TABLE naap.agg_orch_state_hourly         MODIFY TTL ...;
--- ALTER TABLE naap.agg_stream_state_hourly        MODIFY TTL ...;
 -- ALTER TABLE naap.orch_current_store             MODIFY TTL ...;
 -- ALTER TABLE naap.session_current_store          MODIFY TTL ...;
 -- ALTER TABLE naap.canonical_orch_state           MODIFY TTL ...;
