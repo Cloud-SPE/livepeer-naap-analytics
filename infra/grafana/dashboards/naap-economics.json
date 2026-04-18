@@ -161,12 +161,15 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT toStartOfInterval(event_ts, INTERVAL 1 HOUR) AS time,\n    toFloat64(sum(face_value_wei)) / 1e18 AS total_revenue_eth\nFROM naap.canonical_payment_links\nWHERE $__timeFilter(event_ts)\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY time ORDER BY time",
+          "rawSql": "SELECT toStartOfInterval(event_ts, INTERVAL 1 HOUR) AS time,\n    toFloat64(sum(face_value_wei)) / 1e18 AS total_revenue_eth\nFROM naap.api_hourly_streaming_demand\nWHERE $__timeFilter(event_ts)\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY time ORDER BY time",
           "refId": "A"
         }
       ],
       "title": "Gateway Ticket Face Value (ETH, selected range)",
-      "type": "timeseries"
+      "type": "timeseries",
+      "meta": {
+        "backing_table": "naap.api_hourly_streaming_demand"
+      }
     },
     {
       "datasource": {
@@ -224,7 +227,10 @@
         }
       ],
       "title": "Latest Pricing Seen in 24h by Orchestrator",
-      "type": "table"
+      "type": "table",
+      "meta": {
+        "backing_table": "naap.api_orchestrator_identity"
+      }
     }
   ],
   "refresh": "15m",

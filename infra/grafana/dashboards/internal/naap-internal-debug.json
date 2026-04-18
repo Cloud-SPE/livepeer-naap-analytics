@@ -1,0 +1,568 @@
+{
+  "title": "NaaP \u2014 Internal Debug",
+  "uid": "naap-internal-debug",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "tags": [
+    "naap",
+    "internal",
+    "debug"
+  ],
+  "panels": [
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "id": 507,
+      "type": "stat",
+      "title": "BYOC Duplicate Rows",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "percentChangeColorMode": "standard"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT greatest(toInt64(count()) - toInt64(uniqExact(request_id)), 0) FROM naap.canonical_byoc_jobs WHERE $__timeFilter(completed_at) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))",
+          "refId": "A"
+        }
+      ],
+      "description": "Moved from naap-jobs.json by Phase 7 of serving-layer-v2. See docs/exec-plans/active/serving-layer-v2.md.",
+      "meta": {
+        "backing_table": "naap.canonical_byoc_jobs"
+      }
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "footer": {
+              "reducers": []
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      },
+      "id": 6,
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true,
+        "sortBy": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT event_ts AS \"Time\",\n    event_type AS \"Stage\",\n    coalesce(nullIf(JSONExtractString(data, 'pipeline'), ''), nullIf(JSONExtractString(data, 'pipeline_id'), ''), 'unknown') AS \"Pipeline\",\n    gateway AS \"Gateway\",\n    org AS \"Org\",\n    JSONExtractString(data, 'stream_id') AS \"Stream ID\"\nFROM naap.accepted_raw_events\nWHERE event_ts >= now() - INTERVAL 30 MINUTE\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nORDER BY \"Time\" DESC\nLIMIT 200",
+          "refId": "A"
+        }
+      ],
+      "title": "Live Status/Trace/Capability Event Tape (30m)",
+      "type": "table",
+      "description": "Moved from naap-live-operations.json by Phase 7 of serving-layer-v2. See docs/exec-plans/active/serving-layer-v2.md.",
+      "meta": {
+        "backing_table": "naap.accepted_raw_events"
+      }
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "footer": {
+              "reducers": []
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "id": 15,
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Unserved Sessions"
+          }
+        ]
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "WITH status_prompts AS (\n    SELECT canonical_session_key,\n        gateway,\n        event_ts,\n        raw_pipeline_hint,\n        nullIf(JSONExtractString(data, 'inference_status', 'last_params', 'model_id'), '') AS model_id,\n        nullIf(JSONExtractString(data, 'inference_status', 'last_params', 'prompt'), '') AS prompt_text,\n        JSONExtractRaw(data, 'inference_status', 'last_params', 'prompt') AS prompt_raw\n    FROM naap.normalized_ai_stream_status\n    WHERE $__timeFilter(event_ts)\n      AND canonical_session_key != ''\n      AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n), ranked AS (\n    SELECT canonical_session_key,\n        gateway,\n        event_ts,\n        prompt_text,\n        prompt_raw,\n        row_number() OVER (PARTITION BY canonical_session_key ORDER BY event_ts DESC) AS rn\n    FROM status_prompts\n    WHERE (\n            lower(raw_pipeline_hint) LIKE '%streamdiffusion%'\n         OR lower(raw_pipeline_hint) LIKE '%comfyui%'\n         OR lower(raw_pipeline_hint) LIKE '%live-video%'\n      )\n      AND (\n            '${model:csv}' = '__all'\n         OR '${model:csv}' = ''\n         OR has(splitByChar(',', '${model:csv}'), ifNull(model_id, ''))\n         OR has(splitByChar(',', '${model:csv}'), ifNull(raw_pipeline_hint, ''))\n      )\n      AND (\n            prompt_text != ''\n         OR (prompt_raw NOT IN ('', 'null', '{}', '[]'))\n      )\n), latest AS (\n    SELECT event_ts,\n        gateway,\n        if(\n            prompt_text != '',\n            left(replaceRegexpAll(trim(BOTH ' ' FROM prompt_text), '\\s+', ' '), 120),\n            concat('[structured] ', substring(lower(hex(MD5(prompt_raw))), 1, 12))\n        ) AS prompt_label\n    FROM ranked\n    WHERE rn = 1\n)\nSELECT prompt_label AS \"Prompt\",\n    count() AS \"Sessions\",\n    countDistinct(gateway) AS \"Gateways\",\n    max(event_ts) AS \"Latest Seen\"\nFROM latest\nGROUP BY prompt_label\nORDER BY \"Sessions\" DESC, \"Latest Seen\" DESC\nLIMIT 15",
+          "refId": "A"
+        }
+      ],
+      "title": "Top Live Video Prompts (selected range)",
+      "type": "table",
+      "description": "Latest prompt seen per live-video session in the selected range. This panel reads normalized live-video status directly, matches the dashboard model filter against both live-video pipeline hints and embedded model ids, and groups structured prompts by hash when they are not plain strings.\n\nMoved from naap-overview.json by Phase 7 of serving-layer-v2. See docs/exec-plans/active/serving-layer-v2.md.",
+      "meta": {
+        "backing_table": "naap.normalized_ai_stream_status"
+      }
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "id": 506,
+      "type": "stat",
+      "title": "AI Batch Duplicate Rows",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "percentChangeColorMode": "standard"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT greatest(toInt64(count()) - toInt64(uniqExact(request_id)), 0) FROM naap.canonical_ai_batch_jobs WHERE $__timeFilter(completed_at) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))",
+          "refId": "A"
+        }
+      ],
+      "description": "Moved from naap-jobs.json by Phase 7 of serving-layer-v2. See docs/exec-plans/active/serving-layer-v2.md.",
+      "meta": {
+        "backing_table": "naap.canonical_ai_batch_jobs"
+      }
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "events/min",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 24,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "showValues": false,
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
+      "id": 3,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT toStartOfInterval(event_ts, INTERVAL 1 MINUTE) AS time,\n    event_type AS stage,\n    count() AS events_per_minute\nFROM naap.accepted_raw_events\nWHERE $__timeFilter(event_ts)\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY time, stage\nORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "title": "Stage Throughput (selected range)",
+      "type": "timeseries",
+      "description": "Moved from naap-live-operations.json by Phase 7 of serving-layer-v2. See docs/exec-plans/active/serving-layer-v2.md.",
+      "meta": {
+        "backing_table": "naap.accepted_raw_events"
+      }
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "id": 508,
+      "type": "table",
+      "title": "Canonical Coverage vs Source",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 40
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": []
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 2,
+          "queryType": "sql",
+          "rawSql": "WITH source_counts AS (\n  SELECT 'ai-batch' AS job_type, count() AS source_jobs\n  FROM naap.normalized_ai_batch_job FINAL\n  WHERE subtype = 'ai_batch_request_completed'\n    AND request_id != ''\n    AND $__timeFilter(event_ts)\n    AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n  UNION ALL\n  SELECT 'byoc' AS job_type, count() AS source_jobs\n  FROM naap.normalized_byoc_job FINAL\n  WHERE subtype = 'job_gateway_completed'\n    AND $__timeFilter(event_ts)\n    AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n), canonical_counts AS (\n  SELECT 'ai-batch' AS job_type, count() AS canonical_jobs\n  FROM naap.canonical_ai_batch_jobs\n  WHERE $__timeFilter(completed_at)\n    AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n  UNION ALL\n  SELECT 'byoc' AS job_type, count() AS canonical_jobs\n  FROM naap.canonical_byoc_jobs\n  WHERE $__timeFilter(completed_at)\n    AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n)\nSELECT s.job_type, s.source_jobs, c.canonical_jobs,\n  round(toFloat64(c.canonical_jobs) * 100.0 / nullIf(toFloat64(s.source_jobs), 0), 1) AS coverage_pct\nFROM source_counts s\nLEFT JOIN canonical_counts c ON s.job_type = c.job_type",
+          "refId": "A"
+        }
+      ],
+      "description": "Moved from naap-jobs.json by Phase 7 of serving-layer-v2. See docs/exec-plans/active/serving-layer-v2.md.",
+      "meta": {
+        "backing_table": "naap.normalized_ai_batch_job"
+      }
+    },
+    {
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "ratio",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "showValues": false,
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 0.3
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 48
+      },
+      "id": 3,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "WITH labels AS (\n    SELECT orch_address AS addr, orch_label\n    FROM naap.api_orchestrator_identity\n),\nstream_orch AS (\n    SELECT\n        stream_id,\n        argMaxIf(orch_address, hour, orch_address IS NOT NULL AND orch_address != '') AS orch_address\n    FROM naap.canonical_status_hours\n    WHERE $__timeFilter(hour)\n      AND is_terminal_tail_artifact = 0\n      AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n      AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(canonical_model, '')))\n    GROUP BY stream_id\n    HAVING orch_address IS NOT NULL AND orch_address != ''\n),\ntop_orch AS (\n    SELECT orch_address FROM stream_orch GROUP BY orch_address LIMIT 8\n)\nSELECT w.hour AS time,\n    ifNull(labels.orch_label, concat(left(so.orch_address, 8), '...', right(so.orch_address, 4))) AS \"Orchestrator ENS\",\n    sum(w.video_jitter_sum) / nullIf(sum(w.sample_count), 0) AS \"Avg Video Jitter\"\nFROM naap.agg_webrtc_hourly w\nJOIN stream_orch so ON so.stream_id = w.stream_id\nLEFT JOIN labels ON labels.addr = so.orch_address\nWHERE $__timeFilter(w.hour)\nAND (\n    ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '') AND so.orch_address GLOBAL IN (SELECT orch_address FROM top_orch)\n    OR ('${orchestrator:csv}' != '__all' AND '${orchestrator:csv}' != '' AND has(splitByChar(',', '${orchestrator:csv}'), so.orch_address))\n)\nGROUP BY time, \"Orchestrator ENS\" ORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "title": "Jitter by Orchestrator (selected range)",
+      "type": "timeseries",
+      "description": "Moved from naap-performance-drilldown.json by Phase 7 of serving-layer-v2. See docs/exec-plans/active/serving-layer-v2.md.",
+      "meta": {
+        "backing_table": "naap.api_orchestrator_identity"
+      }
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "id": 531,
+      "type": "table",
+      "title": "Payments by Capability",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 56
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": []
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "editorType": "sql",
+          "format": 2,
+          "queryType": "sql",
+          "rawSql": "SELECT capability, payment_type, count() AS payment_count,\n    round(sum(amount), 4) AS total_amount,\n    any(currency) AS currency,\n    uniq(orch_address) AS unique_orchs\nFROM naap.canonical_byoc_payments\nWHERE $__timeFilter(event_ts) AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) AND ('${capability:csv}' = '__all' OR '${capability:csv}' = '' OR has(splitByChar(',', '${capability:csv}'), capability))\nGROUP BY capability, payment_type ORDER BY total_amount DESC",
+          "refId": "A"
+        }
+      ],
+      "description": "Moved from naap-jobs.json by Phase 7 of serving-layer-v2. See docs/exec-plans/active/serving-layer-v2.md.",
+      "meta": {
+        "backing_table": "naap.canonical_byoc_payments"
+      }
+    }
+  ],
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "annotations": {
+    "list": []
+  },
+  "templating": {
+    "list": []
+  },
+  "description": "Internal / resolver-facing debug panels that intentionally reach into canonical_*, normalized_*, or accepted_raw_events. NOT a serving contract \u2014 these queries exist to validate resolver correctness and inspect live pipeline traffic. Not provisioned to end users; this dashboard lives under infra/grafana/dashboards/internal/ so the grafana-lint API-contract check skips it."
+}

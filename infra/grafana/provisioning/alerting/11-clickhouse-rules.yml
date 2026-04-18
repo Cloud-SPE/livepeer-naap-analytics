@@ -480,11 +480,11 @@ groups:
                   toFloat64(duplicate_rows) AS value
                 FROM (
                   SELECT 'ai-batch' AS job_type, greatest(toInt64(count()) - toInt64(uniqExact(request_id)), 0) AS duplicate_rows
-                  FROM naap.canonical_ai_batch_jobs
+                  FROM naap.api_fact_ai_batch_job
                   WHERE completed_at >= now() - INTERVAL 24 HOUR
                   UNION ALL
                   SELECT 'byoc' AS job_type, greatest(toInt64(count()) - toInt64(uniqExact(request_id)), 0) AS duplicate_rows
-                  FROM naap.canonical_byoc_jobs
+                  FROM naap.api_fact_byoc_job
                   WHERE completed_at >= now() - INTERVAL 24 HOUR
                 )
                 WHERE duplicate_rows > 0

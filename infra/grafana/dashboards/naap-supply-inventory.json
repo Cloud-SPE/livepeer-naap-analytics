@@ -159,7 +159,10 @@
         }
       ],
       "title": "GPU Count by Type (Seen in 24h)",
-      "type": "barchart"
+      "type": "barchart",
+      "meta": {
+        "backing_table": "naap.api_observed_capability_offer"
+      }
     },
     {
       "datasource": {
@@ -222,7 +225,10 @@
         }
       ],
       "title": "Latest GPU Inventory Seen in 24h",
-      "type": "table"
+      "type": "table",
+      "meta": {
+        "backing_table": "naap.api_orchestrator_identity"
+      }
     },
     {
       "datasource": {
@@ -286,7 +292,10 @@
       ],
       "title": "Orchestrator GPU Changes (7d vs prior 7d)",
       "type": "table",
-      "description": "Compares orchestrator GPU inventory seen in the latest 7 days versus the prior 7 days. GPU IDs can fluctuate on virtualized or re-enumerated systems, so a UUID change may appear as one GPU removed and a new GPU added even when the underlying hardware did not change."
+      "description": "Compares orchestrator GPU inventory seen in the latest 7 days versus the prior 7 days. GPU IDs can fluctuate on virtualized or re-enumerated systems, so a UUID change may appear as one GPU removed and a new GPU added even when the underlying hardware did not change.",
+      "meta": {
+        "backing_table": "naap.api_orchestrator_identity"
+      }
     },
     {
       "datasource": {
@@ -360,7 +369,10 @@
       ],
       "title": "Demand Change (7d)",
       "type": "stat",
-      "description": "Percent change in total network request demand for the latest 24 hours versus the same 24-hour window seven days earlier."
+      "description": "Percent change in total network request demand for the latest 24 hours versus the same 24-hour window seven days earlier.",
+      "meta": {
+        "backing_table": "naap.api_hourly_request_demand"
+      }
     },
     {
       "datasource": {
@@ -434,7 +446,10 @@
       ],
       "title": "Supply Change (7d)",
       "type": "stat",
-      "description": "Percent change in unique GPUs seen across the latest 7 days versus the prior 7-day window. This is a network-level unique-GPU comparison, so it will not necessarily equal the per-orchestrator add/remove totals when GPUs move between orchestrators or GPU UUIDs are reissued."
+      "description": "Percent change in unique GPUs seen across the latest 7 days versus the prior 7-day window. This is a network-level unique-GPU comparison, so it will not necessarily equal the per-orchestrator add/remove totals when GPUs move between orchestrators or GPU UUIDs are reissued.",
+      "meta": {
+        "backing_table": "naap.api_observed_capability_offer"
+      }
     }
   ],
   "refresh": "15m",
