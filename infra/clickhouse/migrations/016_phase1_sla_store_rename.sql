@@ -11,8 +11,8 @@
 --     input (still owns the scoring math for the resolver's write; Phase 2
 --     pre-computes the benchmark cohort)
 --
--- Data-preserving rename — no row is dropped. Fails loudly on fresh
--- stacks where the source does not exist; in that case the bootstrap
--- already has the new name and this migration is a no-op to run.
+-- Data-preserving rename — no row is dropped. The `IF EXISTS` guard
+-- makes the migration a safe no-op on fresh stacks where bootstrap
+-- v1.sql already creates the target under its new name.
 
-RENAME TABLE naap.canonical_streaming_sla_hourly_store TO naap.api_hourly_streaming_sla_store;
+RENAME TABLE IF EXISTS naap.canonical_streaming_sla_hourly_store TO naap.api_hourly_streaming_sla_store;
