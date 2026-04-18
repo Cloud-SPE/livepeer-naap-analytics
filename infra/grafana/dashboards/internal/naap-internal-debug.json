@@ -461,7 +461,62 @@
     "list": []
   },
   "templating": {
-    "list": []
+    "list": [
+      {
+        "name": "clickhouse_ds",
+        "type": "datasource",
+        "label": "Datasource",
+        "hide": 0,
+        "includeAll": false,
+        "options": [],
+        "query": "grafana-clickhouse-datasource",
+        "refresh": 1,
+        "current": {
+          "text": "ClickHouse Prod",
+          "value": "clickhouse_prod"
+        }
+      },
+      {
+        "name": "org",
+        "type": "query",
+        "label": "Org",
+        "hide": 0,
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "__all"
+        },
+        "definition": "SELECT DISTINCT org FROM naap.api_hourly_request_demand WHERE org != '' ORDER BY org",
+        "query": "SELECT DISTINCT org FROM naap.api_hourly_request_demand WHERE org != '' ORDER BY org",
+        "refresh": 1,
+        "sort": 1,
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "${clickhouse_ds}"
+        }
+      },
+      {
+        "name": "capability",
+        "type": "query",
+        "label": "BYOC Capability",
+        "hide": 0,
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "__all"
+        },
+        "definition": "SELECT DISTINCT capability FROM (SELECT capability FROM naap.api_fact_byoc_job WHERE capability != '' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) UNION ALL SELECT capability_name AS capability FROM naap.api_observed_byoc_worker WHERE capability_name != '' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) UNION ALL SELECT capability_name AS capability FROM naap.api_hourly_byoc_auth WHERE capability_name != '' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) UNION ALL SELECT capability FROM naap.canonical_byoc_payments WHERE capability != '' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))) WHERE capability != '' ORDER BY capability",
+        "query": "SELECT DISTINCT capability FROM (SELECT capability FROM naap.api_fact_byoc_job WHERE capability != '' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) UNION ALL SELECT capability_name AS capability FROM naap.api_observed_byoc_worker WHERE capability_name != '' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) UNION ALL SELECT capability_name AS capability FROM naap.api_hourly_byoc_auth WHERE capability_name != '' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) UNION ALL SELECT capability FROM naap.canonical_byoc_payments WHERE capability != '' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))) WHERE capability != '' ORDER BY capability",
+        "refresh": 1,
+        "sort": 1,
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "${clickhouse_ds}"
+        }
+      }
+    ]
   },
   "description": "Internal / resolver-facing debug panels that intentionally reach into canonical_*, normalized_*, or accepted_raw_events. NOT a serving contract \u2014 these queries exist to validate resolver correctness and inspect live pipeline traffic. Not provisioned to end users; this dashboard lives under infra/grafana/dashboards/internal/ so the grafana-lint API-contract check skips it."
 }

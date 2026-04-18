@@ -185,7 +185,7 @@
         "h": 4,
         "w": 5,
         "x": 5,
-        "y": 1
+        "y": 5
       },
       "options": {
         "colorMode": "background",
@@ -251,7 +251,7 @@
         "h": 4,
         "w": 5,
         "x": 10,
-        "y": 1
+        "y": 9
       },
       "options": {
         "colorMode": "background",
@@ -317,7 +317,7 @@
         "h": 4,
         "w": 5,
         "x": 15,
-        "y": 1
+        "y": 13
       },
       "options": {
         "colorMode": "background",
@@ -387,7 +387,7 @@
         "h": 4,
         "w": 4,
         "x": 20,
-        "y": 1
+        "y": 17
       },
       "options": {
         "colorMode": "background",
@@ -454,7 +454,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 6
+        "y": 21
       },
       "panels": []
     },
@@ -470,7 +470,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 7
+        "y": 22
       },
       "options": {
         "tooltip": {
@@ -520,7 +520,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 7
+        "y": 30
       },
       "options": {
         "tooltip": {
@@ -567,7 +567,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 15
+        "y": 38
       },
       "panels": []
     },
@@ -583,7 +583,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 16
+        "y": 39
       },
       "options": {
         "sortBy": [],
@@ -619,7 +619,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 25
+        "y": 48
       },
       "panels": []
     },
@@ -635,7 +635,7 @@
         "h": 12,
         "w": 12,
         "x": 0,
-        "y": 26
+        "y": 49
       },
       "options": {
         "sortBy": [],
@@ -674,7 +674,7 @@
         "h": 12,
         "w": 12,
         "x": 12,
-        "y": 26
+        "y": 61
       },
       "options": {
         "sortBy": [],
@@ -710,7 +710,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 38
+        "y": 73
       },
       "panels": []
     },
@@ -726,7 +726,7 @@
         "h": 12,
         "w": 24,
         "x": 0,
-        "y": 39
+        "y": 74
       },
       "options": {
         "sortBy": [],
@@ -762,8 +762,80 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 67
+        "y": 86
       }
+    },
+    {
+      "type": "stat",
+      "title": "AI Batch Duplicate Rows",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 0,
+        "y": 87
+      },
+      "id": 29558,
+      "meta": {
+        "backing_table": "naap.api_fact_ai_batch_job"
+      },
+      "options": {},
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "refId": "A",
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT greatest(toInt64(count()) - toInt64(uniqExact(request_id)), 0) AS dupes\nFROM naap.api_fact_ai_batch_job\nWHERE $__timeFilter(completed_at)\n  AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "BYOC Duplicate Rows",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 12,
+        "y": 91
+      },
+      "id": 84439,
+      "meta": {
+        "backing_table": "naap.api_fact_byoc_job"
+      },
+      "options": {},
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "refId": "A",
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT greatest(toInt64(count()) - toInt64(uniqExact(request_id)), 0) AS dupes\nFROM naap.api_fact_byoc_job\nWHERE $__timeFilter(completed_at)\n  AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))"
+        }
+      ]
     },
     {
       "collapsed": false,
@@ -774,7 +846,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 51
+        "y": 95
       }
     },
     {
@@ -789,7 +861,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 52
+        "y": 96
       },
       "options": {
         "showHeader": true,
@@ -828,7 +900,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 52
+        "y": 103
       },
       "options": {
         "showHeader": true,
@@ -867,7 +939,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 59
+        "y": 110
       },
       "options": {
         "showHeader": true,
@@ -906,7 +978,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 59
+        "y": 117
       },
       "options": {
         "showHeader": true,
@@ -945,7 +1017,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 66
+        "y": 124
       },
       "options": {
         "showHeader": true,
@@ -981,7 +1053,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 74
+        "y": 132
       }
     },
     {
@@ -996,7 +1068,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 75
+        "y": 133
       },
       "options": {
         "showHeader": true,
@@ -1032,7 +1104,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 83
+        "y": 141
       }
     },
     {
@@ -1047,7 +1119,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 84
+        "y": 142
       },
       "options": {
         "showHeader": true,
@@ -1083,8 +1155,45 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 92
+        "y": 150
       }
+    },
+    {
+      "type": "table",
+      "title": "BYOC Work Price Volume by Capability",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "${clickhouse_ds}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 151
+      },
+      "id": 6519,
+      "meta": {
+        "backing_table": "naap.api_fact_byoc_job"
+      },
+      "options": {},
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${clickhouse_ds}"
+          },
+          "refId": "A",
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT capability,\n       toInt64(count()) AS job_count,\n       round(toFloat64(sum(price_per_unit)), 4) AS total_price_units,\n       round(toFloat64(avg(price_per_unit)), 4) AS avg_price_per_unit,\n       toInt64(uniq(orch_address)) AS unique_orchs\nFROM naap.api_fact_byoc_job\nWHERE $__timeFilter(completed_at)\n  AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n  AND ('${capability:csv}' = '__all' OR '${capability:csv}' = '' OR has(splitByChar(',', '${capability:csv}'), capability))\nGROUP BY capability\nORDER BY total_price_units DESC"
+        }
+      ],
+      "description": "Per-capability BYOC work price volume over the selected range. Sums price_per_unit across completed jobs as a proxy for payment flow. Exact settled-payment counts live in the internal debug dashboard (canonical_byoc_payments); the serving-contract view uses api_fact_byoc_job."
     }
   ],
   "refresh": "15m",
