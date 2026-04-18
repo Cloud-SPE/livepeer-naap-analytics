@@ -1065,85 +1065,43 @@ func (r *repo) fetchCapabilitySnapshots(ctx context.Context, spec WindowSpec, id
 	start := spec.Start.UTC().Add(-10 * time.Minute)
 	end := spec.End.UTC().Add(30 * time.Second)
 	orgClause, orgArgs := orgPredicate("n.org", spec.Org, spec.ExcludedOrgPrefixes)
+	// Phase-perf: single-scan form replaces the prior 3-way UNION DISTINCT over
+	// normalized_network_capabilities. Matching on any of (address, uri_norm,
+	// name-as-local-address) collapses into one OR'd JOIN condition; DISTINCT
+	// plus GROUP BY dedup the fanout.
 	args := []any{queryID, start, end}
-	args = append(args, orgArgs...)
-	args = append(args, queryID, start, end)
-	args = append(args, orgArgs...)
-	args = append(args, queryID, start, end)
 	args = append(args, orgArgs...)
 	rows, err := r.conn.Query(ctx, `
 		SELECT DISTINCT
-			org,
-			orch_address,
-			orch_uri,
-			orch_uri_norm,
+			n.org AS org,
+			n.orch_address AS orch_address,
+			n.orch_uri AS orch_uri,
+			n.orch_uri_norm AS orch_uri_norm,
 			if(
-				match(lowerUTF8(ifNull(orch_name, '')), '^0x[0-9a-f]{40}$')
-				AND lowerUTF8(ifNull(orch_name, '')) != lowerUTF8(ifNull(orch_address, '')),
-				lowerUTF8(orch_name),
+				match(lowerUTF8(ifNull(n.orch_name, '')), '^0x[0-9a-f]{40}$')
+				AND lowerUTF8(ifNull(n.orch_name, '')) != lowerUTF8(ifNull(n.orch_address, '')),
+				lowerUTF8(n.orch_name),
 				''
 			) AS local_address,
-			event_id,
-			event_ts,
-			raw_capabilities
-		FROM (
-			SELECT
-				n.org AS org,
-				n.orch_address AS orch_address,
-				n.orch_uri AS orch_uri,
-				n.orch_uri_norm AS orch_uri_norm,
-				ifNull(n.orch_name, '') AS orch_name,
-				n.event_id AS event_id,
-				n.event_ts AS event_ts,
-				n.raw_capabilities AS raw_capabilities
-			FROM naap.normalized_network_capabilities n
-			INNER JOIN naap.resolver_query_identities i
-				ON i.query_id = ?
-			   AND i.identity = lowerUTF8(ifNull(n.orch_address, ''))
-			WHERE n.event_ts >= ? AND n.event_ts < ?
-			  AND `+orgClause+`
-
-			UNION DISTINCT
-
-			SELECT
-				n.org AS org,
-				n.orch_address AS orch_address,
-				n.orch_uri AS orch_uri,
-				n.orch_uri_norm AS orch_uri_norm,
-				ifNull(n.orch_name, '') AS orch_name,
-				n.event_id AS event_id,
-				n.event_ts AS event_ts,
-				n.raw_capabilities AS raw_capabilities
-			FROM naap.normalized_network_capabilities n
-			INNER JOIN naap.resolver_query_identities i
-				ON i.query_id = ?
-			   AND i.identity = lowerUTF8(ifNull(n.orch_uri_norm, ''))
-			WHERE n.event_ts >= ? AND n.event_ts < ?
-			  AND `+orgClause+`
-
-			UNION DISTINCT
-
-			SELECT
-				n.org AS org,
-				n.orch_address AS orch_address,
-				n.orch_uri AS orch_uri,
-				n.orch_uri_norm AS orch_uri_norm,
-				ifNull(n.orch_name, '') AS orch_name,
-				n.event_id AS event_id,
-				n.event_ts AS event_ts,
-				n.raw_capabilities AS raw_capabilities
-			FROM naap.normalized_network_capabilities n
-			INNER JOIN naap.resolver_query_identities i
-				ON i.query_id = ?
-			   AND i.identity = if(
-					match(lowerUTF8(ifNull(n.orch_name, '')), '^0x[0-9a-f]{40}$')
-					AND lowerUTF8(ifNull(n.orch_name, '')) != lowerUTF8(ifNull(n.orch_address, '')),
-					lowerUTF8(n.orch_name),
-					''
-				)
-			WHERE n.event_ts >= ? AND n.event_ts < ?
-			  AND `+orgClause+`
-		)
+			n.event_id AS event_id,
+			n.event_ts AS event_ts,
+			n.raw_capabilities AS raw_capabilities
+		FROM naap.normalized_network_capabilities n
+		ARRAY JOIN [
+			lowerUTF8(ifNull(n.orch_address, '')),
+			lowerUTF8(ifNull(n.orch_uri_norm, '')),
+			if(
+				match(lowerUTF8(ifNull(n.orch_name, '')), '^0x[0-9a-f]{40}$')
+				AND lowerUTF8(ifNull(n.orch_name, '')) != lowerUTF8(ifNull(n.orch_address, '')),
+				lowerUTF8(n.orch_name),
+				''
+			)
+		] AS identity_candidate
+		INNER JOIN naap.resolver_query_identities i
+			ON i.query_id = ?
+		   AND i.identity = identity_candidate
+		WHERE n.event_ts >= ? AND n.event_ts < ?
+		  AND `+orgClause+`
 		ORDER BY org, orch_address, orch_uri_norm, event_ts, event_id
 	`, args...)
 	if err != nil {
@@ -2628,6 +2586,16 @@ func (r *repo) publishServingRollups(ctx context.Context, runID string, now time
 		return err
 	}
 	if err := r.insertHourlyBYOCAuth(ctx, runID, now, queryID); err != nil {
+		return err
+	}
+	// Perf-pass: flatten canonical_capability_orchestrator_identity_latest
+	// (expensive multi-CTE argMaxIfMerge view) into a resolver-written store.
+	// Both the current_orchestrator writer and Grafana panels read this
+	// store instead of re-expanding the view on every query.
+	if err := r.insertOrchestratorIdentity(ctx, runID, now); err != nil {
+		return err
+	}
+	if err := r.insertCurrentGPUInventory(ctx, runID, now); err != nil {
 		return err
 	}
 	// Phase 6.3: denormalized current-orchestrator snapshot. Runs once per
@@ -4676,7 +4644,31 @@ func (r *repo) insertHourlyRequestDemand(ctx context.Context, runID string, now 
 //   - canonical_capability_orchestrator_identity_latest (uri, name, label)
 //   - api_hourly_streaming_sla_store (latest SLA score + windowed
 //     aggregate reliability metrics)
+// currentOrchestratorRefreshInterval is the minimum gap between
+// insertCurrentOrchestratorState executions. The store is a "last 24h"
+// rolling snapshot whose output is deterministic across successive runs,
+// so cranking it once per resolver window-slice (every ~2 min in tail
+// mode) is wasted work — each write scans ~2 GiB of capability inventory
+// to produce near-identical rows that the view's argMax then discards.
+//
+// 5 minutes is the worst-case staleness an operator cares about for the
+// orchestrator-listing endpoints; 24h data doesn't shift materially
+// faster than that.
+const currentOrchestratorRefreshInterval = 5 * time.Minute
+
 func (r *repo) insertCurrentOrchestratorState(ctx context.Context, runID string, now time.Time) error {
+	// Skip if a recent write already captured essentially the same snapshot.
+	var lastRefreshedAt time.Time
+	if err := r.conn.QueryRow(ctx, `
+		SELECT ifNull(max(refreshed_at), toDateTime64('1970-01-01 00:00:00', 3, 'UTC'))
+		FROM naap.api_current_orchestrator_store
+	`).Scan(&lastRefreshedAt); err != nil {
+		// Failure to probe is not fatal; fall through and attempt the write.
+		lastRefreshedAt = time.Time{}
+	} else if !lastRefreshedAt.IsZero() && now.Sub(lastRefreshedAt) < currentOrchestratorRefreshInterval {
+		return nil
+	}
+
 	return r.conn.Exec(ctx, `
 		INSERT INTO naap.api_current_orchestrator_store
 		(
@@ -4833,6 +4825,89 @@ func (r *repo) insertCurrentOrchestratorState(ctx context.Context, runID string,
 		LEFT JOIN sla_24h   s24 ON s24.orch_address = c.orch_address
 		LEFT JOIN sla_latest sl ON sl.orch_address  = c.orch_address
 	`, now.UTC(), now.UTC(), now.UTC(), now.UTC(), runID, r.cfg.ResolverVersion, now)
+}
+
+// insertCurrentGPUInventory snapshots the latest 24h of GPU observations
+// from canonical_capability_offer_inventory into one row per (orch_address,
+// gpu_id). Replaces full-scan dashboard queries that cost ~37 GiB/request
+// with a primary-key lookup over ~hundreds of rows.
+//
+// Throttled on the same 5-minute interval as the other current_* writers.
+func (r *repo) insertCurrentGPUInventory(ctx context.Context, runID string, now time.Time) error {
+	var lastRefreshedAt time.Time
+	if err := r.conn.QueryRow(ctx, `
+		SELECT ifNull(max(refreshed_at), toDateTime64('1970-01-01 00:00:00', 3, 'UTC'))
+		FROM naap.api_current_gpu_inventory_store
+	`).Scan(&lastRefreshedAt); err != nil {
+		lastRefreshedAt = time.Time{}
+	} else if !lastRefreshedAt.IsZero() && now.Sub(lastRefreshedAt) < currentOrchestratorRefreshInterval {
+		return nil
+	}
+	return r.conn.Exec(ctx, `
+		INSERT INTO naap.api_current_gpu_inventory_store
+		(
+			org, orch_address, gpu_id, gpu_model_name, gpu_memory_bytes_total,
+			canonical_pipeline, model_id, last_seen,
+			refresh_run_id, artifact_checksum, refreshed_at
+		)
+		SELECT
+			o.org                                                          AS org,
+			o.orch_address                                                 AS orch_address,
+			ifNull(o.gpu_id, '')                                           AS gpu_id,
+			argMax(ifNull(o.gpu_model_name, ''), o.last_seen)              AS gpu_model_name,
+			argMax(ifNull(o.gpu_memory_bytes_total, toUInt64(0)), o.last_seen) AS gpu_memory_bytes_total,
+			argMax(ifNull(o.canonical_pipeline, ''), o.last_seen)          AS canonical_pipeline,
+			argMax(ifNull(o.model_id, ''), o.last_seen)                    AS model_id,
+			max(o.last_seen)                                               AS latest_last_seen,
+			?, ?, ?
+		FROM naap.canonical_capability_offer_inventory o
+		WHERE o.last_seen >= toDateTime(?, 'UTC') - INTERVAL 24 HOUR
+		  AND o.hardware_present = 1
+		  AND ifNull(o.gpu_id, '') != ''
+		  AND o.orch_address != ''
+		GROUP BY o.org, o.orch_address, o.gpu_id
+	`, runID, r.cfg.ResolverVersion, now, now.UTC())
+}
+
+// insertOrchestratorIdentity flattens canonical_capability_orchestrator_identity_latest
+// (a multi-CTE argMaxIfMerge view over canonical_capability_snapshot_latest + ENS
+// metadata) into a resolver-written store. Every downstream identity lookup
+// then reads a primary-key lookup instead of re-expanding the view.
+//
+// Throttled on the same refreshed_at interval as insertCurrentOrchestratorState
+// — identity snapshots don't shift meaningfully under 5 min.
+func (r *repo) insertOrchestratorIdentity(ctx context.Context, runID string, now time.Time) error {
+	var lastRefreshedAt time.Time
+	if err := r.conn.QueryRow(ctx, `
+		SELECT ifNull(max(refreshed_at), toDateTime64('1970-01-01 00:00:00', 3, 'UTC'))
+		FROM naap.api_orchestrator_identity_store
+	`).Scan(&lastRefreshedAt); err != nil {
+		lastRefreshedAt = time.Time{}
+	} else if !lastRefreshedAt.IsZero() && now.Sub(lastRefreshedAt) < currentOrchestratorRefreshInterval {
+		return nil
+	}
+	return r.conn.Exec(ctx, `
+		INSERT INTO naap.api_orchestrator_identity_store
+		(
+			orch_address, name, orch_name, orch_label, orchestrator_uri, orch_uri_norm,
+			version, org, capability_version_id, snapshot_event_id, last_seen,
+			refresh_run_id, artifact_checksum, refreshed_at
+		)
+		SELECT
+			orch_address,
+			coalesce(nullIf(name, ''), orch_address)              AS name,
+			coalesce(nullIf(orch_name, ''), orch_address)         AS orch_name,
+			ifNull(orch_label, '')                                AS orch_label,
+			ifNull(orchestrator_uri, '')                          AS orchestrator_uri,
+			ifNull(orch_uri_norm, '')                             AS orch_uri_norm,
+			ifNull(version, '')                                   AS version,
+			org,
+			ifNull(capability_version_id, '')                     AS capability_version_id,
+			ifNull(snapshot_event_id, '')                         AS snapshot_event_id,
+			last_seen,
+			?, ?, ?
+		FROM naap.canonical_capability_orchestrator_identity_latest
+	`, runID, r.cfg.ResolverVersion, now)
 }
 
 // insertHourlyBYOCAuth aggregates normalized_byoc_auth (one row per auth

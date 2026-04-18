@@ -1230,7 +1230,7 @@
           "value": "__all"
         },
         "definition": "SELECT DISTINCT org FROM naap.api_hourly_request_demand WHERE org != '' ORDER BY org",
-        "query": "SELECT DISTINCT org FROM naap.api_hourly_request_demand WHERE org != '' ORDER BY org",
+        "query": "SELECT org FROM naap.api_variable_orgs",
         "refresh": 1,
         "sort": 1,
         "datasource": {
@@ -1250,7 +1250,7 @@
           "value": "__all"
         },
         "definition": "SELECT DISTINCT capability FROM (SELECT capability FROM naap.api_fact_byoc_job WHERE capability != '' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) UNION ALL SELECT capability_name AS capability FROM naap.api_observed_byoc_worker WHERE capability_name != '' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) UNION ALL SELECT capability_name AS capability FROM naap.api_hourly_byoc_auth WHERE capability_name != '' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) UNION ALL SELECT capability FROM naap.canonical_byoc_payments WHERE capability != '' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))) WHERE capability != '' ORDER BY capability",
-        "query": "SELECT DISTINCT capability FROM (SELECT capability FROM naap.api_fact_byoc_job WHERE capability != '' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) UNION ALL SELECT capability_name AS capability FROM naap.api_observed_byoc_worker WHERE capability_name != '' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) UNION ALL SELECT capability_name AS capability FROM naap.api_hourly_byoc_auth WHERE capability_name != '' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) UNION ALL SELECT capability FROM naap.canonical_byoc_payments WHERE capability != '' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))) WHERE capability != '' ORDER BY capability",
+        "query": "SELECT capability FROM naap.api_variable_capabilities",
         "refresh": 1,
         "sort": 1,
         "datasource": {

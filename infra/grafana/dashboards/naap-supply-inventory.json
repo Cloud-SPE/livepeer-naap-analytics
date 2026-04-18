@@ -154,14 +154,14 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT ifNull(gpu_model_name, 'unknown') AS gpu_model_display,\n    countDistinct(gpu_id) AS gpu_count\nFROM naap.api_observed_capability_offer\nWHERE last_seen >= now() - INTERVAL 24 HOUR\nAND hardware_present = 1\nAND gpu_id != ''\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nAND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), model_id))\nAND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address))\nGROUP BY gpu_model_display ORDER BY gpu_count DESC",
+          "rawSql": "SELECT ifNull(nullIf(gpu_model_name, ''), 'unknown') AS gpu_model_display,\n       countDistinct(gpu_id) AS gpu_count\nFROM naap.api_current_gpu_inventory\nWHERE ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n  AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), model_id))\n  AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address))\nGROUP BY gpu_model_display\nORDER BY gpu_count DESC",
           "refId": "A"
         }
       ],
       "title": "GPU Count by Type (Seen in 24h)",
       "type": "barchart",
       "meta": {
-        "backing_table": "naap.api_observed_capability_offer"
+        "backing_table": "naap.api_current_gpu_inventory"
       }
     },
     {
@@ -220,14 +220,14 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "WITH labels AS (\n    SELECT orch_address AS addr, orch_label\n    FROM naap.api_orchestrator_identity\n),\nlatest_gpu AS (\n    SELECT gpu_id, orch_address, gpu_model_name, gpu_memory_bytes_total, canonical_pipeline, model_id, last_seen\n    FROM (\n        SELECT gpu_id, orch_address, org, gpu_model_name, gpu_memory_bytes_total, canonical_pipeline, model_id, last_seen,\n            row_number() OVER (PARTITION BY orch_address, canonical_pipeline, model_id, gpu_id ORDER BY last_seen DESC, org DESC) AS rn\n        FROM naap.api_observed_capability_offer\n        WHERE last_seen >= now() - INTERVAL 24 HOUR\n        AND hardware_present = 1\n        AND gpu_id != ''\n        AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n        AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), model_id))\n        AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address))\n    )\n    WHERE rn = 1\n)\nSELECT g.last_seen AS \"Latest Observation\",\n    g.canonical_pipeline AS \"Pipeline\",\n    ifNull(labels.orch_label, concat(left(g.orch_address, 8), '...', right(g.orch_address, 4))) AS \"Orchestrator\",\n    g.orch_address AS \"Orchestrator Address\",\n    g.model_id AS \"Model\",\n    g.gpu_id AS \"GPU ID\",\n    ifNull(g.gpu_model_name, '') AS \"GPU Type\",\n    round(toFloat64(g.gpu_memory_bytes_total) / 1073741824.0, 1) AS \"GPU Memory (GB)\"\nFROM latest_gpu g\nLEFT JOIN labels ON labels.addr = g.orch_address\nORDER BY \"Latest Observation\" DESC\nLIMIT 50",
+          "rawSql": "WITH labels AS (\n    SELECT orch_address AS addr, orch_label FROM naap.api_orchestrator_identity\n)\nSELECT g.last_seen AS \"Latest Observation\",\n       g.canonical_pipeline AS \"Pipeline\",\n       ifNull(labels.orch_label, concat(left(g.orch_address, 8), '...', right(g.orch_address, 4))) AS \"Orchestrator\",\n       g.orch_address AS \"Orchestrator Address\",\n       g.model_id AS \"Model\",\n       g.gpu_id AS \"GPU ID\",\n       ifNull(g.gpu_model_name, '') AS \"GPU Type\",\n       round(toFloat64(g.gpu_memory_bytes_total) / 1073741824.0, 1) AS \"GPU Memory (GB)\"\nFROM naap.api_current_gpu_inventory g\nLEFT JOIN labels ON labels.addr = g.orch_address\nWHERE ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), g.org))\n  AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), g.model_id))\n  AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), g.orch_address))\nORDER BY \"Latest Observation\" DESC\nLIMIT 50",
           "refId": "A"
         }
       ],
       "title": "Latest GPU Inventory Seen in 24h",
       "type": "table",
       "meta": {
-        "backing_table": "naap.api_orchestrator_identity"
+        "backing_table": "naap.api_current_gpu_inventory"
       }
     },
     {
@@ -488,7 +488,7 @@
         "multi": true,
         "name": "org",
         "options": [],
-        "query": "SELECT DISTINCT org FROM naap.api_orchestrator_identity WHERE org != '' ORDER BY org",
+        "query": "SELECT org FROM naap.api_variable_orgs",
         "refresh": 1,
         "sort": 1,
         "type": "query",
@@ -510,7 +510,7 @@
         "multi": true,
         "name": "model",
         "options": [],
-        "query": "SELECT DISTINCT model_id FROM naap.api_observed_capability_offer WHERE model_id != '' AND hardware_present = 1 AND last_seen >= now() - INTERVAL 24 HOUR AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address)) ORDER BY model_id",
+        "query": "SELECT model_id FROM naap.api_variable_models",
         "refresh": 1,
         "sort": 1,
         "type": "query",
@@ -531,7 +531,7 @@
         "multi": true,
         "name": "orchestrator",
         "options": [],
-        "query": "SELECT orch_address AS __value, orch_label AS __text FROM naap.api_orchestrator_identity WHERE ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) ORDER BY __text",
+        "query": "SELECT concat(coalesce(nullIf(orch_label, ''), orch_address), ':',  orch_address) FROM naap.api_variable_orchestrators",
         "refresh": 1,
         "sort": 1,
         "type": "query",

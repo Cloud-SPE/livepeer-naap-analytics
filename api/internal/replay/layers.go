@@ -106,6 +106,11 @@ var tablesByLayer = map[Layer][]string{
 		"api_observed_capability_pricing",
 		"api_observed_orchestrator",
 		"api_orchestrator_identity",
+		// Perf-pass: physical backing of api_orchestrator_identity.
+		"api_orchestrator_identity_store",
+		// Perf-pass: current 24h GPU inventory snapshot.
+		"api_current_gpu_inventory",
+		"api_current_gpu_inventory_store",
 	},
 }
 
@@ -125,10 +130,12 @@ var tablesByLayer = map[Layer][]string{
 // promote other canonical stores into the api layer will append to this
 // list in lockstep with the rename.
 var resolverWrittenApiStores = []string{
+	"api_current_gpu_inventory_store",
 	"api_current_orchestrator_store",
 	"api_hourly_byoc_auth_store",
 	"api_hourly_request_demand_store",
 	"api_hourly_streaming_sla_store",
+	"api_orchestrator_identity_store",
 }
 
 // resolverBookkeepingTables lists the resolver_* tables the harness
