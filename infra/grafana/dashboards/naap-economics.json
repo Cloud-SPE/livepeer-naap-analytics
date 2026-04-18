@@ -161,7 +161,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT toStartOfInterval(event_ts, INTERVAL 1 HOUR) AS time,\n    toFloat64(sum(face_value_wei)) / 1e18 AS total_revenue_eth\nFROM naap.api_hourly_streaming_demand\nWHERE $__timeFilter(event_ts)\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY time ORDER BY time",
+          "rawSql": "SELECT toStartOfInterval(window_start, INTERVAL 1 HOUR) AS time,\n    toFloat64(sum(ticket_face_value_eth)) AS total_revenue_eth\nFROM naap.api_hourly_streaming_demand\nWHERE $__timeFilter(window_start)\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY time ORDER BY time",
           "refId": "A"
         }
       ],
