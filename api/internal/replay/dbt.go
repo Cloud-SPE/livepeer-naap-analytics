@@ -54,7 +54,14 @@ func RunDBT(ctx context.Context, log *zap.Logger, dc DBTConfig) error {
 		// views (Phase 3, Phase 4). Canonical views are cheap to rebuild
 		// (~1 s on the daily fixture). Phase 5 retired api_base_* so there
 		// is no longer a second top-level selector to pass.
-		selector = "+api"
+		//
+		// Include every canonical_* model so the resolver (which reads many
+		// canonical views by raw name from Go) doesn't blow up when a view
+		// that no api model refs — e.g.
+		// canonical_capability_orchestrator_identity_latest or
+		// canonical_session_attribution_latest — hasn't been materialized.
+		// Canonical views are cheap to rebuild (~1 s total).
+		selector = "+api staging.* canonical.*"
 	}
 
 	args := []string{"compose", "--profile", "tooling", "run", "--rm", "warehouse",

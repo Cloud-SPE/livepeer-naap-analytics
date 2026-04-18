@@ -3709,20 +3709,35 @@ func (r *repo) insertGPUMetricsRollups(ctx context.Context, runID string, now ti
 				ON h.org = sh.org AND h.canonical_session_key = sh.canonical_session_key AND h.hour = sh.window_start
 			WHERE h.is_terminal_tail_artifact = 0
 		),
+		-- Perf-pass: prefilter to only the snapshot_row_ids referenced by
+		-- the current run's base set. Without this the inventory CTE
+		-- scans the full canonical_capability_hardware_inventory_by_snapshot
+		-- (which now carries ~10 days of Kafka-ingested capability snapshots
+		-- under live load) and times out at the 30 s default — cost is
+		-- proportional to total historical inventory, not to the windows
+		-- we're actually publishing for.
+		needed_snapshots AS (
+			SELECT DISTINCT attribution_snapshot_row_id
+			FROM base
+			WHERE attribution_snapshot_row_id IS NOT NULL
+			  AND attribution_snapshot_row_id != ''
+		),
 		inventory AS (
 			SELECT
-				snapshot_row_id AS attribution_snapshot_row_id,
-				org,
-				orch_address AS orchestrator_address,
-				pipeline_id,
-				model_id,
-				gpu_id,
-				any(gpu_model_name) AS gpu_model_name,
-				any(gpu_memory_bytes_total) AS gpu_memory_bytes_total,
-				any(runner_version) AS runner_version,
-				any(cuda_version) AS cuda_version
-			FROM naap.canonical_capability_hardware_inventory_by_snapshot
-			GROUP BY attribution_snapshot_row_id, org, orchestrator_address, pipeline_id, model_id, gpu_id
+				inv.snapshot_row_id AS attribution_snapshot_row_id,
+				inv.org,
+				inv.orch_address AS orchestrator_address,
+				inv.pipeline_id,
+				inv.model_id,
+				inv.gpu_id,
+				any(inv.gpu_model_name) AS gpu_model_name,
+				any(inv.gpu_memory_bytes_total) AS gpu_memory_bytes_total,
+				any(inv.runner_version) AS runner_version,
+				any(inv.cuda_version) AS cuda_version
+			FROM naap.canonical_capability_hardware_inventory_by_snapshot inv
+			INNER JOIN needed_snapshots ns
+				ON ns.attribution_snapshot_row_id = inv.snapshot_row_id
+			GROUP BY attribution_snapshot_row_id, inv.org, orchestrator_address, inv.pipeline_id, inv.model_id, inv.gpu_id
 		)
 			SELECT
 				b.window_start,
