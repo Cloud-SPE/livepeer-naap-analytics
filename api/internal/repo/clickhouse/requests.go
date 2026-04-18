@@ -19,17 +19,17 @@ func (r *Repo) GetRequestsModels(ctx context.Context) ([]types.RequestsModel, er
 	rows, err := r.conn.Query(ctx, `
 		WITH offers AS (
 		    SELECT
-		        ifNull(canonical_pipeline, capability_name) AS pipeline,
+		        ifNull(nullIf(canonical_pipeline, ''), capability_name) AS pipeline,
 		        model_id AS model,
 		        capability_family,
 		        toInt64(count(DISTINCT orch_address)) AS warm_orch_count,
-		        toInt64(count(DISTINCT nullIf(ifNull(gpu_id, ''), ''))) AS gpu_slots
-		    FROM naap.api_observed_capability_offer
+		        toInt64(count(DISTINCT nullIf(gpu_id, ''))) AS gpu_slots
+		    FROM naap.api_current_capability
 		    WHERE supports_request = 1
 		      AND capability_family = 'builtin'
-		      AND model_id IS NOT NULL AND model_id != ''
-		      AND ifNull(canonical_pipeline, '') != 'live-video-to-video'
-		      AND ifNull(canonical_pipeline, capability_name) != ''
+		      AND model_id != ''
+		      AND canonical_pipeline != 'live-video-to-video'
+		      AND ifNull(nullIf(canonical_pipeline, ''), capability_name) != ''
 		      AND last_seen >= ? AND last_seen < ?
 		    GROUP BY pipeline, model, capability_family
 		    UNION ALL

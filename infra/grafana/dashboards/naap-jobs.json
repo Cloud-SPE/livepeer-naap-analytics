@@ -1160,7 +1160,7 @@
     },
     {
       "type": "table",
-      "title": "BYOC Work Price Volume by Capability",
+      "title": "Settled Payments by Capability",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "${clickhouse_ds}"
@@ -1173,7 +1173,7 @@
       },
       "id": 6519,
       "meta": {
-        "backing_table": "naap.api_fact_byoc_job"
+        "backing_table": "naap.api_hourly_byoc_payments_store"
       },
       "options": {},
       "fieldConfig": {
@@ -1190,10 +1190,10 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "sql",
-          "rawSql": "SELECT capability,\n       toInt64(count()) AS job_count,\n       round(toFloat64(sum(price_per_unit)), 4) AS total_price_units,\n       round(toFloat64(avg(price_per_unit)), 4) AS avg_price_per_unit,\n       toInt64(uniq(orch_address)) AS unique_orchs\nFROM naap.api_fact_byoc_job\nWHERE $__timeFilter(completed_at)\n  AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n  AND ('${capability:csv}' = '__all' OR '${capability:csv}' = '' OR has(splitByChar(',', '${capability:csv}'), capability))\nGROUP BY capability\nORDER BY total_price_units DESC"
+          "rawSql": "SELECT capability,\n       payment_type,\n       toInt64(sum(payment_count)) AS payment_count,\n       round(toFloat64(sum(total_amount)), 4) AS total_amount,\n       any(currency) AS currency,\n       toInt64(sum(unique_orchs)) AS unique_orchs\nFROM naap.api_hourly_byoc_payments\nWHERE $__timeFilter(window_start)\n  AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n  AND ('${capability:csv}' = '__all' OR '${capability:csv}' = '' OR has(splitByChar(',', '${capability:csv}'), capability))\nGROUP BY capability, payment_type\nORDER BY total_amount DESC"
         }
       ],
-      "description": "Per-capability BYOC work price volume over the selected range. Sums price_per_unit across completed jobs as a proxy for payment flow. Exact settled-payment counts live in the internal debug dashboard (canonical_byoc_payments); the serving-contract view uses api_fact_byoc_job."
+      "description": "Per-capability exact settled BYOC payment totals over the selected range. Hourly roll-up of canonical_byoc_payments.amount, written by the resolver into api_hourly_byoc_payments_store. Supersedes the price-derived proxy that summed api_fact_byoc_job.price_per_unit."
     }
   ],
   "refresh": "15m",

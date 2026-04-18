@@ -22,14 +22,14 @@ func (r *Repo) GetStreamingModels(ctx context.Context) ([]types.StreamingModel, 
 		    toInt64(s.gpu_slots) - toInt64(ifNull(d.active_streams, 0)) AS available_capacity,
 		    round(ifNull(f.avg_fps, 0), 1) AS avg_fps
 		FROM (
-		    SELECT canonical_pipeline AS s_pipeline, ifNull(model_id, '') AS s_model,
+		    SELECT canonical_pipeline AS s_pipeline, model_id AS s_model,
 		           toInt64(count(DISTINCT orch_address)) AS warm_orch_count,
-		           toInt64(countDistinctIf(gpu_id, gpu_id IS NOT NULL AND gpu_id != '')) AS gpu_slots
-		    FROM naap.api_observed_capability_offer
+		           toInt64(countDistinctIf(gpu_id, gpu_id != '')) AS gpu_slots
+		    FROM naap.api_current_capability
 		    WHERE canonical_pipeline = 'live-video-to-video'
 		      AND capability_family = 'builtin'
 		      AND last_seen >= ? AND last_seen < ?
-		      AND ifNull(model_id, '') != ''
+		      AND model_id != ''
 		    GROUP BY s_pipeline, s_model
 		) s
 		LEFT JOIN (

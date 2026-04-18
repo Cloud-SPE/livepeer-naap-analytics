@@ -263,77 +263,176 @@ func (r *Repo) GetDashboardPipelines(ctx context.Context, limit int, windowHours
 
 // GetDashboardOrchestrators serves GET /v1/dashboard/orchestrators.
 //
-// Phase 6.3/6.5 — single scan over api_current_orchestrator. Identity,
-// capability membership, GPU count, latest SLA and 24h-aggregated
-// reliability live as denormalized columns on one row per orch_address.
-// The windowHours parameter is retained for API compatibility but the
-// underlying snapshot is fixed at 24h; longer windows degrade to the same
-// 24h view. (The prior implementation fanned out 4 queries against the
-// hourly SLA feed + observed offers + identity lookup and rejoined in Go;
-// the store-written snapshot replaces the whole pattern.)
+// Identity, capability membership, and GPU count come from the
+// resolver-written api_current_orchestrator snapshot (grain: one row per
+// orch_address). Reliability and SLA metrics are aggregated live over
+// the caller's requested window from api_hourly_streaming_sla, so
+// passing `window=1h` vs `window=168h` produces materially different
+// response bodies. Weighted-aggregate pattern:
+// SUM(metric * requested_sessions) / NULLIF(SUM(requested_sessions), 0)
+// matches the additive-primitives contract.
 func (r *Repo) GetDashboardOrchestrators(ctx context.Context, windowHours int) ([]types.DashboardOrchestrator, error) {
-	_ = windowHours
-	rows, err := r.conn.Query(ctx, `
+	if windowHours <= 0 {
+		windowHours = 24
+	}
+
+	type orchData struct {
+		addr               string
+		uri                string
+		gpuCount           int64
+		pipelines          []string
+		pipelineModelPairs [][]any
+
+		totalRequested  int64
+		knownSessions   int64
+		successSessions int64
+		weightedSuccess float64
+		weightedNoSwap  float64
+
+		slaScore       *float64
+		slaWindowStart *time.Time
+	}
+
+	orchs := map[string]*orchData{}
+	var order []string
+
+	idRows, err := r.conn.Query(ctx, `
 		SELECT
 		    orch_address,
 		    orchestrator_uri,
-		    toInt64(gpu_count)                                                           AS gpu_count,
-		    toInt64(known_sessions_count)                                                AS known_sessions,
-		    toInt64(success_sessions)                                                    AS success_sessions,
-		    effective_success_rate,
-		    no_swap_rate,
-		    latest_sla_score,
-		    latest_sla_window_start,
+		    toInt64(gpu_count) AS gpu_count,
 		    pipelines,
 		    pipeline_model_pairs
 		FROM naap.api_current_orchestrator
-		ORDER BY known_sessions_count DESC, orch_address ASC
+		ORDER BY orch_address ASC
 	`)
 	if err != nil {
-		return nil, fmt.Errorf("dashboard orchestrators: %w", err)
+		return nil, fmt.Errorf("dashboard orchestrators identity: %w", err)
 	}
-	defer rows.Close()
-
-	result := make([]types.DashboardOrchestrator, 0)
-	for rows.Next() {
+	for idRows.Next() {
 		var addr, uri string
-		var gpuCount, knownSessions, successSessions int64
-		var effRate, noSwap, sla *float64
-		var slaWindowStart *time.Time
+		var gpuCount int64
 		var pipelines []string
 		var pipelineModelPairs [][]any
-		if err := rows.Scan(
-			&addr, &uri, &gpuCount, &knownSessions, &successSessions,
-			&effRate, &noSwap, &sla, &slaWindowStart,
-			&pipelines, &pipelineModelPairs,
-		); err != nil {
-			return nil, fmt.Errorf("dashboard orchestrators scan: %w", err)
+		if err := idRows.Scan(&addr, &uri, &gpuCount, &pipelines, &pipelineModelPairs); err != nil {
+			idRows.Close()
+			return nil, fmt.Errorf("dashboard orchestrators identity scan: %w", err)
 		}
+		orchs[addr] = &orchData{
+			addr:               addr,
+			uri:                uri,
+			gpuCount:           gpuCount,
+			pipelines:          pipelines,
+			pipelineModelPairs: pipelineModelPairs,
+		}
+		order = append(order, addr)
+	}
+	idRows.Close()
+
+	slaRows, err := r.conn.Query(ctx, `
+		SELECT
+		    orchestrator_address,
+		    toInt64(sum(requested_sessions))                              AS total_requested,
+		    toInt64(sum(ifNull(known_sessions_count, 0)))                 AS known_sessions,
+		    toInt64(sum(ifNull(startup_success_sessions, 0)))             AS success_sessions,
+		    sum(ifNull(effective_success_rate, 0) * requested_sessions)   AS weighted_success,
+		    sum(ifNull(no_swap_rate, 0) * requested_sessions)             AS weighted_no_swap
+		FROM naap.api_hourly_streaming_sla
+		WHERE window_start >= now() - INTERVAL ? HOUR
+		  AND orchestrator_address != ''
+		GROUP BY orchestrator_address
+	`, windowHours)
+	if err != nil {
+		return nil, fmt.Errorf("dashboard orchestrators sla aggregate: %w", err)
+	}
+	for slaRows.Next() {
+		var addr string
+		var totalRequested, known, success int64
+		var weightedSuccess, weightedNoSwap float64
+		if err := slaRows.Scan(&addr, &totalRequested, &known, &success, &weightedSuccess, &weightedNoSwap); err != nil {
+			slaRows.Close()
+			return nil, fmt.Errorf("dashboard orchestrators sla aggregate scan: %w", err)
+		}
+		o, ok := orchs[addr]
+		if !ok {
+			o = &orchData{addr: addr}
+			orchs[addr] = o
+			order = append(order, addr)
+		}
+		o.totalRequested = totalRequested
+		o.knownSessions = known
+		o.successSessions = success
+		o.weightedSuccess = weightedSuccess
+		o.weightedNoSwap = weightedNoSwap
+	}
+	slaRows.Close()
+
+	latestRows, err := r.conn.Query(ctx, `
+		SELECT
+		    orchestrator_address,
+		    window_start,
+		    sum(ifNull(sla_score, 0) * requested_sessions)
+		      / nullIf(toFloat64(sum(requested_sessions)), 0) AS sla
+		FROM naap.api_hourly_streaming_sla
+		WHERE window_start >= now() - INTERVAL ? HOUR
+		  AND orchestrator_address != ''
+		  AND sla_score IS NOT NULL
+		GROUP BY orchestrator_address, window_start
+		ORDER BY orchestrator_address ASC, window_start DESC
+	`, windowHours)
+	if err != nil {
+		return nil, fmt.Errorf("dashboard orchestrators sla latest: %w", err)
+	}
+	for latestRows.Next() {
+		var addr string
+		var windowStart time.Time
+		var sla *float64
+		if err := latestRows.Scan(&addr, &windowStart, &sla); err != nil {
+			latestRows.Close()
+			return nil, fmt.Errorf("dashboard orchestrators sla latest scan: %w", err)
+		}
+		o, ok := orchs[addr]
+		if !ok {
+			continue
+		}
+		if o.slaWindowStart != nil {
+			continue
+		}
+		o.slaScore = sla
+		ws := windowStart
+		o.slaWindowStart = &ws
+	}
+	latestRows.Close()
+
+	result := make([]types.DashboardOrchestrator, 0, len(order))
+	for _, addr := range order {
+		o := orchs[addr]
 
 		orch := types.DashboardOrchestrator{
-			Address:              addr,
-			ServiceURI:           uri,
-			KnownSessions:        knownSessions,
-			SuccessSessions:      successSessions,
-			GPUCount:             gpuCount,
-			EffectiveSuccessRate: effRate,
-			NoSwapRatio:          noSwap,
+			Address:         o.addr,
+			ServiceURI:      o.uri,
+			KnownSessions:   o.knownSessions,
+			SuccessSessions: o.successSessions,
+			GPUCount:        o.gpuCount,
 		}
-		if effRate != nil {
-			orch.SuccessRatio = *effRate * 100
+
+		if o.totalRequested > 0 {
+			eff := divSafe(o.weightedSuccess, float64(o.totalRequested))
+			ns := divSafe(o.weightedNoSwap, float64(o.totalRequested))
+			orch.EffectiveSuccessRate = &eff
+			orch.NoSwapRatio = &ns
+			orch.SuccessRatio = eff * 100
 		}
-		if sla != nil {
-			orch.SLAScore = sla
+		if o.slaScore != nil {
+			orch.SLAScore = o.slaScore
 		}
-		if slaWindowStart != nil {
-			txt := slaWindowStart.UTC().Format(time.RFC3339)
+		if o.slaWindowStart != nil {
+			txt := o.slaWindowStart.UTC().Format(time.RFC3339)
 			orch.SLAWindowStart = &txt
 		}
 
-		// Group pipeline_model_pairs by pipeline for the nested API shape.
-		// Pairs arrive as []any{pipeline, model} tuples from the driver.
 		pmMap := map[string]map[string]bool{}
-		for _, pair := range pipelineModelPairs {
+		for _, pair := range o.pipelineModelPairs {
 			if len(pair) != 2 {
 				continue
 			}
@@ -364,12 +463,21 @@ func (r *Repo) GetDashboardOrchestrators(ctx context.Context, windowHours int) (
 		sort.Slice(pipelineModels, func(i, j int) bool {
 			return pipelineModels[i].PipelineID < pipelineModels[j].PipelineID
 		})
+		pipelines := append([]string(nil), o.pipelines...)
 		sort.Strings(pipelines)
 		orch.Pipelines = pipelines
 		orch.PipelineModels = pipelineModels
 
 		result = append(result, orch)
 	}
+
+	sort.SliceStable(result, func(i, j int) bool {
+		if result[i].KnownSessions != result[j].KnownSessions {
+			return result[i].KnownSessions > result[j].KnownSessions
+		}
+		return result[i].Address < result[j].Address
+	})
+
 	return result, nil
 }
 
@@ -493,7 +601,7 @@ func (r *Repo) GetDashboardPipelineCatalog(ctx context.Context) ([]types.Dashboa
 	start := end.Add(-observedInventoryHours * time.Hour)
 	rows, err := r.conn.Query(ctx, `
 		SELECT DISTINCT canonical_pipeline, model_id
-		FROM naap.api_observed_capability_offer
+		FROM naap.api_current_capability
 		WHERE last_seen >= ? AND last_seen < ?
 		  AND hardware_present = 1
 		  AND canonical_pipeline != '' AND model_id != ''

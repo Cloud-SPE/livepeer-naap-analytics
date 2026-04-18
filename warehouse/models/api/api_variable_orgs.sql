@@ -3,16 +3,15 @@
 -- (e.g. daydream) AND orgs that only run request-response (e.g. cloudspe)
 -- both appear in the dropdown.
 --
--- The prior single-source version read from api_hourly_request_demand
--- alone and silently dropped streaming-only orgs; the Served Sessions
--- panel on the Overview dashboard then showed no daydream data because
--- daydream wasn't an `All` selection target.
+-- Reads canonical-layer stores directly (rather than the api_hourly_*
+-- views) to satisfy the serving contract rule that api_* views only
+-- depend on canonical_* or api_*_store tables.
 
 {{ config(materialized='view') }}
 
 select distinct org from (
-    select org from naap.api_hourly_streaming_demand where org != ''
+    select org from naap.canonical_streaming_demand_hourly_store where org != ''
     union distinct
-    select org from naap.api_hourly_request_demand where org != ''
+    select org from naap.api_hourly_request_demand_store where org != ''
 )
 order by org

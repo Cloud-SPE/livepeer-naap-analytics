@@ -10,6 +10,6 @@ select distinct
     orch_label,
     name,
     org
-from {{ ref('api_orchestrator_identity') }}
+from naap.api_orchestrator_identity_store
 where orch_address != ''
 order by orch_address

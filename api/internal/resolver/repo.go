@@ -2588,6 +2588,9 @@ func (r *repo) publishServingRollups(ctx context.Context, runID string, now time
 	if err := r.insertHourlyBYOCAuth(ctx, runID, now, queryID); err != nil {
 		return err
 	}
+	if err := r.insertHourlyBYOCPayments(ctx, runID, now, queryID); err != nil {
+		return err
+	}
 	// Perf-pass: flatten canonical_capability_orchestrator_identity_latest
 	// (expensive multi-CTE argMaxIfMerge view) into a resolver-written store.
 	// Both the current_orchestrator writer and Grafana panels read this
@@ -2604,6 +2607,14 @@ func (r *repo) publishServingRollups(ctx context.Context, runID string, now time
 	// read. Must run AFTER insertFinalSLAComplianceRollups so the latest
 	// SLA scores are visible when composed.
 	if err := r.insertCurrentOrchestratorState(ctx, runID, now); err != nil {
+		return err
+	}
+	// Phase 4: unified capability spine. Runs once per resolver backfill and
+	// writes one row per (org, orch_address, capability_id, canonical_pipeline,
+	// model_id, gpu_id) so /v1/requests/*, /v1/streaming/*, and
+	// /v1/dashboard/pipeline-catalog read api_current_capability instead of
+	// scanning api_observed_capability_offer.
+	if err := r.insertCurrentCapability(ctx, runID, now); err != nil {
 		return err
 	}
 	return nil
@@ -4884,6 +4895,169 @@ func (r *repo) insertCurrentGPUInventory(ctx context.Context, runID string, now 
 	`, runID, r.cfg.ResolverVersion, now, now.UTC())
 }
 
+// insertCurrentCapability composes the unified capability spine from
+// canonical_capability_offer_inventory (builtin + byoc offers), canonical_byoc_workers
+// (byoc workers that registered without a matching offer), canonical_capability_pricing_inventory
+// (pricing), and canonical_capability_orchestrator_identity_latest (orchestrator
+// name/uri). One row per (org, orch_address, capability_id, canonical_pipeline,
+// model_id, gpu_id) denormalizes everything the three serving endpoints need
+// so /v1/requests/*, /v1/streaming/*, and /v1/dashboard/pipeline-catalog stop
+// rescanning api_observed_capability_offer on every request.
+//
+// Throttled on the same 5-minute refresh interval as the other current_*
+// writers — this is a "last 24h" snapshot that doesn't shift meaningfully
+// faster than that.
+func (r *repo) insertCurrentCapability(ctx context.Context, runID string, now time.Time) error {
+	var lastRefreshedAt time.Time
+	if err := r.conn.QueryRow(ctx, `
+		SELECT ifNull(max(refreshed_at), toDateTime64('1970-01-01 00:00:00', 3, 'UTC'))
+		FROM naap.api_current_capability_store
+	`).Scan(&lastRefreshedAt); err != nil {
+		lastRefreshedAt = time.Time{}
+	} else if !lastRefreshedAt.IsZero() && now.Sub(lastRefreshedAt) < currentOrchestratorRefreshInterval {
+		return nil
+	}
+
+	return r.conn.Exec(ctx, `
+		INSERT INTO naap.api_current_capability_store
+		(
+			org, orch_address, orchestrator_uri, orchestrator_name,
+			capability_id, capability_name, capability_family,
+			canonical_pipeline, model_id, gpu_id,
+			advertised_capacity, hardware_present,
+			supports_request, supports_stream,
+			price_per_unit, price_currency,
+			last_seen,
+			refresh_run_id, artifact_checksum, refreshed_at
+		)
+		WITH offers_24h AS (
+			SELECT
+				o.org                                                       AS org,
+				o.orch_address                                              AS orch_address,
+				ifNull(o.orchestrator_uri, '')                              AS orchestrator_uri,
+				toUInt16(ifNull(o.capability_id, toUInt16(0)))              AS capability_id,
+				ifNull(o.capability_name, '')                               AS capability_name,
+				ifNull(o.capability_family, '')                             AS capability_family,
+				ifNull(o.canonical_pipeline, '')                            AS canonical_pipeline,
+				ifNull(o.model_id, '')                                      AS model_id,
+				ifNull(o.gpu_id, '')                                        AS gpu_id,
+				toInt32(ifNull(o.advertised_capacity, toInt32(0)))          AS advertised_capacity,
+				o.hardware_present                                          AS hardware_present,
+				toUInt8(ifNull(o.supports_request, toUInt8(0)))             AS supports_request,
+				toUInt8(ifNull(o.supports_stream, toUInt8(0)))              AS supports_stream,
+				o.last_seen                                                 AS last_seen
+			FROM naap.canonical_capability_offer_inventory o
+			WHERE o.last_seen >= toDateTime(?, 'UTC') - INTERVAL 24 HOUR
+			  AND o.orch_address != ''
+		),
+		offers_rollup AS (
+			SELECT
+				org, orch_address, capability_id, canonical_pipeline, model_id, gpu_id,
+				argMax(orchestrator_uri, (last_seen, orchestrator_uri))     AS orchestrator_uri,
+				argMax(capability_name, (last_seen, capability_name))       AS capability_name,
+				argMax(capability_family, (last_seen, capability_family))   AS capability_family,
+				toUInt32(greatest(max(advertised_capacity), 0))             AS advertised_capacity,
+				max(hardware_present)                                       AS hardware_present,
+				max(supports_request)                                       AS supports_request,
+				max(supports_stream)                                        AS supports_stream,
+				max(last_seen)                                              AS last_seen
+			FROM offers_24h
+			GROUP BY org, orch_address, capability_id, canonical_pipeline, model_id, gpu_id
+		),
+		byoc_workers_24h AS (
+			SELECT
+				w.org                                                       AS org,
+				w.orch_address                                              AS orch_address,
+				argMax(ifNull(w.orch_url_norm, ''), (w.event_ts, w.event_id))   AS orchestrator_uri,
+				toUInt16(0)                                                 AS capability_id,
+				w.capability                                                AS capability_name,
+				toLowCardinality('byoc')                                    AS capability_family,
+				''                                                          AS canonical_pipeline,
+				ifNull(w.model, '')                                         AS model_id,
+				''                                                          AS gpu_id,
+				toUInt32(0)                                                 AS advertised_capacity,
+				toUInt8(0)                                                  AS hardware_present,
+				toUInt8(1)                                                  AS supports_request,
+				toUInt8(0)                                                  AS supports_stream,
+				max(w.event_ts)                                             AS last_seen
+			FROM naap.canonical_byoc_workers w
+			WHERE w.event_ts >= toDateTime(?, 'UTC') - INTERVAL 24 HOUR
+			  AND w.orch_address != ''
+			  AND w.capability != ''
+			GROUP BY w.org, w.orch_address, w.capability, ifNull(w.model, '')
+		),
+		combined AS (
+			SELECT
+				org, orch_address, orchestrator_uri,
+				capability_id, capability_name, capability_family,
+				canonical_pipeline, model_id, gpu_id,
+				advertised_capacity, hardware_present, supports_request, supports_stream,
+				last_seen
+			FROM offers_rollup
+			UNION ALL
+			SELECT
+				b.org, b.orch_address, b.orchestrator_uri,
+				b.capability_id, b.capability_name, b.capability_family,
+				b.canonical_pipeline, b.model_id, b.gpu_id,
+				b.advertised_capacity, b.hardware_present, b.supports_request, b.supports_stream,
+				b.last_seen
+			FROM byoc_workers_24h b
+			LEFT ANTI JOIN offers_rollup o
+				ON  o.org          = b.org
+				AND o.orch_address = b.orch_address
+				AND lower(o.capability_name) = lower(b.capability_name)
+				AND o.model_id     = b.model_id
+		),
+		pricing AS (
+			SELECT
+				p.org                                                                AS org,
+				p.orch_address                                                       AS orch_address,
+				toUInt16(ifNull(p.capability_id, toUInt16(0)))                       AS capability_id,
+				ifNull(p.model_id, '')                                               AS model_id,
+				toFloat64(argMax(p.price_per_unit, (p.last_seen, p.snapshot_event_id)))
+					/ nullIf(toFloat64(argMax(p.pixels_per_unit, (p.last_seen, p.snapshot_event_id))), 0)
+					AS price_per_unit
+			FROM naap.canonical_capability_pricing_inventory p
+			WHERE p.last_seen >= toDateTime(?, 'UTC') - INTERVAL 24 HOUR
+			  AND p.orch_address != ''
+			GROUP BY p.org, p.orch_address, p.capability_id, ifNull(p.model_id, '')
+		),
+		identity AS (
+			SELECT
+				orch_address,
+				coalesce(nullIf(orch_name, ''), orch_address) AS orchestrator_name
+			FROM naap.canonical_capability_orchestrator_identity_latest
+		)
+		SELECT
+			c.org,
+			c.orch_address,
+			c.orchestrator_uri,
+			ifNull(i.orchestrator_name, c.orch_address)                 AS orchestrator_name,
+			c.capability_id,
+			c.capability_name,
+			c.capability_family,
+			c.canonical_pipeline,
+			c.model_id,
+			c.gpu_id,
+			c.advertised_capacity,
+			c.hardware_present,
+			c.supports_request,
+			c.supports_stream,
+			ifNull(p.price_per_unit, 0.0)                               AS price_per_unit,
+			''                                                          AS price_currency,
+			c.last_seen,
+			?, ?, ?
+		FROM combined c
+		LEFT JOIN pricing p
+			ON  p.org          = c.org
+			AND p.orch_address = c.orch_address
+			AND p.capability_id = c.capability_id
+			AND p.model_id     = c.model_id
+		LEFT JOIN identity i
+			ON i.orch_address = c.orch_address
+	`, now.UTC(), now.UTC(), now.UTC(), runID, r.cfg.ResolverVersion, now)
+}
+
 // insertOrchestratorIdentity flattens canonical_capability_orchestrator_identity_latest
 // (a multi-CTE argMaxIfMerge view over canonical_capability_snapshot_latest + ENS
 // metadata) into a resolver-written store. Every downstream identity lookup
@@ -4956,6 +5130,45 @@ func (r *repo) insertHourlyBYOCAuth(ctx context.Context, runID string, now time.
 			AND w.window_start = toStartOfHour(a.event_ts)
 		WHERE a.capability != ''
 		GROUP BY window_start, org, capability_name
+	`, queryID, runID, r.cfg.ResolverVersion, now)
+}
+
+// insertHourlyBYOCPayments aggregates canonical_byoc_payments (one row per
+// job_payment event) into the pre-rolled hourly store the public Jobs
+// dashboard reads. Replaces the price-derived proxy from
+// api_fact_byoc_job.price_per_unit with exact settled-payment totals.
+// Scoped to owned_windows so only the current run's (org, window_start)
+// slices are republished; latest-slice argMax at read time picks the
+// freshest refresh_run_id.
+func (r *repo) insertHourlyBYOCPayments(ctx context.Context, runID string, now time.Time, queryID string) error {
+	return r.conn.Exec(ctx, `
+		INSERT INTO naap.api_hourly_byoc_payments_store
+		(
+			window_start, org, capability, payment_type,
+			payment_count, total_amount, currency, unique_orchs,
+			refresh_run_id, artifact_checksum, refreshed_at
+		)
+		WITH owned_windows AS (
+			SELECT DISTINCT org, window_start
+			FROM naap.resolver_query_window_slices
+			WHERE query_id = ?
+		)
+		SELECT
+			toStartOfHour(p.event_ts)                                        AS window_start,
+			p.org                                                            AS org,
+			p.capability                                                     AS capability,
+			p.payment_type                                                   AS payment_type,
+			toUInt64(count())                                                AS payment_count,
+			toFloat64(sum(p.amount))                                         AS total_amount,
+			argMax(p.currency, (p.event_ts, p.event_id))                     AS currency,
+			toUInt64(uniqExact(p.orch_address))                              AS unique_orchs,
+			?, ?, ?
+		FROM naap.canonical_byoc_payments p
+		INNER JOIN owned_windows w
+			ON  w.org = p.org
+			AND w.window_start = toStartOfHour(p.event_ts)
+		WHERE p.capability != ''
+		GROUP BY window_start, org, capability, payment_type
 	`, queryID, runID, r.cfg.ResolverVersion, now)
 }
 
