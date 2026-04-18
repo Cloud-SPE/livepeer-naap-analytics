@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/livepeer/naap-analytics/internal/cursor"
 	"github.com/livepeer/naap-analytics/internal/types"
 )
 
@@ -178,7 +179,7 @@ func (r *Repo) ListAIBatchJobs(ctx context.Context, p types.TimeWindowParams) ([
 	start, end := defaultWindow(p)
 	limit := normalizeLimit(p.Limit)
 
-	cursorTs, cursorKeys, err := decodeTimeCursor(p.Cursor, 1)
+	cursorTs, cursorKeys, err := cursor.DecodeTime(p.Cursor, 1)
 	if err != nil {
 		return nil, "", err
 	}
@@ -235,7 +236,7 @@ func (r *Repo) ListAIBatchJobs(ctx context.Context, p types.TimeWindowParams) ([
 	nextCursor := ""
 	if len(result) > limit {
 		last := result[limit-1]
-		nextCursor = encodeTimeCursor(last.CompletedAt, last.RequestID)
+		nextCursor = cursor.EncodeTime(last.CompletedAt, last.RequestID)
 		result = result[:limit]
 	}
 	if result == nil {
@@ -327,7 +328,7 @@ func (r *Repo) ListBYOCJobs(ctx context.Context, p types.TimeWindowParams) ([]ty
 	start, end := defaultWindow(p)
 	limit := normalizeLimit(p.Limit)
 
-	cursorTs, cursorKeys, err := decodeTimeCursor(p.Cursor, 1)
+	cursorTs, cursorKeys, err := cursor.DecodeTime(p.Cursor, 1)
 	if err != nil {
 		return nil, "", err
 	}
@@ -387,7 +388,7 @@ func (r *Repo) ListBYOCJobs(ctx context.Context, p types.TimeWindowParams) ([]ty
 	nextCursor := ""
 	if len(result) > limit {
 		last := result[limit-1]
-		nextCursor = encodeTimeCursor(last.CompletedAt, last.RequestID)
+		nextCursor = cursor.EncodeTime(last.CompletedAt, last.RequestID)
 		result = result[:limit]
 	}
 	if result == nil {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/livepeer/naap-analytics/internal/cursor"
 	"github.com/livepeer/naap-analytics/internal/types"
 )
 
@@ -113,7 +114,7 @@ func (r *Repo) ListStreamingSLA(ctx context.Context, p types.TimeWindowParams) (
 	start, end := defaultWindow(p)
 	limit := normalizeLimit(p.Limit)
 
-	cursorTs, cursorKeys, err := decodeTimeCursor(p.Cursor, 4)
+	cursorTs, cursorKeys, err := cursor.DecodeTime(p.Cursor, 4)
 	if err != nil {
 		return nil, "", err
 	}
@@ -187,7 +188,7 @@ func (r *Repo) ListStreamingSLA(ctx context.Context, p types.TimeWindowParams) (
 	nextCursor := ""
 	if len(result) > limit {
 		last := result[limit-1]
-		nextCursor = encodeTimeCursor(last.WindowStart, last.OrchestratorAddress, last.PipelineID, last.ModelID, last.GPUID)
+		nextCursor = cursor.EncodeTime(last.WindowStart, last.OrchestratorAddress, last.PipelineID, last.ModelID, last.GPUID)
 		result = result[:limit]
 	}
 	if result == nil {
@@ -201,7 +202,7 @@ func (r *Repo) ListStreamingDemand(ctx context.Context, p types.TimeWindowParams
 	start, end := defaultWindow(p)
 	limit := normalizeLimit(p.Limit)
 
-	cursorTs, cursorKeys, err := decodeTimeCursor(p.Cursor, 3)
+	cursorTs, cursorKeys, err := cursor.DecodeTime(p.Cursor, 3)
 	if err != nil {
 		return nil, "", err
 	}
@@ -260,7 +261,7 @@ func (r *Repo) ListStreamingDemand(ctx context.Context, p types.TimeWindowParams
 	nextCursor := ""
 	if len(result) > limit {
 		last := result[limit-1]
-		nextCursor = encodeTimeCursor(last.WindowStart, last.Gateway, last.PipelineID, last.ModelID)
+		nextCursor = cursor.EncodeTime(last.WindowStart, last.Gateway, last.PipelineID, last.ModelID)
 		result = result[:limit]
 	}
 	if result == nil {
@@ -274,7 +275,7 @@ func (r *Repo) ListStreamingGPUMetrics(ctx context.Context, p types.TimeWindowPa
 	start, end := defaultWindow(p)
 	limit := normalizeLimit(p.Limit)
 
-	cursorTs, cursorKeys, err := decodeTimeCursor(p.Cursor, 4)
+	cursorTs, cursorKeys, err := cursor.DecodeTime(p.Cursor, 4)
 	if err != nil {
 		return nil, "", err
 	}
@@ -348,7 +349,7 @@ func (r *Repo) ListStreamingGPUMetrics(ctx context.Context, p types.TimeWindowPa
 	nextCursor := ""
 	if len(result) > limit {
 		last := result[limit-1]
-		nextCursor = encodeTimeCursor(last.WindowStart, last.OrchestratorAddress, last.PipelineID, last.ModelID, last.GPUID)
+		nextCursor = cursor.EncodeTime(last.WindowStart, last.OrchestratorAddress, last.PipelineID, last.ModelID, last.GPUID)
 		result = result[:limit]
 	}
 	if result == nil {

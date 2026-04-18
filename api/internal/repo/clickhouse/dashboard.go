@@ -24,85 +24,52 @@ func (r *Repo) GetDashboardKPI(ctx context.Context, windowHours int, pipeline, m
 	windowStart := now.Add(-windowDuration)
 	previousWindowStart := windowStart.Add(-windowDuration)
 
-	activeOrch, err := r.countObservedDashboardOrchestrators(ctx, windowStart, now, pipeline, modelID)
-	if err != nil {
-		return nil, err
-	}
-	previousActiveOrch, err := r.countObservedDashboardOrchestrators(ctx, previousWindowStart, windowStart, pipeline, modelID)
+	// Phase 6.5: consolidate sessions+usage into one scan over
+	// api_hourly_streaming_demand, and current+previous orch counts into one
+	// scan over capability observations. KPI intentionally spans two data
+	// sources (demand time-series + capability inventory), so 2 queries is
+	// the natural floor — collapsing further would require a UNION with a
+	// row-type discriminator that just moves the branching into SQL.
+	activeOrch, previousActiveOrch, err := r.countActiveAndPrevious(ctx, windowStart, now, previousWindowStart, pipeline, modelID)
 	if err != nil {
 		return nil, err
 	}
 
-	// Query 2: hourly session counts from the additive streaming demand spine.
-	sessionRows, err := r.conn.Query(ctx, `
-		SELECT window_start, sum(requested_sessions) AS sessions, sum(startup_success_sessions) AS successes
+	rows, err := r.conn.Query(ctx, `
+		SELECT window_start,
+		       sum(requested_sessions)        AS sessions,
+		       sum(startup_success_sessions)  AS successes,
+		       sum(total_minutes)             AS mins
 		FROM naap.api_hourly_streaming_demand
 		WHERE window_start >= ?
 		  AND (? = '' OR pipeline_id = ?)
 		  AND (? = '' OR model_id = ?)
-		GROUP BY window_start ORDER BY window_start
+		GROUP BY window_start
+		ORDER BY window_start
 	`, windowStart, pipeline, pipeline, modelID, modelID)
 	if err != nil {
-		return nil, fmt.Errorf("dashboard kpi hourly sessions: %w", err)
+		return nil, fmt.Errorf("dashboard kpi hourly series: %w", err)
 	}
-	defer sessionRows.Close()
+	defer rows.Close()
 
 	var sessionBuckets []sessionBucket
-	for sessionRows.Next() {
-		var b sessionBucket
-		if err := sessionRows.Scan(&b.hour, &b.sessions, &b.successes); err != nil {
-			return nil, fmt.Errorf("dashboard kpi scan sessions: %w", err)
-		}
-		sessionBuckets = append(sessionBuckets, b)
-	}
-
-	// Query 3: hourly usage minutes
-	usageRows, err := r.conn.Query(ctx, `
-		SELECT window_start, sum(total_minutes) AS mins
-		FROM naap.api_hourly_streaming_demand
-		WHERE window_start >= ?
-		  AND (? = '' OR pipeline_id = ?)
-		  AND (? = '' OR model_id = ?)
-		GROUP BY window_start ORDER BY window_start
-	`, windowStart, pipeline, pipeline, modelID, modelID)
-	if err != nil {
-		return nil, fmt.Errorf("dashboard kpi hourly usage: %w", err)
-	}
-	defer usageRows.Close()
-
-	type usageBucket struct {
-		windowStart time.Time
-		mins        float64
-	}
-	var usageBuckets []usageBucket
-	for usageRows.Next() {
-		var b usageBucket
-		if err := usageRows.Scan(&b.windowStart, &b.mins); err != nil {
-			return nil, fmt.Errorf("dashboard kpi scan usage: %w", err)
-		}
-		usageBuckets = append(usageBuckets, b)
-	}
-
-	// Build hourly timeseries
-	hourlySessions := make([]types.HourlyBucket, 0, len(sessionBuckets))
+	hourlySessions := make([]types.HourlyBucket, 0)
+	hourlyUsage := make([]types.HourlyBucket, 0)
 	var totalSessions, totalSuccesses uint64
-	for _, b := range sessionBuckets {
-		hourlySessions = append(hourlySessions, types.HourlyBucket{
-			Hour:  b.hour.Format(time.RFC3339),
-			Value: float64(b.sessions),
-		})
-		totalSessions += b.sessions
-		totalSuccesses += b.successes
-	}
-
-	hourlyUsage := make([]types.HourlyBucket, 0, len(usageBuckets))
 	var totalMins float64
-	for _, b := range usageBuckets {
-		hourlyUsage = append(hourlyUsage, types.HourlyBucket{
-			Hour:  b.windowStart.Format(time.RFC3339),
-			Value: b.mins,
-		})
-		totalMins += b.mins
+	for rows.Next() {
+		var hour time.Time
+		var sessions, successes uint64
+		var mins float64
+		if err := rows.Scan(&hour, &sessions, &successes, &mins); err != nil {
+			return nil, fmt.Errorf("dashboard kpi scan: %w", err)
+		}
+		sessionBuckets = append(sessionBuckets, sessionBucket{hour: hour, sessions: sessions, successes: successes})
+		hourlySessions = append(hourlySessions, types.HourlyBucket{Hour: hour.Format(time.RFC3339), Value: float64(sessions)})
+		hourlyUsage = append(hourlyUsage, types.HourlyBucket{Hour: hour.Format(time.RFC3339), Value: mins})
+		totalSessions += sessions
+		totalSuccesses += successes
+		totalMins += mins
 	}
 
 	// Compute period-over-period deltas
@@ -126,33 +93,52 @@ func (r *Repo) GetDashboardKPI(ctx context.Context, windowHours int, pipeline, m
 	return kpi, nil
 }
 
-func (r *Repo) countObservedDashboardOrchestrators(ctx context.Context, start, end time.Time, pipeline, modelID string) (uint64, error) {
-	var activeOrch uint64
+// countActiveAndPrevious returns the distinct orch_address counts for the
+// current [windowStart, now] and prior [previousWindowStart, windowStart]
+// windows in a single pass. Phase 6.5 consolidated this from two
+// countObservedDashboardOrchestrators calls.
+//
+// When pipeline/model filters are set, scanning
+// api_observed_capability_offer is cheaper than api_observed_orchestrator
+// (offer rows can be pruned by capability_family + canonical_pipeline
+// predicates before the distinct-count); the unfiltered path stays on
+// api_observed_orchestrator which has one row per orch per observation.
+func (r *Repo) countActiveAndPrevious(ctx context.Context, windowStart, now, previousWindowStart time.Time, pipeline, modelID string) (uint64, uint64, error) {
+	var current, previous uint64
 	if pipeline != "" || modelID != "" {
-		orchCountSQL := `
-			SELECT countDistinct(s.orch_address) AS observed
-			FROM naap.api_observed_capability_offer s
-			WHERE s.last_seen >= ? AND s.last_seen < ?
-			  AND s.capability_family = 'builtin'
-			  AND (? = '' OR s.canonical_pipeline = ?)
-			  AND (? = '' OR s.model_id = ?)
-		`
-		if err := r.conn.QueryRow(ctx, orchCountSQL,
-			start, end,
-			pipeline, pipeline, modelID, modelID,
-		).Scan(&activeOrch); err != nil {
-			return 0, fmt.Errorf("dashboard kpi orch count: %w", err)
-		}
-	} else {
 		if err := r.conn.QueryRow(ctx, `
-			SELECT countDistinct(orch_address) AS observed
-			FROM naap.api_observed_orchestrator
+			SELECT
+				countDistinctIf(orch_address, last_seen >= ? AND last_seen < ?) AS current_count,
+				countDistinctIf(orch_address, last_seen >= ? AND last_seen < ?) AS previous_count
+			FROM naap.api_observed_capability_offer
 			WHERE last_seen >= ? AND last_seen < ?
-		`, start, end).Scan(&activeOrch); err != nil {
-			return 0, fmt.Errorf("dashboard kpi orch count: %w", err)
+			  AND capability_family = 'builtin'
+			  AND (? = '' OR canonical_pipeline = ?)
+			  AND (? = '' OR model_id = ?)
+		`,
+			windowStart, now,
+			previousWindowStart, windowStart,
+			previousWindowStart, now,
+			pipeline, pipeline, modelID, modelID,
+		).Scan(&current, &previous); err != nil {
+			return 0, 0, fmt.Errorf("dashboard kpi orch counts: %w", err)
 		}
+		return current, previous, nil
 	}
-	return activeOrch, nil
+	if err := r.conn.QueryRow(ctx, `
+		SELECT
+			countDistinctIf(orch_address, last_seen >= ? AND last_seen < ?) AS current_count,
+			countDistinctIf(orch_address, last_seen >= ? AND last_seen < ?) AS previous_count
+		FROM naap.api_observed_orchestrator
+		WHERE last_seen >= ? AND last_seen < ?
+	`,
+		windowStart, now,
+		previousWindowStart, windowStart,
+		previousWindowStart, now,
+	).Scan(&current, &previous); err != nil {
+		return 0, 0, fmt.Errorf("dashboard kpi orch counts: %w", err)
+	}
+	return current, previous, nil
 }
 
 // computeDelta splits hourly buckets at the midpoint and returns the % change.

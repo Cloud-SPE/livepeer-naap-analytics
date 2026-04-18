@@ -1,10 +1,6 @@
 package clickhouse
 
 import (
-	"encoding/base64"
-	"encoding/json"
-	"fmt"
-	"strconv"
 	"time"
 
 	"github.com/livepeer/naap-analytics/internal/types"
@@ -39,50 +35,6 @@ func divSafe(a, b float64) float64 {
 		return 0
 	}
 	return a / b
-}
-
-func encodeCursorValues(values ...string) string {
-	raw, _ := json.Marshal(values)
-	return base64.RawURLEncoding.EncodeToString(raw)
-}
-
-func decodeCursorValues(cursor string, expected int) ([]string, error) {
-	if cursor == "" {
-		return nil, nil
-	}
-	raw, err := base64.RawURLEncoding.DecodeString(cursor)
-	if err != nil {
-		return nil, fmt.Errorf("%w: decode token", types.ErrInvalidCursor)
-	}
-	var values []string
-	if err := json.Unmarshal(raw, &values); err != nil {
-		return nil, fmt.Errorf("%w: decode payload", types.ErrInvalidCursor)
-	}
-	if len(values) != expected {
-		return nil, fmt.Errorf("%w: expected %d values, got %d", types.ErrInvalidCursor, expected, len(values))
-	}
-	return values, nil
-}
-
-func encodeTimeCursor(t time.Time, keys ...string) string {
-	values := []string{strconv.FormatInt(t.UnixMilli(), 10)}
-	values = append(values, keys...)
-	return encodeCursorValues(values...)
-}
-
-func decodeTimeCursor(cursor string, keyCount int) (time.Time, []string, error) {
-	vals, err := decodeCursorValues(cursor, keyCount+1)
-	if err != nil {
-		return time.Time{}, nil, err
-	}
-	if vals == nil {
-		return time.Time{}, nil, nil
-	}
-	ms, err := strconv.ParseInt(vals[0], 10, 64)
-	if err != nil {
-		return time.Time{}, nil, fmt.Errorf("%w: bad timestamp", types.ErrInvalidCursor)
-	}
-	return time.UnixMilli(ms).UTC(), vals[1:], nil
 }
 
 func nullableString(v *string) string {
