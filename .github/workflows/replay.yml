@@ -42,6 +42,11 @@ jobs:
     services:
       clickhouse:
         image: clickhouse/clickhouse-server:24.3
+        env:
+          CLICKHOUSE_DB: naap
+          CLICKHOUSE_USER: naap_admin
+          CLICKHOUSE_PASSWORD: changeme
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
         ports:
           - 8123:8123
           - 9000:9000
@@ -94,9 +99,9 @@ jobs:
         run: |
           until wget -qO- http://localhost:8123/ping >/dev/null 2>&1; do sleep 1; done
           echo 'CREATE DATABASE IF NOT EXISTS naap' | \
-            curl -s 'http://localhost:8123/' --data-binary @-
+            curl -sS -u 'naap_admin:changeme' 'http://localhost:8123/' --data-binary @-
           cat infra/clickhouse/bootstrap/v1.sql | \
-            curl -s 'http://localhost:8123/?database=naap' --data-binary @-
+            curl -sS -u 'naap_admin:changeme' 'http://localhost:8123/?database=naap' --data-binary @-
 
       # No Kafka producer on ephemeral CI, so --pause-ingestion=false
       # is safe and slightly faster than the default pause/resume.
@@ -105,13 +110,13 @@ jobs:
           CLICKHOUSE_ADDR: localhost:9000
           CLICKHOUSE_HTTP_ADDR: localhost:8123
           CLICKHOUSE_DB: naap
-          CLICKHOUSE_ADMIN_USER: default
-          CLICKHOUSE_ADMIN_PASSWORD: ""
+          CLICKHOUSE_ADMIN_USER: naap_admin
+          CLICKHOUSE_ADMIN_PASSWORD: changeme
           DBT_PROFILES_DIR: ${{ github.workspace }}/warehouse
           CLICKHOUSE_HOST: localhost
           CLICKHOUSE_PORT: "8123"
-          CLICKHOUSE_USER: default
-          CLICKHOUSE_PASSWORD: ""
+          CLICKHOUSE_USER: naap_admin
+          CLICKHOUSE_PASSWORD: changeme
         run: |
           # Build the replay binary once; the Makefile target runs it
           # twice and diffs.
@@ -146,8 +151,8 @@ jobs:
           CLICKHOUSE_HOST: localhost
           CLICKHOUSE_PORT: "8123"
           CLICKHOUSE_DB: naap
-          CLICKHOUSE_USER: default
-          CLICKHOUSE_PASSWORD: ""
+          CLICKHOUSE_USER: naap_admin
+          CLICKHOUSE_PASSWORD: changeme
         run: dbt test --select test_api_hourly_additive_primitives
 
       - name: Upload replay reports on failure

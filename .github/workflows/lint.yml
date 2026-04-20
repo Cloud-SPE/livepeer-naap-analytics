@@ -46,6 +46,11 @@ jobs:
     services:
       clickhouse:
         image: clickhouse/clickhouse-server:24.3
+        env:
+          CLICKHOUSE_DB: naap
+          CLICKHOUSE_USER: naap_admin
+          CLICKHOUSE_PASSWORD: changeme
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
         ports:
           - 8123:8123
           - 9000:9000
@@ -70,7 +75,7 @@ jobs:
         run: |
           until wget -qO- http://localhost:8123/ping >/dev/null 2>&1; do sleep 1; done
           echo 'CREATE DATABASE IF NOT EXISTS naap' | \
-            curl -s 'http://localhost:8123/' --data-binary @-
+            curl -sS -u 'naap_admin:changeme' 'http://localhost:8123/' --data-binary @-
 
       - name: dbt parse (checks the ref() graph compiles)
         working-directory: warehouse
@@ -79,8 +84,8 @@ jobs:
           CLICKHOUSE_HOST: localhost
           CLICKHOUSE_PORT: "8123"
           CLICKHOUSE_DB: naap
-          CLICKHOUSE_USER: default
-          CLICKHOUSE_PASSWORD: ""
+          CLICKHOUSE_USER: naap_admin
+          CLICKHOUSE_PASSWORD: changeme
         run: dbt parse
 
       # The test emits only string-literal violation rows (no SELECTs
@@ -93,6 +98,6 @@ jobs:
           CLICKHOUSE_HOST: localhost
           CLICKHOUSE_PORT: "8123"
           CLICKHOUSE_DB: naap
-          CLICKHOUSE_USER: default
-          CLICKHOUSE_PASSWORD: ""
+          CLICKHOUSE_USER: naap_admin
+          CLICKHOUSE_PASSWORD: changeme
         run: dbt test --select test_layer_discipline
