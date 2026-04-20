@@ -4945,7 +4945,7 @@ func (r *repo) insertCurrentCapability(ctx context.Context, runID string, now ti
 				o.hardware_present                                          AS hardware_present,
 				toUInt8(ifNull(o.supports_request, toUInt8(0)))             AS supports_request,
 				toUInt8(ifNull(o.supports_stream, toUInt8(0)))              AS supports_stream,
-				o.last_seen                                                 AS last_seen
+				o.last_seen                                                 AS raw_last_seen
 			FROM naap.canonical_capability_offer_inventory o
 			WHERE o.last_seen >= toDateTime(?, 'UTC') - INTERVAL 24 HOUR
 			  AND o.orch_address != ''
@@ -4953,14 +4953,14 @@ func (r *repo) insertCurrentCapability(ctx context.Context, runID string, now ti
 		offers_rollup AS (
 			SELECT
 				org, orch_address, capability_id, canonical_pipeline, model_id, gpu_id,
-				argMax(orchestrator_uri, (last_seen, orchestrator_uri))     AS orchestrator_uri,
-				argMax(capability_name, (last_seen, capability_name))       AS capability_name,
-				argMax(capability_family, (last_seen, capability_family))   AS capability_family,
+				argMax(orchestrator_uri, (raw_last_seen, orchestrator_uri)) AS orchestrator_uri,
+				argMax(capability_name, (raw_last_seen, capability_name))   AS capability_name,
+				argMax(capability_family, (raw_last_seen, capability_family)) AS capability_family,
 				toUInt32(greatest(max(advertised_capacity), 0))             AS advertised_capacity,
 				max(hardware_present)                                       AS hardware_present,
 				max(supports_request)                                       AS supports_request,
 				max(supports_stream)                                        AS supports_stream,
-				max(last_seen)                                              AS last_seen
+				max(raw_last_seen)                                          AS last_seen
 			FROM offers_24h
 			GROUP BY org, orch_address, capability_id, canonical_pipeline, model_id, gpu_id
 		),
