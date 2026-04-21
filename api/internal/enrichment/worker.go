@@ -12,7 +12,8 @@ import (
 	"github.com/livepeer/naap-analytics/internal/config"
 )
 
-// Worker polls the Livepeer API on a fixed interval and upserts results into ClickHouse.
+// Worker polls the Livepeer public API on a fixed interval and upserts
+// external metadata into ClickHouse.
 type Worker struct {
 	client   *Client
 	conn     driver.Conn
@@ -78,9 +79,6 @@ func (w *Worker) sync(ctx context.Context) {
 	}
 	if err := w.syncGateways(ctx); err != nil {
 		w.log.Warn("enrichment: gateway sync failed", zap.Error(err))
-	}
-	if err := w.syncGPUInventory(ctx); err != nil {
-		w.log.Warn("enrichment: gpu inventory sync failed", zap.Error(err))
 	}
 }
 

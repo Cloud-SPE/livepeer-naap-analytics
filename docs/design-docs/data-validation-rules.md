@@ -51,6 +51,13 @@ The current contract is defined over these raw event families and their minimum 
 | `network_capabilities` | envelope `id`, `timestamp`, `gateway`; payload object or array of orchestrators with `address`, `local_address`, `orch_uri`, `capabilities`, `capabilities_prices`, optional `hardware[]` and per-model constraints | canonical orchestrator, pipeline, model, GPU, capability, and price identity | one raw payload can fan out into many logical rows; hardware may be absent even when model identity exists |
 | `discovery_results` | envelope `id`, `timestamp`, `gateway`; non-empty array of candidate orchestrators with `address`, `url`, `latency_ms` | discovery visibility and latency evidence | array must be non-empty and normalized safely |
 | `create_new_payment` | envelope `id`, `timestamp`, `gateway`; payload `sessionID`, `manifestID`, `requestID`, `sender`, `recipient`, `orchestrator`, `faceValue`, `numTickets`, `price`, `winProb` | payment/fee attribution to session demand | joins must use canonical request/session lineage, not fuzzy time matching |
+| `ai_batch_request` | envelope `id`, `type`, `timestamp`, `gateway`; payload `data.type` (`ai_batch_request_received`/`ai_batch_request_completed`), `data.request_id`, `data.pipeline`, `data.model_id`, `data.success`, `data.tries`, `data.duration_ms`, `data.orch_url`, `data.latency_score`, `data.price_per_unit`, `data.error_type`, `data.error` | AI batch job lifecycle for fixed pipelines (text-to-image, llm, audio-to-text, etc.) | `data.type` is the full subtype string (e.g. `ai_batch_request_completed`), not a short form; only completed rows carry outcome fields |
+| `ai_llm_request` | envelope `id`, `type`, `timestamp`, `gateway`; payload `data.type` (`llm_request_completed`/`llm_stream_completed`), `data.request_id`, `data.model`, `data.orch_url`, `data.prompt_tokens`, `data.completion_tokens`, `data.total_tokens`, `data.total_duration_ms`, `data.tokens_per_second`, `data.ttft_ms`, `data.finish_reason`, `data.error` | LLM-specific token/TPS/TTFT metrics paired with `ai_batch_request` via `request_id` | only completed/stream-completed subtypes are accepted; links via `(org, request_id)` |
+| `job_gateway` | envelope `id`, `type`, `timestamp`, `gateway`; payload `data.type` (`submitted`/`completed`/`discovery_result`/`token_fetch_result`), `data.capability`, `data.request_id`, `data.success`, `data.duration_ms`, `data.orchestrator_info{address,url}` | BYOC job lifecycle as seen by the gateway | `data.type` is the short form; only `completed` rows are used as canonical job records; capabilities are stored verbatim (never hardcoded) |
+| `job_orchestrator` | envelope `id`, `type`, `timestamp`, `gateway`; payload `data.type` (`completed`), `data.capability`, `data.success`, `data.duration_ms`, `data.http_status`, `data.worker_url`, `data.orchestrator_info{address,url}`, `data.charged_compute`, `data.price_per_unit` | BYOC job outcome as seen by the orchestrator | supplements `job_gateway` completed rows; not joined into canonical_byoc_jobs by default |
+| `job_auth` | envelope `id`, `type`, `timestamp`, `gateway`; payload `data.capability`, `data.success`, `data.orchestrator_info{address,url}`, `data.error` | BYOC authorization event per capability and orchestrator | used for auth success/failure rate aggregations only |
+| `worker_lifecycle` | envelope `id`, `type`, `timestamp`, `gateway`; payload `data.capability`, `data.orchestrator_info{address,url}`, `data.worker_url`, `data.price_per_unit`, `data.worker_options[]{model}` | BYOC worker registration snapshot per orchestrator+capability | multiple entries over time for same orch+capability; `argMax` on `event_ts` gives the latest known worker/model/price |
+| `job_payment` | envelope `id`, `type`, `timestamp`, `gateway`; payload `data.capability`, `data.request_id`, `data.orchestrator_info{address}`, `data.amount`, `data.currency`; subtype in `data.type` | BYOC payment event — financial record of a completed job charge | stored in `normalized_byoc_payment`; no hardware attribution; kept separate from job lifecycle events |
 
 ## Global Normalization Principles
 
@@ -783,7 +790,7 @@ Avoid fragmenting sessions and segments when only attributes changed.
 **Raw data scope**
 - `ai_stream_events` with parameter update semantics
 - model changes
-- GPU changes
+- GPU identity changes
 - worker changes
 
 **Requirement**
@@ -1222,6 +1229,17 @@ The implementation must expose enough information to review:
 - percent stale
 - canonical pipeline coverage when model identity is present
 - explicit hardware-less coverage
+- explicit job/session denominator state before attribution quality is computed
+
+For request/response jobs specifically:
+
+- `canonical_ai_batch_jobs.selection_outcome` and
+  `canonical_byoc_jobs.selection_outcome` must be
+  `selected | no_orch | unknown`
+- job attribution quality metrics use `selection_outcome = selected` as the
+  denominator
+- `no_orch` and `unknown` remain visible as lifecycle outcomes and must not be
+  silently folded into attribution failure percentages
 
 Current readiness expectation: for attributable rows where model identity is known, canonical pipeline should be non-empty for at least 99% of rows over a rolling 24-hour window, unless the rows are intentionally pipeline-empty because pipeline text duplicated the model id.
 
@@ -1302,7 +1320,7 @@ Current active demand formulas:
 
 `last_error_occurred` alone does not reduce effective success under the current active contract.
 
-Pipeline fallback is allowed at the public demand grain only when exactly one non-empty pipeline exists for the shared `(hour, gateway, region, model)` cohort.
+Pipeline fallback is allowed at the public demand grain only when exactly one non-empty pipeline exists for the shared `(hour, gateway, model)` cohort after collapsing any lower-layer region splits.
 If the fallback pipeline equals model id case-insensitively, canonical public pipeline stays blank.
 
 **Output obligations**
@@ -1412,17 +1430,34 @@ The current active formulas are:
 - `effective_failed_sessions = startup_failed_sessions OR zero_output_fps_session OR loading_only_session`
 - `effective_success_rate = 1 - effective_failed_sessions / requested_sessions`
 - `no_swap_rate = 1 - total_swapped / requested_sessions`
-- `health_signal_coverage_ratio = health_signal_count / health_expected_signal_count`, defaulting to `1.0` when the denominator is `0`
-- `output_viability_rate = 1 - (loading_only_sessions + zero_output_fps_sessions) / requested_sessions`
-- `sla_score = 100 * health_signal_coverage_ratio * ((0.4 * startup_success_rate) + (0.2 * no_swap_rate) + (0.4 * output_viability_rate))`
+- `health_signal_coverage_ratio = min(health_signal_count / health_expected_signal_count, 1.0)`, defaulting to `1.0` when the denominator is `0`
+- `output_failed_sessions = count(requested session where loading_only_session OR zero_output_fps_session)`
+- `output_viability_rate = 1 - output_failed_sessions / requested_sessions`
+- `avg_output_fps = output_fps_sum / status_samples` when `status_samples > 0`
+- `avg_prompt_to_first_frame_ms = prompt_to_first_frame_sum_ms / prompt_to_first_frame_sample_count` when `prompt_to_first_frame_sample_count > 0`
+- `avg_e2e_latency_ms = e2e_latency_sum_ms / e2e_latency_sample_count` when `e2e_latency_sample_count > 0`
+- `reliability_score = (0.4 * startup_success_rate) + (0.2 * no_swap_rate) + (0.4 * output_viability_rate)`
+- `ptff_score_raw` compares `avg_prompt_to_first_frame_ms` to the prior 7 full UTC days of the network-wide `(pipeline_id, model_id)` benchmark; rows at or below cohort `p50` score `1.0`, rows at or above `p90` score `0.0`, and values in between interpolate linearly
+- `e2e_score_raw` compares `avg_e2e_latency_ms` to the prior 7 full UTC days of the network-wide `(pipeline_id, model_id)` benchmark; rows at or below cohort `p50` score `1.0`, rows at or above `p90` score `0.0`, and values in between interpolate linearly
+- `fps_score_raw` compares `avg_output_fps` to the prior 7 full UTC days of the network-wide `(pipeline_id, model_id)` benchmark; rows at or above cohort `p50` score `1.0`, rows at or below `p10` score `0.0`, and values in between interpolate linearly
+- `ptff_score = clamp(0.5 + min(prompt_to_first_frame_sample_count / 10, 1.0) * (ptff_score_raw - 0.5), 0, 1)`
+- `e2e_score = clamp(0.5 + min(e2e_latency_sample_count / 10, 1.0) * (e2e_score_raw - 0.5), 0, 1)`
+- `fps_score = clamp(0.5 + min(status_samples / 30, 1.0) * (fps_score_raw - 0.5), 0, 1)`
+- `latency_score = (0.6 * ptff_score) + (0.4 * e2e_score)`
+- `quality_score = (0.6 * latency_score) + (0.4 * fps_score)`
+- `sla_score = clamp(100 * health_signal_coverage_ratio * ((0.7 * reliability_score) + (0.3 * quality_score)), 0, 100)`
 
 Bounds are part of the contract:
 
-- startup, effective, no-swap, and health-coverage ratios are in `[0,1]`
+- startup, effective, no-swap, output-viability, health-coverage, reliability, PTFF, E2E, latency, FPS, and quality scores are in `[0,1]`
 - `sla_score` is in `[0,100]`
 
 **Output obligations**
-- SLA rows carry both additive support fields and derived rates
+- SLA rows carry additive support fields for FPS and latency, derived averages, `gpu_model_name`, and the derived component scores
+- additive org-hour SLA facts remain the freshness source of truth
+- final public/org SLA serving rows are published from those additive inputs so
+  serving reads do not recompute the full benchmark-scoring path on every
+  request
 
 **Validator checks**
 - derived ratios and score match recomputation exactly
@@ -1453,8 +1488,11 @@ Rules:
 
 - sum additive counters directly
 - recompute ratios from summed numerators and denominators
-- recompute weighted averages from additive support counts
+- recompute means from additive sums and counts
+- weighted averages require explicit additive support counts and sums
 - do not average precomputed ratios or percentiles directly
+- percentiles require merge-safe aggregate state; scalar percentile values are not re-rollup inputs
+- overlapping classifications must expose an explicit additive union counter when higher-grain recomputation needs the union count
 - model-aware joins must include model identity or pre-aggregate away model grain first
 - null means “no valid evidence,” not zero
 
@@ -1483,13 +1521,13 @@ Define what a compliant system must ultimately expose, regardless of storage mod
 The minimum logical output families are:
 
 - GPU metrics
-  - grain: hour x orchestrator x pipeline x model x GPU x region
+  - grain: hour x orchestrator x pipeline x model x GPU
 - network demand
-  - grain: hour x gateway x region x pipeline x model
+  - grain: hour x gateway x pipeline x model
 - GPU-sliced network demand
-  - grain: hour x gateway x orchestrator x region x pipeline x model x GPU
+  - grain: hour x gateway x orchestrator x pipeline x model x GPU
 - SLA compliance
-  - grain: hour x orchestrator x pipeline x model x GPU x region
+  - grain: hour x orchestrator x pipeline x model x GPU
 
 Org-aware variants, when present, must preserve organization or tenant identity at the same logical grain.
 
@@ -1717,9 +1755,11 @@ Tests skip automatically when `CLICKHOUSE_ADDR` is not set.
 
 The production resolver deployment now runs in `auto` mode:
 
-- visible closed historical backlog is processed first
-- late accepted raw rows can enqueue exact dirty historical `(org, event_date)` repairs
-- live lateness-window tail updates continue in the same service
+- live lateness-window tail updates run first
+- the latest eligible same-day dirty hour is repaired next
+- queued explicit repair requests run ahead of historical dirty-day replay
+- late accepted raw rows can still enqueue exact dirty historical `(org, event_date)` repairs
+- remaining closed historical backlog is processed last
 
 Manual `backfill` and `repair-window` remain operator tools, but they are no
 longer the normal steady-state path.

@@ -1,43 +1,35 @@
 package clickhouse
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/livepeer/naap-analytics/internal/types"
 )
 
 const (
-	activeOrchMinutes     = 10
-	activeStreamSecs      = 120
-	minReliabilitySamples = 5
-	defaultLimit          = 50
-	maxFailureLimit       = 500
+	defaultLimit           = 50
+	observedInventoryHours = 24
 )
 
-// effectiveWindow returns the query time window, applying defaults when zero.
-// Default window is the last 24 hours.
-func effectiveWindow(p types.QueryParams) (start, end time.Time) {
-	end = p.EndTime
+func normalizeLimit(limit int) int {
+	if limit <= 0 {
+		return defaultLimit
+	}
+	return limit
+}
+
+func defaultWindow(p types.TimeWindowParams) (start, end time.Time) {
+	end = p.End
 	if end.IsZero() {
 		end = time.Now().UTC()
 	}
-	start = p.StartTime
+	start = p.Start
 	if start.IsZero() {
 		start = end.Add(-24 * time.Hour)
 	}
 	return start.UTC(), end.UTC()
 }
 
-// effectiveLimit returns the query limit, applying the default when zero.
-func effectiveLimit(p types.QueryParams) int {
-	if p.Limit <= 0 {
-		return defaultLimit
-	}
-	return p.Limit
-}
-
-// divSafe divides a by b, returning 0 if b is zero.
 func divSafe(a, b float64) float64 {
 	if b == 0 {
 		return 0
@@ -45,16 +37,28 @@ func divSafe(a, b float64) float64 {
 	return a / b
 }
 
-// rateOrNil returns nil when the sample count is below the minimum threshold,
-// preventing misleading percentages from tiny samples (REL-002-a).
-func rateOrNil(num, denom int64) *float64 {
-	if denom < minReliabilitySamples {
-		return nil
+func nullableString(v *string) string {
+	if v == nil {
+		return ""
 	}
-	v := float64(num) / float64(denom)
-	return &v
+	return *v
 }
 
-func activeStreamPredicate(column string) string {
-	return fmt.Sprintf("%s > now() - INTERVAL %d SECOND", column, activeStreamSecs)
+// hostnameFromURI extracts the hostname from a URI string.
+func hostnameFromURI(uri string) string {
+	// Simple extraction — strip scheme and path
+	s := uri
+	for _, prefix := range []string{"https://", "http://"} {
+		if len(s) > len(prefix) && s[:len(prefix)] == prefix {
+			s = s[len(prefix):]
+			break
+		}
+	}
+	// Strip port and path
+	for i := 0; i < len(s); i++ {
+		if s[i] == ':' || s[i] == '/' {
+			return s[:i]
+		}
+	}
+	return s
 }

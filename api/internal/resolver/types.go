@@ -28,6 +28,28 @@ type RunRequest struct {
 	End                 *time.Time
 	Step                time.Duration
 	DryRun              bool
+
+	// Now is the frozen wall clock this run uses for every row-level
+	// timestamp it writes (refreshed_at, materialized_at, built_at,
+	// decided_at, rebuilt_at). A zero value falls back to time.Now().UTC()
+	// at execution start, so production daemon usage keeps working
+	// unchanged; the replay harness and determinism tests pin Now so two
+	// runs over the same raw events produce byte-identical canonical state.
+	//
+	// Scheduling clocks (tail intervals, lateness cutoffs, dirty-window
+	// readiness, claim TTLs) deliberately still read the real wall clock
+	// — those control the daemon's behaviour, not the data it writes.
+	Now time.Time
+}
+
+// EffectiveNow returns the frozen Now when set, otherwise the current wall
+// clock. Callers inside the execute path should call this exactly once per
+// run and thread the result to every writer.
+func (r RunRequest) EffectiveNow() time.Time {
+	if r.Now.IsZero() {
+		return time.Now().UTC()
+	}
+	return r.Now.UTC()
 }
 
 type WindowSpec struct {
@@ -48,6 +70,8 @@ type RunStats struct {
 	Decisions           int
 	SessionRows         int
 	StatusHourRows      int
+	AIBatchJobRows      int
+	BYOCJobRows         int
 }
 
 type selectionCandidate struct {
@@ -74,23 +98,24 @@ type eventLineage struct {
 }
 
 type SelectionEvent struct {
-	ID                string
-	Org               string
-	SessionKey        string
-	Seq               uint32
-	SelectionTS       time.Time
-	Trigger           string
-	ObservedAddress   string
-	ObservedURL       string
-	ObservedModelHint string
-	ObservedPipeline  string
-	AnchorEventID     string
-	AnchorEventType   string
-	AnchorEventTS     time.Time
-	SourceTopic       string
-	SourcePartition   int32
-	SourceOffset      int64
-	InputHash         string
+	ID                   string
+	Org                  string
+	SessionKey           string
+	Seq                  uint32
+	SelectionTS          time.Time
+	Trigger              string
+	ObservedAddress      string
+	ObservedURL          string
+	ObservedModelHint    string
+	ObservedPipeline     string
+	PipelineHintVerbatim bool
+	AnchorEventID        string
+	AnchorEventType      string
+	AnchorEventTS        time.Time
+	SourceTopic          string
+	SourcePartition      int32
+	SourceOffset         int64
+	InputHash            string
 }
 
 type capabilitySnapshot struct {
@@ -157,6 +182,8 @@ type SelectionDecision struct {
 	CanonicalPipeline     string
 	CanonicalModel        string
 	GPUID                 string
+	GPUModelName          string
+	GPUMemoryBytesTotal   *uint64
 	InputHash             string
 }
 
@@ -313,19 +340,150 @@ type dirtyPartition struct {
 	UpdatedAt        time.Time
 }
 
+type dirtyWindow struct {
+	Org              string
+	WindowStart      time.Time
+	WindowEnd        time.Time
+	Status           string
+	Reason           string
+	FirstDirtyAt     time.Time
+	LastDirtyAt      time.Time
+	ClaimOwner       string
+	LeaseExpiresAt   *time.Time
+	AttemptCount     uint32
+	LastErrorSummary string
+	UpdatedAt        time.Time
+}
+
+// AIBatchJobRecord holds the raw job data fetched from normalized_ai_batch_job.
+// OrchURL is always sourced from the completed_at event; ReceivedAt is from the
+// received event and is used as SelectionTS when available.
+type AIBatchJobRecord struct {
+	RequestID    string
+	Org          string
+	Gateway      string
+	Pipeline     string
+	ModelID      string
+	OrchURL      string
+	OrchURLNorm  string
+	ReceivedAt   *time.Time
+	CompletedAt  time.Time
+	Success      *uint8
+	Tries        uint16
+	DurationMS   int64
+	LatencyScore float64
+	PricePerUnit float64
+	ErrorType    string
+	Error        string
+}
+
+// AIBatchJobRow is an AIBatchJobRecord enriched with attribution outputs.
+type AIBatchJobRow struct {
+	AIBatchJobRecord
+	SelectionOutcome      string
+	AttributionStatus     string
+	AttributionReason     string
+	AttributionMethod     string
+	AttributionConfidence string
+	AttributedOrchURI     string
+	CapabilityVersionID   string
+	AttributionSnapshotTS *time.Time
+	GPUID                 string
+	GPUModelName          string
+	GPUMemoryBytesTotal   *uint64
+	AttributedModel       string
+}
+
+// BYOCJobRecord holds the raw job data fetched from normalized_byoc_job.
+type BYOCJobRecord struct {
+	EventID        string
+	Org            string
+	Gateway        string
+	Capability     string
+	OrchAddress    string
+	OrchURL        string
+	OrchURLNorm    string
+	WorkerURL      string
+	ChargedCompute uint8
+	CompletedAt    time.Time
+	Success        *uint8
+	DurationMS     int64
+	HTTPStatus     uint16
+	Error          string
+}
+
+// BYOCJobRow is a BYOCJobRecord enriched with attribution and model outputs.
+type BYOCJobRow struct {
+	BYOCJobRecord
+	SelectionOutcome      string
+	Model                 string
+	PricePerUnit          float64
+	AttributionStatus     string
+	AttributionReason     string
+	AttributionMethod     string
+	AttributionConfidence string
+	AttributedOrchURI     string
+	CapabilityVersionID   string
+	AttributionSnapshotTS *time.Time
+	GPUID                 string
+	GPUModelName          string
+	GPUMemoryBytesTotal   *uint64
+}
+
+// workerLifecycleSnapshot is a point-in-time view of a BYOC worker's model
+// and pricing, used to resolve model identity for BYOC jobs. The most recent
+// snapshot where EventTS <= job.CompletedAt takes precedence.
+type workerLifecycleSnapshot struct {
+	Org          string
+	Capability   string
+	OrchAddress  string
+	EventTS      time.Time
+	Model        string
+	PricePerUnit float64
+	WorkerURL    string
+}
+
 type dirtyScanWatermark struct {
 	IngestedAt time.Time
 	EventID    string
 }
 
+type dirtyScanResult struct {
+	HistoricalPartitions []backfillPartition
+	SameDayWindows       []dirtyWindow
+	Watermark            *dirtyScanWatermark
+}
+
+type repairRequest struct {
+	RequestID        string
+	Org              string
+	WindowStart      time.Time
+	WindowEnd        time.Time
+	Status           string
+	RequestedBy      string
+	Reason           string
+	DryRun           bool
+	ClaimOwner       string
+	LeaseExpiresAt   *time.Time
+	AttemptCount     uint32
+	StartedAt        *time.Time
+	FinishedAt       *time.Time
+	LastErrorSummary string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
 type schedulerHealthState struct {
-	Status                   string                `json:"status"`
-	Mode                     string                `json:"mode,omitempty"`
-	Phase                    string                `json:"phase,omitempty"`
-	DirtyQueueDepth          uint64                `json:"dirty_queue_depth,omitempty"`
-	AcceptedRawScanWatermark *dirtyScanWatermark   `json:"accepted_raw_scan_watermark,omitempty"`
-	TailWatermark            *time.Time            `json:"tail_watermark,omitempty"`
-	ActiveClaim              *schedulerActiveClaim `json:"active_claim,omitempty"`
+	Status                    string                  `json:"status"`
+	Mode                      string                  `json:"mode,omitempty"`
+	Phase                     string                  `json:"phase,omitempty"`
+	HistoricalDirtyQueueDepth uint64                  `json:"historical_dirty_queue_depth,omitempty"`
+	SameDayDirtyQueueDepth    uint64                  `json:"same_day_dirty_queue_depth,omitempty"`
+	RepairRequestQueueDepth   uint64                  `json:"repair_request_queue_depth,omitempty"`
+	AcceptedRawScanWatermark  *dirtyScanWatermark     `json:"accepted_raw_scan_watermark,omitempty"`
+	TailWatermark             *time.Time              `json:"tail_watermark,omitempty"`
+	ActiveClaim               *schedulerActiveClaim   `json:"active_claim,omitempty"`
+	ActiveRepairRequest       *schedulerRepairRequest `json:"active_repair_request,omitempty"`
 }
 
 type schedulerActiveClaim struct {
@@ -334,6 +492,15 @@ type schedulerActiveClaim struct {
 	WindowStart time.Time `json:"window_start"`
 	WindowEnd   time.Time `json:"window_end"`
 	OwnerID     string    `json:"owner_id"`
+}
+
+type schedulerRepairRequest struct {
+	RequestID   string    `json:"request_id"`
+	Org         string    `json:"org,omitempty"`
+	WindowStart time.Time `json:"window_start"`
+	WindowEnd   time.Time `json:"window_end"`
+	Status      string    `json:"status"`
+	DryRun      bool      `json:"dry_run"`
 }
 
 func stableHash(parts ...string) string {

@@ -31,26 +31,42 @@ class Args:
 
 def parse_args() -> Args:
     dotenv = read_dotenv(Path(".env"))
+
+    def dotenv_first(*keys: str, fallback: str | None = None) -> str | None:
+        for key in keys:
+            value = dotenv.get(key)
+            if value:
+                return value
+        return fallback
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--clickhouse-url",
-        default=dotenv.get("CLICKHOUSE_HTTP_URL", "http://127.0.0.1:8123"),
+        default=dotenv_first("CLICKHOUSE_HTTP_URL", fallback="http://127.0.0.1:8123"),
         help="ClickHouse HTTP endpoint",
     )
     parser.add_argument(
         "--clickhouse-user",
-        default=dotenv.get("CLICKHOUSE_USER", "naap_admin"),
+        default=dotenv_first(
+            "CLICKHOUSE_ADMIN_USER", "CLICKHOUSE_USER", fallback="naap_admin"
+        ),
         help="ClickHouse user",
     )
     parser.add_argument(
         "--clickhouse-password",
-        default=dotenv.get("CLICKHOUSE_PASSWORD", "changeme"),
+        default=dotenv_first(
+            "CLICKHOUSE_ADMIN_PASSWORD", "CLICKHOUSE_PASSWORD", fallback="changeme"
+        ),
         help="ClickHouse password",
     )
-    parser.add_argument("--database", default="naap", help="ClickHouse database")
+    parser.add_argument(
+        "--database",
+        default=dotenv_first("CLICKHOUSE_DATABASE", "CLICKHOUSE_DB", fallback="naap"),
+        help="ClickHouse database",
+    )
     parser.add_argument(
         "--output-dir",
-        default="docs/baselines",
+        default=".local/baselines",
         help="Directory for JSON/Markdown snapshots",
     )
     parser.add_argument(
@@ -140,17 +156,16 @@ def build_snapshot(args: Args) -> dict[str, Any]:
         f"""
         SELECT
             run_id,
+            mode,
+            org,
             status,
             started_at,
             finished_at,
             dateDiff('second', started_at, finished_at) AS duration_seconds,
-            watermark_before,
-            watermark_after,
-            affected_session_keys,
-            affected_capability_rows,
-            refreshed_rows,
+            rows_processed,
+            mismatch_count,
             error_summary
-        FROM canonical_refresh_runs
+        FROM resolver_runs
         ORDER BY started_at DESC
         LIMIT {args.run_limit}
         """,
@@ -164,7 +179,7 @@ def build_snapshot(args: Args) -> dict[str, Any]:
             max(ingested_at) AS ingest_end,
             dateDiff('second', min(ingested_at), max(ingested_at)) AS ingest_span_seconds,
             count() AS raw_event_rows
-        FROM raw_events
+        FROM accepted_raw_events
         """,
     )
 
@@ -172,16 +187,15 @@ def build_snapshot(args: Args) -> dict[str, Any]:
         args,
         """
         SELECT
-            pipeline_name,
-            watermark_ts,
-            updated_at,
-            artifact_checksum,
+            max(event_ts) AS latest_event_ts,
+            max(ingested_at) AS latest_ingested_at,
+            (SELECT max(last_seen) FROM canonical_session_current) AS latest_session_last_seen,
             dateDiff(
                 'second',
-                watermark_ts,
-                (SELECT max(ingested_at) FROM raw_events)
+                max(event_ts),
+                max(ingested_at)
             ) AS watermark_lag_seconds
-        FROM canonical_refresh_watermark FINAL
+        FROM accepted_raw_events
         """,
     )
 
@@ -189,11 +203,9 @@ def build_snapshot(args: Args) -> dict[str, Any]:
         args,
         """
         SELECT
-            count() AS staged_keys,
-            uniqExact(run_id) AS chunk_runs,
-            min(inserted_at) AS first_stage,
-            max(inserted_at) AS last_stage
-        FROM canonical_refresh_session_keys
+            countIf(released_at IS NULL) AS active_claims,
+            max(updated_at) AS last_claim_update
+        FROM resolver_window_claims FINAL
         """,
     )
 
@@ -201,30 +213,27 @@ def build_snapshot(args: Args) -> dict[str, Any]:
         args,
         """
         SELECT
-            (SELECT count() FROM canonical_session_attribution_audit) AS attribution_audit_rows,
-            (SELECT count() FROM canonical_session_attribution_current FINAL) AS attribution_current_rows,
-            (SELECT count() FROM canonical_refresh_changed_attribution) AS changed_attribution_rows,
-            (SELECT count() FROM canonical_refresh_changed_sessions) AS changed_session_rows,
+            (SELECT count() FROM canonical_selection_attribution_current FINAL) AS selection_attribution_current_rows,
+            (SELECT count() FROM canonical_session_current FINAL) AS session_current_rows,
+            (SELECT count() FROM canonical_session_current_store) AS session_current_store_rows,
             (SELECT count() FROM canonical_session_demand_input_current FINAL) AS demand_input_rows,
-            (SELECT count() FROM canonical_refresh_shadow_comparisons) AS shadow_comparison_rows,
-            (SELECT count() FROM canonical_refresh_shadow_mismatches) AS shadow_mismatch_rows,
-            (SELECT count() FROM canonical_refresh_uri_identity_bounds) AS uri_identity_bounds_rows,
-            (SELECT count() FROM canonical_refresh_address_identity_bounds) AS address_identity_bounds_rows,
-            (SELECT count() FROM canonical_refresh_uri_candidates) AS uri_candidate_rows,
-            (SELECT count() FROM canonical_refresh_address_candidates) AS address_candidate_rows
+            (SELECT count() FROM canonical_status_hours_store) AS status_hours_rows,
+            (SELECT count() FROM canonical_streaming_demand_hourly_store) AS demand_store_rows,
+            (SELECT count() FROM api_hourly_streaming_sla_store) AS sla_store_rows,
+            (SELECT count() FROM canonical_streaming_gpu_metrics_hourly_store) AS gpu_metrics_store_rows
         """,
     )
 
     store_counts = many(
         args,
         """
-        SELECT 'canonical_session_attribution_audit' AS table, count() AS rows FROM canonical_session_attribution_audit
+        SELECT 'accepted_raw_events' AS table, count() AS rows FROM accepted_raw_events
         UNION ALL
-        SELECT 'canonical_session_attribution_current' AS table, count() AS rows FROM canonical_session_attribution_current FINAL
+        SELECT 'canonical_selection_attribution_current' AS table, count() AS rows FROM canonical_selection_attribution_current FINAL
         UNION ALL
-        SELECT 'canonical_refresh_changed_attribution' AS table, count() AS rows FROM canonical_refresh_changed_attribution
+        SELECT 'canonical_session_current' AS table, count() AS rows FROM canonical_session_current FINAL
         UNION ALL
-        SELECT 'canonical_session_latest_store' AS table, count() AS rows FROM canonical_session_latest_store
+        SELECT 'canonical_session_current_store' AS table, count() AS rows FROM canonical_session_current_store
         UNION ALL
         SELECT 'canonical_status_hours_store' AS table, count() AS rows FROM canonical_status_hours_store
         UNION ALL
@@ -234,25 +243,11 @@ def build_snapshot(args: Args) -> dict[str, Any]:
         UNION ALL
         SELECT 'canonical_session_demand_input_current' AS table, count() AS rows FROM canonical_session_demand_input_current FINAL
         UNION ALL
-        SELECT 'canonical_refresh_changed_sessions' AS table, count() AS rows FROM canonical_refresh_changed_sessions
+        SELECT 'canonical_streaming_demand_hourly_store' AS table, count() AS rows FROM canonical_streaming_demand_hourly_store
         UNION ALL
-        SELECT 'canonical_refresh_shadow_comparisons' AS table, count() AS rows FROM canonical_refresh_shadow_comparisons
+        SELECT 'api_hourly_streaming_sla_store' AS table, count() AS rows FROM api_hourly_streaming_sla_store
         UNION ALL
-        SELECT 'canonical_refresh_shadow_mismatches' AS table, count() AS rows FROM canonical_refresh_shadow_mismatches
-        UNION ALL
-        SELECT 'canonical_refresh_uri_identity_bounds' AS table, count() AS rows FROM canonical_refresh_uri_identity_bounds
-        UNION ALL
-        SELECT 'canonical_refresh_address_identity_bounds' AS table, count() AS rows FROM canonical_refresh_address_identity_bounds
-        UNION ALL
-        SELECT 'canonical_refresh_uri_candidates' AS table, count() AS rows FROM canonical_refresh_uri_candidates
-        UNION ALL
-        SELECT 'canonical_refresh_address_candidates' AS table, count() AS rows FROM canonical_refresh_address_candidates
-        UNION ALL
-        SELECT 'api_network_demand_by_org_store' AS table, count() AS rows FROM api_network_demand_by_org_store
-        UNION ALL
-        SELECT 'api_sla_compliance_by_org_store' AS table, count() AS rows FROM api_sla_compliance_by_org_store
-        UNION ALL
-        SELECT 'api_gpu_metrics_by_org_store' AS table, count() AS rows FROM api_gpu_metrics_by_org_store
+        SELECT 'canonical_streaming_gpu_metrics_hourly_store' AS table, count() AS rows FROM canonical_streaming_gpu_metrics_hourly_store
         ORDER BY table
         """,
     )
@@ -262,16 +257,19 @@ def build_snapshot(args: Args) -> dict[str, Any]:
         """
         SELECT
             count() AS total_sessions,
+            countIf(selection_outcome = 'selected') AS selected_sessions,
             countIf(attribution_status = 'resolved') AS resolved,
             countIf(attribution_status = 'hardware_less') AS hardware_less,
             countIf(attribution_status = 'stale') AS stale,
             countIf(attribution_status = 'ambiguous') AS ambiguous,
             countIf(attribution_status = 'unresolved') AS unresolved,
+            countIf(selection_outcome = 'selected' AND attribution_status = 'resolved') AS selected_resolved,
+            countIf(selection_outcome = 'selected' AND attribution_status = 'unresolved') AS selected_unresolved,
             countIf(notEmpty(ifNull(attributed_orch_address, ''))) AS with_orch,
             countIf(notEmpty(ifNull(canonical_model, ''))) AS with_model,
             countIf(notEmpty(ifNull(canonical_pipeline, ''))) AS with_pipeline,
             countIf(attribution_status = 'unresolved' AND notEmpty(ifNull(attributed_orch_address, ''))) AS unresolved_with_orch
-        FROM canonical_session_latest
+        FROM canonical_session_current
         """,
     )
 
@@ -284,7 +282,7 @@ def build_snapshot(args: Args) -> dict[str, Any]:
             countIf(notEmpty(ifNull(model_id, ''))) AS rows_with_model,
             countIf(notEmpty(ifNull(gpu_id, ''))) AS rows_with_gpu,
             sum(known_sessions_count) AS known_sessions_total
-        FROM api_gpu_metrics_by_org
+        FROM api_hourly_streaming_gpu_metrics
         """,
     )
 
@@ -297,7 +295,7 @@ def build_snapshot(args: Args) -> dict[str, Any]:
             countIf(notEmpty(ifNull(model_id, ''))) AS rows_with_model,
             countIf(notEmpty(ifNull(gpu_id, ''))) AS rows_with_gpu,
             sum(known_sessions_count) AS known_sessions_total
-        FROM api_sla_compliance_by_org
+        FROM api_hourly_streaming_sla
         """,
     )
 
@@ -311,14 +309,13 @@ def build_snapshot(args: Args) -> dict[str, Any]:
             memory_usage,
             left(replaceRegexpAll(query, '\\\\s+', ' '), 320) AS query
         FROM system.processes
-        WHERE query LIKE '%INSERT INTO naap.canonical_session_attribution_audit%'
-           OR query LIKE '%INSERT INTO naap.canonical_session_attribution_current%'
-           OR query LIKE '%INSERT INTO naap.canonical_refresh_changed_attribution%'
-           OR query LIKE '%INSERT INTO naap.canonical_refresh_changed_sessions%'
-           OR query LIKE '%INSERT INTO naap.canonical_refresh_shadow_comparisons%'
-           OR query LIKE '%INSERT INTO naap.canonical_refresh_shadow_mismatches%'
+        WHERE query LIKE '%INSERT INTO naap.canonical_selection_attribution_current%'
+           OR query LIKE '%INSERT INTO naap.canonical_session_current_store%'
            OR query LIKE '%INSERT INTO naap.canonical_session_demand_input_current%'
-           OR query LIKE '%INSERT INTO naap.%_store%'
+           OR query LIKE '%INSERT INTO naap.canonical_status_hours_store%'
+           OR query LIKE '%INSERT INTO naap.canonical_status_samples_recent_store%'
+           OR query LIKE '%INSERT INTO naap.canonical_active_stream_state_latest_store%'
+           OR query LIKE '%INSERT INTO naap.canonical_%_store%'
         ORDER BY elapsed DESC
         LIMIT 5
         """,
@@ -340,20 +337,15 @@ def build_snapshot(args: Args) -> dict[str, Any]:
         FROM (
             SELECT
                 multiIf(
-                    query LIKE '%INSERT INTO naap.canonical_session_attribution_audit%', 'canonical_session_attribution_audit',
-                    query LIKE '%INSERT INTO naap.canonical_session_attribution_current%', 'canonical_session_attribution_current',
-                    query LIKE '%INSERT INTO naap.canonical_refresh_changed_attribution%', 'canonical_refresh_changed_attribution',
-                    query LIKE '%INSERT INTO naap.canonical_refresh_changed_sessions%', 'canonical_refresh_changed_sessions',
-                    query LIKE '%INSERT INTO naap.canonical_refresh_shadow_comparisons%', 'canonical_refresh_shadow_comparisons',
-                    query LIKE '%INSERT INTO naap.canonical_refresh_shadow_mismatches%', 'canonical_refresh_shadow_mismatches',
+                    query LIKE '%INSERT INTO naap.canonical_selection_attribution_current%', 'canonical_selection_attribution_current',
+                    query LIKE '%INSERT INTO naap.canonical_session_current_store%', 'canonical_session_current_store',
                     query LIKE '%INSERT INTO naap.canonical_session_demand_input_current%', 'canonical_session_demand_input_current',
-                    query LIKE '%INSERT INTO naap.canonical_session_latest_store%', 'canonical_session_latest_store',
                     query LIKE '%INSERT INTO naap.canonical_status_hours_store%', 'canonical_status_hours_store',
                     query LIKE '%INSERT INTO naap.canonical_status_samples_recent_store%', 'canonical_status_samples_recent_store',
                     query LIKE '%INSERT INTO naap.canonical_active_stream_state_latest_store%', 'canonical_active_stream_state_latest_store',
-                    query LIKE '%INSERT INTO naap.api_network_demand_by_org_store%', 'api_network_demand_by_org_store',
-                    query LIKE '%INSERT INTO naap.api_sla_compliance_by_org_store%', 'api_sla_compliance_by_org_store',
-                    query LIKE '%INSERT INTO naap.api_gpu_metrics_by_org_store%', 'api_gpu_metrics_by_org_store',
+                    query LIKE '%INSERT INTO naap.canonical_streaming_demand_hourly_store%', 'canonical_streaming_demand_hourly_store',
+                    query LIKE '%INSERT INTO naap.api_hourly_streaming_sla_store%', 'api_hourly_streaming_sla_store',
+                    query LIKE '%INSERT INTO naap.canonical_streaming_gpu_metrics_hourly_store%', 'canonical_streaming_gpu_metrics_hourly_store',
                     'other'
                 ) AS target,
                 query_duration_ms,
@@ -363,20 +355,15 @@ def build_snapshot(args: Args) -> dict[str, Any]:
             WHERE type = 'QueryFinish'
               AND event_time >= now() - INTERVAL {args.window_minutes} MINUTE
               AND (
-                    query LIKE '%INSERT INTO naap.canonical_session_attribution_audit%'
-                 OR query LIKE '%INSERT INTO naap.canonical_session_attribution_current%'
-                 OR query LIKE '%INSERT INTO naap.canonical_refresh_changed_attribution%'
-                 OR query LIKE '%INSERT INTO naap.canonical_refresh_changed_sessions%'
-                 OR query LIKE '%INSERT INTO naap.canonical_refresh_shadow_comparisons%'
-                 OR query LIKE '%INSERT INTO naap.canonical_refresh_shadow_mismatches%'
+                    query LIKE '%INSERT INTO naap.canonical_selection_attribution_current%'
+                 OR query LIKE '%INSERT INTO naap.canonical_session_current_store%'
                  OR query LIKE '%INSERT INTO naap.canonical_session_demand_input_current%'
-                 OR query LIKE '%INSERT INTO naap.canonical_session_latest_store%'
                  OR query LIKE '%INSERT INTO naap.canonical_status_hours_store%'
                  OR query LIKE '%INSERT INTO naap.canonical_status_samples_recent_store%'
                  OR query LIKE '%INSERT INTO naap.canonical_active_stream_state_latest_store%'
-                 OR query LIKE '%INSERT INTO naap.api_network_demand_by_org_store%'
-                 OR query LIKE '%INSERT INTO naap.api_sla_compliance_by_org_store%'
-                 OR query LIKE '%INSERT INTO naap.api_gpu_metrics_by_org_store%'
+                 OR query LIKE '%INSERT INTO naap.canonical_streaming_demand_hourly_store%'
+                 OR query LIKE '%INSERT INTO naap.api_hourly_streaming_sla_store%'
+                 OR query LIKE '%INSERT INTO naap.canonical_streaming_gpu_metrics_hourly_store%'
               )
         )
         GROUP BY target
@@ -423,31 +410,25 @@ def render_markdown(snapshot: dict[str, Any]) -> str:
         f"(`{ingest.get('ingest_span_seconds')}s`, `{ingest.get('raw_event_rows')}` rows)"
     )
     lines.append(
-        f"- Current watermark: `{watermark.get('watermark_ts')}` "
-        f"(lag `{watermark.get('watermark_lag_seconds')}`s, updated `{watermark.get('updated_at')}`)"
+        f"- Latest raw event: `{watermark.get('latest_event_ts')}`; "
+        f"`ingested_at={watermark.get('latest_ingested_at')}`, "
+        f"`latest_session_last_seen={watermark.get('latest_session_last_seen')}`, "
+        f"`event_to_ingest_lag={watermark.get('watermark_lag_seconds')}`s"
     )
     lines.append("")
     lines.append("## Repair State")
     lines.append("")
     lines.append(
-        f"- Attribution rows: `audit={repair.get('attribution_audit_rows')}`, "
-        f"`current={repair.get('attribution_current_rows')}`, "
-        f"`changed_attribution={repair.get('changed_attribution_rows')}`"
+        f"- Selection attribution rows: `current={repair.get('selection_attribution_current_rows')}`, "
+        f"`session_current={repair.get('session_current_rows')}`, "
+        f"`session_current_store={repair.get('session_current_store_rows')}`"
     )
     lines.append(
-        f"- Delta staging: `changed_sessions={repair.get('changed_session_rows')}`, "
-        f"`session_demand_input={repair.get('demand_input_rows')}`"
-    )
-    lines.append(
-        f"- Shadow proof: `comparisons={repair.get('shadow_comparison_rows')}`, "
-        f"`mismatches={repair.get('shadow_mismatch_rows')}`"
-    )
-    lines.append(
-        f"- Deprecated `034` staging tables (should stay near zero after rollback): "
-        f"`uri_bounds={repair.get('uri_identity_bounds_rows')}`, "
-        f"`address_bounds={repair.get('address_identity_bounds_rows')}`, "
-        f"`uri_candidates={repair.get('uri_candidate_rows')}`, "
-        f"`address_candidates={repair.get('address_candidate_rows')}`"
+        f"- Serving inputs: `session_demand_input={repair.get('demand_input_rows')}`, "
+        f"`status_hours={repair.get('status_hours_rows')}`, "
+        f"`demand_store={repair.get('demand_store_rows')}`, "
+        f"`sla_store={repair.get('sla_store_rows')}`, "
+        f"`gpu_metrics_store={repair.get('gpu_metrics_store_rows')}`"
     )
     lines.append("")
     lines.append("## Canonical Quality")
@@ -457,6 +438,11 @@ def render_markdown(snapshot: dict[str, Any]) -> str:
         f"`resolved={canonical.get('resolved')}` ({pct(canonical.get('resolved', 0), canonical.get('total_sessions', 0))}), "
         f"`unresolved={canonical.get('unresolved')}` ({pct(canonical.get('unresolved', 0), canonical.get('total_sessions', 0))}), "
         f"`ambiguous={canonical.get('ambiguous')}`, `stale={canonical.get('stale')}`, `hardware_less={canonical.get('hardware_less')}`"
+    )
+    lines.append(
+        f"- Selected-session slice: `selected={canonical.get('selected_sessions')}`, "
+        f"`selected_resolved={canonical.get('selected_resolved')}` ({pct(canonical.get('selected_resolved', 0), canonical.get('selected_sessions', 0))}), "
+        f"`selected_unresolved={canonical.get('selected_unresolved')}` ({pct(canonical.get('selected_unresolved', 0), canonical.get('selected_sessions', 0))})"
     )
     lines.append(
         f"- Coverage: `with_orch={canonical.get('with_orch')}` ({pct(canonical.get('with_orch', 0), canonical.get('total_sessions', 0))}), "
@@ -486,11 +472,10 @@ def render_markdown(snapshot: dict[str, Any]) -> str:
     lines.append("")
     for run in snapshot["recent_runs"][:5]:
         lines.append(
-            f"- `{run['run_id']}` `{run['status']}` "
-            f"`{run['duration_seconds']}s`, "
-            f"`affected_session_keys={run['affected_session_keys']}`, "
-            f"`affected_capability_rows={run['affected_capability_rows']}`, "
-            f"`watermark_after={run['watermark_after']}`"
+            f"- `{run['run_id']}` `{run['mode']}` `{run['status']}` "
+            f"`org={run['org']}`, `{run['duration_seconds']}s`, "
+            f"`rows_processed={run['rows_processed']}`, "
+            f"`mismatches={run['mismatch_count']}`"
         )
     lines.append("")
     lines.append("## Performance Window")

@@ -1,6 +1,6 @@
 # NAAP Analytics — Grafana Stack (infra2)
 #
-# Deploys Grafana with NAAP dashboards, exposed via Traefik at grafana.cloudspe.com.
+# Deploys Grafana with NAAP dashboards, exposed via Traefik at grafana.livepeer.cloud.
 # Dashboards and datasource provisioning are bind-mounted from /opt/naap/grafana/.
 #
 # Prerequisites:
@@ -10,7 +10,14 @@
 #
 # ── REQUIRED ENVIRONMENT VARIABLES ────────────────────────────────────────────
 #   GF_ADMIN_PASSWORD          — Grafana admin user password
+#   GRAFANA_PUBLIC_URL         — fully qualified Grafana URL used for alert links
 #   CLICKHOUSE_READER_PASSWORD — password for naap_reader (ClickHouse datasource)
+#   GRAFANA_ALERTING_ENABLED          — true to enable repo-managed Grafana alerting
+#   GRAFANA_ALERT_DISCORD_ENABLED     — true to enable Discord delivery
+#   GRAFANA_ALERT_DISCORD_WEBHOOK_URL — required when Discord delivery is enabled
+#   GRAFANA_ALERT_TELEGRAM_ENABLED    — true to enable Telegram delivery
+#   GRAFANA_ALERT_TELEGRAM_BOT_TOKEN  — required when Telegram delivery is enabled
+#   GRAFANA_ALERT_TELEGRAM_CHAT_ID    — required when Telegram delivery is enabled
 #
 # ── OPTIONAL ENVIRONMENT VARIABLES ────────────────────────────────────────────
 #   GF_ADMIN_USER              — Grafana admin username (default: admin)
@@ -19,6 +26,7 @@ services:
 
   grafana:
     image: grafana/grafana:latest
+    entrypoint: ["/bin/sh", "/usr/local/bin/render-grafana-provisioning.sh"]
     container_name: naap-grafana
     restart: unless-stopped
     environment:
@@ -27,13 +35,23 @@ services:
       GF_AUTH_ANONYMOUS_ENABLED: "false"
       GF_INSTALL_PLUGINS: grafana-clickhouse-datasource
       GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/naap-overview.json
-      GF_SERVER_ROOT_URL: https://grafana.cloudspe.com
+      GF_SERVER_ROOT_URL: ${GRAFANA_PUBLIC_URL:-https://grafana.livepeer.cloud/}
+      GF_PATHS_PROVISIONING: /tmp/grafana-provisioning
+      GRAFANA_PROVISIONING_SRC_DIR: /etc/grafana/provisioning-src
+      GRAFANA_RENDERED_PROVISIONING_DIR: /tmp/grafana-provisioning
 
-      # Injected into provisioning/datasources/clickhouse.yml at runtime
+      # Alert links are derived from this public URL and repo-managed provisioning.
       CLICKHOUSE_READER_PASSWORD: ${CLICKHOUSE_READER_PASSWORD}
+      GRAFANA_ALERTING_ENABLED: ${GRAFANA_ALERTING_ENABLED:-false}
+      GRAFANA_ALERT_DISCORD_ENABLED: ${GRAFANA_ALERT_DISCORD_ENABLED:-false}
+      GRAFANA_ALERT_DISCORD_WEBHOOK_URL: ${GRAFANA_ALERT_DISCORD_WEBHOOK_URL:-}
+      GRAFANA_ALERT_TELEGRAM_ENABLED: ${GRAFANA_ALERT_TELEGRAM_ENABLED:-false}
+      GRAFANA_ALERT_TELEGRAM_BOT_TOKEN: ${GRAFANA_ALERT_TELEGRAM_BOT_TOKEN:-}
+      GRAFANA_ALERT_TELEGRAM_CHAT_ID: ${GRAFANA_ALERT_TELEGRAM_CHAT_ID:-}
     volumes:
-      - /opt/naap/grafana/provisioning:/etc/grafana/provisioning:ro
+      - /opt/naap/grafana/provisioning:/etc/grafana/provisioning-src:ro
       - /opt/naap/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - /opt/naap/grafana/scripts/render-provisioning.sh:/usr/local/bin/render-grafana-provisioning.sh:ro
       - naap_grafana_data:/var/lib/grafana
     labels:
       - "traefik.enable=true"

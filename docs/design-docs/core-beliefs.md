@@ -16,7 +16,7 @@ Security is not a feature added later — it is a constraint from the start.
 
 ### T2. Performance is critical
 Correctness comes first; then performance. But performance requirements are real and enforced.
-- P99 latency targets are documented in `docs/PRODUCT_SENSE.md`
+- P99 latency targets are documented in `docs/product-sense.md`
 - Benchmarks are tracked; regressions are treated as bugs
 - Algorithm and data structure choices are justified in comments or design docs
 

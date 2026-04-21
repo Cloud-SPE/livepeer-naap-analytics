@@ -1,4 +1,4 @@
-# NAAP Analytics — infra2 Deployment Guide
+# NaaP Analytics — infra2 Deployment Guide
 
 Production deployment for `infra2.cloudspe.com`. Each service is a separate
 Portainer stack for independent lifecycle management.
@@ -13,7 +13,7 @@ For the standard runtime and recovery model, see [`../../docs/operations/run-mod
 | `naap-clickhouse` | ClickHouse | — (internal, SSH tunnel for access) |
 | `naap-app` | API | `naap-api.cloudspe.com` |
 | `naap-prometheus` | Prometheus, Node Exporter, cAdvisor | — (SSH tunnel only) |
-| `naap-grafana` | Grafana | `grafana.cloudspe.com` |
+| `naap-grafana` | Grafana | `grafana.livepeer.cloud` |
 | `naap-kafka-ui` | Kafka UI | `kafka-ui.cloudspe.com` |
 | `naap-mirrormaker2` | MM2 (daydream→infra2) | — (internal) |
 
@@ -140,7 +140,7 @@ Monitor backfill progress:
 ```bash
 docker exec naap-analytics-clickhouse clickhouse-client \
   --user naap_admin --password <pw> \
-  --query "SELECT count(), min(event_ts), max(event_ts) FROM naap.events"
+  --query "SELECT count(), min(event_ts), max(event_ts) FROM naap.accepted_raw_events"
 ```
 
 ## Updating

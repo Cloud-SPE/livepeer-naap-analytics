@@ -352,6 +352,8 @@ func materializeDecision(selection SelectionEvent, matches []matchedInterval, st
 	decision.CanonicalModel = selected.Model
 	if !canCollapseMultiGPUMatch(filtered) {
 		decision.GPUID = selected.GPUID
+		decision.GPUModelName = selected.GPUModelName
+		decision.GPUMemoryBytesTotal = selected.GPUMemoryTotal
 	}
 	if !selected.HardwarePresent {
 		decision.Status = "hardware_less"
@@ -387,6 +389,27 @@ func compatibleMatches(selection SelectionEvent, matches []matchedInterval) []ma
 }
 
 func isCompatible(selection SelectionEvent, interval CapabilityInterval) bool {
+	// BYOC path: bypass the canonical pipeline allow-list and match verbatim.
+	// The capability string from the job (e.g. "openai-chat-completions") must
+	// equal the interval pipeline exactly (case-insensitive). When a worker-
+	// lifecycle model hint is present, it also participates in compatibility
+	// filtering so same-capability candidates can be disambiguated before the
+	// final BYOC row is materialized.
+	if selection.PipelineHintVerbatim {
+		if selection.ObservedPipeline == "" || interval.Pipeline == "" {
+			return false
+		}
+		if !strings.EqualFold(selection.ObservedPipeline, interval.Pipeline) {
+			return false
+		}
+		if selection.ObservedModelHint != "" {
+			if interval.Model == "" || !strings.EqualFold(selection.ObservedModelHint, interval.Model) {
+				return false
+			}
+		}
+		return true
+	}
+	// Standard path: use the canonical pipeline allow-list.
 	if pipelineHint := compatiblePipelineHint(selection.ObservedPipeline); pipelineHint != "" {
 		if interval.Pipeline == "" || !strings.EqualFold(pipelineHint, interval.Pipeline) {
 			return false
@@ -402,7 +425,11 @@ func isCompatible(selection SelectionEvent, interval CapabilityInterval) bool {
 
 func compatiblePipelineHint(hint string) string {
 	switch strings.ToLower(strings.TrimSpace(hint)) {
-	case "live-video-to-video", "text-to-image", "image-to-image", "text-to-video", "audio-to-text", "text-to-speech", "noop":
+	case "live-video-to-video",
+		"text-to-image", "image-to-image", "image-to-video", "text-to-video",
+		"audio-to-text", "text-to-speech",
+		"upscale", "llm", "image-to-text", "segment-anything-2",
+		"noop":
 		return strings.ToLower(strings.TrimSpace(hint))
 	default:
 		return ""

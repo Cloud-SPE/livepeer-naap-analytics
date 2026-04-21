@@ -1,0 +1,20 @@
+select
+    capability_version_id,
+    snapshot_event_id,
+    org,
+    orch_address,
+    orchestrator_uri,
+    orch_uri_norm,
+    last_seen,
+    capability_id,
+    capability_name,
+    capability_family,
+    canonical_pipeline,
+    offered_name,
+    model_id,
+    gpu_id,
+    gpu_model_name,
+    gpu_memory_bytes_total,
+    supports_stream,
+    supports_request
+from {{ ref('canonical_capability_hardware_observed_inventory') }}

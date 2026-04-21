@@ -1,0 +1,103 @@
+# Medallion lints — the four machine-checked rules from
+# docs/design-docs/api-table-contract.md §Enforcement. Runs on every
+# PR; fast (<3 min) and self-contained (no fixture, no live data).
+#
+# Matches the local `make lint-medallion` target one-for-one:
+#   - core-logic recalc (bash grep against signatures)
+#   - grafana panel serving-contract (Go binary over dashboard JSON)
+#   - dbt layer-discipline (graph walk; runs against ephemeral CH
+#     because dbt needs an adapter connection, but the compiled SQL
+#     is pure string literals — no tables read)
+#
+# The api_hourly_* additive-primitives test is deliberately NOT here
+# because it requires actual loaded data; it runs in the replay
+# workflow after the full pipeline is populated.
+
+name: medallion-lints
+
+on:
+  pull_request:
+  push:
+    branches: [main, refactor/medallion-v2]
+
+jobs:
+  core-logic-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run core-logic lint
+        run: bash scripts/core-logic-lint.sh
+
+  grafana-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache-dependency-path: api/go.sum
+      - name: Build grafana-lint
+        run: cd api && go build -o ../bin/grafana-lint ./cmd/grafana-lint
+      - name: Run grafana-lint
+        run: ./bin/grafana-lint
+
+  layer-discipline-lint:
+    runs-on: ubuntu-latest
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:24.3
+        env:
+          CLICKHOUSE_DB: naap
+          CLICKHOUSE_USER: naap_admin
+          CLICKHOUSE_PASSWORD: changeme
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+        ports:
+          - 8123:8123
+          - 9000:9000
+        options: >-
+          --health-cmd "wget -qO- http://localhost:8123/ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dbt
+        run: |
+          python -m pip install --upgrade pip
+          pip install dbt-core dbt-clickhouse
+
+      - name: Wait for ClickHouse + create naap database
+        run: |
+          until wget -qO- http://localhost:8123/ping >/dev/null 2>&1; do sleep 1; done
+          echo 'CREATE DATABASE IF NOT EXISTS naap' | \
+            curl -sS -u 'naap_admin:changeme' 'http://localhost:8123/' --data-binary @-
+
+      - name: dbt parse (checks the ref() graph compiles)
+        working-directory: warehouse
+        env:
+          DBT_PROFILES_DIR: ${{ github.workspace }}/warehouse
+          CLICKHOUSE_HOST: localhost
+          CLICKHOUSE_PORT: "8123"
+          CLICKHOUSE_DB: naap
+          CLICKHOUSE_USER: naap_admin
+          CLICKHOUSE_PASSWORD: changeme
+        run: dbt parse
+
+      # The test emits only string-literal violation rows (no SELECTs
+      # from ref()'d tables) so an empty CH with just the naap database
+      # is enough to run it. No bootstrap DDL needed.
+      - name: Run layer-discipline test
+        working-directory: warehouse
+        env:
+          DBT_PROFILES_DIR: ${{ github.workspace }}/warehouse
+          CLICKHOUSE_HOST: localhost
+          CLICKHOUSE_PORT: "8123"
+          CLICKHOUSE_DB: naap
+          CLICKHOUSE_USER: naap_admin
+          CLICKHOUSE_PASSWORD: changeme
+        run: dbt test --select test_layer_discipline

@@ -18,12 +18,12 @@ Model split:
 - `warehouse/models/staging/` exposes thin views over normalized physical tables
 - `warehouse/models/canonical/` exposes current canonical contracts over
   physical `canonical_*_store` tables
-- `warehouse/models/api/` exposes serving contracts over bounded resolver-fed
-  store tables
-- `api_status_samples` and `api_active_stream_state` remain store-backed so
-  request paths do not reconstruct hot state from wide history joins
-- `api_active_stream_state` is deterministic; recency filtering belongs in
-  request or dashboard queries, not in the semantic view itself
+- `warehouse/models/api/` exposes serving contracts over bounded canonical and
+  resolver-fed stores
+- `api_current_active_stream_state` remains store-backed so request paths do not
+  reconstruct hot state from wide history joins
+- `api_current_active_stream_state` is deterministic; recency filtering belongs
+  in request or dashboard queries, not in the semantic view itself
 
 Tier contract:
 
@@ -36,9 +36,20 @@ Tier contract:
 This contract is semantic, not a promise that every physical ClickHouse object
 shares one of those prefixes. The generated bootstrap also includes
 infrastructure/runtime tables such as `accepted_raw_events`, `ignored_raw_events`,
-`kafka_*`, `resolver_*`, `agg_*`, metadata tables, and change/audit tables.
+`kafka_*`, `resolver_*`, `agg_*`, metadata tables, and materialized views.
 Those physical names are part of the supported v1 schema and are not being
 renamed just to force prefix uniformity.
+
+Temporal suffixes add semantics on top of the tier prefix:
+
+- `*_current` / `*_latest` — true latest-state entities or helpers only
+- `*_inventory` — observed historical/windowed inventory
+- `*_store` — physically owned tables backing a semantic relation; `store` is not a truth tier
+
+The naming rule is therefore:
+
+- prefix defines the semantic tier
+- suffix defines latest-state vs observed inventory vs physical storage role
 
 Important rule:
 

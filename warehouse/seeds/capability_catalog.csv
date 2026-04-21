@@ -1,0 +1,12 @@
+capability_id,capability_name,capability_family,canonical_pipeline,constraint_kind,supports_stream,supports_request
+27,text-to-image,builtin,text-to-image,model_id,false,true
+28,image-to-image,builtin,image-to-image,model_id,false,true
+29,image-to-video,builtin,image-to-video,model_id,false,true
+30,upscale,builtin,upscale,model_id,false,true
+31,audio-to-text,builtin,audio-to-text,model_id,false,true
+32,segment-anything-2,builtin,segment-anything-2,model_id,false,true
+33,llm,builtin,llm,model_id,false,true
+34,image-to-text,builtin,image-to-text,model_id,false,true
+35,live-video-to-video,builtin,live-video-to-video,model_id,true,false
+36,text-to-speech,builtin,text-to-speech,model_id,false,true
+37,byoc,byoc,,external_capability_name,true,true

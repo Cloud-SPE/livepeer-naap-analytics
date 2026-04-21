@@ -1,4 +1,4 @@
-.PHONY: up up-tooling down build test test-integration bench load-test lint dev-api setup fmt ch-smoke ch-query push push-api push-clickhouse push-dbt push-resolver push-mcp warehouse-run warehouse-test warehouse-compile test-validation test-validation-host test-validation-docker test-validation-clean measure-baseline measure-refactor-replay migrate-status migrate-validate migrate-up bootstrap-extract resolver-logs resolver-auto resolver-bootstrap resolver-tail resolver-backfill resolver-repair-window parity-verify backfill-rollups backfill-raw-mv-views
+.PHONY: up up-tooling down build test test-integration bench load-test lint dev-api setup fmt ch-smoke ch-query push push-api push-clickhouse push-dbt push-resolver push-mcp warehouse-run warehouse-test warehouse-compile test-validation test-validation-host test-validation-docker test-validation-clean measure-baseline measure-refactor-replay migrate-status migrate-validate migrate-up bootstrap-extract resolver-logs resolver-auto resolver-bootstrap resolver-tail resolver-backfill resolver-repair-window parity-verify replay replay-build replay-fetch-fixture replay-fetch-fixture-force replay-verify replay-verify-full lint-medallion lint-core-logic lint-grafana lint-grafana-build lint-dbt-layer-discipline lint-dbt-additive-primitives replay-fetch-fixture-daily replay-fetch-fixture-daily-force replay-daily replay-verify-canonical apply-store-ddl lint-store-ddl lint-store-ddl-build
 
 REGISTRY  ?= tztcloud
 IMAGE_TAG ?= latest
@@ -86,14 +86,14 @@ test-validation-host:
 
 test-validation-docker:
 	@set -e; \
-	trap 'docker compose --profile validation rm -sf validation-clickhouse warehouse-validation validation-go >/dev/null 2>&1 || true; docker volume rm $$(docker volume ls -q | grep livepeer-naap-analytics-v3_validation_clickhouse_data) >/dev/null 2>&1 || true' EXIT; \
+	trap 'docker compose --profile validation rm -sf validation-clickhouse warehouse-validation validation-go >/dev/null 2>&1 || true; docker volume rm $$(docker volume ls -q | grep "validation_clickhouse_data$$") >/dev/null 2>&1 || true' EXIT; \
 	docker compose --profile validation run --rm validation-go
 
 test-validation-clean:
 	@set -e; \
 	docker compose --profile validation rm -sf validation-clickhouse warehouse-validation validation-go >/dev/null 2>&1 || true; \
-	docker volume rm $$(docker volume ls -q | grep livepeer-naap-analytics-v3_validation_clickhouse_data) >/dev/null 2>&1 || true; \
-	trap 'docker compose --profile validation rm -sf validation-clickhouse warehouse-validation validation-go >/dev/null 2>&1 || true; docker volume rm $$(docker volume ls -q | grep livepeer-naap-analytics-v3_validation_clickhouse_data) >/dev/null 2>&1 || true' EXIT; \
+	docker volume rm $$(docker volume ls -q | grep "validation_clickhouse_data$$") >/dev/null 2>&1 || true; \
+	trap 'docker compose --profile validation rm -sf validation-clickhouse warehouse-validation validation-go >/dev/null 2>&1 || true; docker volume rm $$(docker volume ls -q | grep "validation_clickhouse_data$$") >/dev/null 2>&1 || true' EXIT; \
 	docker compose --profile validation run --rm validation-go
 
 warehouse-run:
@@ -141,9 +141,9 @@ ch-smoke:
 	clickhouse-client --query "SELECT count() AS n, event_type, org FROM naap.accepted_raw_events GROUP BY event_type, org ORDER BY n DESC"
 	@echo "=== Orch state rows ==="
 	clickhouse-client --query "SELECT count() FROM naap.agg_orch_state FINAL"
-	@echo "=== Stream hourly rows ==="
-	clickhouse-client --query "SELECT sum(requested_sessions), sum(startup_success_sessions), sum(no_orch_sessions) FROM naap.api_stream_hourly"
-	@echo "=== Payment hourly rows ==="
+	@echo "=== Streaming demand hourly rows ==="
+	clickhouse-client --query "SELECT sum(requested_sessions), sum(startup_success_sessions), sum(no_orch_sessions) FROM naap.api_hourly_streaming_demand"
+	@echo "=== Payment aggregate rows ==="
 	clickhouse-client --query "SELECT count(), sum(total_wei) FROM naap.agg_payment_hourly"
 
 # Interactive ClickHouse client.
@@ -183,12 +183,6 @@ resolver-repair-window:
 parity-verify:
 	docker compose run --rm $(if $(CLICKHOUSE_TIMEOUT),-e CLICKHOUSE_TIMEOUT=$(CLICKHOUSE_TIMEOUT),) resolver -mode verify $(if $(DRY_RUN),-dry-run,) -from "$(FROM)" -to "$(TO)" $(if $(ORG),-org "$(ORG)",) $(if $(EXCLUDE_ORG_PREFIXES),-exclude-org-prefixes "$(EXCLUDE_ORG_PREFIXES)",)
 
-backfill-rollups:
-	docker compose exec -T clickhouse clickhouse-client --user naap_admin --password changeme --multiquery < scripts/backfill_session_rollups.sql
-
-backfill-raw-mv-views:
-	docker compose exec -T clickhouse clickhouse-client --user naap_admin --password changeme --multiquery < scripts/backfill_repointed_raw_views.sql
-
 # ── Inspector ─────────────────────────────────────────────────────────────────
 
 inspect:
@@ -211,3 +205,147 @@ measure-baseline:
 
 measure-refactor-replay:
 	python3 scripts/measure_refactor_replay.py
+
+# ── Replay harness ────────────────────────────────────────────────────────────
+# Drives the medallion pipeline over a pinned raw-event fixture and records
+# a per-layer artifact_checksum rollup. A second run over the same fixture
+# must produce byte-identical rollups; divergence localises to the layer
+# that broke determinism. See docs/operations/replay-harness.md.
+
+replay-fetch-fixture:
+	@bash scripts/fetch-golden-fixture.sh
+
+replay-fetch-fixture-force:
+	@bash scripts/fetch-golden-fixture.sh --force
+
+# 24h dev-iteration fixture. Trims the full-pipeline replay from ~90 min
+# to ~10 min so developers can run the determinism gate while working.
+# Use the golden fixture for the CI determinism gate and phase-exit
+# criteria; the daily is a local-only aide.
+replay-fetch-fixture-daily:
+	@bash scripts/fetch-daily-fixture.sh
+
+replay-fetch-fixture-daily-force:
+	@bash scripts/fetch-daily-fixture.sh --force
+
+replay-build:
+	cd api && go build -o ../bin/replay ./cmd/replay
+
+replay: replay-build
+	./bin/replay \
+	    --fixture tests/fixtures/raw_events_golden.ndjson.zst \
+	    --manifest tests/fixtures/raw_events_golden.manifest.json \
+	    --layers raw,normalized \
+	    --output target/replay
+
+# Run replay twice and diff; any divergence fails the target.
+# This is the determinism gate — used by CI and as an exit criterion for
+# every phase of the serving-layer-v2 rollout.
+#
+# Both runs pause Kafka ingest MVs while they execute, so live traffic on
+# a compose stack cannot contaminate the comparison. The first run loads
+# the fixture; the second skips the load and re-checksums the same state,
+# proving the checksum itself is deterministic and the pipeline is stable.
+#
+# For a truly full determinism check (load → checksum → load again →
+# checksum), use `make replay-verify-full`.
+replay-verify: replay-build
+	./bin/replay \
+	    --fixture tests/fixtures/raw_events_golden.ndjson.zst \
+	    --manifest tests/fixtures/raw_events_golden.manifest.json \
+	    --layers raw,normalized \
+	    --output target/replay
+	mv target/replay/latest.json target/replay/first.json
+	./bin/replay \
+	    --fixture tests/fixtures/raw_events_golden.ndjson.zst \
+	    --manifest tests/fixtures/raw_events_golden.manifest.json \
+	    --layers raw,normalized \
+	    --output target/replay \
+	    --skip-load \
+	    --compare-to target/replay/first.json
+
+# ── Medallion lints (serving-layer-v2 Phase 0) ─────────────────────────────
+# Four machine-checked rules from docs/design-docs/api-table-contract.md.
+# Each lint supports an allowlist so known-scheduled violations don't
+# block CI; the allowlist entries disappear as the plan's phases land.
+
+lint-medallion: lint-core-logic lint-grafana lint-dbt-layer-discipline lint-dbt-additive-primitives lint-store-ddl
+	@echo "lint-medallion: all five rules clean"
+
+lint-core-logic:
+	@bash scripts/core-logic-lint.sh
+
+lint-grafana-build:
+	cd api && go build -o ../bin/grafana-lint ./cmd/grafana-lint
+
+lint-grafana: lint-grafana-build
+	./bin/grafana-lint
+
+# dbt tests run against the live warehouse container. The compose
+# service has its own ClickHouse connection (uses CLICKHOUSE_ADMIN_*).
+lint-dbt-layer-discipline:
+	docker compose --profile tooling run --rm warehouse test --select test_layer_discipline
+
+lint-dbt-additive-primitives:
+	docker compose --profile tooling run --rm warehouse test --select test_api_hourly_additive_primitives
+
+# ── Store-table DDL ownership (serving-layer-v2 Phase 0 PR 8) ─────────────
+# The canonical declaration for every resolver-written _store MergeTree
+# lives under warehouse/ddl/stores/. Physical tables are still created
+# via infra/clickhouse/migrations/ at bootstrap, but drift between the
+# live schema and the checked-in declaration is caught by lint-store-ddl.
+# New store tables: drop a file in warehouse/ddl/stores/ + an ALTER-safe
+# migration under infra/clickhouse/migrations/ so fresh stacks bootstrap
+# correctly.
+
+apply-store-ddl:
+	@bash scripts/apply-store-ddl.sh
+
+lint-store-ddl-build:
+	cd api && go build -o ../bin/store-ddl-lint ./cmd/store-ddl-lint
+
+lint-store-ddl: lint-store-ddl-build
+	./bin/store-ddl-lint
+
+replay-verify-full: replay-build
+	./bin/replay \
+	    --fixture tests/fixtures/raw_events_golden.ndjson.zst \
+	    --manifest tests/fixtures/raw_events_golden.manifest.json \
+	    --layers raw,normalized \
+	    --output target/replay
+	mv target/replay/latest.json target/replay/first.json
+	./bin/replay \
+	    --fixture tests/fixtures/raw_events_golden.ndjson.zst \
+	    --manifest tests/fixtures/raw_events_golden.manifest.json \
+	    --layers raw,normalized \
+	    --output target/replay \
+	    --compare-to target/replay/first.json
+
+# Run the harness over the daily dev fixture. Full 4-layer pipeline
+# (raw → normalized → canonical → api). Typical runtime: ~10 min.
+replay-daily: replay-build
+	./bin/replay \
+	    --fixture tests/fixtures/raw_events_daily.ndjson.zst \
+	    --manifest tests/fixtures/raw_events_daily.manifest.json \
+	    --layers raw,normalized,canonical,api \
+	    --output target/replay
+
+# Four-layer determinism gate against the daily fixture. Use this
+# during Phase 1–8 development; the golden fixture's equivalent
+# (replay-verify-full-canonical, not yet wired) is the CI-gating one.
+replay-verify-canonical: replay-build
+	./bin/replay \
+	    --fixture tests/fixtures/raw_events_daily.ndjson.zst \
+	    --manifest tests/fixtures/raw_events_daily.manifest.json \
+	    --layers raw,normalized,canonical,api \
+	    --output target/replay
+	mv target/replay/latest.json target/replay/first.json
+	./bin/replay \
+	    --fixture tests/fixtures/raw_events_daily.ndjson.zst \
+	    --manifest tests/fixtures/raw_events_daily.manifest.json \
+	    --layers raw,normalized,canonical,api \
+	    --output target/replay \
+	    --skip-load \
+	    --skip-resolver \
+	    --skip-dbt \
+	    --compare-to target/replay/first.json

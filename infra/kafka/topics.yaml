@@ -1,4 +1,4 @@
-# Kafka topic definitions for NAAP Analytics.
+# Kafka topic definitions for NaaP Analytics.
 # Used for documentation and topic provisioning via scripts/setup.sh.
 # Topic naming convention: naap.<domain>.<event-type>
 

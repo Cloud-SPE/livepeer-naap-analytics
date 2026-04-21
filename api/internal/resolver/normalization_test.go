@@ -25,6 +25,66 @@ func TestNormalizeObservedHints_StreamdiffusionPipelineBecomesModelHint(t *testi
 	}
 }
 
+func TestNormalizeCanonicalPipeline_RecognizesAllAIBatchPipelines(t *testing.T) {
+	cases := []string{
+		"text-to-image", "image-to-image", "image-to-video", "text-to-video",
+		"audio-to-text", "text-to-speech",
+		"upscale", "llm", "image-to-text", "segment-anything-2",
+		"live-video-to-video", "noop",
+	}
+	for _, c := range cases {
+		result := normalizeCanonicalPipeline(c)
+		if result != c {
+			t.Errorf("normalizeCanonicalPipeline(%q) = %q, want %q", c, result, c)
+		}
+		// Case-insensitive
+		upper := "TEXT-TO-IMAGE"
+		if c == "text-to-image" {
+			if normalizeCanonicalPipeline(upper) != "text-to-image" {
+				t.Errorf("case-insensitive normalization failed for %q", upper)
+			}
+		}
+	}
+}
+
+func TestNormalizeCanonicalPipeline_RejectsBYOCCapabilityString(t *testing.T) {
+	// BYOC capability strings must not be recognized by the canonical allow-list.
+	// They use PipelineHintVerbatim = true and bypass this function.
+	if got := normalizeCanonicalPipeline("openai-chat-completions"); got != "" {
+		t.Fatalf("normalizeCanonicalPipeline(%q) = %q, want empty", "openai-chat-completions", got)
+	}
+}
+
+func TestCompatiblePipelineHint_RecognizesSegmentAnything2(t *testing.T) {
+	if got := compatiblePipelineHint("segment-anything-2"); got != "segment-anything-2" {
+		t.Fatalf("compatiblePipelineHint = %q, want segment-anything-2", got)
+	}
+}
+
+func TestCompatiblePipelineHint_RecognizesImageToVideo(t *testing.T) {
+	if got := compatiblePipelineHint("image-to-video"); got != "image-to-video" {
+		t.Fatalf("compatiblePipelineHint = %q, want image-to-video", got)
+	}
+}
+
+func TestCompatiblePipelineHint_RecognizesUpscale(t *testing.T) {
+	if got := compatiblePipelineHint("upscale"); got != "upscale" {
+		t.Fatalf("compatiblePipelineHint = %q, want upscale", got)
+	}
+}
+
+func TestCompatiblePipelineHint_RecognizesLLM(t *testing.T) {
+	if got := compatiblePipelineHint("llm"); got != "llm" {
+		t.Fatalf("compatiblePipelineHint = %q, want llm", got)
+	}
+}
+
+func TestCompatiblePipelineHint_RecognizesImageToText(t *testing.T) {
+	if got := compatiblePipelineHint("image-to-text"); got != "image-to-text" {
+		t.Fatalf("compatiblePipelineHint = %q, want image-to-text", got)
+	}
+}
+
 func TestBuildSessionCurrentRows_NormalizesFallbackHints(t *testing.T) {
 	lastSeen := time.Date(2026, 3, 28, 12, 5, 0, 0, time.UTC)
 	rows := buildSessionCurrentRows(map[string]SessionEvidence{

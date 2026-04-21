@@ -2,7 +2,7 @@
   "annotations": {
     "list": []
   },
-  "description": "Queries public org-aware API views such as api_network_demand_by_org; internal v_base_*_by_org views are not dashboard surfaces.",
+  "description": "Economics dashboard. Revenue panels use selected-range payment history; pricing panels show pricing seen in the last 24 hours rather than authoritative current network state.",
   "editable": true,
   "graphTooltip": 0,
   "id": null,
@@ -13,9 +13,21 @@
       "includeVars": true,
       "keepTime": true,
       "targetBlank": false,
-      "title": "Overview",
+      "title": "Live AI Video",
       "type": "link",
       "url": "/d/naap-overview"
+    },
+    {
+      "asDropdown": false,
+      "icon": "dashboard",
+      "includeVars": true,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
+      "title": "Jobs",
+      "tooltip": "",
+      "type": "link",
+      "url": "/d/naap-jobs"
     },
     {
       "asDropdown": false,
@@ -23,7 +35,7 @@
       "includeVars": true,
       "keepTime": true,
       "targetBlank": false,
-      "title": "Live Ops",
+      "title": "AI Video Ops",
       "type": "link",
       "url": "/d/naap-live-operations"
     },
@@ -33,7 +45,7 @@
       "includeVars": true,
       "keepTime": true,
       "targetBlank": false,
-      "title": "Performance",
+      "title": "AI Video Perf",
       "type": "link",
       "url": "/d/naap-performance-drilldown"
     },
@@ -149,12 +161,15 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT toStartOfInterval(hour, INTERVAL 1 HOUR) AS time,\n    toFloat64(sum(total_wei)) / 1e18 AS total_revenue_eth\nFROM naap.api_payment_hourly\nWHERE $__timeFilter(hour)\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY time ORDER BY time",
+          "rawSql": "SELECT toStartOfInterval(window_start, INTERVAL 1 HOUR) AS time,\n    toFloat64(sum(ticket_face_value_eth)) AS total_revenue_eth\nFROM naap.api_hourly_streaming_demand\nWHERE $__timeFilter(window_start)\nAND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\nGROUP BY time ORDER BY time",
           "refId": "A"
         }
       ],
-      "title": "Gateway Ticket Face Value (ETH, hourly)",
-      "type": "timeseries"
+      "title": "Gateway Ticket Face Value (ETH, selected range)",
+      "type": "timeseries",
+      "meta": {
+        "backing_table": "naap.api_hourly_streaming_demand"
+      }
     },
     {
       "datasource": {
@@ -207,12 +222,15 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "WITH latest_quotes AS (\n    SELECT orch_address, org, last_seen, name,\n        JSONExtractString(cap_item, 'constraint') AS model_id,\n        JSONExtractInt(cap_item, 'pricePerUnit') AS price_per_unit,\n        JSONExtractInt(cap_item, 'pixelsPerUnit') AS pixels_per_unit\n    FROM naap.api_latest_orchestrator_state\n    ARRAY JOIN JSONExtractArrayRaw(raw_capabilities, 'capabilities_prices') AS cap_item\n    WHERE JSONExtractInt(cap_item, 'pricePerUnit') > 0\n    AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n    AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address))\n)\nSELECT q.last_seen AS \"Quote Time\",\n    if(q.name != '' AND NOT startsWith(lower(q.name), '0x'), q.name, q.orch_address) AS \"Orchestrator\",\n    q.model_id AS \"Model\",\n    round(toFloat64(q.price_per_unit) * 1000000.0 / greatest(toFloat64(ifNull(q.pixels_per_unit, 1)), 1.0) / 1000000000.0, 4) AS \"Price (gwei/MP)\"\nFROM latest_quotes q\nORDER BY \"Quote Time\" DESC, \"Price (gwei/MP)\" DESC\nLIMIT 20",
+          "rawSql": "WITH labels AS (\n    SELECT orch_address AS addr, orch_label\n    FROM naap.api_orchestrator_identity\n),\nlatest_quotes AS (\n    SELECT orch_address, last_seen, ifNull(model_id, '') AS model_id, price_per_unit, pixels_per_unit\n    FROM (\n        SELECT orch_address, org, last_seen, model_id, price_per_unit, pixels_per_unit,\n            row_number() OVER (PARTITION BY orch_address, ifNull(model_id, '') ORDER BY last_seen DESC, org DESC) AS rn\n        FROM naap.api_observed_capability_pricing\n        WHERE last_seen >= now() - INTERVAL 24 HOUR\n        AND price_per_unit > 0\n        AND pixels_per_unit > 0\n        AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n        AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(model_id, '')))\n        AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address))\n    )\n    WHERE rn = 1\n)\nSELECT q.last_seen AS \"Quote Time\",\n    ifNull(labels.orch_label, concat(left(q.orch_address, 8), '...', right(q.orch_address, 4))) AS \"Orchestrator\",\n    q.orch_address AS \"Orchestrator Address\",\n    q.model_id AS \"Model\",\n    round(toFloat64(q.price_per_unit) * 1000000.0 / toFloat64(q.pixels_per_unit) / 1000000000.0, 4) AS \"Price (gwei/MP)\"\nFROM latest_quotes q\nLEFT JOIN labels ON labels.addr = q.orch_address\nORDER BY \"Quote Time\" DESC, \"Price (gwei/MP)\" DESC\nLIMIT 20",
           "refId": "A"
         }
       ],
-      "title": "Latest Quoted Prices by Orchestrator",
-      "type": "table"
+      "title": "Latest Pricing Seen in 24h by Orchestrator",
+      "type": "table",
+      "meta": {
+        "backing_table": "naap.api_orchestrator_identity"
+      }
     }
   ],
   "refresh": "15m",
@@ -243,14 +261,14 @@
           "text": "All",
           "value": "__all"
         },
-        "definition": "SELECT DISTINCT org FROM naap.api_latest_orchestrator_state WHERE org != '' ORDER BY org",
+        "definition": "SELECT org FROM naap.api_variable_orgs",
         "hide": 0,
         "includeAll": true,
         "label": "Org",
         "multi": true,
         "name": "org",
         "options": [],
-        "query": "SELECT DISTINCT org FROM naap.api_latest_orchestrator_state WHERE org != '' ORDER BY org",
+        "query": "SELECT org FROM naap.api_variable_orgs",
         "refresh": 1,
         "sort": 1,
         "type": "query",
@@ -264,14 +282,14 @@
           "text": "All",
           "value": "__all"
         },
-        "definition": "SELECT DISTINCT model_id FROM naap.api_gpu_inventory WHERE model_id != '' ORDER BY model_id",
+        "definition": "SELECT model_id FROM naap.api_variable_models",
         "hide": 0,
         "includeAll": true,
         "label": "Model",
         "multi": true,
         "name": "model",
         "options": [],
-        "query": "SELECT DISTINCT model_id FROM naap.api_gpu_inventory WHERE model_id != '' ORDER BY model_id",
+        "query": "SELECT model_id FROM naap.api_variable_models",
         "refresh": 1,
         "sort": 1,
         "type": "query",
@@ -285,14 +303,14 @@
           "text": "All",
           "value": "__all"
         },
-        "definition": "SELECT orch_address AS __value, if(name != '' AND NOT startsWith(lower(name), '0x'), concat(name, ' (', orch_address, ')'), orch_address) AS __text FROM naap.api_latest_orchestrator_state ORDER BY if(name != '' AND NOT startsWith(lower(name), '0x'), 1, 0) DESC, __text",
+        "definition": "SELECT concat(coalesce(nullIf(orch_label, ''), orch_address), ':',  orch_address) FROM naap.api_variable_orchestrators",
         "hide": 0,
         "includeAll": true,
         "label": "Orchestrator (ENS)",
         "multi": true,
         "name": "orchestrator",
         "options": [],
-        "query": "SELECT orch_address AS __value, if(name != '' AND NOT startsWith(lower(name), '0x'), concat(name, ' (', orch_address, ')'), orch_address) AS __text FROM naap.api_latest_orchestrator_state ORDER BY if(name != '' AND NOT startsWith(lower(name), '0x'), 1, 0) DESC, __text",
+        "query": "SELECT concat(coalesce(nullIf(orch_label, ''), orch_address), ':',  orch_address) FROM naap.api_variable_orchestrators",
         "refresh": 1,
         "sort": 1,
         "type": "query",

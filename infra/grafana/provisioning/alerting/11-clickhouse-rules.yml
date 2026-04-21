@@ -1,0 +1,926 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: naap-clickhouse-system-health
+    folder: infra
+    interval: 1m
+    rules:
+      - uid: naap_raw_freshness_stale
+        title: NaapAcceptedRawFreshnessStale
+        condition: B
+        data:
+          - refId: A
+            datasourceUid: clickhouse_prod
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              datasource:
+                type: grafana-clickhouse-datasource
+                uid: clickhouse_prod
+              editorType: sql
+              format: 1
+              intervalMs: 1000
+              maxDataPoints: 43200
+              queryType: sql
+              rawSql: WITH raw AS (SELECT count() AS row_count, max(ingested_at) AS max_ingested_at FROM naap.accepted_raw_events) SELECT if(row_count = 0, 0.0, toFloat64(greatest(dateDiff('second', max_ingested_at, now()), 0))) AS value FROM raw
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 0
+              to: 0
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 300
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - A
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+              type: classic_conditions
+        dashboardUid: naap-system-health
+        panelId: 2
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 5m
+        annotations:
+          summary: accepted_raw_events freshness is stale.
+          description: accepted_raw_events freshness lag has exceeded 300 seconds for 5 minutes.
+          runbook_url: https://github.com/Cloud-SPE/livepeer-naap-analytics/blob/main/docs/operations/operations-runbook.md
+        labels:
+          severity: critical
+          datasource: clickhouse
+          component: clickhouse
+          surface: ingest
+          pipeline_type: system
+      - uid: naap_dirty_scan_lag_high
+        title: NaapDirtyScanLagHigh
+        condition: B
+        data:
+          - refId: A
+            datasourceUid: clickhouse_prod
+            relativeTimeRange:
+              from: 900
+              to: 0
+            model:
+              datasource:
+                type: grafana-clickhouse-datasource
+                uid: clickhouse_prod
+              editorType: sql
+              format: 1
+              intervalMs: 1000
+              maxDataPoints: 43200
+              queryType: sql
+              rawSql: WITH raw AS (SELECT max(ingested_at) AS raw_max FROM naap.accepted_raw_events WHERE event_type IN ('stream_trace', 'ai_stream_status', 'ai_stream_events', 'network_capabilities', 'ai_batch_request', 'ai_llm_request', 'job_gateway', 'job_orchestrator', 'worker_lifecycle')), wm AS (SELECT max(last_ingested_at) AS wm_max FROM naap.resolver_runtime_state FINAL) SELECT if(isNull(raw_max), 0.0, toFloat64(greatest(dateDiff('second', ifNull(wm_max, raw_max), raw_max), 0))) AS value FROM raw CROSS JOIN wm
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 0
+              to: 0
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 300
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - A
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+              type: classic_conditions
+        dashboardUid: naap-system-health
+        panelId: 3
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 10m
+        annotations:
+          summary: Resolver dirty scan lag is high.
+          description: Resolver runtime state is more than 300 seconds behind accepted raw ingest for streaming surfaces.
+          runbook_url: https://github.com/Cloud-SPE/livepeer-naap-analytics/blob/main/docs/operations/run-modes-and-recovery.md
+        labels:
+          severity: critical
+          datasource: clickhouse
+          component: resolver
+          surface: streaming
+          pipeline_type: streaming
+      - uid: naap_dirty_queue_backlog
+        title: NaapDirtyHistoricalQueueBacklog
+        condition: B
+        data:
+          - refId: A
+            datasourceUid: clickhouse_prod
+            relativeTimeRange:
+              from: 1800
+              to: 0
+            model:
+              datasource:
+                type: grafana-clickhouse-datasource
+                uid: clickhouse_prod
+              editorType: sql
+              format: 1
+              intervalMs: 1000
+              maxDataPoints: 43200
+              queryType: sql
+              rawSql: SELECT toFloat64(count()) AS value FROM naap.resolver_dirty_partitions FINAL WHERE status = 'pending'
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 0
+              to: 0
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 25
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - A
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+              type: classic_conditions
+        dashboardUid: naap-system-health
+        panelId: 4
+        noDataState: OK
+        execErrState: Alerting
+        for: 15m
+        annotations:
+          summary: Resolver dirty historical queue backlog is elevated.
+          description: Pending dirty partitions have remained above 25 for 15 minutes.
+          runbook_url: https://github.com/Cloud-SPE/livepeer-naap-analytics/blob/main/docs/operations/run-modes-and-recovery.md
+        labels:
+          severity: degraded
+          datasource: clickhouse
+          component: resolver
+          surface: streaming
+          pipeline_type: streaming
+      - uid: naap_resolver_tail_stale
+        title: NaapResolverTailStale
+        condition: B
+        data:
+          - refId: A
+            datasourceUid: clickhouse_prod
+            relativeTimeRange:
+              from: 3600
+              to: 0
+            model:
+              datasource:
+                type: grafana-clickhouse-datasource
+                uid: clickhouse_prod
+              editorType: sql
+              format: 1
+              intervalMs: 1000
+              maxDataPoints: 43200
+              queryType: sql
+              rawSql: WITH tail AS (SELECT max(finished_at) AS last_success_at FROM naap.resolver_runs WHERE mode = 'tail' AND status = 'success') SELECT if(isNull(last_success_at), 31536000.0, toFloat64(greatest(dateDiff('second', last_success_at, now()), 0))) AS value FROM tail
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 0
+              to: 0
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 900
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - A
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+              type: classic_conditions
+        dashboardUid: naap-system-health
+        panelId: 26
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 10m
+        annotations:
+          summary: Resolver tail publication is stale.
+          description: No successful resolver tail run has completed for more than 900 seconds for 10 minutes.
+          runbook_url: https://github.com/Cloud-SPE/livepeer-naap-analytics/blob/main/docs/operations/run-modes-and-recovery.md
+        labels:
+          severity: critical
+          datasource: clickhouse
+          component: resolver
+          surface: streaming
+          pipeline_type: streaming
+      - uid: naap_same_day_repair_stalled
+        title: NaapResolverSameDayRepairStalled
+        condition: B
+        data:
+          - refId: A
+            datasourceUid: clickhouse_prod
+            relativeTimeRange:
+              from: 3600
+              to: 0
+            model:
+              datasource:
+                type: grafana-clickhouse-datasource
+                uid: clickhouse_prod
+              editorType: sql
+              format: 1
+              intervalMs: 1000
+              maxDataPoints: 43200
+              queryType: sql
+              rawSql: |
+                WITH cfg AS (
+                  SELECT
+                    ifNull(argMax(lateness_window_seconds, started_at), 600) AS lateness_window_seconds,
+                    ifNull(argMax(dirty_quiet_period_seconds, started_at), 120) AS dirty_quiet_period_seconds
+                  FROM naap.resolver_runs
+                )
+                SELECT count() AS value
+                FROM naap.resolver_dirty_windows FINAL
+                CROSS JOIN cfg
+                WHERE status = 'pending'
+                  AND dateDiff('second', window_end, now()) >= toInt64(cfg.lateness_window_seconds)
+                  AND dateDiff('second', last_dirty_at, now()) >= toInt64(cfg.dirty_quiet_period_seconds)
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 0
+              to: 0
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - A
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+              type: classic_conditions
+        dashboardUid: naap-system-health
+        panelId: 5
+        noDataState: OK
+        execErrState: Alerting
+        for: 15m
+        annotations:
+          summary: Same-day resolver repair backlog is not draining.
+          description: Eligible same-day closed-hour repairs have remained pending for 15 minutes.
+          runbook_url: https://github.com/Cloud-SPE/livepeer-naap-analytics/blob/main/docs/runbooks/resolver-operations.md
+        labels:
+          severity: critical
+          datasource: clickhouse
+          component: resolver
+          surface: streaming
+          pipeline_type: streaming
+      - uid: naap_hist_repair_age_high
+        title: NaapResolverHistoricalRepairAgeHigh
+        condition: B
+        data:
+          - refId: A
+            datasourceUid: clickhouse_prod
+            relativeTimeRange:
+              from: 86400
+              to: 0
+            model:
+              datasource:
+                type: grafana-clickhouse-datasource
+                uid: clickhouse_prod
+              editorType: sql
+              format: 1
+              intervalMs: 1000
+              maxDataPoints: 43200
+              queryType: sql
+              rawSql: WITH pending AS (SELECT count() AS pending_count, min(updated_at) AS oldest_pending_at FROM naap.resolver_dirty_partitions FINAL WHERE status = 'pending') SELECT if(pending_count = 0, 0.0, toFloat64(greatest(dateDiff('hour', oldest_pending_at, now()), 0))) AS value FROM pending
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 0
+              to: 0
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 6
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - A
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+              type: classic_conditions
+        dashboardUid: naap-system-health
+        panelId: 27
+        noDataState: OK
+        execErrState: Alerting
+        for: 30m
+        annotations:
+          summary: Historical resolver repair backlog is aging.
+          description: The oldest pending historical dirty partition has remained pending for more than 6 hours for 30 minutes.
+          runbook_url: https://github.com/Cloud-SPE/livepeer-naap-analytics/blob/main/docs/operations/run-modes-and-recovery.md
+        labels:
+          severity: degraded
+          datasource: clickhouse
+          component: resolver
+          surface: streaming
+          pipeline_type: streaming
+      - uid: naap_streaming_attribution_rate_low
+        title: NaapStreamingAttributionRateLow
+        condition: B
+        data:
+          - refId: A
+            datasourceUid: clickhouse_prod
+            relativeTimeRange:
+              from: 3600
+              to: 0
+            model:
+              datasource:
+                type: grafana-clickhouse-datasource
+                uid: clickhouse_prod
+              editorType: sql
+              format: 1
+              intervalMs: 1000
+              maxDataPoints: 43200
+              queryType: sql
+              rawSql: WITH recent AS (SELECT count() AS total_samples, countIf(is_attributed = 1) AS attributed_samples FROM naap.canonical_status_samples_recent WHERE sample_ts >= now() - INTERVAL 60 MINUTE) SELECT if(total_samples >= 500, toFloat64(attributed_samples) / toFloat64(total_samples), 1.0) AS value FROM recent
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 0
+              to: 0
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0.75
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - A
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+              type: classic_conditions
+        noDataState: OK
+        execErrState: Alerting
+        for: 15m
+        annotations:
+          summary: Streaming attribution rate is below the warning threshold.
+          description: Streaming attribution rate over the last 60 minutes is below 75 percent after the 500-sample guard.
+          runbook_url: https://github.com/Cloud-SPE/livepeer-naap-analytics/blob/main/docs/operations/operations-runbook.md
+        labels:
+          severity: warning
+          datasource: clickhouse
+          component: streaming
+          surface: live-video
+          pipeline_type: streaming
+
+  - orgId: 1
+    name: naap-request-response-anomalies
+    folder: infra
+    interval: 5m
+    rules:
+      - uid: naap_rr_dup_rows
+        title: NaapRequestResponseDuplicateRowsPresent
+        condition: B
+        data:
+          - refId: A
+            datasourceUid: clickhouse_prod
+            relativeTimeRange:
+              from: 86400
+              to: 0
+            model:
+              datasource:
+                type: grafana-clickhouse-datasource
+                uid: clickhouse_prod
+              editorType: sql
+              format: 1
+              intervalMs: 1000
+              maxDataPoints: 43200
+              queryType: sql
+              rawSql: |
+                SELECT
+                  job_type,
+                  toFloat64(duplicate_rows) AS value
+                FROM (
+                  SELECT 'ai-batch' AS job_type, greatest(toInt64(count()) - toInt64(uniqExact(request_id)), 0) AS duplicate_rows
+                  FROM naap.api_fact_ai_batch_job
+                  WHERE completed_at >= now() - INTERVAL 24 HOUR
+                  UNION ALL
+                  SELECT 'byoc' AS job_type, greatest(toInt64(count()) - toInt64(uniqExact(request_id)), 0) AS duplicate_rows
+                  FROM naap.api_fact_byoc_job
+                  WHERE completed_at >= now() - INTERVAL 24 HOUR
+                )
+                WHERE duplicate_rows > 0
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 0
+              to: 0
+            model:
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: $A > 0
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+              type: math
+        dashboardUid: naap-system-health
+        panelId: 20
+        noDataState: OK
+        execErrState: Alerting
+        for: 10m
+        annotations:
+          summary: '{{ if $labels.job_type }}Duplicate request-response canonical job rows are present for {{$labels.job_type}}.{{ else }}Duplicate request-response canonical job rows are present.{{ end }}'
+          description: canonical_ai_batch_jobs or canonical_byoc_jobs produced duplicate rows in the last 24 hours.
+          runbook_url: https://github.com/Cloud-SPE/livepeer-naap-analytics/blob/main/docs/operations/runtime-validation-and-performance.md
+        labels:
+          severity: critical
+          datasource: clickhouse
+          component: request-response
+          surface: jobs
+          pipeline_type: request-response
+      - uid: naap_rr_canon_cov_low
+        title: NaapRequestResponseCanonicalCoverageLow
+        condition: B
+        data:
+          - refId: A
+            datasourceUid: clickhouse_prod
+            relativeTimeRange:
+              from: 21600
+              to: 0
+            model:
+              datasource:
+                type: grafana-clickhouse-datasource
+                uid: clickhouse_prod
+              editorType: sql
+              format: 1
+              intervalMs: 1000
+              maxDataPoints: 43200
+              queryType: sql
+              rawSql: |
+                WITH source_counts AS (
+                  SELECT 'ai-batch' AS job_type, count() AS source_jobs
+                  FROM naap.normalized_ai_batch_job FINAL
+                  WHERE subtype = 'ai_batch_request_completed'
+                    AND request_id != ''
+                    AND event_ts >= now() - INTERVAL 6 HOUR
+                  UNION ALL
+                  SELECT 'byoc' AS job_type, count() AS source_jobs
+                  FROM naap.normalized_byoc_job FINAL
+                  WHERE subtype = 'job_gateway_completed'
+                    AND event_ts >= now() - INTERVAL 6 HOUR
+                ),
+                canonical_counts AS (
+                  SELECT 'ai-batch' AS job_type, count() AS canonical_jobs
+                  FROM naap.canonical_ai_batch_jobs
+                  WHERE completed_at >= now() - INTERVAL 6 HOUR
+                  UNION ALL
+                  SELECT 'byoc' AS job_type, count() AS canonical_jobs
+                  FROM naap.canonical_byoc_jobs
+                  WHERE completed_at >= now() - INTERVAL 6 HOUR
+                )
+                SELECT
+                  s.job_type,
+                  toFloat64(round(ifNull(c.canonical_jobs, 0) * 100.0 / nullIf(toFloat64(s.source_jobs), 0), 2)) AS value
+                FROM source_counts s
+                LEFT JOIN canonical_counts c ON s.job_type = c.job_type
+                WHERE s.source_jobs >= 20
+                  AND ifNull(c.canonical_jobs, 0) * 100.0 / nullIf(toFloat64(s.source_jobs), 0) < 98
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 0
+              to: 0
+            model:
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: $A < 98
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+              type: math
+        dashboardUid: naap-system-health
+        panelId: 21
+        noDataState: OK
+        execErrState: Alerting
+        for: 15m
+        annotations:
+          summary: '{{ if $labels.job_type }}Request-response canonical coverage is below the threshold for {{$labels.job_type}}.{{ else }}Request-response canonical coverage is below the threshold.{{ end }}'
+          description: Normalized completed request-response events are not being reflected in canonical job rows at the expected rate.
+          runbook_url: https://github.com/Cloud-SPE/livepeer-naap-analytics/blob/main/docs/operations/runtime-validation-and-performance.md
+        labels:
+          severity: critical
+          datasource: clickhouse
+          component: request-response
+          surface: jobs
+          pipeline_type: request-response
+      - uid: naap_rr_density_drop
+        title: NaapRequestResponseDensityCollapse
+        condition: B
+        data:
+          - refId: A
+            datasourceUid: clickhouse_prod
+            relativeTimeRange:
+              from: 172800
+              to: 0
+            model:
+              datasource:
+                type: grafana-clickhouse-datasource
+                uid: clickhouse_prod
+              editorType: sql
+              format: 1
+              intervalMs: 1000
+              maxDataPoints: 43200
+              queryType: sql
+              rawSql: |
+                WITH current_bucket AS (
+                  SELECT toStartOfHour(now()) - INTERVAL 1 HOUR AS window_start
+                ),
+                request_rows AS (
+                  SELECT
+                    if(capability_family = 'byoc', 'byoc', 'ai-batch') AS job_type,
+                    ifNull(canonical_pipeline, capability_name) AS pipeline_id,
+                    window_start,
+                    job_count
+                  FROM naap.api_hourly_request_demand
+                ),
+                current_counts AS (
+                  SELECT
+                    job_type,
+                    pipeline_id,
+                    sum(job_count) AS current_jobs
+                  FROM request_rows
+                  WHERE window_start = (SELECT window_start FROM current_bucket)
+                  GROUP BY job_type, pipeline_id
+                ),
+                historical_counts AS (
+                  SELECT
+                    job_type,
+                    pipeline_id,
+                    window_start,
+                    sum(job_count) AS hourly_jobs
+                  FROM request_rows
+                  WHERE window_start >= (SELECT window_start FROM current_bucket) - INTERVAL 24 HOUR
+                    AND window_start < (SELECT window_start FROM current_bucket)
+                  GROUP BY job_type, pipeline_id, window_start
+                ),
+                baselines AS (
+                  SELECT
+                    job_type,
+                    pipeline_id,
+                    quantileExact(0.5)(hourly_jobs) AS baseline_jobs
+                  FROM historical_counts
+                  GROUP BY job_type, pipeline_id
+                )
+                SELECT
+                  b.job_type,
+                  b.pipeline_id,
+                  toFloat64(round(ifNull(c.current_jobs, 0) * 100.0 / nullIf(toFloat64(b.baseline_jobs), 0), 2)) AS value
+                FROM baselines b
+                LEFT JOIN current_counts c
+                  ON c.job_type = b.job_type
+                 AND c.pipeline_id = b.pipeline_id
+                WHERE b.baseline_jobs >= 20
+                  AND ifNull(c.current_jobs, 0) < (b.baseline_jobs * 0.2)
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 0
+              to: 0
+            model:
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: $A < 20
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+              type: math
+        dashboardUid: naap-system-health
+        panelId: 22
+        noDataState: OK
+        execErrState: Alerting
+        for: 30m
+        annotations:
+          summary: '{{ if $labels.pipeline_id }}Request-response demand density has collapsed for {{$labels.job_type}} on {{$labels.pipeline_id}}.{{ else if $labels.job_type }}Request-response demand density has collapsed for {{$labels.job_type}}.{{ else }}Request-response demand density has collapsed for a recent hourly slice.{{ end }}'
+          description: A request-response pipeline fell below 20 percent of its trailing 24 hour median hourly job volume.
+          runbook_url: https://github.com/Cloud-SPE/livepeer-naap-analytics/blob/main/docs/operations/devops-environment-guide.md
+        labels:
+          severity: degraded
+          datasource: clickhouse
+          component: request-response
+          surface: jobs
+          pipeline_type: request-response
+
+  - orgId: 1
+    name: naap-streaming-anomalies
+    folder: infra
+    interval: 5m
+    rules:
+      - uid: naap_stream_sig_cov_low
+        title: NaapStreamingHealthSignalCoverageLow
+        condition: B
+        data:
+          - refId: A
+            datasourceUid: clickhouse_prod
+            relativeTimeRange:
+              from: 7200
+              to: 0
+            model:
+              datasource:
+                type: grafana-clickhouse-datasource
+                uid: clickhouse_prod
+              editorType: sql
+              format: 1
+              intervalMs: 1000
+              maxDataPoints: 43200
+              queryType: sql
+              rawSql: |
+                WITH current_bucket AS (
+                  SELECT toStartOfHour(now()) - INTERVAL 1 HOUR AS window_start
+                )
+                SELECT
+                  pipeline_id,
+                  toFloat64(round(
+                    if(sum(health_expected_signal_count) = 0,
+                      1.0,
+                      sum(health_signal_count) / toFloat64(sum(health_expected_signal_count))
+                    ) * 100,
+                    2
+                  )) AS value
+                FROM naap.api_hourly_streaming_demand
+                WHERE window_start = (SELECT window_start FROM current_bucket)
+                  AND pipeline_id != ''
+                GROUP BY pipeline_id
+                HAVING sum(requested_sessions) >= 50
+                   AND if(sum(health_expected_signal_count) = 0,
+                     1.0,
+                     sum(health_signal_count) / toFloat64(sum(health_expected_signal_count))
+                   ) < 0.60
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 0
+              to: 0
+            model:
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: $A < 60
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+              type: math
+        dashboardUid: naap-system-health
+        panelId: 23
+        noDataState: OK
+        execErrState: Alerting
+        for: 15m
+        annotations:
+          summary: '{{ if $labels.pipeline_id }}Streaming health-signal coverage is below the threshold for {{$labels.pipeline_id}}.{{ else }}Streaming health-signal coverage is below the threshold.{{ end }}'
+          description: A live-video pipeline dropped below 60 percent health-signal coverage over the most recent published hour.
+          runbook_url: https://github.com/Cloud-SPE/livepeer-naap-analytics/blob/main/docs/operations/runtime-validation-and-performance.md
+        labels:
+          severity: degraded
+          datasource: clickhouse
+          component: streaming
+          surface: live-video
+          pipeline_type: streaming
+      - uid: naap_stream_unserved_high
+        title: NaapStreamingUnservedDemandHigh
+        condition: B
+        data:
+          - refId: A
+            datasourceUid: clickhouse_prod
+            relativeTimeRange:
+              from: 7200
+              to: 0
+            model:
+              datasource:
+                type: grafana-clickhouse-datasource
+                uid: clickhouse_prod
+              editorType: sql
+              format: 1
+              intervalMs: 1000
+              maxDataPoints: 43200
+              queryType: sql
+              rawSql: |
+                WITH current_bucket AS (
+                  SELECT toStartOfHour(now()) - INTERVAL 1 HOUR AS window_start
+                )
+                SELECT
+                  gateway_label AS gateway,
+                  pipeline_id,
+                  toFloat64(round(sum(effective_failed_sessions) * 100.0 / nullIf(toFloat64(sum(requested_sessions)), 0), 2)) AS value
+                FROM (
+                  SELECT
+                    ifNull(nullIf(gateway, ''), 'unattributed_gateway') AS gateway_label,
+                    pipeline_id,
+                    requested_sessions,
+                    effective_failed_sessions
+                  FROM naap.api_hourly_streaming_demand
+                  WHERE window_start = (SELECT window_start FROM current_bucket)
+                    AND pipeline_id != ''
+                )
+                GROUP BY gateway_label, pipeline_id
+                HAVING sum(requested_sessions) >= 50
+                   AND sum(effective_failed_sessions) / nullIf(toFloat64(sum(requested_sessions)), 0) > 0.40
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 0
+              to: 0
+            model:
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: $A > 40
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+              type: math
+        dashboardUid: naap-system-health
+        panelId: 24
+        noDataState: OK
+        execErrState: Alerting
+        for: 15m
+        annotations:
+          summary: '{{ if and $labels.gateway $labels.pipeline_id }}Streaming unserved demand is elevated for {{$labels.gateway}} on {{$labels.pipeline_id}}.{{ else if $labels.pipeline_id }}Streaming unserved demand is elevated for {{$labels.pipeline_id}}.{{ else }}Streaming unserved demand is elevated.{{ end }}'
+          description: A gateway and pipeline pair exceeded a 40 percent effective failure rate over the most recent published hour.
+          runbook_url: https://github.com/Cloud-SPE/livepeer-naap-analytics/blob/main/docs/operations/devops-environment-guide.md
+        labels:
+          severity: critical
+          datasource: clickhouse
+          component: streaming
+          surface: live-video
+          pipeline_type: streaming
+      - uid: naap_stream_density_drop
+        title: NaapStreamingDemandDensityCollapse
+        condition: B
+        data:
+          - refId: A
+            datasourceUid: clickhouse_prod
+            relativeTimeRange:
+              from: 172800
+              to: 0
+            model:
+              datasource:
+                type: grafana-clickhouse-datasource
+                uid: clickhouse_prod
+              editorType: sql
+              format: 1
+              intervalMs: 1000
+              maxDataPoints: 43200
+              queryType: sql
+              rawSql: |
+                WITH current_bucket AS (
+                  SELECT toStartOfHour(now()) - INTERVAL 1 HOUR AS window_start
+                ),
+                current_counts AS (
+                  SELECT
+                    pipeline_id,
+                    sum(requested_sessions) AS current_requested
+                  FROM naap.api_hourly_streaming_demand
+                  WHERE window_start = (SELECT window_start FROM current_bucket)
+                    AND pipeline_id != ''
+                  GROUP BY pipeline_id
+                ),
+                historical_counts AS (
+                  SELECT
+                    pipeline_id,
+                    window_start,
+                    sum(requested_sessions) AS hourly_requested
+                  FROM naap.api_hourly_streaming_demand
+                  WHERE window_start >= (SELECT window_start FROM current_bucket) - INTERVAL 24 HOUR
+                    AND window_start < (SELECT window_start FROM current_bucket)
+                    AND pipeline_id != ''
+                  GROUP BY pipeline_id, window_start
+                ),
+                baselines AS (
+                  SELECT
+                    pipeline_id,
+                    quantileExact(0.5)(hourly_requested) AS baseline_requested
+                  FROM historical_counts
+                  GROUP BY pipeline_id
+                )
+                SELECT
+                  pipeline_id,
+                  toFloat64(round(ifNull(c.current_requested, 0) * 100.0 / nullIf(toFloat64(b.baseline_requested), 0), 2)) AS value
+                FROM baselines b
+                LEFT JOIN current_counts c ON c.pipeline_id = b.pipeline_id
+                WHERE b.baseline_requested >= 50
+                  AND ifNull(c.current_requested, 0) < (b.baseline_requested * 0.2)
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 0
+              to: 0
+            model:
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: $A < 20
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+              type: math
+        dashboardUid: naap-system-health
+        panelId: 25
+        noDataState: OK
+        execErrState: Alerting
+        for: 30m
+        annotations:
+          summary: '{{ if $labels.pipeline_id }}Streaming demand density has collapsed for {{$labels.pipeline_id}}.{{ else }}Streaming demand density has collapsed for a recent hourly slice.{{ end }}'
+          description: A live-video pipeline fell below 20 percent of its trailing 24 hour median hourly requested-session volume.
+          runbook_url: https://github.com/Cloud-SPE/livepeer-naap-analytics/blob/main/docs/operations/devops-environment-guide.md
+        labels:
+          severity: degraded
+          datasource: clickhouse
+          component: streaming
+          surface: live-video
+          pipeline_type: streaming

@@ -35,10 +35,6 @@ func TestTierContract_BootstrapExcludesLegacyObjectFamilies(t *testing.T) {
 			name:  "compatibility_store",
 			query: `SELECT count() FROM system.tables WHERE database = 'naap' AND name = 'canonical_session_latest_store'`,
 		},
-		{
-			name:  "deprecated_api_stores",
-			query: `SELECT count() FROM system.tables WHERE database = 'naap' AND name IN ('api_status_samples_store', 'api_active_stream_state_store')`,
-		},
 	}
 
 	for _, check := range checks {

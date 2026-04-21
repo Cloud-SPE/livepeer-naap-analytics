@@ -5,7 +5,7 @@
 | **Status** | Active |
 | **Effective date** | 2026-04-02 |
 | **Ticket** | TASK-17 / [#296](https://github.com/livepeer/livepeer-naap-analytics-deployment/issues/296) |
-| **Last reviewed** | 2026-04-02 |
+| **Last reviewed** | 2026-04-09 |
 
 Related: [`deploy/set_ufw_rules.sh`](../../deploy/set_ufw_rules.sh) · [`deploy/ubuntu-setup.sh`](../../deploy/ubuntu-setup.sh) · [`deploy/ubuntu-file-modifications.txt`](../../deploy/ubuntu-file-modifications.txt)
 
@@ -13,7 +13,7 @@ Related: [`deploy/set_ufw_rules.sh`](../../deploy/set_ufw_rules.sh) · [`deploy/
 
 ## Overview
 
-This runbook documents the current security posture of the NAAP analytics infrastructure, identifies the remaining open action items, and provides the exact commands to close them. It covers both infra2 (Kafka, Traefik, Kafka UI, MirrorMaker2) and infra1 (ClickHouse, API, Grafana, Prometheus).
+This runbook documents the current security posture of the NaaP analytics infrastructure, identifies the remaining open action items, and provides the exact commands to close them. It covers both infra2 (Kafka, Traefik, Kafka UI, MirrorMaker2) and infra1 (ClickHouse, API, Grafana, Prometheus).
 
 ---
 
@@ -167,6 +167,7 @@ Run after applying all three action items:
 [ ] Prometheus Targets — metrics-infra2 target shows UP
 [ ] Kafka external — connecting client can reach kafka.cloudspe.com:9092
 [ ] ClickHouse — docker exec query returns 1 (port 8123 rule removal only)
-[ ] API — GET /health (or equivalent) returns 200
+[ ] API — GET /healthz returns 200
 [ ] Grafana — dashboards loading, Kafka and ClickHouse metrics visible
+[ ] Grafana — provisioned Discord and Telegram alert contact points load without missing-secret errors
 ```

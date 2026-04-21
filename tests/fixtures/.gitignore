@@ -1,0 +1,4 @@
+# Golden fixture: committed manifest only; the raw events archive is regenerable via scripts/fetch-golden-fixture.sh
+raw_events_golden.ndjson
+raw_events_golden.ndjson.zst
+*.tmp

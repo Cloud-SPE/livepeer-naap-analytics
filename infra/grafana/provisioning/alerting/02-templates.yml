@@ -1,0 +1,81 @@
+apiVersion: 1
+
+templates:
+  - orgId: 1
+    name: naap_alerting
+    template: |
+      {{ define "naap.target.label" -}}
+      {{- if .Labels.instance -}}
+      {{ .Labels.instance }}{{ with .Labels.job }} (job={{ . }}){{ end }}
+      {{- else if .Labels.consumergroup -}}
+      {{ .Labels.consumergroup }}{{ with .Labels.topic }} (topic={{ . }}){{ end }}
+      {{- else if and .Labels.gateway .Labels.pipeline_id -}}
+      gateway={{ .Labels.gateway }}, pipeline={{ .Labels.pipeline_id }}
+      {{- else if .Labels.pipeline_id -}}
+      pipeline={{ .Labels.pipeline_id }}{{ with .Labels.job_type }}, job_type={{ . }}{{ end }}
+      {{- else if .Labels.job_type -}}
+      job_type={{ .Labels.job_type }}
+      {{- else if .Labels.gateway -}}
+      gateway={{ .Labels.gateway }}
+      {{- else if .Labels.orchestrator_uri -}}
+      orchestrator={{ .Labels.orchestrator_uri }}
+      {{- end }}
+      {{- end }}
+
+      {{ define "naap.target.fallback" -}}
+      {{- if eq .CommonLabels.component "api" -}}API service aggregate
+      {{- else if eq .CommonLabels.component "clickhouse" -}}ClickHouse ingest path
+      {{- else if eq .CommonLabels.component "resolver" -}}resolver runtime
+      {{- else if eq .CommonLabels.component "kafka" -}}ClickHouse Kafka consumer
+      {{- else if eq .CommonLabels.component "host" -}}monitored host
+      {{- else if eq .CommonLabels.component "observability" -}}scrape target
+      {{- else if eq .CommonLabels.component "request-response" -}}request-response pipeline aggregate
+      {{- else if eq .CommonLabels.component "streaming" -}}live-video pipeline aggregate
+      {{- else -}}{{ .CommonLabels.component }}
+      {{- end }}
+      {{- end }}
+
+      {{ define "naap.default.title" -}}
+      [NaaP][{{ .CommonLabels.severity }}] {{ with .CommonAnnotations.summary }}{{ . }}{{ else }}{{ .CommonLabels.alertname }}{{ end }}
+      {{- end }}
+
+      {{ define "naap.default.message" -}}
+      {{- with .CommonAnnotations.summary }}
+      {{ . }}
+      {{- else }}
+      {{ .CommonLabels.alertname }} is {{ .Status }}.
+      {{- end }}
+      Status: {{ .Status }}
+      Severity: {{ .CommonLabels.severity }}
+      {{- if and .Alerts (or (index .Alerts 0).Labels.instance (index .Alerts 0).Labels.consumergroup (index .Alerts 0).Labels.pipeline_id (index .Alerts 0).Labels.job_type (index .Alerts 0).Labels.gateway (index .Alerts 0).Labels.orchestrator_uri) }}
+      Target: {{ template "naap.target.label" (index .Alerts 0) }}
+      {{- else }}
+      Target: {{ template "naap.target.fallback" . }}
+      {{- end }}
+      {{- with .CommonLabels.datasource }}
+      Source: {{ . }}
+      {{- end }}
+      {{- if and .CommonLabels.surface (ne .CommonLabels.surface "system") }}
+      Surface: {{ .CommonLabels.surface }}
+      {{- end }}
+      {{- if and .CommonLabels.pipeline_type (ne .CommonLabels.pipeline_type "system") }}
+      Pipeline Type: {{ .CommonLabels.pipeline_type }}
+      {{- end }}
+      {{- if and .Alerts (or (index .Alerts 0).Labels.instance (index .Alerts 0).Labels.consumergroup (index .Alerts 0).Labels.pipeline_id (index .Alerts 0).Labels.job_type (index .Alerts 0).Labels.gateway (index .Alerts 0).Labels.orchestrator_uri) }}
+      Observed:
+      {{- range .Alerts }}
+      - {{ template "naap.target.label" . }}{{ with .ValueString }} | {{ . }}{{ end }}
+      {{- end }}
+      {{- end }}
+      {{- if .Alerts }}
+      {{- with (index .Alerts 0).GeneratorURL }}
+      Grafana: {{ . }}
+      {{- end }}
+      {{- end }}
+      {{- with .CommonAnnotations.description }}
+      Details: {{ . }}
+      {{- end }}
+      {{- with .CommonAnnotations.runbook_url }}
+      Runbook: {{ . }}
+      {{- end }}
+      {{- end }}

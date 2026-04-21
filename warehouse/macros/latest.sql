@@ -18,3 +18,25 @@
         {% endfor %}
 )
 {%- endmacro %}
+
+{% macro latest_rows_cte(cte_name, source_relation, key_columns, order_columns) -%}
+{{ cte_name }} as (
+    select *
+    from (
+        select
+            *,
+            row_number() over (
+                partition by
+                    {% for column in key_columns -%}
+                    {{ column }}{{ "," if not loop.last }}
+                    {% endfor %}
+                order by
+                    {% for column in order_columns -%}
+                    {{ column }}{{ "," if not loop.last }}
+                    {% endfor %}
+            ) as _latest_row_number
+        from {{ source_relation }}
+    )
+    where _latest_row_number = 1
+)
+{%- endmacro %}

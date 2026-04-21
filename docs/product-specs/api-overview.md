@@ -8,53 +8,92 @@
 
 ## Problem
 
-External developers and partners need a single, well-documented HTTP API to query
-analytics data derived from the Livepeer network's Kafka event stream.
+External developers and partners need one stable HTTP API for dashboard,
+streaming, request, and discovery analytics derived from the Livepeer network's
+semantic serving layer.
 
 ## Solution
 
-A versioned REST/JSON API served by the Go `api/` service, backed by ClickHouse
-materialized views. No authentication required. IP-based rate limiting for abuse
-protection.
+A versioned REST/JSON API served by the Go `api/` service and backed by the
+published `api_*` ClickHouse contracts. The public `v1` surface is read-only
+and uses RFC 7807 errors plus cursor envelopes on paginated routes.
 
 ## Base URL
 
-```
-https://analytics.livepeer.cloud/v1/
+```text
+https://naap-api.livepeer.cloud
 ```
 
 ## Cross-cutting requirements
 
 | ID | Requirement | Acceptance criteria |
 |----|-------------|-------------------|
-| API-001 | All endpoints respond within 1 second at P99 under normal load | Load test confirms P99 ≤ 1000ms at 60 req/min per IP |
-| API-002 | Rate limiting: 60 req/min, 1000 req/hour per IP | `HTTP 429` returned with `Retry-After` header when exceeded |
-| API-003 | All responses include `meta.generated_at`, `meta.query_time_ms`, `meta.org` | Integration test validates meta fields on every endpoint |
-| API-004 | All endpoints accept `?org=daydream\|cloudspe` filter; omit for all orgs | Test: filtered responses contain only events from that org's Kafka topic |
-| API-005 | All time-range params accept ISO 8601 or Unix epoch ms | Invalid values return `HTTP 400` with RFC 7807 error body |
-| API-006 | HTTPS only; HTTP redirects to HTTPS | HTTP → HTTPS redirect verified in integration test |
-| API-007 | API version in URL path (`/v1/`); breaking changes use `/v2/` | Breaking change policy documented in `docs/design-docs/adr-002-api-design.md` |
-| API-008 | List endpoints use cursor-based pagination with `?cursor` and `?limit` | Test confirms stable pagination across inserts |
-| API-009 | Error responses use RFC 7807 Problem Details format | All 4xx/5xx responses validated against schema |
-| API-010 | Rate limit config (req/min, req/hour) is env-var driven, no code change required | Verified by changing env var and re-running rate limit test |
+| API-001 | The public contract is served from `/v1/*` plus `/healthz` | OpenAPI, router, and docs agree on the live route set |
+| API-002 | Cursor routes return `{data, pagination, meta}` | Runtime tests validate `data`, `pagination`, and `meta` on every paginated route |
+| API-003 | Non-paginated routes return the payload directly | Handler tests validate arrays and objects for non-cursor routes |
+| API-004 | Cursor routes accept only `limit` and `cursor` for pagination | Legacy `offset`, `page`, and `page_size` are rejected with `400` |
+| API-005 | Time windows use RFC 3339 `start` / `end` or endpoint-specific `window` | Invalid values return `400` with RFC 7807 problem JSON |
+| API-006 | Omitted time windows default to the last 24 hours unless the route documents otherwise | Repo and handler tests cover the default-window behavior |
+| API-007 | Public metrics are derived from published `api_*` contracts | Validation tests prevent handler-side aggregate reconstruction from lower layers |
+| API-008 | Discover `caps` uses OR semantics | OpenAPI text and implementation agree on OR filtering |
+| API-009 | Error responses use RFC 7807 Problem Details | Runtime tests validate content type and status behavior |
+| API-010 | Breaking changes require a new API version | The `v1` OpenAPI file is treated as the source of truth for the served surface |
 
-## Endpoint map (active endpoints)
+## Endpoint map
 
-| Domain | Endpoint | Spec |
-|--------|---------|------|
-| Network state | `GET /v1/net/orchestrators` | `r1-network-state.md` |
-| Network state | `GET /v1/net/models` | `r1-network-state.md` |
-| Network state | `GET /v1/net/capacity` | `r1-network-state.md` |
-| Performance | `GET /v1/perf/by-model` | `r3-performance-quality.md` |
-| SLA | `GET /v1/sla/compliance` | Built-in |
-| Network demand | `GET /v1/network/demand` | Built-in |
-| GPU | `GET /v1/gpu/network-demand` | Built-in |
-| GPU | `GET /v1/gpu/metrics` | Built-in |
-| Dashboard | `GET /v1/dashboard/kpi` | Built-in |
-| Dashboard | `GET /v1/dashboard/pipelines` | Built-in |
-| Dashboard | `GET /v1/dashboard/orchestrators` | Built-in |
-| Dashboard | `GET /v1/dashboard/gpu-capacity` | Built-in |
-| Dashboard | `GET /v1/dashboard/pipeline-catalog` | Built-in |
-| Dashboard | `GET /v1/dashboard/pricing` | Built-in |
-| Dashboard | `GET /v1/dashboard/job-feed` | Built-in |
-| Health | `GET /healthz` | Built-in, no spec needed |
+| Domain | Endpoint |
+|--------|----------|
+| Dashboard | `GET /v1/dashboard/kpi` |
+| Dashboard | `GET /v1/dashboard/pipelines` |
+| Dashboard | `GET /v1/dashboard/orchestrators` |
+| Dashboard | `GET /v1/dashboard/gpu-capacity` |
+| Dashboard | `GET /v1/dashboard/pipeline-catalog` |
+| Dashboard | `GET /v1/dashboard/pricing` |
+| Dashboard | `GET /v1/dashboard/job-feed` |
+| Streaming | `GET /v1/streaming/models` |
+| Streaming | `GET /v1/streaming/orchestrators` |
+| Streaming | `GET /v1/streaming/sla` |
+| Streaming | `GET /v1/streaming/demand` |
+| Streaming | `GET /v1/streaming/gpu-metrics` |
+| Requests | `GET /v1/requests/models` |
+| Requests | `GET /v1/requests/orchestrators` |
+| Requests | `GET /v1/requests/ai-batch/summary` |
+| Requests | `GET /v1/requests/ai-batch/jobs` |
+| Requests | `GET /v1/requests/ai-batch/llm-summary` |
+| Requests | `GET /v1/requests/byoc/summary` |
+| Requests | `GET /v1/requests/byoc/jobs` |
+| Requests | `GET /v1/requests/byoc/workers` |
+| Requests | `GET /v1/requests/byoc/auth` |
+| Discover | `GET /v1/discover/orchestrators` |
+| Health | `GET /healthz` |
+
+## Cursor Pagination Contract
+
+The cursor-paginated `v1` routes share this envelope:
+
+```json
+{
+  "data": [],
+  "pagination": {
+    "next_cursor": "opaque-string",
+    "has_more": true,
+    "page_size": 50
+  },
+  "meta": {
+    "generated_at": "2026-04-15T12:00:00Z",
+    "request_id": "optional-request-id"
+  }
+}
+```
+
+The paginated routes are:
+
+- `GET /v1/streaming/sla`
+- `GET /v1/streaming/demand`
+- `GET /v1/streaming/gpu-metrics`
+- `GET /v1/requests/ai-batch/jobs`
+- `GET /v1/requests/byoc/jobs`
+
+Clients request the first page with `?limit=<n>` and continue with
+`?limit=<n>&cursor=<pagination.next_cursor>`. Legacy `offset`, `page`, and
+`page_size` are rejected on those routes.

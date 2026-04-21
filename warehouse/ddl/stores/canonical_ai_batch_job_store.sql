@@ -1,0 +1,7 @@
+-- Canonical DDL for naap.canonical_ai_batch_job_store.
+-- Source of truth: this file. The resolver and MVs write rows;
+-- this declaration governs the physical schema.
+-- Apply with scripts/apply-store-ddl.sh; drift is caught by
+-- `make lint-store-ddl`.
+
+CREATE TABLE IF NOT EXISTS naap.canonical_ai_batch_job_store (`request_id` String, `org` LowCardinality(String), `gateway` String, `pipeline` LowCardinality(String), `model_id` String, `received_at` Nullable(DateTime64(3, 'UTC')), `completed_at` DateTime64(3, 'UTC'), `success` Nullable(UInt8), `tries` UInt16, `duration_ms` Int64, `orch_url` String, `orch_url_norm` String, `selection_outcome` LowCardinality(String) DEFAULT 'unknown', `latency_score` Float64, `price_per_unit` Float64, `error_type` String, `error` String, `attribution_status` LowCardinality(String), `attribution_reason` LowCardinality(String), `attribution_method` LowCardinality(String), `attribution_confidence` LowCardinality(String), `attributed_orch_uri` Nullable(String), `capability_version_id` Nullable(String), `attribution_snapshot_ts` Nullable(DateTime64(3, 'UTC')), `gpu_id` Nullable(String), `gpu_model_name` Nullable(String), `gpu_memory_bytes_total` Nullable(UInt64), `attributed_model` Nullable(String), `resolver_run_id` String DEFAULT '', `materialized_at` DateTime64(3, 'UTC') DEFAULT now64()) ENGINE = ReplacingMergeTree(materialized_at) PARTITION BY (org, toYYYYMM(completed_at)) ORDER BY (org, request_id, completed_at) TTL toDateTime(completed_at) + toIntervalDay(90) SETTINGS index_granularity = 8192;

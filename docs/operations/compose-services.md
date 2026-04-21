@@ -13,10 +13,9 @@ These services are started by [`make up`](../../Makefile).
 
 | Service | Type | Responsibility |
 | --- | --- | --- |
-| `zookeeper` | long-running | Kafka coordination for the local single-broker stack. |
-| `kafka` | long-running | Local event source for `network_events` and `streaming_events`. |
+| `kafka` | long-running | Local Kafka broker in single-node KRaft mode for `network_events` and `streaming_events`. |
 | `clickhouse` | long-running | Physical ingest, storage, materialized views, resolver state, and serving-store tables. |
-| `warehouse-init` | one-shot init | Publishes dbt semantic `canonical_*` and `api_*` views into ClickHouse after startup. This is the Compose equivalent of an init container. |
+| `warehouse-init` | one-shot init | Publishes dbt semantic `canonical_*` and public `api_*` views (`api_hourly_*`, `api_current_*`, `api_fact_*`) into ClickHouse after startup. This is the Compose equivalent of an init container. |
 | `resolver` | long-running | Repairs dirty windows, publishes current state, and maintains serving stores. |
 | `api` | long-running | Read-only REST API plus enrichment worker. Starts after `warehouse-init` succeeds so semantic views exist on fresh volumes. |
 | `prometheus` | long-running | Scrapes API, resolver, ClickHouse, Kafka exporter, cAdvisor, and node-exporter metrics. |
@@ -66,6 +65,10 @@ docker compose --profile validation up -d validation-clickhouse
 docker compose --profile validation run --rm warehouse-validation
 make bootstrap-extract
 ```
+
+`make bootstrap-extract` refreshes the generated schema inventory from the
+checked-in bootstrap SQL. It does not recreate `v1.sql` from the validation
+database.
 
 ## What Is Not Always-On
 

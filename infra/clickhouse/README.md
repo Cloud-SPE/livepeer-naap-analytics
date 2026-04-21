@@ -5,7 +5,7 @@ engine and stores the physical schema used by the analytics stack. Semantic
 tiers still center on `raw_*`, `normalized_*`, `canonical_*`, `operational_*`,
 and `api_*`, but the supported bootstrap also includes infrastructure/runtime
 objects such as `accepted_raw_events`, `ignored_raw_events`, `kafka_*`,
-`resolver_*`, `agg_*`, metadata tables, and change/audit tables.
+`resolver_*`, `agg_*`, metadata tables, and materialized views.
 
 The current fresh-volume bootstrap artifact is [`bootstrap/v1.sql`](bootstrap/v1.sql).
 The generated inventory for that bootstrap lives at [`../../docs/generated/schema.md`](../../docs/generated/schema.md).
@@ -38,20 +38,23 @@ Forward migrations are managed by the repo-native `ch-migrate` runner, which
 records checksums in `naap.schema_migrations` only when forward migrations are
 actually present and supports `up`, `bootstrap`, `status`, and `validate`.
 
-Regenerate the bootstrap artifact from a clean bootstrap-backed validation stack with:
+Refresh the generated schema inventory from the checked-in bootstrap with:
 
 ```bash
 make bootstrap-extract
 ```
+
+Refreshing `bootstrap/v1.sql` itself from a clean migrated ClickHouse instance
+remains a separate operator step.
 
 ### Table population strategies
 
 | Strategy | Tables | Trigger |
 |----------|--------|---------|
 | **MV-populated** | `accepted_raw_events`, `ignored_raw_events`, `normalized_*`, event-driven aggregates | Fires synchronously as Kafka rows are routed by the ingest materialized views |
-| **Worker-populated** | `orch_metadata`, `gateway_metadata`, `agg_gpu_inventory` | API enrichment worker polls every 5m and batch-inserts |
+| **Worker-populated** | `orch_metadata`, `gateway_metadata` | API enrichment worker polls every 5m and batch-inserts |
 
-Worker-populated tables are applied manually on existing volumes — the bootstrap and any future forward migrations only create the table schema. The enrichment worker will populate them on next startup.
+Worker-populated tables are applied manually on existing volumes — the bootstrap and any future forward migrations only create the table schema. The enrichment worker will populate them on next startup. Observed capability snapshots, offers, pricing, and GPU inventory are derived natively from `normalized_network_capabilities` through MV-populated canonical capability inventory stores and are served through observed-window capability views.
 
 ### Tier contract
 
@@ -65,8 +68,17 @@ This contract governs semantic data flow, not physical naming uniformity. The
 generated bootstrap in [`../../docs/generated/schema.md`](../../docs/generated/schema.md)
 is the source of truth for the supported physical object inventory.
 
+Temporal suffixes add semantics on top of the tier prefix:
+
+- `*_current` / `*_latest` — latest-state entities or helpers only
+- `*_inventory` — observed historical/windowed inventory
+- `*_store` — physical ownership/persistence, not semantic truth by itself
+
 `canonical_*` is the only valid source for downstream derivations. `api_*` is a
 serving layer and must not be used as truth for new warehouse logic.
+
+Runtime/infrastructure families such as `resolver_*`, `agg_*`, `mv_*`, `kafka_*`,
+and metadata tables are intentionally outside the semantic tier prefixes.
 
 Resolver/store rule:
 
@@ -104,7 +116,7 @@ clickhouse-client --query "SELECT count(), ignore_reason FROM naap.ignored_raw_e
 
 # Check canonical/serving tables populated:
 clickhouse-client --query "SELECT count() FROM naap.canonical_session_current_store FINAL"
-clickhouse-client --query "SELECT sum(requested_sessions) FROM naap.api_network_demand_by_org_store FINAL"
+clickhouse-client --query "SELECT sum(requested_sessions) FROM naap.canonical_streaming_demand_hourly_store FINAL"
 ```
 
 ## Changing the Kafka broker

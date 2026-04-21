@@ -70,11 +70,11 @@ func TestTierContract_CanonicalAndAPIViewsMirrorServingSurfaces(t *testing.T) {
 	if got := h.queryString(t, `SELECT attribution_status FROM naap.canonical_session_current WHERE canonical_session_key = ?`, key); got != "resolved" {
 		t.Fatalf("canonical_session_current attribution_status = %q, want resolved", got)
 	}
-	if got := h.queryInt(t, `SELECT count() FROM naap.api_status_samples WHERE canonical_session_key = ?`, key); got != 1 {
-		t.Fatalf("api_status_samples count = %d, want 1", got)
+	if got := h.queryInt(t, `SELECT count() FROM naap.canonical_status_samples_recent WHERE canonical_session_key = ?`, key); got != 1 {
+		t.Fatalf("canonical_status_samples_recent count = %d, want 1", got)
 	}
-	if got := h.queryInt(t, `SELECT count() FROM naap.api_active_stream_state WHERE org = ? AND stream_id = ? AND request_id = ?`, h.org, streamID, requestID); got != 1 {
-		t.Fatalf("api_active_stream_state count = %d, want 1", got)
+	if got := h.queryInt(t, `SELECT count() FROM naap.api_current_active_stream_state WHERE org = ? AND stream_id = ? AND request_id = ?`, h.org, streamID, requestID); got != 1 {
+		t.Fatalf("api_current_active_stream_state count = %d, want 1", got)
 	}
 }
 
@@ -106,8 +106,8 @@ func TestTierContract_TailFilteringRemainsVisibleThroughAPISurfaces(t *testing.T
 	if got := h.queryInt(t, `SELECT toUInt64(is_terminal_tail_artifact) FROM naap.canonical_status_hours WHERE canonical_session_key = ? AND hour = ?`, key, baseHour.Add(time.Hour)); got != 1 {
 		t.Fatalf("canonical_status_hours terminal tail flag = %d, want 1", got)
 	}
-	if got := h.queryInt(t, `SELECT count() FROM naap.api_orchestrator_reliability_hourly WHERE org = ?`, h.org); got != 1 {
-		t.Fatalf("api_orchestrator_reliability_hourly count = %d, want 1", got)
+	if got := h.queryInt(t, `SELECT count() FROM naap.api_hourly_streaming_sla WHERE org = ?`, h.org); got != 1 {
+		t.Fatalf("api_hourly_streaming_sla count = %d, want 1", got)
 	}
 }
 
@@ -133,10 +133,57 @@ func TestTierContract_APIActiveStreamStateExcludesBlankStreamIDs(t *testing.T) {
 		t.Fatalf("insert canonical_active_stream_state_latest_store: %v", err)
 	}
 
-	if got := h.queryInt(t, `SELECT count() FROM naap.api_active_stream_state WHERE org = ?`, h.org); got != 1 {
-		t.Fatalf("api_active_stream_state count = %d, want 1", got)
+	if got := h.queryInt(t, `SELECT count() FROM naap.api_current_active_stream_state WHERE org = ?`, h.org); got != 1 {
+		t.Fatalf("api_current_active_stream_state count = %d, want 1", got)
 	}
-	if got := h.queryInt(t, `SELECT count() FROM naap.api_active_stream_state WHERE org = ? AND stream_id = ''`, h.org); got != 0 {
-		t.Fatalf("api_active_stream_state blank stream count = %d, want 0", got)
+	if got := h.queryInt(t, `SELECT count() FROM naap.api_current_active_stream_state WHERE org = ? AND stream_id = ''`, h.org); got != 0 {
+		t.Fatalf("api_current_active_stream_state blank stream count = %d, want 0", got)
+	}
+}
+
+func TestTierContract_APIActiveStreamStateDoesNotJoinSessionStateAcrossOrgs(t *testing.T) {
+	h := newHarness(t)
+	ts := time.Now().UTC()
+	otherOrg := h.org + "_other"
+	sessionKey := "shared-session-key"
+
+	if err := h.conn.Exec(context.Background(), `
+		INSERT INTO naap.canonical_active_stream_state_latest_store
+		(
+			canonical_session_key, event_id, sample_ts, org, stream_id, request_id, gateway,
+			pipeline, model_id, orch_address, attribution_status, attribution_reason, state,
+			output_fps, input_fps, e2e_latency_ms, started_at, last_seen, completed,
+			refresh_run_id, artifact_checksum, refreshed_at
+		)
+		VALUES
+		(?, ?, ?, ?, ?, ?, 'gw-a', 'text-to-image', NULL, '0xaaa', 'resolved', 'ok', 'ONLINE', 12.0, 0.0, NULL, NULL, ?, 0, 'test-run', 'validation', ?)
+	`,
+		sessionKey, uid("e"), ts, h.org, "stream-ok", "req-ok", ts, ts,
+	); err != nil {
+		t.Fatalf("insert canonical_active_stream_state_latest_store: %v", err)
+	}
+
+	if err := h.conn.Exec(context.Background(), `
+		INSERT INTO naap.canonical_session_current_store
+		(
+			canonical_session_key, org, gpu_id, last_seen, startup_outcome,
+			attribution_reason, attribution_status, attributed_orch_address, materialized_at
+		)
+		VALUES
+		(?, ?, 'gpu-foreign', ?, 'success', 'ok', 'resolved', '0xforeign', ?)
+	`,
+		sessionKey, otherOrg, ts, ts,
+	); err != nil {
+		t.Fatalf("insert canonical_session_current_store: %v", err)
+	}
+
+	if got := h.queryInt(t, `SELECT count() FROM naap.api_current_active_stream_state WHERE org = ? AND canonical_session_key = ?`, h.org, sessionKey); got != 1 {
+		t.Fatalf("api_current_active_stream_state count = %d, want 1", got)
+	}
+	if got := h.queryString(t, `SELECT ifNull(gpu_id, '') FROM naap.api_current_active_stream_state WHERE org = ? AND canonical_session_key = ?`, h.org, sessionKey); got != "" {
+		t.Fatalf("api_current_active_stream_state gpu_id = %q, want empty", got)
+	}
+	if got := h.queryString(t, `SELECT ifNull(attributed_orch_address, '') FROM naap.api_current_active_stream_state WHERE org = ? AND canonical_session_key = ?`, h.org, sessionKey); got != "" {
+		t.Fatalf("api_current_active_stream_state attributed_orch_address = %q, want empty", got)
 	}
 }

@@ -5,13 +5,13 @@
 | **Status** | Active |
 | **Effective date** | 2026-04-02 |
 | **Ticket** | TASK-06 / [#285](https://github.com/livepeer/livepeer-naap-analytics-deployment/issues/285) |
-| **Last reviewed** | 2026-04-02 |
+| **Last reviewed** | 2026-04-20 |
 
 ---
 
 ## Overview
 
-This document is the single source of truth for all data retention decisions in the NAAP analytics stack. It covers Kafka topic retention windows, ClickHouse table TTLs, and the relationship between the two tiers.
+This document is the single source of truth for all data retention decisions in the NaaP analytics stack. It covers Kafka topic retention windows, ClickHouse table TTLs, and the relationship between the two tiers.
 
 For the architectural rationale behind the Kafka + ClickHouse engine choice, see [`../design-docs/adr-001-storage-architecture.md`](../design-docs/adr-001-storage-architecture.md). For the canonical SQL TTL statements, see [`../../infra/clickhouse/retention.sql`](../../infra/clickhouse/retention.sql).
 
@@ -31,21 +31,20 @@ For the architectural rationale behind the Kafka + ClickHouse engine choice, see
 
 | Topic | Partitions | Retention | Rationale |
 |---|---|---|---|
-| `naap.events.raw` | 6 | **7 days** (604,800,000 ms) | Primary raw event stream. 7 days covers the operational replay window for short-term re-consumption. Events are durably stored in ClickHouse for 90 days; Kafka retention is intentionally short because ClickHouse is the authoritative archive. |
-| `naap.analytics.aggregated` | 3 | **30 days** (2,592,000,000 ms) | Aggregates produced by the pipeline. Consumers (API repo layer) have a 30-day catch-up window. |
-| `naap.alerts` | 1 | **7 days** (604,800,000 ms) | Threshold breach alerts. Alerts are time-sensitive; 7 days is sufficient for incident review. |
-| Broker default | — | **7 days** (`KAFKA_LOG_RETENTION_HOURS=168`) | Applies to any auto-created topics not listed above. |
+| `network_events` | 6 | **7 days** (604,800,000 ms) | Primary raw network-event stream for the daydream org. |
+| `streaming_events` | 6 | **7 days** (604,800,000 ms) | Primary raw streaming-event stream for the cloudspe org. |
+| Broker default | — | **7 days** (`KAFKA_LOG_RETENTION_HOURS=168`) | Applies to auto-created topics that are not explicitly overridden. |
 
-Configuration source: `infra/kafka/topics.yaml`. Broker default: `deploy/infra2/kafka/stack.yml`.
+Current broker default source: `deploy/infra2/kafka/stack.yml`.
 
 ### Replay within the Kafka window
 
-With `KAFKA_AUTO_OFFSET_RESET=earliest`, ClickHouse consumer groups can re-consume from up to 30 days ago by resetting their offsets. Consumer groups:
+With `KAFKA_AUTO_OFFSET_RESET=earliest`, ClickHouse consumer groups can re-consume from up to 7 days ago by resetting their offsets. Consumer groups:
 
 | Consumer group | Topic |
 |---|---|
-| `clickhouse-naap-network` | `naap.events.raw` (network events) |
-| `clickhouse-naap-streaming` | `naap.events.raw` (streaming events) |
+| `clickhouse-naap-network` | `network_events` |
+| `clickhouse-naap-streaming` | `streaming_events` |
 
 Offset reset procedure: stop the ClickHouse Kafka engine table, reset the consumer group offset using the Kafka CLI, then restart. See `infra/clickhouse/README.md` for operational steps.
 
@@ -66,28 +65,40 @@ TTL expressions are applied at the table level in ClickHouse and enforced asynch
 
 Queryable diagnostic view: `naap.ignored_raw_event_diagnostics`.
 
+### Tier 1b — Normalized event tables — AI Batch / BYOC (90 days)
+
+| Table | TTL column | TTL |
+|---|---|---|
+| `naap.normalized_ai_batch_job` | `event_ts` | 90 days |
+| `naap.normalized_ai_llm_request` | `event_ts` | 90 days |
+| `naap.normalized_byoc_job` | `event_ts` | 90 days |
+| `naap.normalized_byoc_auth` | `event_ts` | 90 days |
+| `naap.normalized_worker_lifecycle` | `event_ts` | 90 days |
+| `naap.normalized_byoc_payment` | `event_ts` | 90 days |
+
+These tables store all accepted AI batch, BYOC, and payment events after normalization. The 90-day TTL matches `accepted_raw_events` so that canonical dbt models can always be recomputed from normalized tables within the same audit window. TTL statements are in `infra/clickhouse/retention.sql`.
+
 ### Tier 2 — Aggregate samples (30 days)
 
 | Table | TTL column | TTL |
 |---|---|---|
 | `naap.agg_stream_status_samples` | `sample_ts` | 30 days |
 | `naap.resolver_dirty_partitions` | `event_date` | 30 days |
+| `naap.resolver_dirty_windows` | `window_start` | 30 days |
+| `naap.resolver_repair_requests` | `created_at` | 30 days |
 
-Retention matches the `naap.analytics.aggregated` Kafka topic window.
+This tier is intentionally longer-lived than Kafka replay. These tables support
+validation, debugging, and bounded forensic review after the 7-day Kafka window
+has expired but before the 90-day raw-event TTL boundary.
 
 ### Tier 3 — Entity metadata / cache (7 days)
 
 | Table | TTL column | TTL |
 |---|---|---|
-| `naap.agg_gpu_inventory` | `last_seen` | 7 days |
 | `naap.gateway_metadata` | `updated_at` | 7 days |
 | `naap.orch_metadata` | `updated_at` | 7 days |
 | `naap.resolver_window_claims` | `created_at` | 7 days |
-| `naap.selection_attribution_changes` | `created_at` | 7 days |
-| `naap.session_current_changes` | `created_at` | 7 days |
-| `naap.status_hour_changes` | `created_at` | 7 days |
-
-These tables are refreshed continuously by the resolver and ingest pipeline. Entries older than 7 days have no operational value. Long-term history for change events is available via `accepted_raw_events`.
+These tables are refreshed continuously by metadata polling or resolver activity. Entries older than 7 days have no operational value. Long-term history for capability-derived GPU inventory remains available via retained raw events.
 
 ### Tier 4 — Resolver working tables (1–2 days)
 
@@ -103,20 +114,25 @@ Ephemeral per-query scratch tables. Short TTLs prevent accumulation of stale wor
 
 ### No TTL — Unbounded growth (known gap)
 
-The following tables currently have no TTL and will grow indefinitely:
+The current no-TTL gap is the resolver-published serving and canonical store
+family, not the retired pre-refactor tables.
 
-| Table | Notes |
-|---|---|
-| `naap.agg_orch_state_hourly` | Hourly orchestrator aggregates |
-| `naap.agg_stream_state_hourly` | Hourly stream aggregates |
-| `naap.orch_current_store` | Resolver-published orchestrator current state |
-| `naap.session_current_store` | Resolver-published session current state |
-| `naap.canonical_orch_state` | dbt-published semantic view |
-| `naap.canonical_stream_state` | dbt-published semantic view |
-| `naap.api_orch_state_store` | API serving table |
-| `naap.api_stream_state_store` | API serving table |
+Representative examples:
 
-A TTL of 90 days (aligning with raw event retention) is the candidate for hourly aggregates and current-store tables. Applying a TTL to `api_*_store` and `canonical_*_store` tables requires a separate decision based on API consumer requirements and the downstream query window. See [Known Gaps](#known-gaps-and-future-work).
+- `naap.api_current_capability_store`
+- `naap.api_current_gpu_inventory_store`
+- `naap.api_current_orchestrator_store`
+- `naap.api_hourly_byoc_auth_store`
+- `naap.api_hourly_byoc_payments_store`
+- `naap.api_hourly_request_demand_store`
+- `naap.api_hourly_streaming_sla_store`
+- `naap.canonical_payment_links_store`
+- `naap.canonical_session_current_store`
+- `naap.canonical_sla_benchmark_daily_store`
+
+Applying TTL to these stores requires an explicit decision on replay,
+dashboard/API query windows, and how much historical state the resolver needs
+to republish safely. See [Known Gaps](#known-gaps-and-future-work).
 
 ---
 
@@ -126,7 +142,7 @@ The following table defines the replay path based on event age:
 
 | Event age | Replay source | Mechanism |
 |---|---|---|
-| 0 – 7 days | Kafka `naap.events.raw` | Reset ClickHouse consumer group offset to `earliest`; re-consume directly from Kafka |
+| 0 – 7 days | Kafka `network_events` / `streaming_events` | Reset ClickHouse consumer group offset to `earliest`; re-consume directly from Kafka |
 | 7 days – 90 days | ClickHouse `naap.accepted_raw_events` | Use resolver `backfill` mode: `make resolver-backfill FROM=<start> TO=<end> ORG=<org>` |
 | > 90 days | Not available (TTL expired) | Raw events have been purged from ClickHouse. Derived aggregates may still be queryable depending on their TTL. |
 
@@ -146,7 +162,7 @@ To change a topic's retention window:
    kafka-configs.sh --bootstrap-server <broker>:9092 \
      --alter \
      --entity-type topics \
-     --entity-name naap.events.raw \
+     --entity-name network_events \
      --add-config retention.ms=<new_value_ms>
    ```
 3. Verify:
@@ -154,7 +170,7 @@ To change a topic's retention window:
    kafka-configs.sh --bootstrap-server <broker>:9092 \
      --describe \
      --entity-type topics \
-     --entity-name naap.events.raw
+     --entity-name network_events
    ```
 
 Note: `topics.yaml` is the source of truth for documentation and provisioning scripts (`scripts/setup.sh`). Updating the file does not automatically alter the live topic — the CLI step is required.
@@ -179,9 +195,9 @@ No container restart is required. See `infra/clickhouse/README.md` for the full 
 
 ## Known Gaps and Future Work
 
-1. **Hourly aggregate tables have no TTL** (`agg_*_hourly`). These tables grow unbounded. Candidate fix: apply a 90-day TTL matching raw event retention. Requires a forward migration in `infra/clickhouse/migrations/`.
+1. **Resolver-published serving and canonical stores have no TTL** (`api_*_store`, several `canonical_*_store` tables, and the latest-state helper stores). TTL for these tables depends on replay requirements, downstream query windows, and how much historical state the resolver must retain to republish safely.
 
-2. **Current-store and API-serving tables have no TTL** (`*_current_store`, `api_*_store`, `canonical_*_store`). TTL for serving tables depends on the downstream API query window and consumer SLA. This requires a separate decision.
+2. **The known-gap list must stay synchronized with `infra/clickhouse/retention.sql` and the checked-in store DDL.** This document used to enumerate retired pre-refactor tables, which created review noise and operator confusion.
 
 3. **Prometheus retention is out of scope for this document.** It is governed by the Prometheus stack configs:
    - infra1 Prometheus: 180-day retention (`deploy/infra1/prometheus/stack.yml`)

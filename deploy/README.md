@@ -59,11 +59,9 @@ Any change to migrations or config requires a new image build and push.
 | `KAFKA_AUTO_OFFSET_RESET` | `latest` | `earliest` for full backfill, `latest` for new data only |
 | `KAFKA_NETWORK_GROUP` | `clickhouse-naap-network` | Consumer group for `network_events` — **must be unique per node** |
 | `KAFKA_STREAMING_GROUP` | `clickhouse-naap-streaming` | Consumer group for `streaming_events` — **must be unique per node** |
-| `KAFKA_BROKERS` | `infra2.cloudspe.com:9092` | Broker(s) for the API service |
 | `API_PORT` | `8000` | Host port (only used if Traefik labels are removed and `ports:` is uncommented) |
 | `RATE_LIMIT_RPS` | `100` | Requests/sec per IP (0 = disabled) |
 | `RATE_LIMIT_BURST` | `200` | Burst allowance |
-| `OTLP_ENDPOINT` | *(empty)* | OTLP trace endpoint; empty disables telemetry |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 | `ENRICHMENT_ENABLED` | `true` | Enable/disable the Livepeer API enrichment worker |
 | `ENRICHMENT_INTERVAL` | `5m` | How often the enrichment worker polls the Livepeer API |
@@ -108,7 +106,7 @@ docker volume create naap-analytics_clickhouse_data
 Ten dashboards are baked into the API image at `infra/grafana/dashboards/` and auto-provisioned
 on startup.
 
-### NAAP application dashboards (General folder)
+### NaaP application dashboards (General folder)
 
 | Dashboard | Description |
 |-----------|-------------|
@@ -149,8 +147,26 @@ variable — the same variable required by the API service.
 
 ### Required environment variables (Grafana)
 
-The Grafana service requires no additional variables beyond those already listed for the API.
-`CLICKHOUSE_READER_PASSWORD` is shared.
+Grafana uses the shared `CLICKHOUSE_READER_PASSWORD` plus explicit alerting
+enable flags and channel secrets consumed by the startup renderer for
+`infra/grafana/provisioning/alerting/`. Alert bodies use Grafana's public root
+URL for links back to dashboards and alert rules:
+
+- `GF_ADMIN_USER`
+- `GF_ADMIN_PASSWORD`
+- `GRAFANA_PUBLIC_URL`
+- `GRAFANA_ALERTING_ENABLED`
+- `GRAFANA_ALERT_DISCORD_ENABLED`
+- `GRAFANA_ALERT_DISCORD_WEBHOOK_URL`
+- `GRAFANA_ALERT_TELEGRAM_ENABLED`
+- `GRAFANA_ALERT_TELEGRAM_BOT_TOKEN`
+- `GRAFANA_ALERT_TELEGRAM_CHAT_ID`
+
+If a channel is enabled and its required secret is missing, Grafana startup
+fails fast instead of silently dropping notifications. If alerting is
+intentionally disabled, set `GRAFANA_ALERTING_ENABLED=false`. In production,
+set `GRAFANA_PUBLIC_URL=https://grafana.livepeer.cloud/` so generated alert
+links resolve to the public Grafana host instead of a container-local address.
 
 ### Grafana plugin install
 
@@ -199,7 +215,7 @@ topic history. Monitor progress:
 ```bash
 docker exec -it <stack>-clickhouse-1 clickhouse-client \
   --user naap_admin --password <password> \
-  --query "SELECT count(), min(event_ts), max(event_ts) FROM naap.events"
+  --query "SELECT count(), min(event_ts), max(event_ts) FROM naap.accepted_raw_events"
 ```
 
 Once backfill is complete:

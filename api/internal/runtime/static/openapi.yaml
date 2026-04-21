@@ -1,317 +1,813 @@
-openapi: 3.0.3
+openapi: "3.0.3"
 info:
   title: NAAP Analytics API
   version: "1"
   description: |
-    Read-only analytics API for the Livepeer AI network.
-    Backed by ClickHouse materialized views fed from two Kafka topics:
-    `network_events` (daydream org) and `streaming_events` (cloudspe org).
+    Read-only analytics API for the Livepeer AI network, backed by ClickHouse.
 
-    **Rate limiting:** 100 req/s sustained, burst 200 per IP.
-    Exceeded requests receive `429 Too Many Requests`.
+    **21 endpoints** organized into three sections:
+    - **Dashboard** (7) — pre-aggregated widgets for the NAAP UI dashboard page
+    - **Streaming** (5) — live-video-to-video session analytics
+    - **Requests** (9) — AI Batch + BYOC request/response job analytics
 
-    **Default time window:** last 24 hours when `start`/`end` are omitted.
-
-    **WEI values** (payment amounts) are returned as decimal strings to avoid
-    float64 precision loss (e.g. `"1234500000000000000"`).
+    ## Conventions
+    - All timestamps are UTC ISO 8601 / RFC 3339.
+    - Cursor-paginated endpoints return `{data, pagination, meta}` envelopes.
+    - Non-paginated endpoints return the payload directly.
+    - Errors follow RFC 7807 `application/problem+json`.
+    - Default time window is **24 hours** when `window` / `start` / `end` are omitted.
+    - Rate limit: 100 req/s sustained, burst 200 per IP.
 
 servers:
   - url: https://naap-api.livepeer.cloud
     description: Production
+  - url: https://naap-api.cloudspe.com
+    description: CloudSPE
   - url: http://localhost:8000
     description: Local development
 
 tags:
-  - name: Health
-  - name: Network
-    description: Orchestrator network state (R1)
-  - name: Capacity
-    description: GPU supply vs. stream demand (R15)
-  - name: SLA
-    description: SLA compliance metrics per orchestrator/pipeline (ported from leaderboard-serverless)
-  - name: Demand
-    description: Network demand metrics per gateway/pipeline (ported from leaderboard-serverless)
-  - name: GPUMetrics
-    description: GPU performance metrics per orchestrator/pipeline (ported from leaderboard-serverless)
   - name: Dashboard
-    description: Pre-aggregated, UI-ready endpoints for the NAAP dashboard widgets (R16)
+    description: Pre-aggregated UI widgets combining streaming + requests data
+  - name: Streaming
+    description: Live-video-to-video session analytics
+  - name: Requests
+    description: AI Batch + BYOC request/response job analytics
+  - name: Discover
+    description: Ranked orchestrator list for routing/selection decisions
 
-# ── Common parameter definitions ──────────────────────────────────────────────
+paths:
+  # ──────────────────────── Dashboard (7 endpoints) ────────────────────────
+
+  /v1/dashboard/kpi:
+    get:
+      operationId: getDashboardKPI
+      tags: [Dashboard]
+      summary: KPI summary with hourly timeseries
+      description: |
+        Success rate, active orchestrator count, session count, and usage minutes
+        for the dashboard header, with hourly timeseries and period-over-period deltas.
+        Returns two sections: `streaming` (live-video-to-video metrics over the
+        requested window) and `requests` (AI Batch + BYOC job totals). The
+        orchestrator count reflects the last 10-minute heartbeat window regardless
+        of the time window parameter.
+      parameters:
+        - $ref: "#/components/parameters/DashboardWindow"
+        - name: pipeline
+          in: query
+          schema: { type: string }
+        - name: model_id
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: KPI payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardKPICombined"
+
+  /v1/dashboard/pipelines:
+    get:
+      operationId: getDashboardPipelines
+      tags: [Dashboard]
+      summary: Pipeline usage breakdown
+      description: |
+        Pipeline-level usage rollup for the dashboard "Pipelines & GPUs" panel.
+        Returns a `streaming` array (live-video-to-video pipelines with sessions,
+        minutes, and weighted average FPS, broken down per model) and a `requests`
+        object with AI Batch breakdown by pipeline and BYOC breakdown by capability.
+        The `limit` parameter caps the streaming array length only.
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 5, minimum: 1, maximum: 20 }
+        - $ref: "#/components/parameters/DashboardWindow"
+      responses:
+        "200":
+          description: Pipeline usage payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardPipelinesCombined"
+
+  /v1/dashboard/orchestrators:
+    get:
+      operationId: getDashboardOrchestrators
+      tags: [Dashboard]
+      summary: Orchestrator SLA table
+      description: |
+        One row per orchestrator for the Orchestrators table, with SLA metrics
+        (effective success rate, no-swap rate, SLA score), known session count,
+        observed pipelines/models, and observed GPU UUID count. Capability inventory fields
+        reflect orchestrators observed in the selected window rather than an
+        authoritative live network state; GPU UUID counts should not be read as
+        stable physical-device counts on cloud or virtualized orchestrators.
+        Sorted by session volume.
+        Default window is 24 hours.
+      parameters:
+        - name: window
+          in: query
+          schema: { type: string, default: "24h" }
+          description: "Time window (e.g. 1h, 24h, 7d). Max 7d."
+      responses:
+        "200":
+          description: Orchestrator list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DashboardOrchestrator"
+
+  /v1/dashboard/gpu-capacity:
+    get:
+      operationId: getDashboardGPUCapacity
+      tags: [Dashboard]
+      summary: GPU inventory summary
+      description: |
+        GPU inventory summary for the dashboard capacity widget. Returns the
+        total observed GPU UUID count, a breakdown by GPU model (RTX 4090, 5090,
+        etc.), and a per-pipeline breakdown showing which GPU models serve which pipelines.
+        A GPU shared across multiple pipelines appears in each pipeline's breakdown
+        but is counted once in the total. Reflects reported GPU UUIDs observed in
+        the last 24 hours, not authoritative physical-device identity.
+      responses:
+        "200":
+          description: GPU capacity payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardGPUCapacity"
+
+  /v1/dashboard/pipeline-catalog:
+    get:
+      operationId: getDashboardPipelineCatalog
+      tags: [Dashboard]
+      summary: Available pipeline + model combinations
+      description: |
+        Available pipelines and their models, derived from orchestrator capability
+        observations over the last 24 hours. Each entry is one pipeline
+        (e.g., `live-video-to-video`, `openai-chat-completions`) with the set of
+        models observed in that window. Used by the UI to populate filter dropdowns and
+        the pipeline catalog view. The `regions` field is reserved for future use
+        and is currently empty.
+      responses:
+        "200":
+          description: Pipeline catalog
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DashboardPipelineCatalogEntry"
+
+  /v1/dashboard/pricing:
+    get:
+      operationId: getDashboardPricing
+      tags: [Dashboard]
+      summary: Per-orchestrator pricing
+      description: |
+        Latest observed per-orchestrator price points in the last 24 hours.
+        One row per (orchestrator, pipeline, model) combination with raw
+        wei-per-unit pricing and pixels-per-unit. Capability-specific quotes
+        win over older quotes in the same window.
+      responses:
+        "200":
+          description: Pricing rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DashboardPipelinePricing"
+
+  /v1/dashboard/job-feed:
+    get:
+      operationId: getDashboardJobFeed
+      tags: [Dashboard]
+      summary: Live job/stream feed
+      description: |
+        Most recently active live-video-to-video streams for the job feed widget,
+        ordered by last-seen timestamp descending. Returns only in-flight streams
+        (completed sessions are excluded). Includes orchestrator URL, pipeline,
+        model, gateway, input/output FPS, and elapsed duration.
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50, minimum: 1, maximum: 200 }
+      responses:
+        "200":
+          description: Job feed items
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DashboardJobFeedItem"
+
+  # ──────────────────────── Streaming (5 endpoints) ────────────────────────
+
+  /v1/streaming/models:
+    get:
+      operationId: getStreamingModels
+      tags: [Streaming]
+      summary: Streaming model capacity and performance
+      description: |
+        Per-model capacity and load view for the live-video-to-video streaming page.
+        Each row shows observed warm orchestrator count, observed total GPU slots, currently active
+        streams, available capacity (slots minus active), and 24-hour weighted
+        average output FPS. Only includes the `live-video-to-video` pipeline.
+        A negative `available_capacity` means slots are oversubscribed (multiple
+        concurrent streams per GPU).
+      responses:
+        "200":
+          description: Streaming model rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/StreamingModel"
+
+  /v1/streaming/orchestrators:
+    get:
+      operationId: getStreamingOrchestrators
+      tags: [Streaming]
+      summary: Streaming orchestrator inventory
+      description: |
+        Orchestrators observed serving `live-video-to-video` in the last 24 hours, with
+        their service URI, observed models, and observed GPU UUID count. Each orchestrator
+        address appears at most once. Sorted by GPU UUID count descending.
+      responses:
+        "200":
+          description: Streaming orchestrator rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/StreamingOrchestrator"
+
+  /v1/streaming/sla:
+    get:
+      operationId: getStreamingSLA
+      tags: [Streaming]
+      summary: Streaming SLA compliance (cursor-paginated)
+      description: |
+        Hourly SLA compliance metrics per (orchestrator, pipeline, model, GPU)
+        for live-video-to-video, derived from per-session health samples.
+        Includes requested vs. successful sessions, effective success rate,
+        no-swap rate, average output FPS, and a composite SLA score.
+        Cursor-paginated; default window is the last 24 hours.
+      parameters:
+        - $ref: "#/components/parameters/WindowStart"
+        - $ref: "#/components/parameters/WindowEnd"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: SLA compliance rows
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CursorEnvelope_StreamingSLARow"
+
+  /v1/streaming/demand:
+    get:
+      operationId: getStreamingDemand
+      tags: [Streaming]
+      summary: Streaming network demand (cursor-paginated)
+      description: |
+        Hourly network demand as seen from the gateway side: how many sessions
+        each gateway requested, how many started successfully, how many failed
+        with no orchestrator available, and total minutes of usage.
+        Cursor-paginated. Use this to analyze traffic and capacity gaps; for
+        orchestrator-side quality metrics use `/streaming/sla` instead.
+      parameters:
+        - $ref: "#/components/parameters/WindowStart"
+        - $ref: "#/components/parameters/WindowEnd"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Demand rows
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CursorEnvelope_StreamingDemandRow"
+
+  /v1/streaming/gpu-metrics:
+    get:
+      operationId: getStreamingGPUMetrics
+      tags: [Streaming]
+      summary: Per-GPU streaming metrics (cursor-paginated)
+      description: |
+        Finest-grain performance data: one row per (hour, GPU) for
+        live-video-to-video, with session counts, average output FPS,
+        end-to-end latency, and swap rate. Use this to identify individual
+        underperforming GPUs. Cursor-paginated; default window is the last 24 hours.
+      parameters:
+        - $ref: "#/components/parameters/WindowStart"
+        - $ref: "#/components/parameters/WindowEnd"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: GPU metric rows
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CursorEnvelope_StreamingGPUMetricRow"
+
+  # ──────────────────────── Requests (9 endpoints) ────────────────────────
+
+  /v1/requests/models:
+    get:
+      operationId: getRequestsModels
+      tags: [Requests]
+      summary: Request-based model capacity and performance
+      description: |
+        Per-model capacity and load view for non-streaming pipelines
+        (AI Batch + BYOC). Each row shows observed warm orchestrator count, observed GPU slots,
+        and 24-hour job statistics (count, success rate, average duration).
+        The `job_type` field indicates whether the model is served by AI Batch
+        or BYOC orchestrators. Sorted by recent job volume.
+      responses:
+        "200":
+          description: Request model rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RequestsModel"
+
+  /v1/requests/orchestrators:
+    get:
+      operationId: getRequestsOrchestrators
+      tags: [Requests]
+      summary: Request-based orchestrator inventory
+      description: |
+        Orchestrators observed serving non-streaming pipelines in the last 24 hours,
+        with their service URI, observed capabilities (as `pipeline:model`
+        strings), and observed GPU UUID count. Each orchestrator address appears
+        at most once. Sorted by GPU UUID count descending.
+      responses:
+        "200":
+          description: Request orchestrator rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RequestsOrchestrator"
+
+  /v1/requests/ai-batch/summary:
+    get:
+      operationId: getAIBatchSummary
+      tags: [Requests]
+      summary: AI Batch job summary by pipeline
+      description: |
+        AI Batch job totals grouped by pipeline (e.g., `text-to-image`, `llm`,
+        `upscale`). Each row shows total jobs, how many were successfully selected
+        vs. rejected for no-orchestrator-available, success rate, and average
+        duration. Use for the AI Batch overview dashboard; for per-request details
+        use `/requests/ai-batch/jobs`.
+      parameters:
+        - $ref: "#/components/parameters/WindowStart"
+        - $ref: "#/components/parameters/WindowEnd"
+      responses:
+        "200":
+          description: AI Batch summary rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AIBatchSummaryRow"
+
+  /v1/requests/ai-batch/jobs:
+    get:
+      operationId: listAIBatchJobs
+      tags: [Requests]
+      summary: AI Batch individual job records (cursor-paginated)
+      description: |
+        Individual AI Batch job records, one row per request, ordered by completion
+        time descending. Includes success status, retry count, duration, the
+        selected orchestrator URL, GPU model, and attribution status.
+        Cursor-paginated. Use for audit trails, debugging failed requests, and
+        drilling into specific jobs.
+      parameters:
+        - $ref: "#/components/parameters/WindowStart"
+        - $ref: "#/components/parameters/WindowEnd"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: AI Batch job records
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CursorEnvelope_AIBatchJobRecord"
+
+  /v1/requests/ai-batch/llm-summary:
+    get:
+      operationId: getAIBatchLLMSummary
+      tags: [Requests]
+      summary: AI Batch LLM-specific summary by model
+      description: |
+        LLM-specific performance metrics grouped by model (tokens/sec,
+        time-to-first-token, average tokens per request, success rate).
+        Covers only LLM requests from AI Batch traffic. Separate from
+        `/requests/ai-batch/summary` because LLM throughput and token metrics
+        don't apply to image or audio pipelines.
+      parameters:
+        - $ref: "#/components/parameters/WindowStart"
+        - $ref: "#/components/parameters/WindowEnd"
+      responses:
+        "200":
+          description: LLM summary rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AIBatchLLMSummaryRow"
+
+  /v1/requests/byoc/summary:
+    get:
+      operationId: getBYOCSummary
+      tags: [Requests]
+      summary: BYOC job summary by capability
+      description: |
+        BYOC (Bring-Your-Own-Compute) job totals grouped by capability
+        (`openai-chat-completions`, `openai-image-generation`, etc.). Each row
+        shows total jobs, selection outcome counts, success rate, and average
+        duration. Use for the BYOC overview dashboard.
+      parameters:
+        - $ref: "#/components/parameters/WindowStart"
+        - $ref: "#/components/parameters/WindowEnd"
+      responses:
+        "200":
+          description: BYOC summary rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BYOCSummaryRow"
+
+  /v1/requests/byoc/jobs:
+    get:
+      operationId: listBYOCJobs
+      tags: [Requests]
+      summary: BYOC individual job records (cursor-paginated)
+      description: |
+        Individual BYOC job records, ordered by completion time descending.
+        Includes HTTP status, worker URL, orchestrator selection outcome, GPU
+        model, attribution status, and error message for failures.
+        Cursor-paginated. Use for audit trails, debugging, and tracing specific
+        requests through the orchestrator-worker chain.
+      parameters:
+        - $ref: "#/components/parameters/WindowStart"
+        - $ref: "#/components/parameters/WindowEnd"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: BYOC job records
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CursorEnvelope_BYOCJobRecord"
+
+  /v1/requests/byoc/workers:
+    get:
+      operationId: getBYOCWorkers
+      tags: [Requests]
+      summary: BYOC worker inventory by capability
+      description: |
+        BYOC worker inventory grouped by capability. Each row shows how many
+        distinct workers were observed advertising the capability in the time window, the
+        models they support, and their average price-per-unit. Use to understand
+        supply-side composition for each capability.
+      parameters:
+        - $ref: "#/components/parameters/WindowStart"
+        - $ref: "#/components/parameters/WindowEnd"
+      responses:
+        "200":
+          description: BYOC worker rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BYOCWorkerRow"
+
+  /v1/requests/byoc/auth:
+    get:
+      operationId: getBYOCAuth
+      tags: [Requests]
+      summary: BYOC auth event summary by capability
+      description: |
+        Authentication event outcomes grouped by capability — how many auth
+        attempts happened, the success rate, and failure count. Separate from
+        job execution success; a capability can have healthy auth but failing
+        jobs, or vice versa. Use to debug connectivity or credential issues.
+      parameters:
+        - $ref: "#/components/parameters/WindowStart"
+        - $ref: "#/components/parameters/WindowEnd"
+      responses:
+        "200":
+          description: BYOC auth rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BYOCAuthRow"
+
+  # ──────────────────────── Discover (1 endpoint) ────────────────────────
+
+  /v1/discover/orchestrators:
+    get:
+      operationId: discoverOrchestrators
+      tags: [Discover]
+      summary: Ranked orchestrator+pipeline list with optional capability filter
+      description: |
+        Orchestrators eligible to serve jobs, decomposed into one row per
+        (orchestrator, pipeline). An orch advertising N pipelines emits N rows
+        sharing the same `address` and timestamps but each carrying its own
+        `score` and `capabilities` list. For example, an orch serving
+        `live-video-to-video` and `llm` produces 2 rows.
+
+        Each row's score is derived from the last 2 hours of activity, routed
+        by catalog flags: streaming capabilities (`supports_stream = 1`) use
+        `api_hourly_streaming_sla` (`sla_score / 100`), and request-mode
+        capabilities (builtin AI-batch and BYOC) use
+        `api_hourly_request_demand` (success/job ratio). When no recent SLA
+        data exists for that (orch, pipeline), score is `0.0` and
+        `recent_work` is `false` — signaling the score is a placeholder, not
+        a measurement. When SLA data exists, `recent_work` is `true` and the
+        score is meaningful. Only orchestrators that heartbeated in the last
+        30 minutes are included. BYOC capabilities are included; the pipeline
+        key is the raw `capability_name` (e.g., `openai-chat-completions`).
+
+        The optional `caps` query parameter is repeatable and uses **OR
+        semantics**: a row is emitted whenever its pipeline has at least one
+        matching `pipeline/model` in the caps list. The returned `capabilities`
+        array still includes all of the orch's models for that pipeline.
+        Callers needing AND semantics can group rows by `address` themselves.
+        Intended for gateways and routing clients choosing a target.
+      parameters:
+        - name: caps
+          in: query
+          required: false
+          description: |
+            Repeatable capability filter in `pipeline/model` form. When supplied,
+            rows whose pipeline has at least one matching capability are returned.
+            Example: `?caps=live-video-to-video/streamdiffusion-sdxl&caps=llm/glm-4.7-flash`
+          schema:
+            type: array
+            items: { type: string }
+          style: form
+          explode: true
+      responses:
+        "200":
+          description: Discover-ranked orchestrator rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DiscoverOrchestratorRow"
+
+  # ──────────────────────── Infrastructure ────────────────────────
+
+  /healthz:
+    get:
+      operationId: healthz
+      summary: Health check
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: "ok" }
 
 components:
   parameters:
-    org:
-      name: org
-      in: query
-      description: Filter to a single organisation. Omit for all orgs.
-      schema:
-        type: string
-        enum: [daydream]
-    start:
-      name: start
-      in: query
-      description: Window start (RFC3339). Defaults to 24 hours ago.
-      schema:
-        type: string
-        format: date-time
-        example: "2026-03-01T00:00:00Z"
-    end:
-      name: end
-      in: query
-      description: Window end (RFC3339). Defaults to now.
-      schema:
-        type: string
-        format: date-time
-        example: "2026-03-24T23:59:59Z"
-    limit:
-      name: limit
-      in: query
-      description: Maximum rows to return (1–1000).
-      schema:
-        type: integer
-        minimum: 1
-        maximum: 1000
-        default: 50
-    offset:
-      name: offset
-      in: query
-      description: Pagination offset.
-      schema:
-        type: integer
-        minimum: 0
-        default: 0
-    pipeline:
-      name: pipeline
-      in: query
-      description: Filter by pipeline name (e.g. `text-to-image`).
-      schema:
-        type: string
-    orch_address:
-      name: orch_address
-      in: query
-      description: Filter by orchestrator Ethereum address (lowercased).
-      schema:
-        type: string
-        example: ""
-    active_only:
-      name: active_only
-      in: query
-      description: When `true`, return only orchestrators active within the last 15 minutes.
-      schema:
-        type: boolean
-        default: false
-    stream_id:
-      name: stream_id
-      in: query
-      schema:
-        type: string
-    failure_type:
-      name: failure_type
-      in: query
-      description: Filter failure events by type.
-      schema:
-        type: string
-        enum: [no_orch_available, orch_swap, inference_restart, inference_error]
-    address_path:
-      name: address
-      in: path
-      required: true
-      description: Orchestrator Ethereum address (lowercased).
-      schema:
-        type: string
-        example: ""
-    window:
+    DashboardWindow:
       name: window
       in: query
-      description: |
-        Lookback window as a duration string. Accepts Go duration syntax (`24h`, `90m`, `30s`)
-        or a day suffix (`7d`). Capped per-endpoint — see endpoint description for limits.
-      schema:
-        type: string
-        example: "24h"
-        default: "24h"
-    page:
-      name: page
+      schema: { type: string, default: "24h" }
+      description: "Time window (e.g. 1h, 24h, 7d). Max 168h."
+
+    WindowStart:
+      name: start
       in: query
-      description: Page number (1-based).
-      schema:
-        type: integer
-        minimum: 1
-        default: 1
-    page_size:
-      name: page_size
+      schema: { type: string, format: date-time }
+      description: "Window start (RFC 3339). Default: now - 24h."
+
+    WindowEnd:
+      name: end
       in: query
-      description: Items per page (1–500).
-      schema:
-        type: integer
-        minimum: 1
-        maximum: 500
-        default: 50
-    orchestrator_address:
-      name: orchestrator_address
+      schema: { type: string, format: date-time }
+      description: "Window end (RFC 3339). Default: now."
+
+    Limit:
+      name: limit
       in: query
-      description: Filter by orchestrator Ethereum address (lowercased).
-      schema:
-        type: string
-        example: ""
-    pipeline_id:
-      name: pipeline_id
+      schema: { type: integer, default: 50, minimum: 1, maximum: 1000 }
+
+    Cursor:
+      name: cursor
       in: query
-      description: Filter by pipeline name (e.g. `streamdiffusion-sdxl-v2v`).
-      schema:
-        type: string
-    model_id:
-      name: model_id
-      in: query
-      description: Filter by model identifier.
-      schema:
-        type: string
-    gpu_id:
-      name: gpu_id
-      in: query
-      description: Filter by GPU slot identifier.
-      schema:
-        type: string
-    gateway_filter:
-      name: gateway
-      in: query
-      description: Filter by gateway Ethereum address.
-      schema:
-        type: string
-    gpu_model_name:
-      name: gpu_model_name
-      in: query
-      description: Filter by GPU model name (e.g. `RTX-4090`).
-      schema:
-        type: string
-    runner_version:
-      name: runner_version
-      in: query
-      description: Filter by runner software version.
-      schema:
-        type: string
-    cuda_version:
-      name: cuda_version
-      in: query
-      description: Filter by CUDA version string.
-      schema:
-        type: string
-    region:
-      name: region
-      in: query
-      description: Filter by geographic region (currently always null — reserved for future use).
-      schema:
-        type: string
+      schema: { type: string }
+      description: Opaque cursor for keyset pagination.
 
   schemas:
-
-    # ── Dashboard (R16) ──────────────────────────────────────────────────────
-
-    DashboardMetricDelta:
+    CursorPageInfo:
       type: object
       properties:
-        value: { type: number, format: double }
-        delta: { type: number, format: double, description: "Period-over-period % change" }
-      required: [value, delta]
+        next_cursor: { type: string }
+        has_more: { type: boolean }
+        page_size: { type: integer }
 
-    DashboardHourlyBucket:
+    Meta:
+      type: object
+      properties:
+        generated_at: { type: string, format: date-time }
+        request_id: { type: string }
+
+    MetricDelta:
+      type: object
+      properties:
+        value: { type: number }
+        delta: { type: number }
+
+    HourlyBucket:
       type: object
       properties:
         hour: { type: string, format: date-time }
-        value: { type: number, format: double }
-      required: [hour, value]
+        value: { type: number }
 
     DashboardKPI:
       type: object
       properties:
-        successRate:          { $ref: "#/components/schemas/DashboardMetricDelta" }
-        orchestratorsOnline:  { $ref: "#/components/schemas/DashboardMetricDelta" }
-        dailyUsageMins:       { $ref: "#/components/schemas/DashboardMetricDelta", description: "Total stream-minutes from api_network_demand" }
-        dailySessionCount:    { $ref: "#/components/schemas/DashboardMetricDelta" }
-        dailyNetworkFeesEth:  { $ref: "#/components/schemas/DashboardMetricDelta" }
-        timeframeHours:       { type: integer }
+        successRate: { $ref: "#/components/schemas/MetricDelta" }
+        orchestratorsOnline: { $ref: "#/components/schemas/MetricDelta" }
+        dailyUsageMins: { $ref: "#/components/schemas/MetricDelta" }
+        dailySessionCount: { $ref: "#/components/schemas/MetricDelta" }
+        dailyNetworkFeesEth: { $ref: "#/components/schemas/MetricDelta" }
+        timeframeHours: { type: integer }
         hourlySessions:
           type: array
-          items: { $ref: "#/components/schemas/DashboardHourlyBucket" }
+          items: { $ref: "#/components/schemas/HourlyBucket" }
         hourlyUsage:
           type: array
-          items: { $ref: "#/components/schemas/DashboardHourlyBucket" }
+          items: { $ref: "#/components/schemas/HourlyBucket" }
+
+    DashboardJobsOverview:
+      type: object
+      properties:
+        ai_batch:
+          $ref: "#/components/schemas/DashboardJobsStats"
+        byoc:
+          $ref: "#/components/schemas/DashboardJobsStats"
+
+    DashboardJobsStats:
+      type: object
+      properties:
+        total_jobs: { type: integer }
+        selected_jobs: { type: integer }
+        no_orch_jobs: { type: integer }
+        success_rate: { type: number }
+        avg_duration_ms: { type: number }
+
+    DashboardKPICombined:
+      type: object
+      properties:
+        streaming: { $ref: "#/components/schemas/DashboardKPI" }
+        requests: { $ref: "#/components/schemas/DashboardJobsOverview" }
+
+    DashboardPipelineModelMins:
+      type: object
+      properties:
+        model: { type: string }
+        mins: { type: number }
+        sessions: { type: integer }
+        avgFps: { type: number }
 
     DashboardPipelineUsage:
       type: object
       properties:
-        name:     { type: string }
-        sessions: { type: integer, format: int64 }
-        mins:     { type: number, format: double }
-        avgFps:   { type: number, format: double }
+        name: { type: string }
+        mins: { type: number }
+        sessions: { type: integer }
+        avgFps: { type: number }
+        modelMins:
+          type: array
+          items: { $ref: "#/components/schemas/DashboardPipelineModelMins" }
 
-    DashboardPipelineModelOffer:
+    DashboardJobsByPipelineRow:
       type: object
       properties:
-        pipelineId: { type: string }
-        modelIds:
+        pipeline: { type: string }
+        total_jobs: { type: integer }
+        selected_jobs: { type: integer }
+        no_orch_jobs: { type: integer }
+        success_rate: { type: number }
+        avg_duration_ms: { type: number }
+
+    DashboardJobsByCapabilityRow:
+      type: object
+      properties:
+        capability: { type: string }
+        total_jobs: { type: integer }
+        selected_jobs: { type: integer }
+        no_orch_jobs: { type: integer }
+        success_rate: { type: number }
+        avg_duration_ms: { type: number }
+
+    DashboardPipelinesCombined:
+      type: object
+      properties:
+        streaming:
           type: array
-          items: { type: string }
+          items: { $ref: "#/components/schemas/DashboardPipelineUsage" }
+        requests:
+          type: object
+          properties:
+            by_pipeline:
+              type: array
+              items: { $ref: "#/components/schemas/DashboardJobsByPipelineRow" }
+            by_capability:
+              type: array
+              items: { $ref: "#/components/schemas/DashboardJobsByCapabilityRow" }
 
     DashboardOrchestrator:
       type: object
       properties:
-        address:              { type: string }
-        ensName:              { type: string, description: "ENS name if registered, empty otherwise" }
-        serviceUri:           { type: string, description: "Orchestrator service URI (e.g. https://host:8935)" }
-        knownSessions:        { type: integer, format: int64 }
-        successSessions:      { type: integer, format: int64 }
-        successRatio:         { type: number, format: double }
-        effectiveSuccessRate: { type: number, format: double, nullable: true }
-        noSwapRatio:          { type: number, format: double, nullable: true }
-        slaScore:             { type: number, format: double, nullable: true }
+        address: { type: string }
+        serviceUri: { type: string }
+        knownSessions: { type: integer }
+        successSessions: { type: integer }
+        successRatio: { type: number }
+        effectiveSuccessRate: { type: number, nullable: true }
+        noSwapRatio: { type: number, nullable: true }
+        slaScore: { type: number, nullable: true, description: "Composite SLA score (0–100)" }
         pipelines:
           type: array
           items: { type: string }
         pipelineModels:
           type: array
-          items: { $ref: "#/components/schemas/DashboardPipelineModelOffer" }
-        gpuCount: { type: integer, format: int64 }
-
-    DashboardGPUModelCapacity:
-      type: object
-      properties:
-        model: { type: string }
-        count: { type: integer, format: int64 }
-
-    DashboardGPUCapacityPipelineModel:
-      type: object
-      properties:
-        model: { type: string }
-        gpus:  { type: integer, format: int64 }
-
-    DashboardGPUCapacityPipeline:
-      type: object
-      properties:
-        name: { type: string }
-        gpus: { type: integer, format: int64 }
-        models:
-          type: array
-          items: { $ref: "#/components/schemas/DashboardGPUCapacityPipelineModel" }
+          items:
+            type: object
+            properties:
+              pipelineId: { type: string }
+              modelIds:
+                type: array
+                items: { type: string }
+        gpuCount: { type: integer }
 
     DashboardGPUCapacity:
       type: object
       properties:
-        totalGPUs:         { type: integer, format: int64 }
-        activeGPUs:        { type: integer, format: int64 }
-        availableCapacity: { type: number, format: double, description: "Fraction 0–1" }
+        totalGPUs: { type: integer }
+        activeGPUs: { type: integer }
+        availableCapacity: { type: number }
         models:
           type: array
-          items: { $ref: "#/components/schemas/DashboardGPUModelCapacity" }
+          items:
+            type: object
+            properties:
+              model: { type: string }
+              count: { type: integer }
         pipelineGPUs:
           type: array
-          items: { $ref: "#/components/schemas/DashboardGPUCapacityPipeline" }
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              gpus: { type: integer }
+              models:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    model: { type: string }
+                    gpus: { type: integer }
 
     DashboardPipelineCatalogEntry:
       type: object
       properties:
-        id:      { type: string }
-        name:    { type: string }
+        id: { type: string }
+        name: { type: string }
         models:
           type: array
           items: { type: string }
@@ -322,816 +818,281 @@ components:
     DashboardPipelinePricing:
       type: object
       properties:
-        pipeline:           { type: string }
-        model:              { type: string }
-        orchCount:          { type: integer, format: int64 }
-        priceMinWeiPerUnit: { type: integer, format: int64 }
-        priceMaxWeiPerUnit: { type: integer, format: int64 }
-        priceAvgWeiPerUnit: { type: number, format: double }
-        pixelsPerUnit:      { type: integer, format: int64 }
+        orchAddress: { type: string }
+        orchName: { type: string }
+        pipeline: { type: string }
+        model: { type: string }
+        priceWeiPerUnit: { type: integer }
+        pixelsPerUnit: { type: integer }
+        isWarm: { type: boolean }
 
     DashboardJobFeedItem:
       type: object
       properties:
-        id:              { type: string }
-        pipeline:        { type: string }
-        model:           { type: string }
-        gateway:         { type: string }
+        id: { type: string }
+        pipeline: { type: string }
+        model: { type: string }
+        gateway: { type: string }
         orchestratorUrl: { type: string }
-        state:           { type: string }
-        inputFps:        { type: number, format: double }
-        outputFps:       { type: number, format: double }
-        firstSeen:       { type: string, format: date-time }
-        lastSeen:        { type: string, format: date-time }
-        durationSeconds: { type: number, format: double, nullable: true }
+        state: { type: string }
+        job_type: { type: string }
+        inputFps: { type: number }
+        outputFps: { type: number }
+        firstSeen: { type: string, format: date-time }
+        lastSeen: { type: string, format: date-time }
+        durationSeconds: { type: number, nullable: true }
 
-    # ── Shared ──────────────────────────────────────────────────────────────
-
-    Problem:
-      description: RFC 7807 Problem Details error response.
+    StreamingModel:
       type: object
       properties:
-        type:
+        pipeline: { type: string }
+        model: { type: string }
+        warm_orch_count: { type: integer }
+        gpu_slots: { type: integer }
+        active_streams: { type: integer }
+        available_capacity: { type: integer }
+        avg_fps: { type: number }
+
+    StreamingOrchestrator:
+      type: object
+      properties:
+        address: { type: string }
+        uri: { type: string }
+        models:
+          type: array
+          items: { type: string }
+        gpu_count: { type: integer }
+        last_seen: { type: string, format: date-time }
+
+    StreamingSLARow:
+      type: object
+      properties:
+        window_start: { type: string, format: date-time }
+        org: { type: string }
+        orchestrator_address: { type: string }
+        pipeline_id: { type: string }
+        model_id: { type: string }
+        gpu_id: { type: string }
+        requested_sessions: { type: integer }
+        startup_success_sessions: { type: integer }
+        effective_success_rate: { type: number }
+        no_swap_rate: { type: number }
+        avg_output_fps: { type: number }
+        sla_score: { type: number }
+
+    CursorEnvelope_StreamingSLARow:
+      type: object
+      properties:
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/StreamingSLARow" }
+        pagination: { $ref: "#/components/schemas/CursorPageInfo" }
+        meta: { $ref: "#/components/schemas/Meta" }
+
+    StreamingDemandRow:
+      type: object
+      properties:
+        window_start: { type: string, format: date-time }
+        org: { type: string }
+        gateway: { type: string }
+        pipeline_id: { type: string }
+        model_id: { type: string }
+        requested_sessions: { type: integer }
+        startup_success_sessions: { type: integer }
+        effective_success_rate: { type: number }
+        total_minutes: { type: number }
+        no_orch_sessions: { type: integer }
+
+    CursorEnvelope_StreamingDemandRow:
+      type: object
+      properties:
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/StreamingDemandRow" }
+        pagination: { $ref: "#/components/schemas/CursorPageInfo" }
+        meta: { $ref: "#/components/schemas/Meta" }
+
+    StreamingGPUMetricRow:
+      type: object
+      properties:
+        window_start: { type: string, format: date-time }
+        org: { type: string }
+        orchestrator_address: { type: string }
+        pipeline_id: { type: string }
+        model_id: { type: string }
+        gpu_id: { type: string }
+        gpu_model_name: { type: string }
+        known_sessions_count: { type: integer }
+        startup_success_sessions: { type: integer }
+        avg_output_fps: { type: number }
+        avg_e2e_latency_ms: { type: number }
+        swap_rate: { type: number }
+
+    CursorEnvelope_StreamingGPUMetricRow:
+      type: object
+      properties:
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/StreamingGPUMetricRow" }
+        pagination: { $ref: "#/components/schemas/CursorPageInfo" }
+        meta: { $ref: "#/components/schemas/Meta" }
+
+    RequestsModel:
+      type: object
+      properties:
+        pipeline: { type: string }
+        model: { type: string }
+        job_type: { type: string }
+        warm_orch_count: { type: integer }
+        gpu_slots: { type: integer }
+        job_count_24h: { type: integer }
+        success_rate: { type: number }
+        avg_duration_ms: { type: number }
+
+    RequestsOrchestrator:
+      type: object
+      properties:
+        address: { type: string }
+        uri: { type: string }
+        capabilities:
+          type: array
+          items: { type: string }
+        gpu_count: { type: integer }
+        last_seen: { type: string, format: date-time }
+
+    AIBatchSummaryRow:
+      type: object
+      properties:
+        pipeline: { type: string }
+        total_jobs: { type: integer }
+        selected_jobs: { type: integer }
+        no_orch_jobs: { type: integer }
+        success_rate: { type: number }
+        avg_duration_ms: { type: number }
+
+    AIBatchJobRecord:
+      type: object
+      properties:
+        request_id: { type: string }
+        org: { type: string }
+        gateway: { type: string }
+        pipeline: { type: string }
+        model_id: { type: string }
+        completed_at: { type: string, format: date-time }
+        success: { type: boolean }
+        tries: { type: integer }
+        duration_ms: { type: integer }
+        orch_url: { type: string }
+        selection_outcome: { type: string }
+        gpu_model_name: { type: string }
+        attribution_status: { type: string }
+
+    CursorEnvelope_AIBatchJobRecord:
+      type: object
+      properties:
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/AIBatchJobRecord" }
+        pagination: { $ref: "#/components/schemas/CursorPageInfo" }
+        meta: { $ref: "#/components/schemas/Meta" }
+
+    AIBatchLLMSummaryRow:
+      type: object
+      properties:
+        model: { type: string }
+        total_requests: { type: integer }
+        success_rate: { type: number }
+        avg_tokens_per_sec: { type: number }
+        avg_ttft_ms: { type: number }
+        avg_total_tokens: { type: number }
+
+    BYOCSummaryRow:
+      type: object
+      properties:
+        capability: { type: string }
+        total_jobs: { type: integer }
+        selected_jobs: { type: integer }
+        no_orch_jobs: { type: integer }
+        success_rate: { type: number }
+        avg_duration_ms: { type: number }
+
+    BYOCJobRecord:
+      type: object
+      properties:
+        request_id: { type: string }
+        org: { type: string }
+        capability: { type: string }
+        model: { type: string }
+        completed_at: { type: string, format: date-time }
+        success: { type: boolean }
+        duration_ms: { type: integer }
+        http_status: { type: integer }
+        orch_address: { type: string }
+        orch_url: { type: string }
+        worker_url: { type: string }
+        selection_outcome: { type: string }
+        gpu_model_name: { type: string }
+        attribution_status: { type: string }
+        error: { type: string }
+
+    CursorEnvelope_BYOCJobRecord:
+      type: object
+      properties:
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/BYOCJobRecord" }
+        pagination: { $ref: "#/components/schemas/CursorPageInfo" }
+        meta: { $ref: "#/components/schemas/Meta" }
+
+    BYOCWorkerRow:
+      type: object
+      properties:
+        capability: { type: string }
+        worker_count: { type: integer }
+        models:
+          type: array
+          items: { type: string }
+        avg_price_per_unit: { type: number }
+
+    BYOCAuthRow:
+      type: object
+      properties:
+        capability: { type: string }
+        total_events: { type: integer }
+        success_rate: { type: number }
+        failure_count: { type: integer }
+
+    DiscoverOrchestratorRow:
+      type: object
+      properties:
+        address:
           type: string
-          example: "about:blank"
-        title:
-          type: string
-          example: "Too Many Requests"
-        status:
+          description: Orchestrator service URI
+        score:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: |
+            Fitness score; higher is better. When `recent_work` is true, this is
+            a measured value derived from the last 2-hour SLA. When `recent_work`
+            is false, this is `0.0` (placeholder — there's no measurement yet).
+        capabilities:
+          type: array
+          items:
+            type: string
+            description: "`pipeline/model` pair (e.g., `live-video-to-video/streamdiffusion-sdxl`)"
+        last_seen_ms:
           type: integer
-          example: 429
-        detail:
-          type: string
-          example: "rate limit exceeded"
-
-    WEI:
-      description: |
-        Payment value in wei (1e-18 ETH), returned as a decimal string to
-        preserve full uint64 precision.
-      type: string
-      pattern: "^[0-9]+$"
-      example: "1234500000000000000"
-
-    FPSStats:
-      type: object
-      properties:
-        Avg:
-          type: number
-          format: double
-        P5:
-          type: number
-          format: double
-        P50:
-          type: number
-          format: double
-        P99:
-          type: number
-          format: double
-
-    # ── Network (R1) ────────────────────────────────────────────────────────
-
-    Orchestrator:
-      type: object
-      properties:
-        Address:
-          type: string
-        Org:
-          type: string
-        Name:
-          type: string
-        URI:
-          type: string
-        Version:
-          type: string
-        LastSeen:
+          format: int64
+          description: Unix millisecond timestamp of the most recent heartbeat
+        last_seen:
           type: string
           format: date-time
-        IsActive:
+          description: ISO 8601 representation of the most recent heartbeat
+        recent_work:
           type: boolean
-        RawCapabilities:
-          type: string
-          description: Raw JSON capabilities blob.
-
-    ModelAvailability:
-      type: object
-      properties:
-        Pipeline:
-          type: string
-        Model:
-          type: string
-        WarmOrchCount:
-          type: integer
-          format: int64
-        TotalCapacity:
-          type: integer
-          format: int64
-        PriceMinWeiPerPixel:
-          type: integer
-          format: int64
-        PriceMaxWeiPerPixel:
-          type: integer
-          format: int64
-        PriceAvgWeiPerPixel:
-          type: number
-          format: double
-
-    # ── Model Performance (R12) ──────────────────────────────────────────────
-
-    ModelPerformance:
-      type: object
-      properties:
-        ModelID: { type: string }
-        Pipeline: { type: string }
-        AvgFPS: { type: number, format: double }
-        P50FPS: { type: number, format: double }
-        P99FPS: { type: number, format: double }
-        WarmOrchCount: { type: integer, format: int64 }
-        TotalStreams: { type: integer, format: int64 }
-
-    OrchModelStats:
-      type: object
-      properties:
-        Address: { type: string }
-        Name: { type: string }
-        AvgFPS: { type: number, format: double }
-        IsWarm: { type: boolean }
-
-    # ── Capacity (R15) ───────────────────────────────────────────────────────
-
-    CapacityEntry:
-      type: object
-      properties:
-        Pipeline: { type: string }
-        ModelID: { type: string }
-        WarmOrchCount: { type: integer, format: int64 }
-        ActiveStreams: { type: integer, format: int64 }
-        UtilizationPct: { type: number, format: double, description: "active streams / warm orchs (0–1)" }
-        TotalVRAMBytes: { type: integer, format: int64 }
-
-    CapacitySummary:
-      type: object
-      properties:
-        SnapshotTime: { type: string, format: date-time }
-        Entries:
-          type: array
-          items: { $ref: "#/components/schemas/CapacityEntry" }
-
-    # ── SLA / GPU / Network Demand (ported from leaderboard-serverless) ──────
-
-    Pagination:
-      type: object
-      description: Pagination metadata included in paged responses.
-      properties:
-        page:        { type: integer, example: 1 }
-        page_size:   { type: integer, example: 50 }
-        total_count: { type: integer, example: 243 }
-        total_pages: { type: integer, example: 5 }
-
-    SLAComplianceRow:
-      type: object
-      description: SLA compliance metrics for one (orchestrator, pipeline, model, gpu, window) bucket.
-      properties:
-        window_start:                { type: string, format: date-time }
-        org:                         { type: string, nullable: true }
-        orchestrator_address:        { type: string, example: "0xabc123" }
-        pipeline_id:                 { type: string, example: "streamdiffusion-sdxl-v2v" }
-        model_id:                    { type: string, nullable: true }
-        gpu_id:                      { type: string, nullable: true }
-        region:                      { type: string, nullable: true, description: "Always null — not captured in event data." }
-        known_sessions_count:        { type: integer, format: int64 }
-        requested_sessions:          { type: integer, format: int64 }
-        startup_success_sessions:    { type: integer, format: int64 }
-        no_orch_sessions:            { type: integer, format: int64 }
-        startup_excused_sessions:    { type: integer, format: int64, description: "Failed sessions whose KPI treatment is explicitly excused by canonical lifecycle rules." }
-        startup_failed_sessions:     { type: integer, format: int64 }
-        loading_only_sessions:       { type: integer, format: int64 }
-        zero_output_fps_sessions:    { type: integer, format: int64 }
-        effective_failed_sessions:   { type: integer, format: int64 }
-        confirmed_swapped_sessions:  { type: integer, format: int64, description: "Always 0 — confirmation signal absent." }
-        inferred_swap_sessions:      { type: integer, format: int64 }
-        total_swapped_sessions:      { type: integer, format: int64 }
-        sessions_ending_in_error:    { type: integer, format: int64 }
-        error_status_samples:        { type: integer, format: int64 }
-        health_signal_count:         { type: integer, format: int64 }
-        health_expected_signal_count: { type: integer, format: int64 }
-        health_signal_coverage_ratio: { type: number, format: double }
-        startup_success_rate:        { type: number, format: double, nullable: true }
-        excused_failure_rate:        { type: number, format: double, nullable: true }
-        effective_success_rate:      { type: number, format: double, nullable: true }
-        no_swap_rate:                { type: number, format: double, nullable: true }
-        output_viability_rate:       { type: number, format: double, nullable: true }
-        sla_score:                   { type: number, format: double, nullable: true, description: "100×health_signal_coverage_ratio×((0.4×startup_success_rate)+(0.2×no_swap_rate)+(0.4×output_viability_rate))." }
-
-    SLAComplianceResponse:
-      type: object
-      properties:
-        compliance:
-          type: array
-          items: { $ref: "#/components/schemas/SLAComplianceRow" }
-        pagination: { $ref: "#/components/schemas/Pagination" }
-
-    NetworkDemandRow:
-      type: object
-      description: Network demand metrics for one (gateway, pipeline, model, window) bucket.
-      properties:
-        window_start:                { type: string, format: date-time }
-        org:                         { type: string, nullable: true }
-        gateway:                     { type: string, example: "0xgateway123" }
-        region:                      { type: string, nullable: true, description: "Always null." }
-        pipeline_id:                 { type: string }
-        model_id:                    { type: string, nullable: true }
-        sessions_count:              { type: integer, format: int64 }
-        avg_output_fps:              { type: number, format: double }
-        total_minutes:               { type: number, format: double }
-        known_sessions_count:        { type: integer, format: int64 }
-        requested_sessions:          { type: integer, format: int64 }
-        startup_success_sessions:    { type: integer, format: int64 }
-        no_orch_sessions:            { type: integer, format: int64 }
-        startup_excused_sessions:    { type: integer, format: int64 }
-        startup_failed_sessions:     { type: integer, format: int64 }
-        loading_only_sessions:       { type: integer, format: int64 }
-        zero_output_fps_sessions:    { type: integer, format: int64 }
-        effective_failed_sessions:   { type: integer, format: int64 }
-        confirmed_swapped_sessions:  { type: integer, format: int64 }
-        inferred_swap_sessions:      { type: integer, format: int64 }
-        total_swapped_sessions:      { type: integer, format: int64 }
-        sessions_ending_in_error:    { type: integer, format: int64 }
-        error_status_samples:        { type: integer, format: int64 }
-        health_signal_count:         { type: integer, format: int64 }
-        health_expected_signal_count: { type: integer, format: int64 }
-        health_signal_coverage_ratio: { type: number, format: double }
-        startup_success_rate:        { type: number, format: double }
-        excused_failure_rate:        { type: number, format: double }
-        effective_success_rate:      { type: number, format: double }
-        ticket_face_value_eth:       { type: number, format: double, description: "Proportional ETH payment estimate for this gateway's sessions." }
-
-    NetworkDemandResponse:
-      type: object
-      properties:
-        demand:
-          type: array
-          items: { $ref: "#/components/schemas/NetworkDemandRow" }
-        pagination: { $ref: "#/components/schemas/Pagination" }
-
-    GPUNetworkDemandRow:
-      type: object
-      description: GPU-sliced network demand metrics for one (gateway, orchestrator, pipeline, model, gpu, window) bucket.
-      properties:
-        window_start:                { type: string, format: date-time }
-        org:                         { type: string, nullable: true }
-        gateway:                     { type: string }
-        orchestrator_address:        { type: string }
-        region:                      { type: string, nullable: true, description: "Always null." }
-        pipeline_id:                 { type: string }
-        model_id:                    { type: string, nullable: true }
-        gpu_id:                      { type: string, nullable: true }
-        gpu_identity_status:         { type: string, enum: [resolved, hardware_unresolved] }
-        sessions_count:              { type: integer, format: int64 }
-        avg_output_fps:              { type: number, format: double }
-        total_minutes:               { type: number, format: double }
-        known_sessions_count:        { type: integer, format: int64 }
-        requested_sessions:          { type: integer, format: int64 }
-        startup_success_sessions:    { type: integer, format: int64 }
-        no_orch_sessions:            { type: integer, format: int64 }
-        startup_excused_sessions:    { type: integer, format: int64 }
-        startup_failed_sessions:     { type: integer, format: int64 }
-        loading_only_sessions:       { type: integer, format: int64 }
-        zero_output_fps_sessions:    { type: integer, format: int64 }
-        effective_failed_sessions:   { type: integer, format: int64 }
-        confirmed_swapped_sessions:  { type: integer, format: int64 }
-        inferred_swap_sessions:      { type: integer, format: int64 }
-        total_swapped_sessions:      { type: integer, format: int64 }
-        sessions_ending_in_error:    { type: integer, format: int64 }
-        error_status_samples:        { type: integer, format: int64 }
-        health_signal_count:         { type: integer, format: int64 }
-        health_expected_signal_count: { type: integer, format: int64 }
-        health_signal_coverage_ratio: { type: number, format: double }
-        startup_success_rate:        { type: number, format: double }
-        excused_failure_rate:        { type: number, format: double }
-        effective_success_rate:      { type: number, format: double }
-        ticket_face_value_eth:       { type: number, format: double }
-
-    GPUNetworkDemandResponse:
-      type: object
-      properties:
-        demand:
-          type: array
-          items: { $ref: "#/components/schemas/GPUNetworkDemandRow" }
-        pagination: { $ref: "#/components/schemas/Pagination" }
-
-    GPUMetric:
-      type: object
-      description: GPU performance metrics for one (orchestrator, pipeline, model, gpu, window) bucket.
-      properties:
-        window_start:                   { type: string, format: date-time }
-        org:                            { type: string, nullable: true }
-        orchestrator_address:           { type: string }
-        pipeline_id:                    { type: string }
-        model_id:                       { type: string, nullable: true }
-        gpu_id:                         { type: string, nullable: true }
-        region:                         { type: string, nullable: true, description: "Always null." }
-        avg_output_fps:                 { type: number, format: double }
-        p95_output_fps:                 { type: number, format: double }
-        fps_jitter_coefficient:         { type: number, format: double, nullable: true, description: "Always null — not computed." }
-        status_samples:                 { type: integer, format: int64 }
-        error_status_samples:           { type: integer, format: int64 }
-        health_signal_coverage_ratio:   { type: number, format: double }
-        gpu_model_name:                 { type: string, nullable: true }
-        gpu_memory_bytes_total:         { type: integer, format: int64, nullable: true }
-        runner_version:                 { type: string, nullable: true, description: "Always null." }
-        cuda_version:                   { type: string, nullable: true, description: "Always null." }
-        avg_prompt_to_first_frame_ms:   { type: number, format: double, nullable: true, description: "Mean prompt-to-playable proxy in milliseconds (`ai_stream_status.start_time` -> `gateway_receive_few_processed_segments`)." }
-        avg_startup_latency_ms:         { type: number, format: double, nullable: true, description: "Mean startup proxy in milliseconds (`gateway_receive_stream_request` -> `gateway_receive_first_processed_segment`)." }
-        avg_e2e_latency_ms:             { type: number, format: double, nullable: true, description: "Mean E2E proxy in milliseconds (`gateway_send_first_ingest_segment` -> `runner_send_first_processed_segment`)." }
-        p95_prompt_to_first_frame_latency_ms: { type: number, format: double, nullable: true, description: "P95 prompt-to-playable proxy in milliseconds (`ai_stream_status.start_time` -> `gateway_receive_few_processed_segments`)." }
-        p95_startup_latency_ms:         { type: number, format: double, nullable: true, description: "P95 startup proxy in milliseconds (`gateway_receive_stream_request` -> `gateway_receive_first_processed_segment`)." }
-        p95_e2e_latency_ms:             { type: number, format: double, nullable: true, description: "P95 E2E proxy in milliseconds (`gateway_send_first_ingest_segment` -> `runner_send_first_processed_segment`)." }
-        prompt_to_first_frame_sample_count: { type: integer, format: int64 }
-        startup_latency_sample_count:   { type: integer, format: int64 }
-        e2e_latency_sample_count:       { type: integer, format: int64 }
-        known_sessions_count:           { type: integer, format: int64 }
-        startup_success_sessions:       { type: integer, format: int64 }
-        no_orch_sessions:               { type: integer, format: int64 }
-        startup_excused_sessions:       { type: integer, format: int64 }
-        startup_failed_sessions:        { type: integer, format: int64 }
-        confirmed_swapped_sessions:     { type: integer, format: int64 }
-        inferred_swap_sessions:         { type: integer, format: int64 }
-        total_swapped_sessions:         { type: integer, format: int64 }
-        sessions_ending_in_error:       { type: integer, format: int64 }
-        startup_failed_rate:            { type: number, format: double }
-        swap_rate:                      { type: number, format: double }
-
-    GPUMetricsResponse:
-      type: object
-      properties:
-        metrics:
-          type: array
-          items: { $ref: "#/components/schemas/GPUMetric" }
-        pagination: { $ref: "#/components/schemas/Pagination" }
-
-  responses:
-    429:
-      description: Rate limit exceeded.
-      headers:
-        Retry-After:
-          schema:
-            type: integer
-          description: Seconds to wait before retrying.
-      content:
-        application/problem+json:
-          schema:
-            $ref: "#/components/schemas/Problem"
-    500:
-      description: Internal server error.
-      content:
-        application/problem+json:
-          schema:
-            $ref: "#/components/schemas/Problem"
-    404:
-      description: Resource not found.
-      content:
-        application/problem+json:
-          schema:
-            $ref: "#/components/schemas/Problem"
-    TooManyRequests:
-      description: Rate limit exceeded.
-      content:
-        application/problem+json:
-          schema: { $ref: "#/components/schemas/Problem" }
-    NotFound:
-      description: Resource not found.
-      content:
-        application/problem+json:
-          schema: { $ref: "#/components/schemas/Problem" }
-    BadRequest:
-      description: Bad request.
-      content:
-        application/problem+json:
-          schema: { $ref: "#/components/schemas/Problem" }
-
-# ── Paths ──────────────────────────────────────────────────────────────────────
-
-paths:
-
-  /healthz:
-    get:
-      tags: [Health]
-      summary: Health check
-      description: Returns 200 with `{"status":"ok"}` if the service and ClickHouse are healthy. Returns 503 if the ClickHouse ping fails.
-      operationId: getHealth
-      responses:
-        "200":
-          description: Service is healthy.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  status:
-                    type: string
-                    enum: [ok, degraded]
-        "503":
-          description: ClickHouse is unreachable.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  status:
-                    type: string
-                    example: degraded
-
-  # ── Network ────────────────────────────────────────────────────────────────
-
-  /v1/net/orchestrators:
-    get:
-      tags: [Network]
-      summary: List orchestrators
-      description: Paginated list of orchestrators ordered by last seen descending.
-      operationId: listOrchestrators
-      parameters:
-        - $ref: "#/components/parameters/org"
-        - $ref: "#/components/parameters/active_only"
-        - $ref: "#/components/parameters/limit"
-        - $ref: "#/components/parameters/offset"
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Orchestrator"
-        "429":
-          $ref: "#/components/responses/429"
-        "500":
-          $ref: "#/components/responses/500"
-
-  /v1/net/models:
-    get:
-      tags: [Network]
-      summary: Model availability
-      description: Available AI models per pipeline, including warm orch count and price range.
-      operationId: listModels
-      parameters:
-        - $ref: "#/components/parameters/org"
-        - $ref: "#/components/parameters/pipeline"
-        - $ref: "#/components/parameters/limit"
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/ModelAvailability"
-        "429":
-          $ref: "#/components/responses/429"
-        "500":
-          $ref: "#/components/responses/500"
-
-
-  # ── Model Performance (R12) ──────────────────────────────────────────────
-
-  /v1/perf/by-model:
-    get:
-      summary: Performance by AI model
-      description: Returns FPS performance broken down by AI model, joined from GPU inventory.
-      operationId: listModelPerformance
-      tags: [Network]
-      parameters:
-        - $ref: "#/components/parameters/org"
-        - $ref: "#/components/parameters/start"
-        - $ref: "#/components/parameters/end"
-        - $ref: "#/components/parameters/pipeline"
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: array
-                items: { $ref: "#/components/schemas/ModelPerformance" }
-        "429": { $ref: "#/components/responses/TooManyRequests" }
-
-  # ── Capacity (R15) ───────────────────────────────────────────────────────
-
-  /v1/net/capacity:
-    get:
-      summary: Network capacity vs. demand
-      description: Returns GPU supply (warm orchs, VRAM) vs. active stream demand per (pipeline, model).
-      operationId: getCapacitySummary
-      tags: [Capacity, Network]
-      parameters:
-        - $ref: "#/components/parameters/org"
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/CapacitySummary" }
-        "429": { $ref: "#/components/responses/TooManyRequests" }
-
-  # ── SLA / GPU / Network Demand (ported from leaderboard-serverless) ────────
-
-  /v1/sla/compliance:
-    get:
-      summary: SLA compliance metrics
-      description: |
-        Returns per-orchestrator SLA compliance metrics aggregated into hourly buckets.
-        Grouped by (orchestrator_address, pipeline_id, model_id, gpu_id).
-
-        **Window:** default 24h, min 1h, max 30d.
-
-        `region` is currently always null and confirmed swap counters remain 0.
-      operationId: listSLACompliance
-      tags: [SLA]
-      parameters:
-        - $ref: "#/components/parameters/org"
-        - $ref: "#/components/parameters/window"
-        - $ref: "#/components/parameters/orchestrator_address"
-        - $ref: "#/components/parameters/pipeline_id"
-        - $ref: "#/components/parameters/model_id"
-        - $ref: "#/components/parameters/gpu_id"
-        - $ref: "#/components/parameters/region"
-        - $ref: "#/components/parameters/page"
-        - $ref: "#/components/parameters/page_size"
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/SLAComplianceResponse" }
-        "500": { $ref: "#/components/responses/500" }
-
-  /v1/network/demand:
-    get:
-      summary: Network demand metrics
-      description: |
-        Returns gateway demand metrics aggregated into hourly buckets.
-        Grouped by (gateway, pipeline_id, model_id).
-
-        **Window:** default 3h, min 1m, max 30d.
-
-        This surface unions perf-backed hourly keys with session-demand keys so
-        demand-only and perf-only rows both remain visible.
-      operationId: listNetworkDemand
-      tags: [Demand]
-      parameters:
-        - $ref: "#/components/parameters/org"
-        - $ref: "#/components/parameters/window"
-        - $ref: "#/components/parameters/gateway_filter"
-        - $ref: "#/components/parameters/pipeline_id"
-        - $ref: "#/components/parameters/model_id"
-        - $ref: "#/components/parameters/region"
-        - $ref: "#/components/parameters/page"
-        - $ref: "#/components/parameters/page_size"
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/NetworkDemandResponse" }
-        "500": { $ref: "#/components/responses/500" }
-
-  /v1/gpu/network-demand:
-    get:
-      summary: GPU-sliced network demand metrics
-      description: |
-        Returns GPU-sliced gateway demand metrics aggregated into hourly buckets.
-        Grouped by (gateway, orchestrator_address, pipeline_id, model_id, gpu_id).
-
-        **Window:** default 3h, min 1m, max 30d.
-
-        Hardware-unresolved rows remain visible with `gpu_identity_status = hardware_unresolved`.
-      operationId: listGPUNetworkDemand
-      tags: [Demand]
-      parameters:
-        - $ref: "#/components/parameters/org"
-        - $ref: "#/components/parameters/window"
-        - $ref: "#/components/parameters/gateway_filter"
-        - $ref: "#/components/parameters/orchestrator_address"
-        - $ref: "#/components/parameters/pipeline_id"
-        - $ref: "#/components/parameters/model_id"
-        - $ref: "#/components/parameters/gpu_id"
-        - $ref: "#/components/parameters/region"
-        - $ref: "#/components/parameters/page"
-        - $ref: "#/components/parameters/page_size"
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/GPUNetworkDemandResponse" }
-        "500": { $ref: "#/components/responses/500" }
-
-  /v1/gpu/metrics:
-    get:
-      summary: GPU performance metrics
-      description: |
-        Returns per-GPU performance metrics aggregated into hourly buckets.
-        Grouped by (orchestrator_address, pipeline_id, model_id, gpu_id).
-        Hardware dimensions (gpu_model_name, gpu_memory_bytes_total) are joined
-        from the GPU inventory.
-
-        **Window:** default 24h, min 1m, max 72h.
-
-        **Approximations:** `region`, `runner_version`, `cuda_version`, and
-        `fps_jitter_coefficient` are currently null. Latency fields use canonical
-        session-edge proxies rather than raw producer-reported status latency.
-      operationId: listGPUMetrics
-      tags: [GPUMetrics]
-      parameters:
-        - $ref: "#/components/parameters/org"
-        - $ref: "#/components/parameters/window"
-        - $ref: "#/components/parameters/orchestrator_address"
-        - $ref: "#/components/parameters/pipeline_id"
-        - $ref: "#/components/parameters/model_id"
-        - $ref: "#/components/parameters/gpu_id"
-        - $ref: "#/components/parameters/gpu_model_name"
-        - $ref: "#/components/parameters/runner_version"
-        - $ref: "#/components/parameters/cuda_version"
-        - $ref: "#/components/parameters/region"
-        - $ref: "#/components/parameters/page"
-        - $ref: "#/components/parameters/page_size"
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/GPUMetricsResponse" }
-        "500": { $ref: "#/components/responses/500" }
-
-  # ── Dashboard paths (R16) ─────────────────────────────────────────────────
-
-  /v1/dashboard/kpi:
-    get:
-      summary: Dashboard KPI metrics
-      description: |
-        Returns top-level KPI metrics for the dashboard: success rate, active
-        orchestrators, session count, and hourly time-series buckets.
-
-        Deltas are computed by splitting the window into two equal halves and
-        comparing their aggregates.
-
-        **Window:** default 24h, max 168h (7 days). Accepts `?window=24h` or `?window=7d`.
-
-        **Filters:** `pipeline` narrows session counts and usage minutes; `model_id` narrows
-        usage minutes only (session counts are not tracked at model granularity).
-      operationId: getDashboardKPI
-      tags: [Dashboard]
-      parameters:
-        - $ref: "#/components/parameters/window"
-        - $ref: "#/components/parameters/pipeline"
-        - $ref: "#/components/parameters/model_id"
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/DashboardKPI" }
-        "500": { $ref: "#/components/responses/500" }
-
-  /v1/dashboard/pipelines:
-    get:
-      summary: Pipeline usage summary
-      description: |
-        Returns the top N pipelines by session count over the last 24 hours.
-        Suitable for the pipeline usage bar chart.
-      operationId: getDashboardPipelines
-      tags: [Dashboard]
-      parameters:
-        - name: limit
-          in: query
-          description: Maximum pipelines to return (1–20, default 5).
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 20
-            default: 5
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: array
-                items: { $ref: "#/components/schemas/DashboardPipelineUsage" }
-        "500": { $ref: "#/components/responses/500" }
-
-  /v1/dashboard/orchestrators:
-    get:
-      summary: Orchestrator SLA table
-      description: |
-        Returns per-orchestrator SLA metrics aggregated over a rolling window.
-        Includes session counts, effective success rate, no-swap ratio, and
-        composite SLA score (0.7 × effectiveSuccessRate + 0.3 × noSwapRatio).
-        Also includes the pipelines and models each orchestrator currently offers,
-        and GPU count from the hardware inventory.
-
-        **Window:** default 7d (168h), max 30d (720h).
-      operationId: getDashboardOrchestrators
-      tags: [Dashboard]
-      parameters:
-        - $ref: "#/components/parameters/window"
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: array
-                items: { $ref: "#/components/schemas/DashboardOrchestrator" }
-        "500": { $ref: "#/components/responses/500" }
-
-  /v1/dashboard/gpu-capacity:
-    get:
-      summary: GPU capacity inventory
-      description: |
-        Returns GPU hardware inventory grouped by pipeline, model, and GPU model.
-        Data is sourced from the latest capability snapshots (last 10 minutes).
-        Suitable for the GPU capacity widget.
-      operationId: getDashboardGPUCapacity
-      tags: [Dashboard]
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/DashboardGPUCapacity" }
-        "500": { $ref: "#/components/responses/500" }
-
-  /v1/dashboard/pipeline-catalog:
-    get:
-      summary: Active pipeline catalog
-      description: |
-        Returns all pipeline + model combinations currently offered by at least
-        one warm orchestrator (seen within the last 10 minutes).
-        Suitable for the pipeline catalog widget.
-      operationId: getDashboardPipelineCatalog
-      tags: [Dashboard]
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: array
-                items: { $ref: "#/components/schemas/DashboardPipelineCatalogEntry" }
-        "500": { $ref: "#/components/responses/500" }
-
-  /v1/dashboard/pricing:
-    get:
-      summary: Pipeline pricing (raw wei)
-      description: |
-        Returns raw wei-per-unit pricing for each pipeline + model combination,
-        aggregated across all active orchestrators.
-
-        `priceAvgWeiPerUnit` is the unweighted mean across orchestrators that
-        advertise a price. Convert to a human scale with `price = avg / 1e12`.
-        Only orchestrators active within the last 10 minutes are included.
-        Coverage is sparse — most orchestrators do not advertise prices.
-      operationId: getDashboardPricing
-      tags: [Dashboard]
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: array
-                items: { $ref: "#/components/schemas/DashboardPipelinePricing" }
-        "500": { $ref: "#/components/responses/500" }
-
-  /v1/dashboard/job-feed:
-    get:
-      summary: Live job feed
-      description: |
-        Returns currently active streams grouped by session key, ordered by most
-        recently seen. Each item represents one active stream request attributed
-        to a gateway/orchestrator pair.
-
-        Streams with no orchestrator attribution yet appear with an empty
-        `orchestratorUrl` field.
-      operationId: getDashboardJobFeed
-      tags: [Dashboard]
-      parameters:
-        - name: limit
-          in: query
-          description: Maximum items to return (1–200, default 50).
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 200
-            default: 50
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: array
-                items: { $ref: "#/components/schemas/DashboardJobFeedItem" }
-        "500": { $ref: "#/components/responses/500" }
+          description: |
+            True when this (orchestrator, pipeline) had SLA samples in the last
+            2 hours, meaning `score` is a meaningful measurement. False when
+            there's been no recent activity, in which case `score` is a `0.0`
+            placeholder.

@@ -144,7 +144,11 @@ func (r *repo) upsertDirtyScanWatermark(ctx context.Context, stateKey string, wa
 }
 
 func acceptedRawDirtyScanPredicate() string {
-	return `event_type IN ('stream_trace', 'ai_stream_status', 'ai_stream_events', 'network_capabilities')`
+	return `event_type IN (
+		'stream_trace', 'ai_stream_status', 'ai_stream_events', 'network_capabilities',
+		'ai_batch_request', 'ai_llm_request',
+		'job_gateway', 'job_orchestrator', 'worker_lifecycle'
+	)`
 }
 
 func dirtyWatermarkPredicate(watermark *dirtyScanWatermark) (string, []any) {
@@ -158,7 +162,7 @@ func dirtyWatermarkPredicate(watermark *dirtyScanWatermark) (string, []any) {
 	}
 }
 
-func (r *repo) scanDirtyAcceptedRawPartitions(ctx context.Context, org string, excludedPrefixes []string, historicalCutoff time.Time, watermark *dirtyScanWatermark) ([]backfillPartition, *dirtyScanWatermark, error) {
+func (r *repo) scanDirtyAcceptedRawPartitions(ctx context.Context, org string, excludedPrefixes []string, historicalCutoff, currentDayStart time.Time, watermark *dirtyScanWatermark) (dirtyScanResult, error) {
 	orgClause, orgArgs := orgPredicate("org", org, excludedPrefixes)
 	watermarkClause, watermarkArgs := dirtyWatermarkPredicate(watermark)
 
@@ -174,7 +178,7 @@ func (r *repo) scanDirtyAcceptedRawPartitions(ctx context.Context, org string, e
 		LIMIT 1
 	`, maxArgs...)
 	if err != nil {
-		return nil, watermark, fmt.Errorf("query dirty accepted raw watermark: %w", err)
+		return dirtyScanResult{}, fmt.Errorf("query dirty accepted raw watermark: %w", err)
 	}
 	defer maxRows.Close()
 
@@ -182,17 +186,19 @@ func (r *repo) scanDirtyAcceptedRawPartitions(ctx context.Context, org string, e
 	if maxRows.Next() {
 		var mark dirtyScanWatermark
 		if err := maxRows.Scan(&mark.IngestedAt, &mark.EventID); err != nil {
-			return nil, watermark, fmt.Errorf("scan dirty accepted raw watermark: %w", err)
+			return dirtyScanResult{}, fmt.Errorf("scan dirty accepted raw watermark: %w", err)
 		}
 		mark.IngestedAt = mark.IngestedAt.UTC()
 		nextWatermark = &mark
 	}
 	if err := maxRows.Err(); err != nil {
-		return nil, watermark, err
+		return dirtyScanResult{}, err
 	}
 	if nextWatermark == nil {
-		return nil, watermark, nil
+		return dirtyScanResult{Watermark: watermark}, nil
 	}
+
+	result := dirtyScanResult{Watermark: nextWatermark}
 
 	args := []any{historicalCutoff.UTC()}
 	args = append(args, orgArgs...)
@@ -208,22 +214,59 @@ func (r *repo) scanDirtyAcceptedRawPartitions(ctx context.Context, org string, e
 		ORDER BY org, event_date
 	`, args...)
 	if err != nil {
-		return nil, nextWatermark, fmt.Errorf("query dirty accepted raw partitions: %w", err)
+		return dirtyScanResult{}, fmt.Errorf("query dirty accepted raw partitions: %w", err)
 	}
 	defer rows.Close()
 
-	var parts []backfillPartition
 	for rows.Next() {
 		var part backfillPartition
 		if err := rows.Scan(&part.Org, &part.EventDate); err != nil {
-			return nil, nextWatermark, fmt.Errorf("scan dirty accepted raw partition: %w", err)
+			return dirtyScanResult{}, fmt.Errorf("scan dirty accepted raw partition: %w", err)
 		}
 		part.EventDate = truncateUTCDate(part.EventDate)
 		part.Start = part.EventDate
 		part.End = part.EventDate.Add(24 * time.Hour)
-		parts = append(parts, part)
+		result.HistoricalPartitions = append(result.HistoricalPartitions, part)
 	}
-	return parts, nextWatermark, rows.Err()
+	if err := rows.Err(); err != nil {
+		return dirtyScanResult{}, err
+	}
+
+	sameDayArgs := []any{currentDayStart.UTC(), currentDayStart.UTC().Add(24 * time.Hour)}
+	sameDayArgs = append(sameDayArgs, orgArgs...)
+	sameDayArgs = append(sameDayArgs, watermarkArgs...)
+	sameDayRows, err := r.conn.Query(ctx, `
+		SELECT
+			org,
+			toStartOfHour(event_ts) AS window_start,
+			toStartOfHour(event_ts) + toIntervalHour(1) AS window_end
+		FROM naap.accepted_raw_events
+		WHERE event_ts >= ?
+		  AND event_ts < ?
+		  AND `+acceptedRawDirtyScanPredicate()+`
+		  AND `+orgClause+`
+		  AND `+watermarkClause+`
+		GROUP BY org, window_start, window_end
+		ORDER BY org, window_start
+	`, sameDayArgs...)
+	if err != nil {
+		return dirtyScanResult{}, fmt.Errorf("query dirty accepted raw windows: %w", err)
+	}
+	defer sameDayRows.Close()
+
+	for sameDayRows.Next() {
+		var window dirtyWindow
+		if err := sameDayRows.Scan(&window.Org, &window.WindowStart, &window.WindowEnd); err != nil {
+			return dirtyScanResult{}, fmt.Errorf("scan dirty accepted raw window: %w", err)
+		}
+		window.WindowStart = window.WindowStart.UTC()
+		window.WindowEnd = window.WindowEnd.UTC()
+		result.SameDayWindows = append(result.SameDayWindows, window)
+	}
+	if err := sameDayRows.Err(); err != nil {
+		return dirtyScanResult{}, err
+	}
+	return result, nil
 }
 
 func (r *repo) pendingDirtyPartitionCount(ctx context.Context, org string, excludedPrefixes []string) (uint64, error) {
@@ -273,6 +316,307 @@ func (r *repo) nextPendingDirtyPartition(ctx context.Context, org string, exclud
 		return dirtyPartition{}, false, err
 	}
 	return part, true, rows.Err()
+}
+
+func (r *repo) requeueExpiredDirtyPartitions(ctx context.Context, org string, excludedPrefixes []string) (int, error) {
+	orgClause, orgArgs := orgPredicate("ifNull(org, '')", org, excludedPrefixes)
+	rows, err := r.conn.Query(ctx, `
+		SELECT
+			ifNull(org, '') AS org,
+			event_date,
+			status,
+			reason,
+			first_dirty_at,
+			last_dirty_at,
+			ifNull(claim_owner, '') AS claim_owner,
+			lease_expires_at,
+			attempt_count,
+			ifNull(last_error_summary, '') AS last_error_summary,
+			updated_at
+		FROM naap.resolver_dirty_partitions FINAL
+		WHERE status = 'claimed'
+		  AND lease_expires_at <= now64(3)
+		  AND `+orgClause+`
+	`, orgArgs...)
+	if err != nil {
+		return 0, fmt.Errorf("query expired dirty partitions: %w", err)
+	}
+	defer rows.Close()
+
+	now := time.Now().UTC()
+	requeued := 0
+	for rows.Next() {
+		part, scanErr := scanDirtyPartition(rows)
+		if scanErr != nil {
+			return requeued, scanErr
+		}
+		state, ok := requeueDirtyPartitionState(part, now)
+		if !ok {
+			continue
+		}
+		if err := r.insertDirtyPartitionState(ctx, state); err != nil {
+			return requeued, fmt.Errorf("requeue expired dirty partition: %w", err)
+		}
+		requeued++
+	}
+	return requeued, rows.Err()
+}
+
+func (r *repo) pendingDirtyWindowCount(ctx context.Context, org string, excludedPrefixes []string) (uint64, error) {
+	orgClause, orgArgs := orgPredicate("org", org, excludedPrefixes)
+	var count uint64
+	if err := r.conn.QueryRow(ctx, `
+		SELECT count()
+		FROM naap.resolver_dirty_windows FINAL
+		WHERE status = 'pending'
+		  AND `+orgClause+`
+	`, orgArgs...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count pending dirty windows: %w", err)
+	}
+	return count, nil
+}
+
+func (r *repo) nextEligiblePendingDirtyWindow(ctx context.Context, org string, excludedPrefixes []string, repairCutoff, quietCutoff time.Time) (dirtyWindow, bool, error) {
+	orgClause, orgArgs := orgPredicate("org", org, excludedPrefixes)
+	args := []any{repairCutoff.UTC(), quietCutoff.UTC()}
+	args = append(args, orgArgs...)
+	rows, err := r.conn.Query(ctx, `
+		SELECT
+			org,
+			window_start,
+			window_end,
+			status,
+			reason,
+			first_dirty_at,
+			last_dirty_at,
+			ifNull(claim_owner, '') AS claim_owner,
+			lease_expires_at,
+			attempt_count,
+			ifNull(last_error_summary, '') AS last_error_summary,
+			updated_at
+		FROM naap.resolver_dirty_windows FINAL
+		WHERE status = 'pending'
+		  AND window_end <= ?
+		  AND last_dirty_at <= ?
+		  AND `+orgClause+`
+		ORDER BY window_start DESC, last_dirty_at DESC, org
+		LIMIT 1
+	`, args...)
+	if err != nil {
+		return dirtyWindow{}, false, fmt.Errorf("query next eligible pending dirty window: %w", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return dirtyWindow{}, false, nil
+	}
+	window, err := scanDirtyWindow(rows)
+	if err != nil {
+		return dirtyWindow{}, false, err
+	}
+	return window, true, rows.Err()
+}
+
+func (r *repo) requeueExpiredDirtyWindows(ctx context.Context, org string, excludedPrefixes []string) (int, error) {
+	orgClause, orgArgs := orgPredicate("org", org, excludedPrefixes)
+	rows, err := r.conn.Query(ctx, `
+		SELECT
+			org,
+			window_start,
+			window_end,
+			status,
+			reason,
+			first_dirty_at,
+			last_dirty_at,
+			ifNull(claim_owner, '') AS claim_owner,
+			lease_expires_at,
+			attempt_count,
+			ifNull(last_error_summary, '') AS last_error_summary,
+			updated_at
+		FROM naap.resolver_dirty_windows FINAL
+		WHERE status = 'claimed'
+		  AND lease_expires_at <= now64(3)
+		  AND `+orgClause+`
+	`, orgArgs...)
+	if err != nil {
+		return 0, fmt.Errorf("query expired dirty windows: %w", err)
+	}
+	defer rows.Close()
+
+	now := time.Now().UTC()
+	requeued := 0
+	for rows.Next() {
+		window, scanErr := scanDirtyWindow(rows)
+		if scanErr != nil {
+			return requeued, scanErr
+		}
+		state, ok := requeueDirtyWindowState(window, now)
+		if !ok {
+			continue
+		}
+		if err := r.insertDirtyWindowState(ctx, state); err != nil {
+			return requeued, fmt.Errorf("requeue expired dirty window: %w", err)
+		}
+		requeued++
+	}
+	return requeued, rows.Err()
+}
+
+func (r *repo) pendingRepairRequestCount(ctx context.Context, org string, excludedPrefixes []string) (uint64, error) {
+	orgClause, orgArgs := orgPredicate("ifNull(org, '')", org, excludedPrefixes)
+	var count uint64
+	if err := r.conn.QueryRow(ctx, `
+		SELECT count()
+		FROM (
+			SELECT *
+			FROM (
+				SELECT
+					request_id,
+					ifNull(org, '') AS org,
+					status,
+					updated_at,
+					row_number() OVER (PARTITION BY request_id ORDER BY updated_at DESC) AS rn
+				FROM naap.resolver_repair_requests
+			)
+			WHERE rn = 1
+		)
+		WHERE status = 'pending'
+		  AND `+orgClause+`
+	`, orgArgs...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count pending repair requests: %w", err)
+	}
+	return count, nil
+}
+
+func latestRepairRequestStatesQuery(innerWhere string) string {
+	query := `
+		SELECT
+			request_id,
+			org,
+			window_start,
+			window_end,
+			status,
+			requested_by,
+			reason,
+			dry_run,
+			claim_owner,
+			lease_expires_at,
+			attempt_count,
+			started_at,
+			finished_at,
+			last_error_summary,
+			created_at,
+			updated_at
+		FROM (
+			SELECT *
+			FROM (
+				SELECT
+					request_id,
+					ifNull(org, '') AS org,
+					window_start,
+					window_end,
+					status,
+					requested_by,
+					reason,
+					dry_run,
+					ifNull(claim_owner, '') AS claim_owner,
+					lease_expires_at,
+					attempt_count,
+					started_at,
+					finished_at,
+					ifNull(last_error_summary, '') AS last_error_summary,
+					created_at,
+					updated_at,
+					row_number() OVER (PARTITION BY request_id ORDER BY updated_at DESC) AS rn
+				FROM naap.resolver_repair_requests`
+	if innerWhere != "" {
+		query += `
+				WHERE ` + innerWhere
+	}
+	query += `
+			)
+			WHERE rn = 1
+		)
+	`
+	return query
+}
+
+func (r *repo) nextPendingRepairRequest(ctx context.Context, org string, excludedPrefixes []string) (repairRequest, bool, error) {
+	orgClause, orgArgs := orgPredicate("ifNull(org, '')", org, excludedPrefixes)
+	rows, err := r.conn.Query(ctx, latestRepairRequestStatesQuery("")+`
+		WHERE status = 'pending'
+		  AND `+orgClause+`
+		ORDER BY created_at, request_id
+		LIMIT 1
+	`, orgArgs...)
+	if err != nil {
+		return repairRequest{}, false, fmt.Errorf("query next pending repair request: %w", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return repairRequest{}, false, nil
+	}
+	request, err := scanRepairRequest(rows)
+	if err != nil {
+		return repairRequest{}, false, err
+	}
+	return request, true, rows.Err()
+}
+
+func (r *repo) requeueExpiredRepairRequests(ctx context.Context, org string, excludedPrefixes []string) (int, error) {
+	orgClause, orgArgs := orgPredicate("ifNull(org, '')", org, excludedPrefixes)
+	rows, err := r.conn.Query(ctx, latestRepairRequestStatesQuery("")+`
+		WHERE status = 'claimed'
+		  AND lease_expires_at <= now64(3)
+		  AND `+orgClause+`
+	`, orgArgs...)
+	if err != nil {
+		return 0, fmt.Errorf("query expired repair requests: %w", err)
+	}
+	defer rows.Close()
+
+	now := time.Now().UTC()
+	requeued := 0
+	for rows.Next() {
+		request, scanErr := scanRepairRequest(rows)
+		if scanErr != nil {
+			return requeued, scanErr
+		}
+		state, ok := requeueRepairRequestState(request, now)
+		if !ok {
+			continue
+		}
+		if err := r.insertRepairRequestState(ctx, state); err != nil {
+			return requeued, fmt.Errorf("requeue expired repair request: %w", err)
+		}
+		requeued++
+	}
+	return requeued, rows.Err()
+}
+
+func (r *repo) listRepairRequests(ctx context.Context, org string, excludedPrefixes []string, status string, limit uint64) ([]repairRequest, error) {
+	orgClause, orgArgs := orgPredicate("ifNull(org, '')", org, excludedPrefixes)
+	args := []any{status, status}
+	args = append(args, orgArgs...)
+	args = append(args, limit)
+	rows, err := r.conn.Query(ctx, latestRepairRequestStatesQuery("")+`
+		WHERE (? = '' OR status = ?)
+		  AND `+orgClause+`
+		ORDER BY created_at DESC, request_id DESC
+		LIMIT ?
+	`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list repair requests: %w", err)
+	}
+	defer rows.Close()
+	var out []repairRequest
+	for rows.Next() {
+		request, scanErr := scanRepairRequest(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		out = append(out, request)
+	}
+	return out, rows.Err()
 }
 
 func (r *repo) successfulBackfillPartitions(ctx context.Context, org string, excludedPrefixes []string) (map[string]struct{}, error) {
@@ -721,85 +1065,43 @@ func (r *repo) fetchCapabilitySnapshots(ctx context.Context, spec WindowSpec, id
 	start := spec.Start.UTC().Add(-10 * time.Minute)
 	end := spec.End.UTC().Add(30 * time.Second)
 	orgClause, orgArgs := orgPredicate("n.org", spec.Org, spec.ExcludedOrgPrefixes)
+	// Phase-perf: single-scan form replaces the prior 3-way UNION DISTINCT over
+	// normalized_network_capabilities. Matching on any of (address, uri_norm,
+	// name-as-local-address) collapses into one OR'd JOIN condition; DISTINCT
+	// plus GROUP BY dedup the fanout.
 	args := []any{queryID, start, end}
-	args = append(args, orgArgs...)
-	args = append(args, queryID, start, end)
-	args = append(args, orgArgs...)
-	args = append(args, queryID, start, end)
 	args = append(args, orgArgs...)
 	rows, err := r.conn.Query(ctx, `
 		SELECT DISTINCT
-			org,
-			orch_address,
-			orch_uri,
-			orch_uri_norm,
+			n.org AS org,
+			n.orch_address AS orch_address,
+			n.orch_uri AS orch_uri,
+			n.orch_uri_norm AS orch_uri_norm,
 			if(
-				match(lowerUTF8(ifNull(orch_name, '')), '^0x[0-9a-f]{40}$')
-				AND lowerUTF8(ifNull(orch_name, '')) != lowerUTF8(ifNull(orch_address, '')),
-				lowerUTF8(orch_name),
+				match(lowerUTF8(ifNull(n.orch_name, '')), '^0x[0-9a-f]{40}$')
+				AND lowerUTF8(ifNull(n.orch_name, '')) != lowerUTF8(ifNull(n.orch_address, '')),
+				lowerUTF8(n.orch_name),
 				''
 			) AS local_address,
-			event_id,
-			event_ts,
-			raw_capabilities
-		FROM (
-			SELECT
-				n.org AS org,
-				n.orch_address AS orch_address,
-				n.orch_uri AS orch_uri,
-				n.orch_uri_norm AS orch_uri_norm,
-				ifNull(n.orch_name, '') AS orch_name,
-				n.event_id AS event_id,
-				n.event_ts AS event_ts,
-				n.raw_capabilities AS raw_capabilities
-			FROM naap.normalized_network_capabilities n
-			INNER JOIN naap.resolver_query_identities i
-				ON i.query_id = ?
-			   AND i.identity = lowerUTF8(ifNull(n.orch_address, ''))
-			WHERE n.event_ts >= ? AND n.event_ts < ?
-			  AND `+orgClause+`
-
-			UNION DISTINCT
-
-			SELECT
-				n.org AS org,
-				n.orch_address AS orch_address,
-				n.orch_uri AS orch_uri,
-				n.orch_uri_norm AS orch_uri_norm,
-				ifNull(n.orch_name, '') AS orch_name,
-				n.event_id AS event_id,
-				n.event_ts AS event_ts,
-				n.raw_capabilities AS raw_capabilities
-			FROM naap.normalized_network_capabilities n
-			INNER JOIN naap.resolver_query_identities i
-				ON i.query_id = ?
-			   AND i.identity = lowerUTF8(ifNull(n.orch_uri_norm, ''))
-			WHERE n.event_ts >= ? AND n.event_ts < ?
-			  AND `+orgClause+`
-
-			UNION DISTINCT
-
-			SELECT
-				n.org AS org,
-				n.orch_address AS orch_address,
-				n.orch_uri AS orch_uri,
-				n.orch_uri_norm AS orch_uri_norm,
-				ifNull(n.orch_name, '') AS orch_name,
-				n.event_id AS event_id,
-				n.event_ts AS event_ts,
-				n.raw_capabilities AS raw_capabilities
-			FROM naap.normalized_network_capabilities n
-			INNER JOIN naap.resolver_query_identities i
-				ON i.query_id = ?
-			   AND i.identity = if(
-					match(lowerUTF8(ifNull(n.orch_name, '')), '^0x[0-9a-f]{40}$')
-					AND lowerUTF8(ifNull(n.orch_name, '')) != lowerUTF8(ifNull(n.orch_address, '')),
-					lowerUTF8(n.orch_name),
-					''
-				)
-			WHERE n.event_ts >= ? AND n.event_ts < ?
-			  AND `+orgClause+`
-		)
+			n.event_id AS event_id,
+			n.event_ts AS event_ts,
+			n.raw_capabilities AS raw_capabilities
+		FROM naap.normalized_network_capabilities n
+		ARRAY JOIN [
+			lowerUTF8(ifNull(n.orch_address, '')),
+			lowerUTF8(ifNull(n.orch_uri_norm, '')),
+			if(
+				match(lowerUTF8(ifNull(n.orch_name, '')), '^0x[0-9a-f]{40}$')
+				AND lowerUTF8(ifNull(n.orch_name, '')) != lowerUTF8(ifNull(n.orch_address, '')),
+				lowerUTF8(n.orch_name),
+				''
+			)
+		] AS identity_candidate
+		INNER JOIN naap.resolver_query_identities i
+			ON i.query_id = ?
+		   AND i.identity = identity_candidate
+		WHERE n.event_ts >= ? AND n.event_ts < ?
+		  AND `+orgClause+`
 		ORDER BY org, orch_address, orch_uri_norm, event_ts, event_id
 	`, args...)
 	if err != nil {
@@ -1179,63 +1481,21 @@ func (r *repo) fetchLatestSessionDecisions(ctx context.Context, refs []sessionKe
 	return out, rows.Err()
 }
 
-func (r *repo) fetchCurrentDecisionHashes(ctx context.Context, selectionEventIDs []string) (map[string]string, error) {
-	if len(selectionEventIDs) == 0 {
-		return map[string]string{}, nil
-	}
-	queryID, err := r.stageSelectionEventIDs(ctx, selectionEventIDs)
-	if err != nil {
-		return nil, fmt.Errorf("stage decision ids: %w", err)
-	}
-	rows, err := r.conn.Query(ctx, `
-		SELECT
-			c.selection_event_id,
-			lower(hex(MD5(concat(
-				ifNull(c.attribution_status, ''), '|',
-				ifNull(c.attribution_reason, ''), '|',
-				ifNull(c.attribution_method, ''), '|',
-				ifNull(c.selection_confidence, ''), '|',
-				ifNull(c.selected_capability_version_id, ''), '|',
-				ifNull(c.selected_snapshot_event_id, ''), '|',
-				ifNull(c.attributed_orch_address, ''), '|',
-				ifNull(c.attributed_orch_uri, ''), '|',
-				ifNull(c.canonical_pipeline, ''), '|',
-				ifNull(c.canonical_model, ''), '|',
-				ifNull(c.gpu_id, '')
-			)))) AS row_hash
-		FROM naap.resolver_query_selection_event_ids i
-		INNER JOIN naap.canonical_selection_attribution_current c
-			ON i.selection_event_id = c.selection_event_id
-		WHERE i.query_id = ?
-	`, queryID)
-	if err != nil {
-		return nil, fmt.Errorf("fetch current decision hashes: %w", err)
-	}
-	defer rows.Close()
-
-	out := make(map[string]string, len(selectionEventIDs))
-	for rows.Next() {
-		var id, hash string
-		if err := rows.Scan(&id, &hash); err != nil {
-			return nil, fmt.Errorf("scan current decision hash: %w", err)
-		}
-		out[id] = hash
-	}
-	return out, rows.Err()
-}
-
 func (r *repo) recordRun(ctx context.Context, runID string, req RunRequest, status string, startedAt, finishedAt time.Time, rowsProcessed, mismatchCount uint64, errSummary string) error {
+	// Persist both timing knobs with each run so dashboards and alert rules can
+	// evaluate same-day repair eligibility from the live resolver config rather
+	// than assuming fixed interval literals.
 	return r.conn.Exec(ctx, `
 		INSERT INTO naap.resolver_runs
 		(
 			run_id, mode, status, owner_id, org, window_start, window_end, cutoff_ts,
-			lateness_window_seconds, rows_processed, mismatch_count, error_summary,
+			lateness_window_seconds, dirty_quiet_period_seconds, rows_processed, mismatch_count, error_summary,
 			resolver_version, started_at, finished_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		runID, string(req.Mode), status, r.ownerID(), nullableStringValue(req.Org), nullableTimeValue(req.Start), nullableTimeValue(req.End), nullableTimeValue(req.End),
-		uint64(r.cfg.ResolverLatenessWindow.Seconds()), rowsProcessed, mismatchCount, nullableStringValue(errSummary),
+		uint64(r.cfg.ResolverLatenessWindow.Seconds()), uint64(r.cfg.ResolverDirtyQuietPeriod.Seconds()), rowsProcessed, mismatchCount, nullableStringValue(errSummary),
 		r.cfg.ResolverVersion, startedAt.UTC(), finishedAt.UTC(),
 	)
 }
@@ -1371,6 +1631,99 @@ func scanDirtyPartition(scanner interface{ Scan(dest ...any) error }) (dirtyPart
 	return part, nil
 }
 
+func scanDirtyWindow(scanner interface{ Scan(dest ...any) error }) (dirtyWindow, error) {
+	var window dirtyWindow
+	var claimOwner sql.NullString
+	var leaseExpiresAt sql.NullTime
+	var lastError sql.NullString
+	if err := scanner.Scan(
+		&window.Org,
+		&window.WindowStart,
+		&window.WindowEnd,
+		&window.Status,
+		&window.Reason,
+		&window.FirstDirtyAt,
+		&window.LastDirtyAt,
+		&claimOwner,
+		&leaseExpiresAt,
+		&window.AttemptCount,
+		&lastError,
+		&window.UpdatedAt,
+	); err != nil {
+		return dirtyWindow{}, fmt.Errorf("scan dirty window: %w", err)
+	}
+	window.WindowStart = window.WindowStart.UTC()
+	window.WindowEnd = window.WindowEnd.UTC()
+	window.FirstDirtyAt = window.FirstDirtyAt.UTC()
+	window.LastDirtyAt = window.LastDirtyAt.UTC()
+	window.UpdatedAt = window.UpdatedAt.UTC()
+	if claimOwner.Valid {
+		window.ClaimOwner = claimOwner.String
+	}
+	if leaseExpiresAt.Valid {
+		ts := leaseExpiresAt.Time.UTC()
+		window.LeaseExpiresAt = &ts
+	}
+	if lastError.Valid {
+		window.LastErrorSummary = lastError.String
+	}
+	return window, nil
+}
+
+func scanRepairRequest(scanner interface{ Scan(dest ...any) error }) (repairRequest, error) {
+	var request repairRequest
+	var dryRun uint8
+	var claimOwner sql.NullString
+	var leaseExpiresAt sql.NullTime
+	var startedAt sql.NullTime
+	var finishedAt sql.NullTime
+	var lastError sql.NullString
+	if err := scanner.Scan(
+		&request.RequestID,
+		&request.Org,
+		&request.WindowStart,
+		&request.WindowEnd,
+		&request.Status,
+		&request.RequestedBy,
+		&request.Reason,
+		&dryRun,
+		&claimOwner,
+		&leaseExpiresAt,
+		&request.AttemptCount,
+		&startedAt,
+		&finishedAt,
+		&lastError,
+		&request.CreatedAt,
+		&request.UpdatedAt,
+	); err != nil {
+		return repairRequest{}, fmt.Errorf("scan repair request: %w", err)
+	}
+	request.WindowStart = request.WindowStart.UTC()
+	request.WindowEnd = request.WindowEnd.UTC()
+	request.CreatedAt = request.CreatedAt.UTC()
+	request.UpdatedAt = request.UpdatedAt.UTC()
+	request.DryRun = dryRun != 0
+	if claimOwner.Valid {
+		request.ClaimOwner = claimOwner.String
+	}
+	if leaseExpiresAt.Valid {
+		ts := leaseExpiresAt.Time.UTC()
+		request.LeaseExpiresAt = &ts
+	}
+	if startedAt.Valid {
+		ts := startedAt.Time.UTC()
+		request.StartedAt = &ts
+	}
+	if finishedAt.Valid {
+		ts := finishedAt.Time.UTC()
+		request.FinishedAt = &ts
+	}
+	if lastError.Valid {
+		request.LastErrorSummary = lastError.String
+	}
+	return request, nil
+}
+
 func (r *repo) dirtyPartitionState(ctx context.Context, org string, eventDate time.Time) (*dirtyPartition, error) {
 	rows, err := r.conn.Query(ctx, `
 		SELECT
@@ -1403,6 +1756,57 @@ func (r *repo) dirtyPartitionState(ctx context.Context, org string, eventDate ti
 	return &part, rows.Err()
 }
 
+func (r *repo) dirtyWindowState(ctx context.Context, org string, windowStart, windowEnd time.Time) (*dirtyWindow, error) {
+	rows, err := r.conn.Query(ctx, `
+		SELECT
+			org,
+			window_start,
+			window_end,
+			status,
+			reason,
+			first_dirty_at,
+			last_dirty_at,
+			claim_owner,
+			lease_expires_at,
+			attempt_count,
+			last_error_summary,
+			updated_at
+		FROM naap.resolver_dirty_windows FINAL
+		WHERE org = ? AND window_start = ? AND window_end = ?
+		LIMIT 1
+	`, org, windowStart.UTC(), windowEnd.UTC())
+	if err != nil {
+		return nil, fmt.Errorf("query dirty window state: %w", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return nil, nil
+	}
+	window, err := scanDirtyWindow(rows)
+	if err != nil {
+		return nil, err
+	}
+	return &window, rows.Err()
+}
+
+func (r *repo) repairRequestState(ctx context.Context, requestID string) (*repairRequest, error) {
+	rows, err := r.conn.Query(ctx, latestRepairRequestStatesQuery("request_id = ?")+`
+		LIMIT 1
+	`, requestID)
+	if err != nil {
+		return nil, fmt.Errorf("query repair request state: %w", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return nil, nil
+	}
+	request, err := scanRepairRequest(rows)
+	if err != nil {
+		return nil, err
+	}
+	return &request, rows.Err()
+}
+
 func (r *repo) insertDirtyPartitionState(ctx context.Context, part dirtyPartition) error {
 	return r.conn.Exec(ctx, `
 		INSERT INTO naap.resolver_dirty_partitions
@@ -1426,6 +1830,59 @@ func (r *repo) insertDirtyPartitionState(ctx context.Context, part dirtyPartitio
 	)
 }
 
+func (r *repo) insertDirtyWindowState(ctx context.Context, window dirtyWindow) error {
+	return r.conn.Exec(ctx, `
+		INSERT INTO naap.resolver_dirty_windows
+		(
+			org, window_start, window_end, status, reason, first_dirty_at, last_dirty_at,
+			claim_owner, lease_expires_at, attempt_count, last_error_summary, updated_at
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		window.Org,
+		window.WindowStart.UTC(),
+		window.WindowEnd.UTC(),
+		window.Status,
+		window.Reason,
+		window.FirstDirtyAt.UTC(),
+		window.LastDirtyAt.UTC(),
+		nullableStringValue(window.ClaimOwner),
+		nullableTimeValue(window.LeaseExpiresAt),
+		window.AttemptCount,
+		nullableStringValue(window.LastErrorSummary),
+		window.UpdatedAt.UTC(),
+	)
+}
+
+func (r *repo) insertRepairRequestState(ctx context.Context, request repairRequest) error {
+	return r.conn.Exec(ctx, `
+		INSERT INTO naap.resolver_repair_requests
+		(
+			request_id, org, window_start, window_end, status, requested_by, reason, dry_run,
+			claim_owner, lease_expires_at, attempt_count, started_at, finished_at,
+			last_error_summary, created_at, updated_at
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		request.RequestID,
+		nullableStringValue(request.Org),
+		request.WindowStart.UTC(),
+		request.WindowEnd.UTC(),
+		request.Status,
+		request.RequestedBy,
+		request.Reason,
+		boolToUInt8(request.DryRun),
+		nullableStringValue(request.ClaimOwner),
+		nullableTimeValue(request.LeaseExpiresAt),
+		request.AttemptCount,
+		nullableTimeValue(request.StartedAt),
+		nullableTimeValue(request.FinishedAt),
+		nullableStringValue(request.LastErrorSummary),
+		request.CreatedAt.UTC(),
+		request.UpdatedAt.UTC(),
+	)
+}
+
 func (r *repo) enqueueDirtyPartitions(ctx context.Context, parts []backfillPartition, dirtyAt time.Time) (int, error) {
 	enqueued := 0
 	for _, part := range parts {
@@ -1440,6 +1897,39 @@ func (r *repo) enqueueDirtyPartitions(ctx context.Context, parts []backfillParti
 		enqueued++
 	}
 	return enqueued, nil
+}
+
+func (r *repo) enqueueDirtyWindows(ctx context.Context, windows []dirtyWindow, dirtyAt time.Time) (int, error) {
+	enqueued := 0
+	for _, window := range windows {
+		current, err := r.dirtyWindowState(ctx, window.Org, window.WindowStart, window.WindowEnd)
+		if err != nil {
+			return enqueued, err
+		}
+		state := nextDirtyWindowState(current, window, dirtyAt)
+		if err := r.insertDirtyWindowState(ctx, state); err != nil {
+			return enqueued, fmt.Errorf("insert dirty window pending state: %w", err)
+		}
+		enqueued++
+	}
+	return enqueued, nil
+}
+
+func (r *repo) createRepairRequest(ctx context.Context, request repairRequest) error {
+	now := time.Now().UTC()
+	if request.RequestID == "" {
+		request.RequestID = stableHash("repair-request", request.Org, request.WindowStart.UTC().Format(time.RFC3339Nano), request.WindowEnd.UTC().Format(time.RFC3339Nano), request.RequestedBy, request.Reason, now.Format(time.RFC3339Nano))
+	}
+	request.Status = "pending"
+	request.ClaimOwner = ""
+	request.LeaseExpiresAt = nil
+	request.AttemptCount = 0
+	request.StartedAt = nil
+	request.FinishedAt = nil
+	request.LastErrorSummary = ""
+	request.CreatedAt = now
+	request.UpdatedAt = now
+	return r.insertRepairRequestState(ctx, request)
 }
 
 func nextDirtyPartitionState(current *dirtyPartition, part backfillPartition, dirtyAt time.Time) dirtyPartition {
@@ -1472,6 +1962,77 @@ func nextDirtyPartitionState(current *dirtyPartition, part backfillPartition, di
 		state.Status = "pending"
 	}
 	return state
+}
+
+func requeueDirtyPartitionState(current dirtyPartition, now time.Time) (dirtyPartition, bool) {
+	if current.Status != "claimed" || current.LeaseExpiresAt == nil || current.LeaseExpiresAt.UTC().After(now.UTC()) {
+		return dirtyPartition{}, false
+	}
+	current.Status = "pending"
+	current.ClaimOwner = ""
+	current.LeaseExpiresAt = nil
+	current.UpdatedAt = now.UTC()
+	return current, true
+}
+
+func nextDirtyWindowState(current *dirtyWindow, window dirtyWindow, dirtyAt time.Time) dirtyWindow {
+	state := dirtyWindow{
+		Org:          window.Org,
+		WindowStart:  window.WindowStart.UTC(),
+		WindowEnd:    window.WindowEnd.UTC(),
+		Status:       "pending",
+		Reason:       "late_accepted_raw",
+		FirstDirtyAt: dirtyAt.UTC(),
+		LastDirtyAt:  dirtyAt.UTC(),
+		UpdatedAt:    dirtyAt.UTC(),
+	}
+	if current == nil {
+		return state
+	}
+	state.FirstDirtyAt = current.FirstDirtyAt.UTC()
+	state.AttemptCount = current.AttemptCount
+	switch current.Status {
+	case "claimed":
+		state.Status = "claimed"
+		state.ClaimOwner = current.ClaimOwner
+		state.LeaseExpiresAt = current.LeaseExpiresAt
+		state.LastErrorSummary = current.LastErrorSummary
+	case "pending":
+		state.Status = "pending"
+	case "failed", "success":
+		state.Status = "pending"
+	}
+	return state
+}
+
+func requeueDirtyWindowState(current dirtyWindow, now time.Time) (dirtyWindow, bool) {
+	if current.Status != "claimed" || current.LeaseExpiresAt == nil || current.LeaseExpiresAt.UTC().After(now.UTC()) {
+		return dirtyWindow{}, false
+	}
+	current.Status = "pending"
+	current.ClaimOwner = ""
+	current.LeaseExpiresAt = nil
+	current.UpdatedAt = now.UTC()
+	return current, true
+}
+
+func requeueRepairRequestState(current repairRequest, now time.Time) (repairRequest, bool) {
+	if current.Status != "claimed" || current.LeaseExpiresAt == nil || current.LeaseExpiresAt.UTC().After(now.UTC()) {
+		return repairRequest{}, false
+	}
+	current = pendingRepairRequestState(current, now)
+	return current, true
+}
+
+func pendingRepairRequestState(current repairRequest, now time.Time) repairRequest {
+	current.Status = "pending"
+	current.ClaimOwner = ""
+	current.LeaseExpiresAt = nil
+	current.StartedAt = nil
+	current.FinishedAt = nil
+	current.LastErrorSummary = ""
+	current.UpdatedAt = now.UTC()
+	return current
 }
 
 func (r *repo) claimDirtyPartition(ctx context.Context, org string, eventDate time.Time, ownerID string, ttl time.Duration) (bool, error) {
@@ -1546,7 +2107,150 @@ func (r *repo) failDirtyPartition(ctx context.Context, org string, eventDate tim
 	return r.insertDirtyPartitionState(ctx, *current)
 }
 
-func (r *repo) insertSelectionEvents(ctx context.Context, runID string, rows []SelectionEvent) error {
+func (r *repo) claimDirtyWindow(ctx context.Context, org string, windowStart, windowEnd time.Time, ownerID string, ttl time.Duration) (bool, error) {
+	current, err := r.dirtyWindowState(ctx, org, windowStart, windowEnd)
+	if err != nil {
+		return false, err
+	}
+	if current == nil || current.Status != "pending" {
+		return false, nil
+	}
+	now := time.Now().UTC()
+	current.Status = "claimed"
+	current.ClaimOwner = ownerID
+	lease := now.Add(ttl)
+	current.LeaseExpiresAt = &lease
+	current.AttemptCount++
+	current.LastErrorSummary = ""
+	current.UpdatedAt = now
+	if err := r.insertDirtyWindowState(ctx, *current); err != nil {
+		return false, fmt.Errorf("claim dirty window: %w", err)
+	}
+	return true, nil
+}
+
+func (r *repo) releaseDirtyWindow(ctx context.Context, org string, windowStart, windowEnd time.Time, ownerID string) error {
+	current, err := r.dirtyWindowState(ctx, org, windowStart, windowEnd)
+	if err != nil {
+		return err
+	}
+	if current == nil {
+		return nil
+	}
+	now := time.Now().UTC()
+	current.Status = "pending"
+	current.ClaimOwner = ""
+	current.LeaseExpiresAt = nil
+	current.UpdatedAt = now
+	return r.insertDirtyWindowState(ctx, *current)
+}
+
+func (r *repo) completeDirtyWindow(ctx context.Context, org string, windowStart, windowEnd time.Time, ownerID string) error {
+	current, err := r.dirtyWindowState(ctx, org, windowStart, windowEnd)
+	if err != nil {
+		return err
+	}
+	if current == nil {
+		return nil
+	}
+	now := time.Now().UTC()
+	current.Status = "success"
+	current.ClaimOwner = ownerID
+	current.LeaseExpiresAt = nil
+	current.LastErrorSummary = ""
+	current.UpdatedAt = now
+	return r.insertDirtyWindowState(ctx, *current)
+}
+
+func (r *repo) failDirtyWindow(ctx context.Context, org string, windowStart, windowEnd time.Time, ownerID, errSummary string) error {
+	current, err := r.dirtyWindowState(ctx, org, windowStart, windowEnd)
+	if err != nil {
+		return err
+	}
+	if current == nil {
+		return nil
+	}
+	now := time.Now().UTC()
+	current.Status = "failed"
+	current.ClaimOwner = ownerID
+	current.LeaseExpiresAt = nil
+	current.LastErrorSummary = errSummary
+	current.UpdatedAt = now
+	return r.insertDirtyWindowState(ctx, *current)
+}
+
+func (r *repo) claimRepairRequest(ctx context.Context, requestID, ownerID string, ttl time.Duration) (bool, error) {
+	current, err := r.repairRequestState(ctx, requestID)
+	if err != nil {
+		return false, err
+	}
+	if current == nil || current.Status != "pending" {
+		return false, nil
+	}
+	now := time.Now().UTC()
+	current.Status = "claimed"
+	current.ClaimOwner = ownerID
+	lease := now.Add(ttl)
+	current.LeaseExpiresAt = &lease
+	current.AttemptCount++
+	current.StartedAt = &now
+	current.LastErrorSummary = ""
+	current.UpdatedAt = now
+	if err := r.insertRepairRequestState(ctx, *current); err != nil {
+		return false, fmt.Errorf("claim repair request: %w", err)
+	}
+	return true, nil
+}
+
+func (r *repo) completeRepairRequest(ctx context.Context, requestID, ownerID string) error {
+	current, err := r.repairRequestState(ctx, requestID)
+	if err != nil {
+		return err
+	}
+	if current == nil {
+		return nil
+	}
+	now := time.Now().UTC()
+	current.Status = "success"
+	current.ClaimOwner = ownerID
+	current.LeaseExpiresAt = nil
+	current.LastErrorSummary = ""
+	current.FinishedAt = &now
+	current.UpdatedAt = now
+	return r.insertRepairRequestState(ctx, *current)
+}
+
+func (r *repo) releaseRepairRequest(ctx context.Context, requestID string) error {
+	current, err := r.repairRequestState(ctx, requestID)
+	if err != nil {
+		return err
+	}
+	if current == nil {
+		return nil
+	}
+	state := pendingRepairRequestState(*current, time.Now().UTC())
+	return r.insertRepairRequestState(ctx, state)
+}
+
+func (r *repo) failRepairRequest(ctx context.Context, requestID, ownerID, errSummary string) error {
+	current, err := r.repairRequestState(ctx, requestID)
+	if err != nil {
+		return err
+	}
+	if current == nil {
+		return nil
+	}
+	now := time.Now().UTC()
+	current.Status = "failed"
+	current.ClaimOwner = ownerID
+	current.LeaseExpiresAt = nil
+	current.LastErrorSummary = errSummary
+	current.FinishedAt = &now
+	current.UpdatedAt = now
+	return r.insertRepairRequestState(ctx, *current)
+}
+
+func (r *repo) insertSelectionEvents(ctx context.Context, runID string, now time.Time, rows []SelectionEvent) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -1563,7 +2267,6 @@ func (r *repo) insertSelectionEvents(ctx context.Context, runID string, rows []S
 	if err != nil {
 		return fmt.Errorf("prepare selection event batch: %w", err)
 	}
-	now := time.Now().UTC()
 	for _, row := range rows {
 		if err := batch.Append(
 			row.ID, row.Org, row.SessionKey, row.Seq, row.SelectionTS.UTC(),
@@ -1579,7 +2282,7 @@ func (r *repo) insertSelectionEvents(ctx context.Context, runID string, rows []S
 	return batch.Send()
 }
 
-func (r *repo) insertCapabilityVersions(ctx context.Context, runID string, rows []CapabilityVersion) error {
+func (r *repo) insertCapabilityVersions(ctx context.Context, runID string, now time.Time, rows []CapabilityVersion) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -1594,7 +2297,6 @@ func (r *repo) insertCapabilityVersions(ctx context.Context, runID string, rows 
 	if err != nil {
 		return fmt.Errorf("prepare capability version batch: %w", err)
 	}
-	now := time.Now().UTC()
 	for _, row := range rows {
 		if err := batch.Append(
 			row.ID, row.Org, row.OrchAddress, nullableStringValue(row.OrchURI), row.OrchURINorm, nullableStringValue(row.LocalAddress),
@@ -1607,7 +2309,7 @@ func (r *repo) insertCapabilityVersions(ctx context.Context, runID string, rows 
 	return batch.Send()
 }
 
-func (r *repo) insertCapabilityIntervals(ctx context.Context, runID string, rows []CapabilityInterval) error {
+func (r *repo) insertCapabilityIntervals(ctx context.Context, runID string, now time.Time, rows []CapabilityInterval) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -1623,7 +2325,6 @@ func (r *repo) insertCapabilityIntervals(ctx context.Context, runID string, rows
 	if err != nil {
 		return fmt.Errorf("prepare capability interval batch: %w", err)
 	}
-	now := time.Now().UTC()
 	for _, row := range rows {
 		if err := batch.Append(
 			row.VersionID, row.Org, row.OrchAddress, nullableStringValue(row.OrchURI), row.OrchURINorm, row.ValidFromTS.UTC(),
@@ -1637,7 +2338,11 @@ func (r *repo) insertCapabilityIntervals(ctx context.Context, runID string, rows
 	return batch.Send()
 }
 
-func (r *repo) insertDecisionRows(ctx context.Context, runID string, rows []SelectionDecision, previous map[string]string) error {
+// insertDecisionHistoryRows appends to canonical_selection_attribution_decisions
+// — the immutable, append-only history keyed on decision_id. Phase 8 split
+// this out of the prior insertDecisionRows so every resolver writer targets
+// exactly one table (single-responsibility invariant).
+func (r *repo) insertDecisionHistoryRows(ctx context.Context, runID string, now time.Time, rows []SelectionDecision) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -1654,6 +2359,36 @@ func (r *repo) insertDecisionRows(ctx context.Context, runID string, rows []Sele
 	if err != nil {
 		return fmt.Errorf("prepare decision batch: %w", err)
 	}
+	for _, row := range rows {
+		// decision_id is derived from `now` so re-running the same RunRequest
+		// (same Now) produces identical decision_ids — the determinism
+		// invariant the replay harness asserts.
+		decisionID := stableHash(row.SelectionEventID, row.Status, row.Reason, row.Method, row.InputHash, now.Format(time.RFC3339Nano))
+		if err := decisions.Append(
+			decisionID, row.SelectionEventID, row.Org, row.SessionKey, row.SelectionTS.UTC(),
+			row.Status, row.Reason, row.Method, row.Confidence,
+			nullableStringValue(row.CapabilityVersionID), nullableStringValue(row.SnapshotEventID), nullableTimeValue(row.SnapshotTS),
+			nullableStringValue(row.AttributedOrchAddress), nullableStringValue(row.AttributedOrchURI),
+			nullableStringValue(row.CanonicalPipeline), nullableStringValue(row.CanonicalModel), nullableStringValue(row.GPUID),
+			row.InputHash, r.cfg.ResolverVersion, runID, now,
+		); err != nil {
+			return fmt.Errorf("append decision row: %w", err)
+		}
+	}
+	if err := decisions.Send(); err != nil {
+		return fmt.Errorf("send decision rows: %w", err)
+	}
+	return nil
+}
+
+// insertDecisionCurrentRows writes the latest-only projection of the same
+// rows to canonical_selection_attribution_current. Paired with
+// insertDecisionHistoryRows — the caller invokes both per engine step
+// (engine.go), keeping each writer single-target.
+func (r *repo) insertDecisionCurrentRows(ctx context.Context, runID string, now time.Time, rows []SelectionDecision) error {
+	if len(rows) == 0 {
+		return nil
+	}
 	current, err := r.conn.PrepareBatch(ctx, `
 		INSERT INTO naap.canonical_selection_attribution_current
 		(
@@ -1667,29 +2402,7 @@ func (r *repo) insertDecisionRows(ctx context.Context, runID string, rows []Sele
 	if err != nil {
 		return fmt.Errorf("prepare current decision batch: %w", err)
 	}
-	changes, err := r.conn.PrepareBatch(ctx, `
-		INSERT INTO naap.selection_attribution_changes
-		(
-			run_id, selection_event_id, org, canonical_session_key, selection_ts,
-			change_reason, previous_decision_hash, current_decision_hash, created_at
-		)
-	`)
-	if err != nil {
-		return fmt.Errorf("prepare decision change batch: %w", err)
-	}
-	now := time.Now().UTC()
 	for _, row := range rows {
-		decisionID := stableHash(row.SelectionEventID, row.Status, row.Reason, row.Method, row.InputHash, now.Format(time.RFC3339Nano))
-		if err := decisions.Append(
-			decisionID, row.SelectionEventID, row.Org, row.SessionKey, row.SelectionTS.UTC(),
-			row.Status, row.Reason, row.Method, row.Confidence,
-			nullableStringValue(row.CapabilityVersionID), nullableStringValue(row.SnapshotEventID), nullableTimeValue(row.SnapshotTS),
-			nullableStringValue(row.AttributedOrchAddress), nullableStringValue(row.AttributedOrchURI),
-			nullableStringValue(row.CanonicalPipeline), nullableStringValue(row.CanonicalModel), nullableStringValue(row.GPUID),
-			row.InputHash, r.cfg.ResolverVersion, runID, now,
-		); err != nil {
-			return fmt.Errorf("append decision row: %w", err)
-		}
 		if err := current.Append(
 			row.SelectionEventID, row.Org, row.SessionKey, row.SelectionTS.UTC(), row.Status,
 			row.Reason, row.Method, row.Confidence, nullableStringValue(row.CapabilityVersionID),
@@ -1700,34 +2413,14 @@ func (r *repo) insertDecisionRows(ctx context.Context, runID string, rows []Sele
 		); err != nil {
 			return fmt.Errorf("append current decision row: %w", err)
 		}
-		currentHash := stableHash(
-			row.Status, row.Reason, row.Method, row.Confidence, row.CapabilityVersionID, row.SnapshotEventID,
-			row.AttributedOrchAddress, row.AttributedOrchURI, row.CanonicalPipeline, row.CanonicalModel, row.GPUID,
-		)
-		changeReason := "unchanged"
-		prevHash := previous[row.SelectionEventID]
-		if prevHash == "" {
-			changeReason = "new_selection_decision"
-		} else if prevHash != currentHash {
-			changeReason = "decision_updated"
-		}
-		if err := changes.Append(
-			runID, row.SelectionEventID, row.Org, row.SessionKey, row.SelectionTS.UTC(),
-			changeReason, nullableStringValue(prevHash), currentHash, now,
-		); err != nil {
-			return fmt.Errorf("append decision change row: %w", err)
-		}
-	}
-	if err := decisions.Send(); err != nil {
-		return fmt.Errorf("send decision rows: %w", err)
 	}
 	if err := current.Send(); err != nil {
 		return fmt.Errorf("send current decision rows: %w", err)
 	}
-	return changes.Send()
+	return nil
 }
 
-func (r *repo) insertSessionCurrentRows(ctx context.Context, runID string, rows []SessionCurrentRow) error {
+func (r *repo) insertSessionCurrentRows(ctx context.Context, runID string, now time.Time, rows []SessionCurrentRow) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -1750,16 +2443,6 @@ func (r *repo) insertSessionCurrentRows(ctx context.Context, runID string, rows 
 	if err != nil {
 		return fmt.Errorf("prepare session current batch: %w", err)
 	}
-	changes, err := r.conn.PrepareBatch(ctx, `
-		INSERT INTO naap.session_current_changes
-		(
-			run_id, canonical_session_key, org, last_seen, change_reason, current_row_hash, created_at
-		)
-	`)
-	if err != nil {
-		return fmt.Errorf("prepare session current change batch: %w", err)
-	}
-	now := time.Now().UTC()
 	for _, row := range rows {
 		if err := store.Append(
 			row.SessionKey, row.Org, row.StreamID, row.RequestID, nullableStringValue(row.CurrentSelectionEventID),
@@ -1776,19 +2459,14 @@ func (r *repo) insertSessionCurrentRows(ctx context.Context, runID string, rows 
 		); err != nil {
 			return fmt.Errorf("append session current row: %w", err)
 		}
-		rowHash := sessionCurrentRowHash(row)
-		changeReason := "session_updated"
-		if err := changes.Append(runID, row.SessionKey, row.Org, row.LastSeen.UTC(), changeReason, rowHash, now); err != nil {
-			return fmt.Errorf("append session current change: %w", err)
-		}
 	}
 	if err := store.Send(); err != nil {
 		return fmt.Errorf("send session current rows: %w", err)
 	}
-	return changes.Send()
+	return nil
 }
 
-func (r *repo) insertStatusHourRows(ctx context.Context, runID string, rows []StatusHourRow) error {
+func (r *repo) insertStatusHourRows(ctx context.Context, runID string, now time.Time, rows []StatusHourRow) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -1807,16 +2485,6 @@ func (r *repo) insertStatusHourRows(ctx context.Context, runID string, rows []St
 	if err != nil {
 		return fmt.Errorf("prepare status hour batch: %w", err)
 	}
-	changes, err := r.conn.PrepareBatch(ctx, `
-		INSERT INTO naap.status_hour_changes
-		(
-			run_id, canonical_session_key, org, hour, change_reason, current_row_hash, created_at
-		)
-	`)
-	if err != nil {
-		return fmt.Errorf("prepare status hour change batch: %w", err)
-	}
-	now := time.Now().UTC()
 	for _, row := range rows {
 		if err := store.Append(
 			row.SessionKey, row.Org, row.Hour.UTC(), row.StreamID, row.RequestID, row.CanonicalPipeline,
@@ -1830,18 +2498,14 @@ func (r *repo) insertStatusHourRows(ctx context.Context, runID string, rows []St
 		); err != nil {
 			return fmt.Errorf("append status hour row: %w", err)
 		}
-		rowHash := statusHourRowHash(row)
-		if err := changes.Append(runID, row.SessionKey, row.Org, row.Hour.UTC(), "status_hour_updated", rowHash, now); err != nil {
-			return fmt.Errorf("append status hour change: %w", err)
-		}
 	}
 	if err := store.Send(); err != nil {
 		return fmt.Errorf("send status hour rows: %w", err)
 	}
-	return changes.Send()
+	return nil
 }
 
-func (r *repo) insertSessionDemandInputRows(ctx context.Context, runID string, rows []SessionCurrentRow) error {
+func (r *repo) insertSessionDemandInputRows(ctx context.Context, runID string, now time.Time, rows []SessionCurrentRow) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -1858,7 +2522,6 @@ func (r *repo) insertSessionDemandInputRows(ctx context.Context, runID string, r
 	if err != nil {
 		return fmt.Errorf("prepare session demand input batch: %w", err)
 	}
-	now := time.Now().UTC()
 	for _, row := range rows {
 		windowStart := row.LastSeen.UTC().Truncate(time.Hour)
 		if row.StartedAt != nil {
@@ -1884,7 +2547,7 @@ func (r *repo) insertSessionDemandInputRows(ctx context.Context, runID string, r
 	return batch.Send()
 }
 
-func (r *repo) publishServingRollups(ctx context.Context, runID string, slices []windowSliceRef) error {
+func (r *repo) publishServingRollups(ctx context.Context, runID string, now time.Time, slices []windowSliceRef) error {
 	if len(slices) == 0 {
 		return nil
 	}
@@ -1892,37 +2555,72 @@ func (r *repo) publishServingRollups(ctx context.Context, runID string, slices [
 	if err != nil {
 		return fmt.Errorf("stage window slices: %w", err)
 	}
-	if err := r.insertCanonicalStatusSamples(ctx, runID, queryID); err != nil {
+	if err := r.insertCanonicalStatusSamples(ctx, runID, now, queryID); err != nil {
 		return err
 	}
-	if err := r.insertCanonicalActiveStreamState(ctx, runID, queryID); err != nil {
+	if err := r.insertCanonicalActiveStreamState(ctx, runID, now, queryID); err != nil {
 		return err
 	}
-	// insertPaymentLinkRows must run before insertPaymentHourlyRollups so the
-	// store is populated with current-window rows before the hourly aggregation
-	// reads from it.
-	if err := r.insertPaymentLinkRows(ctx, runID, queryID); err != nil {
+	if err := r.insertPaymentLinkRows(ctx, runID, now, queryID); err != nil {
 		return err
 	}
-	if err := r.insertPaymentHourlyRollups(ctx, runID, queryID); err != nil {
+	if err := r.insertNetworkDemandRollups(ctx, runID, now, queryID); err != nil {
 		return err
 	}
-	if err := r.insertNetworkDemandRollups(ctx, runID, queryID); err != nil {
+	if err := r.insertSLAComplianceRollups(ctx, runID, now, queryID); err != nil {
 		return err
 	}
-	if err := r.insertGPUNetworkDemandRollups(ctx, runID, queryID); err != nil {
+	// Phase 2: pre-compute daily benchmark cohort BEFORE the final scoring
+	// step, so insertFinalSLAComplianceRollups can look up 7-day benchmarks
+	// as O(1) per row instead of arrayJoin + quantileTDigestIfMerge.
+	if err := r.insertSLABenchmarkDaily(ctx, runID, now); err != nil {
 		return err
 	}
-	if err := r.insertSLAComplianceRollups(ctx, runID, queryID); err != nil {
+	if err := r.insertFinalSLAComplianceRollups(ctx, runID, now, queryID); err != nil {
 		return err
 	}
-	if err := r.insertGPUMetricsRollups(ctx, runID, queryID); err != nil {
+	if err := r.insertGPUMetricsRollups(ctx, runID, now, queryID); err != nil {
+		return err
+	}
+	if err := r.insertHourlyRequestDemand(ctx, runID, now, queryID); err != nil {
+		return err
+	}
+	if err := r.insertHourlyBYOCAuth(ctx, runID, now, queryID); err != nil {
+		return err
+	}
+	if err := r.insertHourlyBYOCPayments(ctx, runID, now, queryID); err != nil {
+		return err
+	}
+	// Perf-pass: flatten canonical_capability_orchestrator_identity_latest
+	// (expensive multi-CTE argMaxIfMerge view) into a resolver-written store.
+	// Both the current_orchestrator writer and Grafana panels read this
+	// store instead of re-expanding the view on every query.
+	if err := r.insertOrchestratorIdentity(ctx, runID, now); err != nil {
+		return err
+	}
+	if err := r.insertCurrentGPUInventory(ctx, runID, now); err != nil {
+		return err
+	}
+	// Phase 6.3: denormalized current-orchestrator snapshot. Runs once per
+	// resolver backfill (no per-window scoping) because it represents the
+	// "last 24h activity" view that the 3 orchestrator-listing endpoints
+	// read. Must run AFTER insertFinalSLAComplianceRollups so the latest
+	// SLA scores are visible when composed.
+	if err := r.insertCurrentOrchestratorState(ctx, runID, now); err != nil {
+		return err
+	}
+	// Phase 4: unified capability spine. Runs once per resolver backfill and
+	// writes one row per (org, orch_address, capability_id, canonical_pipeline,
+	// model_id, gpu_id) so /v1/requests/*, /v1/streaming/*, and
+	// /v1/dashboard/pipeline-catalog read api_current_capability instead of
+	// scanning api_observed_capability_offer.
+	if err := r.insertCurrentCapability(ctx, runID, now); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (r *repo) insertCanonicalStatusSamples(ctx context.Context, runID, queryID string) error {
+func (r *repo) insertCanonicalStatusSamples(ctx context.Context, runID string, now time.Time, queryID string) error {
 	return r.conn.Exec(ctx, `
 		INSERT INTO naap.canonical_status_samples_recent_store
 		(
@@ -1969,19 +2667,19 @@ func (r *repo) insertCanonicalStatusSamples(ctx context.Context, runID, queryID 
 			if(fs.attribution_status = 'resolved', toUInt8(1), toUInt8(0)) AS is_attributed,
 			?,
 			?,
-			now64()
+			?
 		FROM status_events s
 		LEFT JOIN naap.canonical_session_current fs
 			ON fs.canonical_session_key = s.canonical_session_key
-	`, queryID, runID, r.cfg.ResolverVersion)
+	`, queryID, runID, r.cfg.ResolverVersion, now)
 }
 
-func (r *repo) insertCanonicalActiveStreamState(ctx context.Context, runID, queryID string) error {
+func (r *repo) insertCanonicalActiveStreamState(ctx context.Context, runID string, now time.Time, queryID string) error {
 	return r.conn.Exec(ctx, `
 		INSERT INTO naap.canonical_active_stream_state_latest_store
 		(
 			canonical_session_key, event_id, sample_ts, org, stream_id, request_id, gateway,
-			pipeline, model_id, orch_address, attribution_status, attribution_reason, state,
+			pipeline, model_id, orch_address, orchestrator_uri, attribution_status, attribution_reason, state,
 			output_fps, input_fps, e2e_latency_ms, started_at, last_seen, completed,
 			refresh_run_id, artifact_checksum, refreshed_at
 		)
@@ -2017,6 +2715,8 @@ func (r *repo) insertCanonicalActiveStreamState(ctx context.Context, runID, quer
 				fs.canonical_pipeline AS pipeline,
 				cast(nullIf(fs.canonical_model, ''), 'Nullable(String)') AS model_id,
 				cast(nullIf(fs.attributed_orch_address, ''), 'Nullable(String)') AS orch_address,
+				fs.attributed_orch_address AS attributed_orch_address_key,
+				fs.attributed_orch_uri AS attributed_orch_uri,
 				fs.attribution_status AS attribution_status,
 				fs.attribution_reason AS attribution_reason,
 				s.state AS state,
@@ -2029,34 +2729,45 @@ func (r *repo) insertCanonicalActiveStreamState(ctx context.Context, runID, quer
 			FROM status_events s
 			LEFT JOIN naap.canonical_session_current fs
 				ON fs.canonical_session_key = s.canonical_session_key
+		),
+		orch_uri_latest AS (
+			-- Phase 3: pre-materialize the orch_address -> uri lookup. The
+			-- identity_latest view is a multi-CTE join chain; flattening it
+			-- into a single-column CTE sidesteps ClickHouse analyzer scope
+			-- issues when it sits alongside other JOINs in status_enriched.
+			SELECT orch_address, ifNull(orchestrator_uri, '') AS orchestrator_uri
+			FROM naap.canonical_capability_orchestrator_identity_latest
 		)
 		SELECT
-			canonical_session_key,
-			event_id,
-			sample_ts,
-			org,
-			stream_id,
-			request_id,
-			gateway,
-			pipeline,
-			model_id,
-			orch_address,
-			attribution_status,
-			attribution_reason,
-			state,
-			output_fps,
-			input_fps,
-			e2e_latency_ms,
-			started_at,
-			last_seen,
-			completed,
+			se.canonical_session_key,
+			se.event_id,
+			se.sample_ts,
+			se.org,
+			se.stream_id,
+			se.request_id,
+			se.gateway,
+			se.pipeline,
+			se.model_id,
+			se.orch_address,
+			coalesce(nullIf(se.attributed_orch_uri, ''), ifNull(oi.orchestrator_uri, '')) AS orchestrator_uri,
+			se.attribution_status,
+			se.attribution_reason,
+			se.state,
+			se.output_fps,
+			se.input_fps,
+			se.e2e_latency_ms,
+			se.started_at,
+			se.last_seen,
+			se.completed,
 			?,
 			?,
-			now64()
-		FROM status_enriched
-		ORDER BY canonical_session_key, sample_ts DESC, event_id DESC
-		LIMIT 1 BY canonical_session_key
-	`, queryID, runID, r.cfg.ResolverVersion)
+			?
+		FROM status_enriched se
+		LEFT JOIN orch_uri_latest oi
+			ON oi.orch_address = se.attributed_orch_address_key
+		ORDER BY se.canonical_session_key, se.sample_ts DESC, se.event_id DESC
+		LIMIT 1 BY se.canonical_session_key
+	`, queryID, runID, r.cfg.ResolverVersion, now)
 }
 
 // insertPaymentLinkRows writes one row per payment event into
@@ -2066,7 +2777,7 @@ func (r *repo) insertCanonicalActiveStreamState(ctx context.Context, runID, quer
 // LEFT JOINs canonical_session_current_store for the request_id → session link.
 // ReplacingMergeTree(refreshed_at) on the store means re-runs overwrite stale
 // rows, so re-linking as sessions resolve is free.
-func (r *repo) insertPaymentLinkRows(ctx context.Context, runID, queryID string) error {
+func (r *repo) insertPaymentLinkRows(ctx context.Context, runID string, now time.Time, queryID string) error {
 	return r.conn.Exec(ctx, `
 		INSERT INTO naap.canonical_payment_links_store
 		(
@@ -2093,16 +2804,16 @@ func (r *repo) insertPaymentLinkRows(ctx context.Context, runID, queryID string)
 			toFloat64OrDefault(replaceRegexpOne(JSONExtractString(p.data, 'price'), ' wei/pixel$', ''))     AS price_wei_per_pixel,
 			toFloat64OrDefault(JSONExtractString(p.data, 'winProb'))                                        AS win_prob,
 			toUInt64OrDefault(JSONExtractString(p.data, 'numTickets'))                                      AS num_tickets,
-			fs.canonical_session_key,
+			cast(nullIf(fs.canonical_session_key, ''), 'Nullable(String)')                                  AS canonical_session_key,
 			if(
-				JSONExtractString(p.data, 'requestID') != '' AND isNotNull(fs.canonical_session_key),
+				JSONExtractString(p.data, 'requestID') != '' AND isNotNull(canonical_session_key),
 				'request_id',
 				'unlinked'
 			)                                                                                               AS link_method,
-			if(isNotNull(fs.canonical_session_key), 'resolved', 'unresolved')                              AS link_status,
+			if(isNotNull(canonical_session_key), 'resolved', 'unresolved')                                 AS link_status,
 			?,
 			?,
-			now64()
+			?
 		FROM naap.accepted_raw_events p
 		INNER JOIN naap.resolver_query_window_slices w
 			ON  w.query_id = ?
@@ -2114,53 +2825,15 @@ func (r *repo) insertPaymentLinkRows(ctx context.Context, runID, queryID string)
 			AND JSONExtractString(p.data, 'requestID') != ''
 		WHERE p.event_type = 'create_new_payment'
 		  AND p.event_id   != ''
-	`, runID, r.cfg.ResolverVersion, queryID)
+	`, runID, r.cfg.ResolverVersion, now, queryID)
 }
 
-// insertPaymentHourlyRollups aggregates canonical_payment_links_store rows for
-// the active window slices into api_payment_hourly_store.  Reads from the store
-// (bounded, indexed) rather than the canonical_payment_links view (unbounded
-// full-scan with NOT-IN anti-joins) so it completes in milliseconds.
-func (r *repo) insertPaymentHourlyRollups(ctx context.Context, runID, queryID string) error {
+func (r *repo) insertNetworkDemandRollups(ctx context.Context, runID string, now time.Time, queryID string) error {
 	return r.conn.Exec(ctx, `
-		INSERT INTO naap.api_payment_hourly_store
-		(
-			hour, org, pipeline, orch_address, total_wei, event_count,
-			avg_price_wei_per_pixel, refresh_run_id, artifact_checksum, refreshed_at
-		)
-		SELECT
-			toStartOfHour(p.event_ts)                                              AS hour,
-			p.org                                                                  AS org,
-			coalesce(nullIf(fs.canonical_pipeline, ''), p.pipeline_hint)          AS pipeline,
-			p.recipient_address                                                    AS orch_address,
-			sum(p.face_value_wei)                                                  AS total_wei,
-			count()                                                                AS event_count,
-			avg(p.price_wei_per_pixel)                                             AS avg_price_wei_per_pixel,
-			?,
-			?,
-			now64()
-		FROM naap.canonical_payment_links_store p FINAL
-		INNER JOIN naap.resolver_query_window_slices rs
-			ON  rs.query_id = ?
-			AND p.org = rs.org
-			AND toStartOfHour(p.event_ts) = rs.window_start
-		LEFT JOIN naap.canonical_session_current_store fs FINAL
-			ON  fs.canonical_session_key = p.canonical_session_key
-			AND isNotNull(p.canonical_session_key)
-		GROUP BY
-			hour,
-			p.org,
-			pipeline,
-			p.recipient_address
-	`, runID, r.cfg.ResolverVersion, queryID)
-}
-
-func (r *repo) insertNetworkDemandRollups(ctx context.Context, runID, queryID string) error {
-	return r.conn.Exec(ctx, `
-		INSERT INTO naap.api_network_demand_by_org_store
+		INSERT INTO naap.canonical_streaming_demand_hourly_store
 		(
 			window_start, org, gateway, region, pipeline_id, model_id, sessions_count,
-			avg_output_fps, total_minutes, known_sessions_count, requested_sessions, startup_success_sessions,
+			avg_output_fps, output_fps_sum, status_samples, total_minutes, known_sessions_count, requested_sessions, startup_success_sessions,
 			no_orch_sessions, startup_excused_sessions, startup_failed_sessions, loading_only_sessions,
 			zero_output_fps_sessions, effective_failed_sessions, confirmed_swapped_sessions,
 			inferred_swap_sessions, total_swapped_sessions, sessions_ending_in_error,
@@ -2309,8 +2982,8 @@ func (r *repo) insertNetworkDemandRollups(ctx context.Context, runID, queryID st
 				max(status_error_sample_count) AS status_error_sample_count,
 				max(total_minutes) AS total_minutes,
 				max(ticket_face_value_eth) AS ticket_face_value_eth,
-				sum(status_samples) AS status_samples,
-				sum(output_fps_sum) AS output_fps_sum
+				sum(status_samples) AS session_status_samples,
+				sum(output_fps_sum) AS session_output_fps_sum
 			FROM combined_rows
 			GROUP BY
 				canonical_session_key,
@@ -2329,7 +3002,9 @@ func (r *repo) insertNetworkDemandRollups(ctx context.Context, runID, queryID st
 			pipeline_id,
 			model_id,
 			toUInt64(count()) AS sessions_count,
-			if(sum(status_samples) > 0, sum(output_fps_sum) / toFloat64(sum(status_samples)), 0.0) AS avg_output_fps,
+			if(sum(session_status_samples) > 0, sum(session_output_fps_sum) / toFloat64(sum(session_status_samples)), 0.0) AS avg_output_fps,
+			sum(session_output_fps_sum) AS output_fps_sum,
+			toUInt64(sum(session_status_samples)) AS status_samples,
 			sum(total_minutes) AS total_minutes,
 			toUInt64(countIf(requested_seen = 1)) AS known_sessions_count,
 			toUInt64(countIf(requested_seen = 1)) AS requested_sessions,
@@ -2353,7 +3028,14 @@ func (r *repo) insertNetworkDemandRollups(ctx context.Context, runID, queryID st
 			toUInt64(sum(status_error_sample_count)) AS error_status_samples,
 			toUInt64(sum(session_health_signal_count)) AS health_signal_count,
 			toUInt64(sum(session_health_expected_signal_count)) AS health_expected_signal_count,
-			if(sum(session_health_expected_signal_count) > 0, sum(session_health_signal_count) / toFloat64(sum(session_health_expected_signal_count)), 1.0) AS health_signal_coverage_ratio,
+			least(
+				if(
+					sum(session_health_expected_signal_count) > 0,
+					sum(session_health_signal_count) / toFloat64(sum(session_health_expected_signal_count)),
+					1.0
+				),
+				1.0
+			) AS health_signal_coverage_ratio,
 			if(countIf(requested_seen = 1) > 0, countIf(requested_seen = 1 AND startup_outcome = 'success') / toFloat64(countIf(requested_seen = 1)), 0.0) AS startup_success_rate,
 			if(countIf(requested_seen = 1) > 0, countIf(requested_seen = 1 AND startup_outcome = 'failed' AND excusal_reason != 'none') / toFloat64(countIf(requested_seen = 1)), 0.0) AS excused_failure_rate,
 			if(
@@ -2372,232 +3054,53 @@ func (r *repo) insertNetworkDemandRollups(ctx context.Context, runID, queryID st
 			sum(ticket_face_value_eth) AS ticket_face_value_eth,
 			?,
 			?,
-			now64()
+			?
 		FROM session_union
 		GROUP BY window_start, org, gateway, region, pipeline_id, model_id
-	`, queryID, queryID, runID, r.cfg.ResolverVersion)
+	`, queryID, queryID, runID, r.cfg.ResolverVersion, now)
 }
 
-func (r *repo) insertGPUNetworkDemandRollups(ctx context.Context, runID, queryID string) error {
+func (r *repo) insertSLAComplianceRollups(ctx context.Context, runID string, now time.Time, queryID string) error {
+	// This canonical store remains the source of truth for additive SLA
+	// facts. Final scored serving rows are published immediately afterward
+	// (insertFinalSLAComplianceRollups) via inline Phase 2 scoring so the
+	// API never scores on the hot path.
 	return r.conn.Exec(ctx, `
-		INSERT INTO naap.api_gpu_network_demand_by_org_store
+		INSERT INTO naap.canonical_streaming_sla_input_hourly_store
 		(
-			window_start, org, gateway, orchestrator_address, region, pipeline_id, model_id, gpu_id, gpu_identity_status,
-			sessions_count, avg_output_fps, total_minutes, known_sessions_count, requested_sessions, startup_success_sessions,
-			no_orch_sessions, startup_excused_sessions, startup_failed_sessions, loading_only_sessions,
-			zero_output_fps_sessions, effective_failed_sessions, confirmed_swapped_sessions, inferred_swap_sessions,
-			total_swapped_sessions, sessions_ending_in_error, error_status_samples, health_signal_count,
-			health_expected_signal_count, health_signal_coverage_ratio, startup_success_rate,
-			excused_failure_rate, effective_success_rate, ticket_face_value_eth, refresh_run_id,
-			artifact_checksum, refreshed_at
-		)
-		WITH demand_sessions AS (
-			SELECT
-				d.canonical_session_key,
-				d.window_start,
-				d.org,
-				d.gateway,
-				d.region,
-				ifNull(cs.attributed_orch_address, '') AS orchestrator_address,
-				d.pipeline_id,
-				coalesce(d.model_id, nullIf(cs.canonical_model, '')) AS model_id,
-				cast(nullIf(cs.gpu_id, ''), 'Nullable(String)') AS gpu_id,
-				if(ifNull(cs.attributed_orch_address, '') != '' AND ifNull(cs.gpu_id, '') = '', 'hardware_unresolved', 'resolved') AS gpu_identity_status,
-				d.requested_seen,
-				d.selection_outcome,
-				d.startup_outcome,
-				d.excusal_reason,
-				d.loading_only_session,
-				d.zero_output_fps_session,
-				d.health_signal_count,
-				d.health_expected_signal_count,
-				d.swap_count,
-				d.error_seen,
-				d.status_error_sample_count,
-				d.total_minutes,
-				d.ticket_face_value_eth
-			FROM (
-				SELECT *
-				FROM naap.canonical_session_demand_input_current FINAL
-			) d
-			INNER JOIN naap.resolver_query_window_slices w
-				ON w.query_id = ? AND w.org = d.org AND w.window_start = d.window_start
-			LEFT JOIN naap.canonical_session_current cs
-				ON d.canonical_session_key = cs.canonical_session_key
-			WHERE ifNull(cs.attributed_orch_address, '') != ''
-		),
-		status_events AS (
-			SELECT
-				s.event_id AS event_id,
-				max(s.event_ts) AS event_ts,
-				argMax(s.org, s.event_ts) AS org,
-				argMax(s.gateway, s.event_ts) AS gateway,
-				argMax(s.canonical_session_key, s.event_ts) AS canonical_session_key,
-				argMax(s.output_fps, s.event_ts) AS output_fps
-			FROM naap.normalized_ai_stream_status s
-			INNER JOIN naap.resolver_query_window_slices w
-				ON w.query_id = ? AND w.org = s.org AND w.window_start = toStartOfHour(s.event_ts)
-			WHERE s.event_id != ''
-			  AND s.canonical_session_key != ''
-			GROUP BY s.event_id
-		),
-		perf_sessions AS (
-			SELECT
-				s.canonical_session_key AS canonical_session_key,
-				toStartOfHour(s.event_ts) AS window_start,
-				s.org AS org,
-				s.gateway AS gateway,
-				cast(null AS Nullable(String)) AS region,
-				ifNull(cs.attributed_orch_address, '') AS orchestrator_address,
-				fs.canonical_pipeline AS pipeline_id,
-				cast(nullIf(fs.canonical_model, ''), 'Nullable(String)') AS model_id,
-				cast(nullIf(cs.gpu_id, ''), 'Nullable(String)') AS gpu_id,
-				if(ifNull(cs.attributed_orch_address, '') != '' AND ifNull(cs.gpu_id, '') = '', 'hardware_unresolved', 'resolved') AS gpu_identity_status,
-				toUInt64(count()) AS status_samples,
-				sum(s.output_fps) AS output_fps_sum
-			FROM status_events s
-			LEFT JOIN naap.canonical_session_current fs
-				ON s.canonical_session_key = fs.canonical_session_key
-			LEFT JOIN naap.canonical_session_current cs
-				ON s.canonical_session_key = cs.canonical_session_key
-			WHERE ifNull(cs.attributed_orch_address, '') != ''
-			GROUP BY
-				s.canonical_session_key,
-				window_start,
-				s.org,
-				s.gateway,
-				orchestrator_address,
-				fs.canonical_pipeline,
-				model_id,
-				gpu_id,
-				gpu_identity_status
-		),
-		session_union AS (
-			SELECT
-				coalesce(d.canonical_session_key, p.canonical_session_key) AS canonical_session_key,
-				coalesce(d.window_start, p.window_start) AS window_start,
-				coalesce(d.org, p.org) AS org,
-				coalesce(d.gateway, p.gateway) AS gateway,
-				coalesce(d.orchestrator_address, p.orchestrator_address) AS orchestrator_address,
-				coalesce(d.region, p.region) AS region,
-				coalesce(d.pipeline_id, p.pipeline_id) AS pipeline_id,
-				coalesce(d.model_id, p.model_id) AS model_id,
-				coalesce(d.gpu_id, p.gpu_id) AS gpu_id,
-				if(d.gpu_identity_status = 'hardware_unresolved' OR p.gpu_identity_status = 'hardware_unresolved', 'hardware_unresolved', 'resolved') AS gpu_identity_status,
-				ifNull(d.requested_seen, toUInt8(0)) AS requested_seen,
-				ifNull(d.selection_outcome, 'unknown') AS selection_outcome,
-				ifNull(d.startup_outcome, 'unknown') AS startup_outcome,
-				ifNull(d.excusal_reason, 'none') AS excusal_reason,
-				ifNull(d.loading_only_session, toUInt8(0)) AS loading_only_session,
-				ifNull(d.zero_output_fps_session, toUInt8(0)) AS zero_output_fps_session,
-				ifNull(d.health_signal_count, toUInt64(0)) AS session_health_signal_count,
-				ifNull(d.health_expected_signal_count, toUInt64(0)) AS session_health_expected_signal_count,
-				ifNull(d.swap_count, toUInt64(0)) AS swap_count,
-				ifNull(d.error_seen, toUInt8(0)) AS error_seen,
-				ifNull(d.status_error_sample_count, toUInt64(0)) AS status_error_sample_count,
-				ifNull(d.total_minutes, 0.0) AS total_minutes,
-				ifNull(d.ticket_face_value_eth, 0.0) AS ticket_face_value_eth,
-				ifNull(p.status_samples, toUInt64(0)) AS status_samples,
-				ifNull(p.output_fps_sum, 0.0) AS output_fps_sum
-			FROM demand_sessions d
-			FULL OUTER JOIN perf_sessions p
-				ON d.canonical_session_key = p.canonical_session_key
-			   AND d.window_start = p.window_start
-			   AND d.org = p.org
-			   AND d.gateway = p.gateway
-			   AND d.orchestrator_address = p.orchestrator_address
-			   AND d.pipeline_id = p.pipeline_id
-			   AND ifNull(d.model_id, '') = ifNull(p.model_id, '')
-			   AND ifNull(d.gpu_id, '') = ifNull(p.gpu_id, '')
-		)
-		SELECT
-			window_start,
-			org,
-			gateway,
-			orchestrator_address,
-			region,
-			pipeline_id,
-			model_id,
-			gpu_id,
-			gpu_identity_status,
-			toUInt64(count()) AS sessions_count,
-			if(sum(status_samples) > 0, sum(output_fps_sum) / toFloat64(sum(status_samples)), 0.0) AS avg_output_fps,
-			sum(total_minutes) AS total_minutes,
-			toUInt64(countIf(requested_seen = 1)) AS known_sessions_count,
-			toUInt64(countIf(requested_seen = 1)) AS requested_sessions,
-			toUInt64(countIf(requested_seen = 1 AND startup_outcome = 'success')) AS startup_success_sessions,
-			toUInt64(countIf(requested_seen = 1 AND selection_outcome = 'no_orch')) AS no_orch_sessions,
-			toUInt64(countIf(requested_seen = 1 AND startup_outcome = 'failed' AND excusal_reason != 'none')) AS startup_excused_sessions,
-			toUInt64(countIf(requested_seen = 1 AND startup_outcome = 'failed' AND excusal_reason = 'none')) AS startup_failed_sessions,
-			toUInt64(countIf(requested_seen = 1 AND loading_only_session = 1)) AS loading_only_sessions,
-			toUInt64(countIf(requested_seen = 1 AND zero_output_fps_session = 1)) AS zero_output_fps_sessions,
-			toUInt64(countIf(
-				requested_seen = 1 AND (
-					(startup_outcome = 'failed' AND excusal_reason = 'none') OR
-					loading_only_session = 1 OR
-					zero_output_fps_session = 1
-				)
-			)) AS effective_failed_sessions,
-			toUInt64(0) AS confirmed_swapped_sessions,
-			toUInt64(0) AS inferred_swap_sessions,
-			toUInt64(countIf(requested_seen = 1 AND swap_count > 0)) AS total_swapped_sessions,
-			toUInt64(countIf(requested_seen = 1 AND error_seen = 1)) AS sessions_ending_in_error,
-			toUInt64(sum(status_error_sample_count)) AS error_status_samples,
-			toUInt64(sum(session_health_signal_count)) AS health_signal_count,
-			toUInt64(sum(session_health_expected_signal_count)) AS health_expected_signal_count,
-			if(sum(session_health_expected_signal_count) > 0, sum(session_health_signal_count) / toFloat64(sum(session_health_expected_signal_count)), 1.0) AS health_signal_coverage_ratio,
-			if(countIf(requested_seen = 1) > 0, countIf(requested_seen = 1 AND startup_outcome = 'success') / toFloat64(countIf(requested_seen = 1)), 0.0) AS startup_success_rate,
-			if(countIf(requested_seen = 1) > 0, countIf(requested_seen = 1 AND startup_outcome = 'failed' AND excusal_reason != 'none') / toFloat64(countIf(requested_seen = 1)), 0.0) AS excused_failure_rate,
-			if(
-				countIf(requested_seen = 1) > 0,
-				1.0 - (
-					countIf(
-						requested_seen = 1 AND (
-							(startup_outcome = 'failed' AND excusal_reason = 'none') OR
-							loading_only_session = 1 OR
-							zero_output_fps_session = 1
-						)
-					) / toFloat64(countIf(requested_seen = 1))
-				),
-				0.0
-			) AS effective_success_rate,
-			sum(ticket_face_value_eth) AS ticket_face_value_eth,
-			?,
-			?,
-			now64()
-		FROM session_union
-		GROUP BY
-			window_start,
-			org,
-			gateway,
-			orchestrator_address,
-			region,
-			pipeline_id,
-			model_id,
-			gpu_id,
-			gpu_identity_status
-	`, queryID, queryID, runID, r.cfg.ResolverVersion)
-}
-
-func (r *repo) insertSLAComplianceRollups(ctx context.Context, runID, queryID string) error {
-	return r.conn.Exec(ctx, `
-		INSERT INTO naap.api_sla_compliance_by_org_store
-		(
-			window_start, org, orchestrator_address, pipeline_id, model_id, gpu_id, region,
+			window_start, org, orchestrator_address, pipeline_id, model_id, gpu_id, gpu_model_name, region,
 			known_sessions_count, requested_sessions, startup_success_sessions, no_orch_sessions,
-			startup_excused_sessions, startup_failed_sessions, loading_only_sessions, zero_output_fps_sessions,
+			startup_excused_sessions, startup_failed_sessions, loading_only_sessions, zero_output_fps_sessions, output_failed_sessions,
 			effective_failed_sessions, confirmed_swapped_sessions, inferred_swap_sessions, total_swapped_sessions,
 			sessions_ending_in_error, error_status_samples, health_signal_count, health_expected_signal_count,
 			health_signal_coverage_ratio, startup_success_rate, excused_failure_rate, effective_success_rate,
-			no_swap_rate, output_viability_rate, sla_score, refresh_run_id, artifact_checksum, refreshed_at
+			no_swap_rate, output_viability_rate, output_fps_sum, status_samples, prompt_to_first_frame_sum_ms,
+			prompt_to_first_frame_sample_count, e2e_latency_sum_ms, e2e_latency_sample_count,
+			refresh_run_id, artifact_checksum, refreshed_at
 		)
-		WITH base AS (
+		WITH status_hour_support AS (
+			SELECT
+				n.org AS org,
+				n.canonical_session_key AS canonical_session_key,
+				n.hour AS window_start,
+				toUInt64(sumMerge(n.status_samples_state)) AS status_samples,
+				sumMerge(n.output_fps_sum_state) AS output_fps_sum,
+				sumMerge(n.e2e_latency_sum_state) AS e2e_latency_sum_ms,
+				toUInt64(sumMerge(n.e2e_latency_count_state)) AS e2e_latency_sample_count
+			FROM naap.normalized_session_status_hour_rollup n
+			INNER JOIN naap.resolver_query_window_slices rs
+				ON rs.query_id = ? AND n.org = rs.org AND n.hour = rs.window_start
+			GROUP BY n.org, n.canonical_session_key, n.hour
+		),
+		base AS (
 			SELECT
 				h.hour AS window_start,
 				h.org AS org,
 				ifNull(h.orch_address, '') AS orchestrator_address,
 				h.canonical_pipeline AS pipeline_id,
 				h.canonical_model AS model_id,
+				cast(nullIf(fs.gpu_id, ''), 'Nullable(String)') AS session_gpu_id,
+				attr.attribution_snapshot_row_id AS attribution_snapshot_row_id,
 				fs.requested_seen AS requested_seen,
 				fs.resolver_startup_outcome AS startup_outcome,
 				fs.excusal_reason AS excusal_reason,
@@ -2608,43 +3111,54 @@ func (r *repo) insertSLAComplianceRollups(ctx context.Context, runID, queryID st
 				fs.error_seen AS error_seen,
 				h.error_samples AS error_status_samples,
 				fs.health_signal_count AS health_signal_count,
-				fs.health_expected_signal_count AS health_expected_signal_count
+				fs.health_expected_signal_count AS health_expected_signal_count,
+				ifNull(sh.output_fps_sum, h.avg_output_fps * toFloat64(h.status_samples)) AS output_fps_sum,
+				ifNull(sh.status_samples, h.status_samples) AS status_samples,
+				if(h.prompt_to_playable_latency_ms > 0, h.prompt_to_playable_latency_ms, 0.0) AS prompt_to_first_frame_sum_ms,
+				toUInt64(h.prompt_to_playable_latency_ms > 0) AS prompt_to_first_frame_sample_count,
+				if(
+					ifNull(sh.e2e_latency_sample_count, toUInt64(0)) > 0,
+					ifNull(sh.e2e_latency_sum_ms, 0.0),
+					if(h.avg_e2e_latency_ms > 0, h.avg_e2e_latency_ms, 0.0)
+				) AS e2e_latency_sum_ms,
+				if(
+					ifNull(sh.e2e_latency_sample_count, toUInt64(0)) > 0,
+					sh.e2e_latency_sample_count,
+					toUInt64(h.avg_e2e_latency_ms > 0)
+				) AS e2e_latency_sample_count
 			FROM naap.canonical_status_hours h
 			INNER JOIN naap.resolver_query_window_slices rs
 				ON rs.query_id = ? AND h.org = rs.org AND h.hour = rs.window_start
 			LEFT JOIN naap.canonical_session_current fs
 				ON h.canonical_session_key = fs.canonical_session_key
+			LEFT JOIN naap.canonical_session_attribution_latest attr
+				ON h.canonical_session_key = attr.canonical_session_key
+			LEFT JOIN status_hour_support sh
+				ON h.org = sh.org
+			   AND h.canonical_session_key = sh.canonical_session_key
+			   AND h.hour = sh.window_start
 			WHERE h.is_terminal_tail_artifact = 0
-		),
-		inventory_keys AS (
-			SELECT DISTINCT
-				org,
-				orchestrator_address,
-				coalesce(nullIf(model_id, ''), nullIf(pipeline_id, '')) AS inventory_key
-			FROM base
-			WHERE orchestrator_address != ''
 		),
 		inventory AS (
 			SELECT
-				inv.org,
-				inv.orch_address AS orchestrator_address,
-				coalesce(nullIf(inv.model_id, ''), nullIf(inv.pipeline_id, '')) AS inventory_key,
-				any(inv.model_id) AS inventory_model_id,
-				cast(nullIf(argMaxIfMerge(inv.gpu_id_state), ''), 'Nullable(String)') AS inventory_gpu_id
-			FROM naap.canonical_latest_orchestrator_pipeline_inventory_agg inv
-			INNER JOIN inventory_keys k
-				ON inv.org = k.org
-			   AND inv.orch_address = k.orchestrator_address
-			   AND coalesce(nullIf(inv.model_id, ''), nullIf(inv.pipeline_id, '')) = k.inventory_key
-			GROUP BY inv.org, orchestrator_address, inventory_key
+				snapshot_row_id AS attribution_snapshot_row_id,
+				org,
+				orch_address AS orchestrator_address,
+				pipeline_id,
+				model_id,
+				gpu_id,
+				any(gpu_model_name) AS gpu_model_name
+			FROM naap.canonical_capability_hardware_inventory_by_snapshot
+			GROUP BY attribution_snapshot_row_id, org, orchestrator_address, pipeline_id, model_id, gpu_id
 		)
 		SELECT
 			b.window_start,
 			b.org,
 			b.orchestrator_address,
 			b.pipeline_id,
-			coalesce(b.model_id, i.inventory_model_id) AS model_id,
-			i.inventory_gpu_id AS gpu_id,
+			b.model_id AS model_id,
+			b.session_gpu_id AS gpu_id,
+			any(i.gpu_model_name) AS gpu_model_name,
 			cast(null AS Nullable(String)) AS region,
 			toUInt64(countIf(b.requested_seen = 1)) AS known_sessions_count,
 			toUInt64(countIf(b.requested_seen = 1)) AS requested_sessions,
@@ -2654,6 +3168,12 @@ func (r *repo) insertSLAComplianceRollups(ctx context.Context, runID, queryID st
 			toUInt64(countIf(b.requested_seen = 1 AND b.startup_outcome = 'failed' AND b.excusal_reason = 'none')) AS startup_failed_sessions,
 			toUInt64(countIf(b.requested_seen = 1 AND b.loading_only_session = 1)) AS loading_only_sessions,
 			toUInt64(countIf(b.requested_seen = 1 AND b.zero_output_fps_session = 1)) AS zero_output_fps_sessions,
+			toUInt64(countIf(
+				b.requested_seen = 1 AND (
+					b.loading_only_session = 1 OR
+					b.zero_output_fps_session = 1
+				)
+			)) AS output_failed_sessions,
 			toUInt64(countIf(
 				b.requested_seen = 1 AND (
 					(b.startup_outcome = 'failed' AND b.excusal_reason = 'none') OR
@@ -2668,9 +3188,12 @@ func (r *repo) insertSLAComplianceRollups(ctx context.Context, runID, queryID st
 			toUInt64(sum(b.error_status_samples)) AS error_status_samples,
 			toUInt64(sum(b.health_signal_count)) AS health_signal_count,
 			toUInt64(sum(b.health_expected_signal_count)) AS health_expected_signal_count,
-			if(
-				sum(b.health_expected_signal_count) > 0,
-				sum(b.health_signal_count) / toFloat64(sum(b.health_expected_signal_count)),
+			least(
+				if(
+					sum(b.health_expected_signal_count) > 0,
+					sum(b.health_signal_count) / toFloat64(sum(b.health_expected_signal_count)),
+					1.0
+				),
 				1.0
 			) AS health_signal_coverage_ratio,
 			if(
@@ -2704,67 +3227,452 @@ func (r *repo) insertSLAComplianceRollups(ctx context.Context, runID, queryID st
 			if(
 				countIf(b.requested_seen = 1) > 0,
 				1.0 - (
-					toFloat64(countIf(b.requested_seen = 1 AND b.loading_only_session = 1)) +
-					toFloat64(countIf(b.requested_seen = 1 AND b.zero_output_fps_session = 1))
+					toFloat64(countIf(
+						b.requested_seen = 1 AND (
+							b.loading_only_session = 1 OR
+							b.zero_output_fps_session = 1
+						)
+					))
 				) / toFloat64(countIf(b.requested_seen = 1)),
 				cast(null AS Nullable(Float64))
 			) AS output_viability_rate,
-			if(
-				countIf(b.requested_seen = 1) > 0,
-				100.0 *
-				if(
-					sum(b.health_expected_signal_count) > 0,
-					sum(b.health_signal_count) / toFloat64(sum(b.health_expected_signal_count)),
-					1.0
-				) * (
-					(0.4 * (toFloat64(countIf(b.requested_seen = 1 AND b.startup_outcome = 'success')) / toFloat64(countIf(b.requested_seen = 1)))) +
-					(0.2 * (1.0 - toFloat64(countIf(b.requested_seen = 1 AND b.swap_count > 0)) / toFloat64(countIf(b.requested_seen = 1)))) +
-					(0.4 * (
-						1.0 - (
-							(
-								toFloat64(countIf(b.requested_seen = 1 AND b.loading_only_session = 1)) +
-								toFloat64(countIf(b.requested_seen = 1 AND b.zero_output_fps_session = 1))
-							) / toFloat64(countIf(b.requested_seen = 1))
-						)
-					))
-				),
-				cast(null AS Nullable(Float64))
-			) AS sla_score,
+			sum(b.output_fps_sum) AS output_fps_sum,
+			toUInt64(sum(b.status_samples)) AS status_samples,
+			sum(b.prompt_to_first_frame_sum_ms) AS prompt_to_first_frame_sum_ms,
+			toUInt64(sum(b.prompt_to_first_frame_sample_count)) AS prompt_to_first_frame_sample_count,
+			sum(b.e2e_latency_sum_ms) AS e2e_latency_sum_ms,
+			toUInt64(sum(b.e2e_latency_sample_count)) AS e2e_latency_sample_count,
 			?,
 			?,
-			now64()
+			?
 		FROM base b
 		LEFT JOIN inventory i
-			ON b.org = i.org
+			ON b.attribution_snapshot_row_id = i.attribution_snapshot_row_id
+		   AND b.org = i.org
 		   AND b.orchestrator_address = i.orchestrator_address
-		   AND coalesce(nullIf(b.model_id, ''), nullIf(b.pipeline_id, '')) = i.inventory_key
+		   AND b.pipeline_id = i.pipeline_id
+		   AND ifNull(b.model_id, '') = ifNull(i.model_id, '')
+		   AND ifNull(b.session_gpu_id, '') = ifNull(i.gpu_id, '')
 		GROUP BY
 			b.window_start,
 			b.org,
 			b.orchestrator_address,
 			b.pipeline_id,
-			coalesce(b.model_id, i.inventory_model_id),
-			i.inventory_gpu_id
-	`, queryID, runID, r.cfg.ResolverVersion)
+			b.model_id,
+			b.session_gpu_id
+	`, queryID, queryID, runID, r.cfg.ResolverVersion, now)
 }
 
-func (r *repo) insertGPUMetricsRollups(ctx context.Context, runID, queryID string) error {
+// insertSLABenchmarkDaily aggregates canonical_streaming_sla_input_hourly_store
+// into daily scalar percentiles per (pipeline_id, model_id, cohort_date) and
+// writes them to canonical_sla_benchmark_daily_store. Phase 2 replaced the
+// legacy AggregateFunction-state view that forced a 7-day arrayJoin +
+// quantileTDigestIfMerge on every scoring pass with this pre-computed scalar
+// store. The store is populated for EVERY cohort_date the input store holds
+// (not just the current run's slices) so the 7-day lookback in
+// insertFinalSLAComplianceRollups always finds benchmarks for the past week.
+//
+// ReplacingMergeTree(refreshed_at) on the target plus refresh_run_id in the
+// ORDER BY key means each resolver run is additive; readers use argMax.
+func (r *repo) insertSLABenchmarkDaily(ctx context.Context, runID string, now time.Time) error {
 	return r.conn.Exec(ctx, `
-		INSERT INTO naap.api_gpu_metrics_by_org_store
+		INSERT INTO naap.canonical_sla_benchmark_daily_store
+		(
+			cohort_date, pipeline_id, model_id,
+			ptff_p50, ptff_p90, ptff_row_count,
+			e2e_p50, e2e_p90, e2e_row_count,
+			fps_p10, fps_p50, fps_row_count,
+			refresh_run_id, artifact_checksum, refreshed_at
+		)
+		WITH latest_slices AS (
+			SELECT org, window_start, argMax(refresh_run_id, refreshed_at) AS refresh_run_id
+			FROM naap.canonical_streaming_sla_input_hourly_store
+			GROUP BY org, window_start
+		),
+		-- The input store keeps additive sums + counts; re-aggregate per
+		-- (window_start, orchestrator, pipeline, model, gpu) the same way
+		-- the scoring path will later, so the benchmark's per-row sample
+		-- unit matches the scored row grain exactly. Nullable avg is
+		-- derived from sum/count so per-row grain matches the scoring path.
+		latest_inputs AS (
+			SELECT
+				toDate(s.window_start) AS cohort_date,
+				s.pipeline_id          AS pipeline_id,
+				s.model_id             AS model_id,
+				if(sum(s.prompt_to_first_frame_sample_count) > 0,
+					sum(s.prompt_to_first_frame_sum_ms) / toFloat64(sum(s.prompt_to_first_frame_sample_count)),
+					CAST(NULL, 'Nullable(Float64)'))                             AS avg_prompt_to_first_frame_ms,
+				if(sum(s.e2e_latency_sample_count) > 0,
+					sum(s.e2e_latency_sum_ms) / toFloat64(sum(s.e2e_latency_sample_count)),
+					CAST(NULL, 'Nullable(Float64)'))                             AS avg_e2e_latency_ms,
+				if(sum(s.status_samples) > 0,
+					sum(s.output_fps_sum) / toFloat64(sum(s.status_samples)),
+					CAST(NULL, 'Nullable(Float64)'))                             AS avg_output_fps
+			FROM naap.canonical_streaming_sla_input_hourly_store s
+			INNER JOIN latest_slices l
+				ON  s.org = l.org
+				AND s.window_start = l.window_start
+				AND s.refresh_run_id = l.refresh_run_id
+			WHERE s.pipeline_id != ''
+			GROUP BY
+				cohort_date, s.pipeline_id, s.model_id,
+				s.window_start, s.orchestrator_address, s.gpu_id
+		)
+		SELECT
+			cohort_date,
+			pipeline_id,
+			model_id,
+			quantileTDigestIf(0.5)(ifNull(avg_prompt_to_first_frame_ms, 0.), avg_prompt_to_first_frame_ms IS NOT NULL) AS ptff_p50,
+			quantileTDigestIf(0.9)(ifNull(avg_prompt_to_first_frame_ms, 0.), avg_prompt_to_first_frame_ms IS NOT NULL) AS ptff_p90,
+			toUInt64(countIf(avg_prompt_to_first_frame_ms IS NOT NULL))                                                AS ptff_row_count,
+			quantileTDigestIf(0.5)(ifNull(avg_e2e_latency_ms, 0.),           avg_e2e_latency_ms IS NOT NULL)           AS e2e_p50,
+			quantileTDigestIf(0.9)(ifNull(avg_e2e_latency_ms, 0.),           avg_e2e_latency_ms IS NOT NULL)           AS e2e_p90,
+			toUInt64(countIf(avg_e2e_latency_ms IS NOT NULL))                                                          AS e2e_row_count,
+			quantileTDigestIf(0.1)(ifNull(avg_output_fps, 0.),               avg_output_fps IS NOT NULL)               AS fps_p10,
+			quantileTDigestIf(0.5)(ifNull(avg_output_fps, 0.),               avg_output_fps IS NOT NULL)               AS fps_p50,
+			toUInt64(countIf(avg_output_fps IS NOT NULL))                                                              AS fps_row_count,
+			?, ?, ?
+		FROM latest_inputs
+		GROUP BY cohort_date, pipeline_id, model_id
+	`, runID, r.cfg.ResolverVersion, now)
+}
+
+func (r *repo) insertFinalSLAComplianceRollups(ctx context.Context, runID string, now time.Time, queryID string) error {
+	return r.conn.Exec(ctx, `
+		INSERT INTO naap.api_hourly_streaming_sla_store
+		(
+			window_start, org, orchestrator_address, orchestrator_uri, pipeline_id, model_id, gpu_id, gpu_model_name, region,
+			known_sessions_count, requested_sessions, startup_success_sessions, no_orch_sessions,
+			startup_excused_sessions, startup_failed_sessions, loading_only_sessions, zero_output_fps_sessions,
+			output_failed_sessions, effective_failed_sessions, confirmed_swapped_sessions, inferred_swap_sessions,
+			total_swapped_sessions, sessions_ending_in_error, error_status_samples, health_signal_count,
+			health_expected_signal_count, health_signal_coverage_ratio, startup_success_rate, excused_failure_rate,
+			effective_success_rate, no_swap_rate, output_viability_rate, output_fps_sum, status_samples,
+			avg_output_fps, prompt_to_first_frame_sum_ms, prompt_to_first_frame_sample_count,
+			avg_prompt_to_first_frame_ms, e2e_latency_sum_ms, e2e_latency_sample_count, avg_e2e_latency_ms,
+			reliability_score, ptff_score, e2e_score, latency_score, fps_score, quality_score,
+			sla_semantics_version, sla_score, refresh_run_id, artifact_checksum, refreshed_at
+		)
+		WITH
+		-- Phase 2: scoring math runs inline. owned_windows scopes the write
+		-- to the current resolver run's slices.
+		owned_windows AS (
+			SELECT DISTINCT window_start
+			FROM naap.resolver_query_window_slices
+			WHERE query_id = ?
+		),
+		-- Phase 3: pre-materialize the orchestrator_address -> uri lookup so the
+		-- LEFT JOIN against the multi-CTE identity view is planned as a single
+		-- join step against a flat CTE instead of being re-expanded inline.
+		orch_uri_latest AS (
+			SELECT orch_address, ifNull(orchestrator_uri, '') AS orchestrator_uri
+			FROM naap.canonical_capability_orchestrator_identity_latest
+		),
+		-- Latest input slice per (org, window_start) — argMax by refreshed_at
+		-- ensures re-runs only read the most recent resolver output.
+		latest_input_slices AS (
+			SELECT org, window_start, argMax(refresh_run_id, refreshed_at) AS refresh_run_id
+			FROM naap.canonical_streaming_sla_input_hourly_store
+			GROUP BY org, window_start
+		),
+		-- Collapse inputs to the (window_start, org, orch, pipeline, model, gpu)
+		-- grain. Additive primitives (sessions, samples) sum; ratios recompute
+		-- from sums.
+		inputs AS (
+			SELECT
+				s.window_start AS window_start,
+				s.org AS org,
+				s.orchestrator_address AS orchestrator_address,
+				s.pipeline_id AS pipeline_id,
+				s.model_id AS model_id,
+				s.gpu_id AS gpu_id,
+				any(s.gpu_model_name) AS gpu_model_name,
+				sum(s.known_sessions_count)                                            AS known_sessions_count,
+				sum(s.requested_sessions)                                              AS requested_sessions,
+				sum(s.startup_success_sessions)                                        AS startup_success_sessions,
+				sum(s.no_orch_sessions)                                                AS no_orch_sessions,
+				sum(s.startup_excused_sessions)                                        AS startup_excused_sessions,
+				sum(s.startup_failed_sessions)                                         AS startup_failed_sessions,
+				sum(s.loading_only_sessions)                                           AS loading_only_sessions,
+				sum(s.zero_output_fps_sessions)                                        AS zero_output_fps_sessions,
+				sum(s.output_failed_sessions)                                          AS output_failed_sessions,
+				sum(s.effective_failed_sessions)                                       AS effective_failed_sessions,
+				sum(s.confirmed_swapped_sessions)                                      AS confirmed_swapped_sessions,
+				sum(s.inferred_swap_sessions)                                          AS inferred_swap_sessions,
+				sum(s.total_swapped_sessions)                                          AS total_swapped_sessions,
+				sum(s.sessions_ending_in_error)                                        AS sessions_ending_in_error,
+				sum(s.error_status_samples)                                            AS error_status_samples,
+				sum(s.health_signal_count)                                             AS health_signal_count,
+				sum(s.health_expected_signal_count)                                    AS health_expected_signal_count,
+				least(if(sum(s.health_expected_signal_count) > 0,
+					sum(s.health_signal_count) / toFloat64(sum(s.health_expected_signal_count)),
+					1.), 1.)                                                           AS health_signal_coverage_ratio,
+				if(sum(s.requested_sessions) > 0,
+					sum(s.startup_success_sessions) / toFloat64(sum(s.requested_sessions)),
+					CAST(NULL, 'Nullable(Float64)'))                                    AS startup_success_rate,
+				if(sum(s.requested_sessions) > 0,
+					sum(s.startup_excused_sessions) / toFloat64(sum(s.requested_sessions)),
+					CAST(NULL, 'Nullable(Float64)'))                                    AS excused_failure_rate,
+				if(sum(s.requested_sessions) > 0,
+					1. - (sum(s.effective_failed_sessions) / toFloat64(sum(s.requested_sessions))),
+					CAST(NULL, 'Nullable(Float64)'))                                    AS effective_success_rate,
+				if(sum(s.requested_sessions) > 0,
+					1. - (sum(s.total_swapped_sessions) / toFloat64(sum(s.requested_sessions))),
+					CAST(NULL, 'Nullable(Float64)'))                                    AS no_swap_rate,
+				if(sum(s.requested_sessions) > 0,
+					1. - (sum(s.output_failed_sessions) / toFloat64(sum(s.requested_sessions))),
+					CAST(NULL, 'Nullable(Float64)'))                                    AS output_viability_rate,
+				sum(s.output_fps_sum)                                                  AS output_fps_sum,
+				sum(s.status_samples)                                                  AS status_samples,
+				if(sum(s.status_samples) > 0,
+					sum(s.output_fps_sum) / toFloat64(sum(s.status_samples)),
+					CAST(NULL, 'Nullable(Float64)'))                                    AS avg_output_fps,
+				sum(s.prompt_to_first_frame_sum_ms)                                    AS prompt_to_first_frame_sum_ms,
+				sum(s.prompt_to_first_frame_sample_count)                              AS prompt_to_first_frame_sample_count,
+				if(sum(s.prompt_to_first_frame_sample_count) > 0,
+					sum(s.prompt_to_first_frame_sum_ms) / toFloat64(sum(s.prompt_to_first_frame_sample_count)),
+					CAST(NULL, 'Nullable(Float64)'))                                    AS avg_prompt_to_first_frame_ms,
+				sum(s.e2e_latency_sum_ms)                                              AS e2e_latency_sum_ms,
+				sum(s.e2e_latency_sample_count)                                        AS e2e_latency_sample_count,
+				if(sum(s.e2e_latency_sample_count) > 0,
+					sum(s.e2e_latency_sum_ms) / toFloat64(sum(s.e2e_latency_sample_count)),
+					CAST(NULL, 'Nullable(Float64)'))                                    AS avg_e2e_latency_ms
+			FROM naap.canonical_streaming_sla_input_hourly_store s
+			INNER JOIN latest_input_slices l
+				ON  s.org = l.org
+				AND s.window_start = l.window_start
+				AND s.refresh_run_id = l.refresh_run_id
+			INNER JOIN owned_windows w
+				ON s.window_start = w.window_start
+			GROUP BY s.window_start, s.org, s.orchestrator_address, s.pipeline_id, s.model_id, s.gpu_id
+		),
+		-- Latest benchmark slice per (pipeline_id, model_id, cohort_date).
+		latest_benchmark_slices AS (
+			SELECT pipeline_id, model_id, cohort_date,
+				argMax(refresh_run_id, refreshed_at) AS refresh_run_id
+			FROM naap.canonical_sla_benchmark_daily_store
+			GROUP BY pipeline_id, model_id, cohort_date
+		),
+		benchmarks AS (
+			SELECT b.*
+			FROM naap.canonical_sla_benchmark_daily_store b
+			INNER JOIN latest_benchmark_slices l
+				ON  b.pipeline_id = l.pipeline_id
+				AND ifNull(b.model_id, '') = ifNull(l.model_id, '')
+				AND b.cohort_date = l.cohort_date
+				AND b.refresh_run_id = l.refresh_run_id
+		),
+		-- Per-input 7-day benchmark aggregation. ClickHouse JOINs require
+		-- equality on ON clauses, so we fan each input row into 7 rows —
+		-- one per cohort_date in [window_start - 7d, window_start - 1d] —
+		-- then JOIN the benchmark store on equality. Daily scalar
+		-- percentiles are row-count-weighted averaged to approximate the
+		-- 7-day percentile. On the daily fixture this is row-equal to the
+		-- legacy arrayJoin+quantileTDigestIfMerge path within float
+		-- tolerance; the parity test guards the contract.
+		input_cohort_dates AS (
+			SELECT
+				i.*,
+				arrayJoin(arrayMap(off -> toDate(i.window_start) - off, range(1, 8))) AS cohort_date
+			FROM inputs i
+		),
+		cohort AS (
+			SELECT
+				i.window_start, i.org, i.orchestrator_address, i.pipeline_id, i.model_id, i.gpu_id,
+				i.gpu_model_name, i.known_sessions_count, i.requested_sessions,
+				i.startup_success_sessions, i.no_orch_sessions, i.startup_excused_sessions,
+				i.startup_failed_sessions, i.loading_only_sessions, i.zero_output_fps_sessions,
+				i.output_failed_sessions, i.effective_failed_sessions, i.confirmed_swapped_sessions,
+				i.inferred_swap_sessions, i.total_swapped_sessions, i.sessions_ending_in_error,
+				i.error_status_samples, i.health_signal_count, i.health_expected_signal_count,
+				i.health_signal_coverage_ratio, i.startup_success_rate, i.excused_failure_rate,
+				i.effective_success_rate, i.no_swap_rate, i.output_viability_rate, i.output_fps_sum,
+				i.status_samples, i.avg_output_fps, i.prompt_to_first_frame_sum_ms,
+				i.prompt_to_first_frame_sample_count, i.avg_prompt_to_first_frame_ms,
+				i.e2e_latency_sum_ms, i.e2e_latency_sample_count, i.avg_e2e_latency_ms,
+				sum(ifNull(b.ptff_row_count, toUInt64(0)))                                                          AS ptff_benchmark_row_count,
+				sum(ifNull(b.e2e_row_count, toUInt64(0)))                                                           AS e2e_benchmark_row_count,
+				sum(ifNull(b.fps_row_count, toUInt64(0)))                                                           AS fps_benchmark_row_count,
+				if(sum(ifNull(b.ptff_row_count, toUInt64(0))) > 0,
+					sum(ifNull(b.ptff_p50, 0.) * ifNull(b.ptff_row_count, toUInt64(0))) / sum(ifNull(b.ptff_row_count, toUInt64(0))),
+					CAST(NULL, 'Nullable(Float64)'))                                                                AS ptff_p50,
+				if(sum(ifNull(b.ptff_row_count, toUInt64(0))) > 0,
+					sum(ifNull(b.ptff_p90, 0.) * ifNull(b.ptff_row_count, toUInt64(0))) / sum(ifNull(b.ptff_row_count, toUInt64(0))),
+					CAST(NULL, 'Nullable(Float64)'))                                                                AS ptff_p90,
+				if(sum(ifNull(b.e2e_row_count, toUInt64(0))) > 0,
+					sum(ifNull(b.e2e_p50, 0.) * ifNull(b.e2e_row_count, toUInt64(0))) / sum(ifNull(b.e2e_row_count, toUInt64(0))),
+					CAST(NULL, 'Nullable(Float64)'))                                                                AS e2e_p50,
+				if(sum(ifNull(b.e2e_row_count, toUInt64(0))) > 0,
+					sum(ifNull(b.e2e_p90, 0.) * ifNull(b.e2e_row_count, toUInt64(0))) / sum(ifNull(b.e2e_row_count, toUInt64(0))),
+					CAST(NULL, 'Nullable(Float64)'))                                                                AS e2e_p90,
+				if(sum(ifNull(b.fps_row_count, toUInt64(0))) > 0,
+					sum(ifNull(b.fps_p10, 0.) * ifNull(b.fps_row_count, toUInt64(0))) / sum(ifNull(b.fps_row_count, toUInt64(0))),
+					CAST(NULL, 'Nullable(Float64)'))                                                                AS fps_p10,
+				if(sum(ifNull(b.fps_row_count, toUInt64(0))) > 0,
+					sum(ifNull(b.fps_p50, 0.) * ifNull(b.fps_row_count, toUInt64(0))) / sum(ifNull(b.fps_row_count, toUInt64(0))),
+					CAST(NULL, 'Nullable(Float64)'))                                                                AS fps_p50
+			FROM input_cohort_dates i
+			LEFT JOIN benchmarks b
+				ON  b.pipeline_id = i.pipeline_id
+				AND ifNull(b.model_id, '') = ifNull(i.model_id, '')
+				AND b.cohort_date = i.cohort_date
+			GROUP BY i.window_start, i.org, i.orchestrator_address, i.pipeline_id, i.model_id, i.gpu_id,
+					 i.gpu_model_name, i.known_sessions_count, i.requested_sessions,
+					 i.startup_success_sessions, i.no_orch_sessions, i.startup_excused_sessions,
+					 i.startup_failed_sessions, i.loading_only_sessions, i.zero_output_fps_sessions,
+					 i.output_failed_sessions, i.effective_failed_sessions, i.confirmed_swapped_sessions,
+					 i.inferred_swap_sessions, i.total_swapped_sessions, i.sessions_ending_in_error,
+					 i.error_status_samples, i.health_signal_count, i.health_expected_signal_count,
+					 i.health_signal_coverage_ratio, i.startup_success_rate, i.excused_failure_rate,
+					 i.effective_success_rate, i.no_swap_rate, i.output_viability_rate, i.output_fps_sum,
+					 i.status_samples, i.avg_output_fps, i.prompt_to_first_frame_sum_ms,
+					 i.prompt_to_first_frame_sample_count, i.avg_prompt_to_first_frame_ms,
+					 i.e2e_latency_sum_ms, i.e2e_latency_sample_count, i.avg_e2e_latency_ms
+		),
+		-- Raw per-metric scores (0..1) from percentile position. Uses
+		-- ptff_benchmark_row_count >= 48 as a sample-size gate (≈2 days of
+		-- hourly observations) so sparse benchmarks default to neutral 0.5.
+		raw_scores AS (
+			SELECT
+				c.*,
+				if(c.avg_prompt_to_first_frame_ms IS NULL OR c.ptff_benchmark_row_count < 48, 0.5,
+					if(c.ptff_p90 <= c.ptff_p50,
+						if(c.avg_prompt_to_first_frame_ms <= c.ptff_p50, 1., 0.),
+						multiIf(
+							c.avg_prompt_to_first_frame_ms <= c.ptff_p50, 1.,
+							c.avg_prompt_to_first_frame_ms >= c.ptff_p90, 0.,
+							1. - ((c.avg_prompt_to_first_frame_ms - c.ptff_p50) / (c.ptff_p90 - c.ptff_p50))
+						))
+				) AS ptff_score_raw,
+				if(c.avg_e2e_latency_ms IS NULL OR c.e2e_benchmark_row_count < 48, 0.5,
+					if(c.e2e_p90 <= c.e2e_p50,
+						if(c.avg_e2e_latency_ms <= c.e2e_p50, 1., 0.),
+						multiIf(
+							c.avg_e2e_latency_ms <= c.e2e_p50, 1.,
+							c.avg_e2e_latency_ms >= c.e2e_p90, 0.,
+							1. - ((c.avg_e2e_latency_ms - c.e2e_p50) / (c.e2e_p90 - c.e2e_p50))
+						))
+				) AS e2e_score_raw,
+				if(c.avg_output_fps IS NULL OR c.fps_benchmark_row_count < 48, 0.5,
+					if(c.fps_p50 <= c.fps_p10,
+						if(c.avg_output_fps >= c.fps_p50, 1., 0.),
+						multiIf(
+							c.avg_output_fps >= c.fps_p50, 1.,
+							c.avg_output_fps <= c.fps_p10, 0.,
+							(c.avg_output_fps - c.fps_p10) / (c.fps_p50 - c.fps_p10)
+						))
+				) AS fps_score_raw
+			FROM cohort c
+		),
+		-- Component scores with sample-count dampening.
+		component_scores AS (
+			SELECT
+				r.*,
+				if(r.requested_sessions > 0,
+					least(greatest(
+						(0.4 * r.startup_success_rate) + (0.2 * r.no_swap_rate) + (0.4 * r.output_viability_rate),
+						0.), 1.),
+					CAST(NULL, 'Nullable(Float64)')) AS reliability_score,
+				least(greatest(0.5 + (least(r.prompt_to_first_frame_sample_count / 10., 1.) * (r.ptff_score_raw - 0.5)), 0.), 1.) AS ptff_score,
+				least(greatest(0.5 + (least(r.e2e_latency_sample_count / 10., 1.) * (r.e2e_score_raw - 0.5)), 0.), 1.)             AS e2e_score,
+				least(greatest(0.5 + (least(r.status_samples / 30., 1.) * (r.fps_score_raw - 0.5)), 0.), 1.)                       AS fps_score
+			FROM raw_scores r
+		)
+		SELECT
+			s.window_start,
+			s.org,
+			s.orchestrator_address,
+			ifNull(oi.orchestrator_uri, '') AS orchestrator_uri,
+			s.pipeline_id,
+			s.model_id,
+			s.gpu_id,
+			s.gpu_model_name,
+			CAST(NULL, 'Nullable(String)') AS region,
+			s.known_sessions_count,
+			s.requested_sessions,
+			s.startup_success_sessions,
+			s.no_orch_sessions,
+			s.startup_excused_sessions,
+			s.startup_failed_sessions,
+			s.loading_only_sessions,
+			s.zero_output_fps_sessions,
+			s.output_failed_sessions,
+			s.effective_failed_sessions,
+			s.confirmed_swapped_sessions,
+			s.inferred_swap_sessions,
+			s.total_swapped_sessions,
+			s.sessions_ending_in_error,
+			s.error_status_samples,
+			s.health_signal_count,
+			s.health_expected_signal_count,
+			s.health_signal_coverage_ratio,
+			s.startup_success_rate,
+			s.excused_failure_rate,
+			s.effective_success_rate,
+			s.no_swap_rate,
+			s.output_viability_rate,
+			s.output_fps_sum,
+			s.status_samples,
+			s.avg_output_fps,
+			s.prompt_to_first_frame_sum_ms,
+			s.prompt_to_first_frame_sample_count,
+			s.avg_prompt_to_first_frame_ms,
+			s.e2e_latency_sum_ms,
+			s.e2e_latency_sample_count,
+			s.avg_e2e_latency_ms,
+			s.reliability_score,
+			s.ptff_score,
+			s.e2e_score,
+			least(greatest((0.6 * s.ptff_score) + (0.4 * s.e2e_score), 0.), 1.) AS latency_score,
+			s.fps_score,
+			least(greatest((0.6 * ((0.6 * s.ptff_score) + (0.4 * s.e2e_score))) + (0.4 * s.fps_score), 0.), 1.) AS quality_score,
+			'quality-benchmark-v1' AS sla_semantics_version,
+			if(s.requested_sessions > 0,
+				least(greatest(
+					(100. * s.health_signal_coverage_ratio) *
+					((0.7 * s.reliability_score) + (0.3 * least(greatest(
+						(0.6 * ((0.6 * s.ptff_score) + (0.4 * s.e2e_score))) + (0.4 * s.fps_score),
+						0.), 1.))),
+					0.), 100.),
+				CAST(NULL, 'Nullable(Float64)')) AS sla_score,
+			?, ?, ?
+		FROM component_scores s
+		LEFT JOIN orch_uri_latest oi
+			ON oi.orch_address = s.orchestrator_address
+	`, queryID, runID, r.cfg.ResolverVersion, now)
+}
+
+func (r *repo) insertGPUMetricsRollups(ctx context.Context, runID string, now time.Time, queryID string) error {
+	return r.conn.Exec(ctx, `
+		INSERT INTO naap.canonical_streaming_gpu_metrics_hourly_store
 		(
 			window_start, org, orchestrator_address, pipeline_id, model_id, gpu_id, region,
-			avg_output_fps, p95_output_fps, fps_jitter_coefficient, status_samples,
-			error_status_samples, health_signal_coverage_ratio, gpu_model_name,
-			gpu_memory_bytes_total, runner_version, cuda_version, avg_prompt_to_first_frame_ms,
-			avg_startup_latency_ms, avg_e2e_latency_ms, p95_prompt_to_first_frame_latency_ms,
-			p95_startup_latency_ms, p95_e2e_latency_ms, prompt_to_first_frame_sample_count,
+			avg_output_fps, output_fps_sum, p95_output_fps, output_fps_p95_state, fps_jitter_coefficient, status_samples,
+			error_status_samples, health_signal_count, health_expected_signal_count, health_signal_coverage_ratio, gpu_model_name,
+			gpu_memory_bytes_total, runner_version, cuda_version, avg_prompt_to_first_frame_ms, prompt_to_first_frame_sum_ms,
+			avg_startup_latency_ms, startup_latency_sum_ms, avg_e2e_latency_ms, e2e_latency_sum_ms, p95_prompt_to_first_frame_latency_ms,
+			prompt_to_first_frame_p95_state, p95_startup_latency_ms, startup_latency_p95_state, p95_e2e_latency_ms, e2e_latency_p95_state, prompt_to_first_frame_sample_count,
 			startup_latency_sample_count, e2e_latency_sample_count, known_sessions_count,
 			startup_success_sessions, no_orch_sessions, startup_excused_sessions, startup_failed_sessions,
 			confirmed_swapped_sessions, inferred_swap_sessions, total_swapped_sessions,
 			sessions_ending_in_error, startup_failed_rate, swap_rate, refresh_run_id,
 			artifact_checksum, refreshed_at
 		)
-		WITH base AS (
+		WITH status_hour_support AS (
+			SELECT
+				n.org AS org,
+				n.canonical_session_key AS canonical_session_key,
+				n.hour AS window_start,
+				toUInt64(sumMerge(n.status_samples_state)) AS status_samples,
+				sumMerge(n.output_fps_sum_state) AS output_fps_sum,
+				sumMerge(n.e2e_latency_sum_state) AS e2e_latency_sum_ms,
+				toUInt64(sumMerge(n.e2e_latency_count_state)) AS e2e_latency_sample_count
+			FROM naap.normalized_session_status_hour_rollup n
+			INNER JOIN naap.resolver_query_window_slices rs
+				ON rs.query_id = ? AND n.org = rs.org AND n.hour = rs.window_start
+			GROUP BY n.org, n.canonical_session_key, n.hour
+		),
+		base AS (
 			SELECT
 				h.hour AS window_start,
 				h.org AS org,
@@ -2772,14 +3680,31 @@ func (r *repo) insertGPUMetricsRollups(ctx context.Context, runID, queryID strin
 				h.canonical_pipeline AS pipeline_id,
 				h.canonical_model AS model_id,
 				cast(nullIf(fs.gpu_id, ''), 'Nullable(String)') AS session_gpu_id,
+				attr.attribution_snapshot_row_id AS attribution_snapshot_row_id,
 				fs.requested_seen AS requested_seen,
-				h.status_samples AS status_samples,
+				ifNull(sh.status_samples, h.status_samples) AS status_samples,
 				h.error_samples AS error_status_samples,
-				h.avg_output_fps AS avg_output_fps,
+				ifNull(sh.output_fps_sum, h.avg_output_fps * toFloat64(h.status_samples)) AS output_fps_sum,
+				h.avg_output_fps AS session_hour_avg_output_fps,
+				fs.health_signal_count AS health_signal_count,
+				fs.health_expected_signal_count AS health_expected_signal_count,
 				h.prompt_to_playable_latency_ms AS prompt_to_playable_latency_ms,
+				if(h.prompt_to_playable_latency_ms > 0, h.prompt_to_playable_latency_ms, 0.0) AS prompt_to_first_frame_sum_ms,
+				toUInt64(h.prompt_to_playable_latency_ms > 0) AS prompt_to_first_frame_sample_count,
 				h.startup_latency_ms AS startup_latency_ms,
-				h.avg_e2e_latency_ms AS avg_e2e_latency_ms,
-				fs.health_signal_coverage_ratio AS health_signal_coverage_ratio,
+				if(h.startup_latency_ms > 0, h.startup_latency_ms, 0.0) AS startup_latency_sum_ms,
+				toUInt64(h.startup_latency_ms > 0) AS startup_latency_sample_count,
+				if(
+					ifNull(sh.e2e_latency_sample_count, toUInt64(0)) > 0,
+					ifNull(sh.e2e_latency_sum_ms, 0.0),
+					if(h.avg_e2e_latency_ms > 0, h.avg_e2e_latency_ms, 0.0)
+				) AS e2e_latency_sum_ms,
+				if(
+					ifNull(sh.e2e_latency_sample_count, toUInt64(0)) > 0,
+					sh.e2e_latency_sample_count,
+					toUInt64(h.avg_e2e_latency_ms > 0)
+				) AS e2e_latency_sample_count,
+				h.avg_e2e_latency_ms AS session_hour_avg_e2e_latency_ms,
 				fs.resolver_startup_outcome AS startup_outcome,
 				fs.excusal_reason AS excusal_reason,
 				fs.selection_outcome AS selection_outcome,
@@ -2790,61 +3715,98 @@ func (r *repo) insertGPUMetricsRollups(ctx context.Context, runID, queryID strin
 				ON rs.query_id = ? AND h.org = rs.org AND h.hour = rs.window_start
 			LEFT JOIN naap.canonical_session_current fs
 				ON h.canonical_session_key = fs.canonical_session_key
+			LEFT JOIN naap.canonical_session_attribution_latest attr
+				ON h.canonical_session_key = attr.canonical_session_key
+			LEFT JOIN status_hour_support sh
+				ON h.org = sh.org AND h.canonical_session_key = sh.canonical_session_key AND h.hour = sh.window_start
 			WHERE h.is_terminal_tail_artifact = 0
 		),
-		inventory_keys AS (
-			SELECT DISTINCT
-				org,
-				orchestrator_address,
-				coalesce(nullIf(model_id, ''), nullIf(pipeline_id, '')) AS inventory_key
+		-- Perf-pass: prefilter to only the snapshot_row_ids referenced by
+		-- the current run's base set. Without this the inventory CTE
+		-- scans the full canonical_capability_hardware_inventory_by_snapshot
+		-- (which now carries ~10 days of Kafka-ingested capability snapshots
+		-- under live load) and times out at the 30 s default — cost is
+		-- proportional to total historical inventory, not to the windows
+		-- we're actually publishing for.
+		needed_snapshots AS (
+			SELECT DISTINCT attribution_snapshot_row_id
 			FROM base
-			WHERE orchestrator_address != ''
+			WHERE attribution_snapshot_row_id IS NOT NULL
+			  AND attribution_snapshot_row_id != ''
 		),
 		inventory AS (
 			SELECT
+				inv.snapshot_row_id AS attribution_snapshot_row_id,
 				inv.org,
 				inv.orch_address AS orchestrator_address,
-				coalesce(nullIf(inv.model_id, ''), nullIf(inv.pipeline_id, '')) AS inventory_key,
-				any(inv.model_id) AS inventory_model_id,
-				cast(nullIf(argMaxIfMerge(inv.gpu_id_state), ''), 'Nullable(String)') AS inventory_gpu_id,
-				nullIf(argMaxIfMerge(inv.gpu_model_name_state), '') AS inventory_gpu_model_name,
-				nullIf(argMaxIfMerge(inv.gpu_memory_bytes_total_state), toUInt64(0)) AS inventory_gpu_memory_bytes_total,
-				nullIf(argMaxIfMerge(inv.runner_version_state), '') AS inventory_runner_version,
-				nullIf(argMaxIfMerge(inv.cuda_version_state), '') AS inventory_cuda_version
-			FROM naap.canonical_latest_orchestrator_pipeline_inventory_agg inv
-			INNER JOIN inventory_keys k
-				ON inv.org = k.org
-			   AND inv.orch_address = k.orchestrator_address
-			   AND coalesce(nullIf(inv.model_id, ''), nullIf(inv.pipeline_id, '')) = k.inventory_key
-			GROUP BY inv.org, orchestrator_address, inventory_key
+				inv.pipeline_id,
+				inv.model_id,
+				inv.gpu_id,
+				any(inv.gpu_model_name) AS gpu_model_name,
+				any(inv.gpu_memory_bytes_total) AS gpu_memory_bytes_total,
+				any(inv.runner_version) AS runner_version,
+				any(inv.cuda_version) AS cuda_version
+			FROM naap.canonical_capability_hardware_inventory_by_snapshot inv
+			INNER JOIN needed_snapshots ns
+				ON ns.attribution_snapshot_row_id = inv.snapshot_row_id
+			GROUP BY attribution_snapshot_row_id, inv.org, orchestrator_address, inv.pipeline_id, inv.model_id, inv.gpu_id
 		)
 			SELECT
 				b.window_start,
 				b.org,
 				b.orchestrator_address,
 				b.pipeline_id,
-				coalesce(b.model_id, i.inventory_model_id) AS model_id,
-				coalesce(b.session_gpu_id, i.inventory_gpu_id) AS gpu_id,
+				b.model_id AS model_id,
+				b.session_gpu_id AS gpu_id,
 				cast(null AS Nullable(String)) AS region,
-			avg(b.avg_output_fps) AS avg_output_fps,
-			quantile(0.95)(b.avg_output_fps) AS p95_output_fps,
+			if(sum(b.status_samples) > 0, sum(b.output_fps_sum) / toFloat64(sum(b.status_samples)), 0.0) AS avg_output_fps,
+			sum(b.output_fps_sum) AS output_fps_sum,
+			quantileTDigest(0.95)(b.session_hour_avg_output_fps) AS p95_output_fps,
+			quantileTDigestState(0.95)(b.session_hour_avg_output_fps) AS output_fps_p95_state,
 			cast(null AS Nullable(Float64)) AS fps_jitter_coefficient,
 			toUInt64(sum(b.status_samples)) AS status_samples,
 			toUInt64(sum(b.error_status_samples)) AS error_status_samples,
-			avg(b.health_signal_coverage_ratio) AS health_signal_coverage_ratio,
-			i.inventory_gpu_model_name AS gpu_model_name,
-			i.inventory_gpu_memory_bytes_total AS gpu_memory_bytes_total,
-			i.inventory_runner_version AS runner_version,
-			i.inventory_cuda_version AS cuda_version,
-			if(countIf(b.prompt_to_playable_latency_ms > 0) > 0, avgIf(b.prompt_to_playable_latency_ms, b.prompt_to_playable_latency_ms > 0), cast(null AS Nullable(Float64))) AS avg_prompt_to_first_frame_ms,
-			if(countIf(b.startup_latency_ms > 0) > 0, avgIf(b.startup_latency_ms, b.startup_latency_ms > 0), cast(null AS Nullable(Float64))) AS avg_startup_latency_ms,
-			if(countIf(b.avg_e2e_latency_ms > 0) > 0, avgIf(b.avg_e2e_latency_ms, b.avg_e2e_latency_ms > 0), cast(null AS Nullable(Float64))) AS avg_e2e_latency_ms,
-			if(countIf(b.prompt_to_playable_latency_ms > 0) > 0, quantileIf(0.95)(b.prompt_to_playable_latency_ms, b.prompt_to_playable_latency_ms > 0), cast(null AS Nullable(Float64))) AS p95_prompt_to_first_frame_latency_ms,
-			if(countIf(b.startup_latency_ms > 0) > 0, quantileIf(0.95)(b.startup_latency_ms, b.startup_latency_ms > 0), cast(null AS Nullable(Float64))) AS p95_startup_latency_ms,
-			if(countIf(b.avg_e2e_latency_ms > 0) > 0, quantileIf(0.95)(b.avg_e2e_latency_ms, b.avg_e2e_latency_ms > 0), cast(null AS Nullable(Float64))) AS p95_e2e_latency_ms,
-			toUInt64(countIf(b.prompt_to_playable_latency_ms > 0)) AS prompt_to_first_frame_sample_count,
-			toUInt64(countIf(b.startup_latency_ms > 0)) AS startup_latency_sample_count,
-			toUInt64(countIf(b.avg_e2e_latency_ms > 0)) AS e2e_latency_sample_count,
+			toUInt64(sum(b.health_signal_count)) AS health_signal_count,
+			toUInt64(sum(b.health_expected_signal_count)) AS health_expected_signal_count,
+			least(
+				if(
+					sum(b.health_expected_signal_count) > 0,
+					sum(b.health_signal_count) / toFloat64(sum(b.health_expected_signal_count)),
+					1.0
+				),
+				1.0
+			) AS health_signal_coverage_ratio,
+			i.gpu_model_name AS gpu_model_name,
+			i.gpu_memory_bytes_total AS gpu_memory_bytes_total,
+			i.runner_version AS runner_version,
+			i.cuda_version AS cuda_version,
+			if(sum(b.prompt_to_first_frame_sample_count) > 0, sum(b.prompt_to_first_frame_sum_ms) / toFloat64(sum(b.prompt_to_first_frame_sample_count)), cast(null AS Nullable(Float64))) AS avg_prompt_to_first_frame_ms,
+			sum(b.prompt_to_first_frame_sum_ms) AS prompt_to_first_frame_sum_ms,
+			if(sum(b.startup_latency_sample_count) > 0, sum(b.startup_latency_sum_ms) / toFloat64(sum(b.startup_latency_sample_count)), cast(null AS Nullable(Float64))) AS avg_startup_latency_ms,
+			sum(b.startup_latency_sum_ms) AS startup_latency_sum_ms,
+			if(sum(b.e2e_latency_sample_count) > 0, sum(b.e2e_latency_sum_ms) / toFloat64(sum(b.e2e_latency_sample_count)), cast(null AS Nullable(Float64))) AS avg_e2e_latency_ms,
+			sum(b.e2e_latency_sum_ms) AS e2e_latency_sum_ms,
+			if(
+				countIf(ifNull(b.prompt_to_playable_latency_ms, 0.0) > 0) > 0,
+				quantileTDigestIf(0.95)(ifNull(b.prompt_to_playable_latency_ms, 0.0), toUInt8(ifNull(b.prompt_to_playable_latency_ms, 0.0) > 0)),
+				cast(null AS Nullable(Float64))
+			) AS p95_prompt_to_first_frame_latency_ms,
+			quantileTDigestIfState(0.95)(ifNull(b.prompt_to_playable_latency_ms, 0.0), toUInt8(ifNull(b.prompt_to_playable_latency_ms, 0.0) > 0)) AS prompt_to_first_frame_p95_state,
+			if(
+				countIf(ifNull(b.startup_latency_ms, 0.0) > 0) > 0,
+				quantileTDigestIf(0.95)(ifNull(b.startup_latency_ms, 0.0), toUInt8(ifNull(b.startup_latency_ms, 0.0) > 0)),
+				cast(null AS Nullable(Float64))
+			) AS p95_startup_latency_ms,
+			quantileTDigestIfState(0.95)(ifNull(b.startup_latency_ms, 0.0), toUInt8(ifNull(b.startup_latency_ms, 0.0) > 0)) AS startup_latency_p95_state,
+			if(
+				countIf(ifNull(b.session_hour_avg_e2e_latency_ms, 0.0) > 0) > 0,
+				quantileTDigestIf(0.95)(ifNull(b.session_hour_avg_e2e_latency_ms, 0.0), toUInt8(ifNull(b.session_hour_avg_e2e_latency_ms, 0.0) > 0)),
+				cast(null AS Nullable(Float64))
+			) AS p95_e2e_latency_ms,
+			quantileTDigestIfState(0.95)(ifNull(b.session_hour_avg_e2e_latency_ms, 0.0), toUInt8(ifNull(b.session_hour_avg_e2e_latency_ms, 0.0) > 0)) AS e2e_latency_p95_state,
+			toUInt64(sum(b.prompt_to_first_frame_sample_count)) AS prompt_to_first_frame_sample_count,
+			toUInt64(sum(b.startup_latency_sample_count)) AS startup_latency_sample_count,
+			toUInt64(sum(b.e2e_latency_sample_count)) AS e2e_latency_sample_count,
 			toUInt64(countIf(b.requested_seen = 1)) AS known_sessions_count,
 			toUInt64(countIf(b.requested_seen = 1 AND b.startup_outcome = 'success')) AS startup_success_sessions,
 			toUInt64(countIf(b.requested_seen = 1 AND b.selection_outcome = 'no_orch')) AS no_orch_sessions,
@@ -2858,25 +3820,28 @@ func (r *repo) insertGPUMetricsRollups(ctx context.Context, runID, queryID strin
 			ifNull(toFloat64(countIf(b.requested_seen = 1 AND b.swap_count > 0)) / nullIf(toFloat64(countIf(b.requested_seen = 1)), 0.0), 0.0) AS swap_rate,
 			?,
 			?,
-			now64()
+			?
 		FROM base b
 		LEFT JOIN inventory i
-			ON b.org = i.org
+			ON b.attribution_snapshot_row_id = i.attribution_snapshot_row_id
+		   AND b.org = i.org
 		   AND b.orchestrator_address = i.orchestrator_address
-		   AND coalesce(nullIf(b.model_id, ''), nullIf(b.pipeline_id, '')) = i.inventory_key
-		WHERE ifNull(coalesce(b.session_gpu_id, i.inventory_gpu_id), '') != ''
+		   AND b.pipeline_id = i.pipeline_id
+		   AND ifNull(b.model_id, '') = ifNull(i.model_id, '')
+		   AND ifNull(b.session_gpu_id, '') = ifNull(i.gpu_id, '')
+		WHERE ifNull(b.session_gpu_id, '') != ''
 		GROUP BY
 			b.window_start,
 			b.org,
 			b.orchestrator_address,
 			b.pipeline_id,
-			coalesce(b.model_id, i.inventory_model_id),
-			coalesce(b.session_gpu_id, i.inventory_gpu_id),
-			i.inventory_gpu_model_name,
-			i.inventory_gpu_memory_bytes_total,
-			i.inventory_runner_version,
-			i.inventory_cuda_version
-	`, queryID, runID, r.cfg.ResolverVersion)
+			b.model_id,
+			b.session_gpu_id,
+			i.gpu_model_name,
+			i.gpu_memory_bytes_total,
+			i.runner_version,
+			i.cuda_version
+	`, queryID, queryID, runID, r.cfg.ResolverVersion, now)
 }
 
 func (r *repo) ownerID() string {
@@ -3306,4 +4271,1003 @@ func nullableFloat64HashValue(v *float64) float64 {
 		return 0
 	}
 	return *v
+}
+
+// workerLifecycleLookback is how far before a window start we look for
+// worker_lifecycle snapshots. BYOC workers may have registered well before
+// the attribution window; 30 days covers typical deployments.
+const workerLifecycleLookback = 30 * 24 * time.Hour
+
+// orchIdentitiesToStrings converts a slice of orchIdentity to a flat list of
+// normalized identity strings suitable for stageIdentities.
+func orchIdentitiesToStrings(identities []orchIdentity) []string {
+	seen := make(map[string]struct{}, len(identities)*2)
+	out := make([]string, 0, len(identities)*2)
+	for _, id := range identities {
+		if id.Address != "" {
+			if _, ok := seen[id.Address]; !ok {
+				seen[id.Address] = struct{}{}
+				out = append(out, id.Address)
+			}
+		}
+		if id.URINorm != "" {
+			if _, ok := seen[id.URINorm]; !ok {
+				seen[id.URINorm] = struct{}{}
+				out = append(out, id.URINorm)
+			}
+		}
+	}
+	return out
+}
+
+// fetchAIBatchJobCandidates returns AI batch jobs that completed within the
+// window. It joins each completed row to exactly one deduped received timestamp
+// per (org, request_id), using the earliest received event that is not later
+// than the completion. This preserves the one-row-per-job invariant for
+// resolver-owned job stores and downstream rollups.
+// Jobs with an empty request_id are excluded — those belong to the known gap
+// period before request_id tracking was fixed.
+func (r *repo) fetchAIBatchJobCandidates(ctx context.Context, spec WindowSpec) ([]AIBatchJobRecord, error) {
+	if spec.Start == nil || spec.End == nil {
+		return nil, fmt.Errorf("fetch ai batch job candidates requires bounded window")
+	}
+	orgClause, orgArgs := orgPredicate("c.org", spec.Org, spec.ExcludedOrgPrefixes)
+	args := []any{spec.Start.UTC(), spec.End.UTC()}
+	args = append(args, orgArgs...)
+	rows, err := r.conn.Query(ctx, `
+		SELECT
+			c.request_id,
+			c.org,
+			ifNull(c.gateway, '') AS gateway,
+			ifNull(c.pipeline, '') AS pipeline,
+			ifNull(c.model_id, '') AS model_id,
+			ifNull(c.orch_url, '') AS orch_url,
+			ifNull(lowerUTF8(c.orch_url), '') AS orch_url_norm,
+			minIf(received.event_ts, received.event_ts <= c.event_ts) AS received_at,
+			c.event_ts AS completed_at,
+			c.success,
+			ifNull(toUInt16OrZero(toString(c.tries)), 0) AS tries,
+			ifNull(c.duration_ms, 0) AS duration_ms,
+			ifNull(c.latency_score, 0.0) AS latency_score,
+			ifNull(c.price_per_unit, 0.0) AS price_per_unit,
+			ifNull(c.error_type, '') AS error_type,
+			ifNull(c.error, '') AS error
+		FROM naap.normalized_ai_batch_job AS c FINAL
+		LEFT JOIN (
+			SELECT request_id, org, event_ts
+			FROM naap.normalized_ai_batch_job FINAL
+			WHERE subtype = 'ai_batch_request_received'
+		) received ON received.org = c.org
+		         AND received.request_id = c.request_id
+		WHERE c.subtype = 'ai_batch_request_completed'
+		  AND c.event_ts >= ? AND c.event_ts < ?
+		  AND c.request_id != ''
+		  AND `+orgClause+`
+		GROUP BY
+			c.request_id,
+			c.org,
+			c.gateway,
+			c.pipeline,
+			c.model_id,
+			c.orch_url,
+			c.event_ts,
+			c.success,
+			c.tries,
+			c.duration_ms,
+			c.latency_score,
+			c.price_per_unit,
+			c.error_type,
+			c.error
+		ORDER BY c.org, c.request_id, c.event_ts
+	`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("fetch ai batch job candidates: %w", err)
+	}
+	defer rows.Close()
+
+	var out []AIBatchJobRecord
+	for rows.Next() {
+		var j AIBatchJobRecord
+		var receivedAt sql.NullTime
+		if err := rows.Scan(
+			&j.RequestID, &j.Org, &j.Gateway, &j.Pipeline, &j.ModelID,
+			&j.OrchURL, &j.OrchURLNorm,
+			&receivedAt,
+			&j.CompletedAt, &j.Success,
+			&j.Tries, &j.DurationMS, &j.LatencyScore, &j.PricePerUnit,
+			&j.ErrorType, &j.Error,
+		); err != nil {
+			return nil, fmt.Errorf("scan ai batch job candidate: %w", err)
+		}
+		if receivedAt.Valid {
+			t := receivedAt.Time.UTC()
+			j.ReceivedAt = &t
+		}
+		j.CompletedAt = j.CompletedAt.UTC()
+		out = append(out, j)
+	}
+	return out, rows.Err()
+}
+
+// fetchBYOCJobCandidates returns BYOC job gateway completion events within
+// the window. The event_id field is used as the stable job key.
+func (r *repo) fetchBYOCJobCandidates(ctx context.Context, spec WindowSpec) ([]BYOCJobRecord, error) {
+	if spec.Start == nil || spec.End == nil {
+		return nil, fmt.Errorf("fetch byoc job candidates requires bounded window")
+	}
+	orgClause, orgArgs := orgPredicate("j.org", spec.Org, spec.ExcludedOrgPrefixes)
+	args := []any{spec.Start.UTC(), spec.End.UTC()}
+	args = append(args, orgArgs...)
+	rows, err := r.conn.Query(ctx, `
+		SELECT
+			j.event_id,
+			j.org,
+			ifNull(j.gateway, '') AS gateway,
+			ifNull(j.capability, '') AS capability,
+			ifNull(lowerUTF8(j.orch_address), '') AS orch_address,
+			ifNull(j.orch_url, '') AS orch_url,
+			ifNull(lowerUTF8(j.orch_url), '') AS orch_url_norm,
+			ifNull(j.worker_url, '') AS worker_url,
+			ifNull(j.charged_compute, 0) AS charged_compute,
+			j.event_ts AS completed_at,
+			j.success,
+			ifNull(j.duration_ms, 0) AS duration_ms,
+			ifNull(j.http_status, 0) AS http_status,
+			ifNull(j.error, '') AS error
+		FROM naap.normalized_byoc_job AS j FINAL
+		WHERE j.subtype = 'job_gateway_completed'
+		  AND j.event_ts >= ? AND j.event_ts < ?
+		  AND `+orgClause+`
+		ORDER BY j.org, j.event_id, j.event_ts
+	`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("fetch byoc job candidates: %w", err)
+	}
+	defer rows.Close()
+
+	var out []BYOCJobRecord
+	for rows.Next() {
+		var j BYOCJobRecord
+		if err := rows.Scan(
+			&j.EventID, &j.Org, &j.Gateway, &j.Capability,
+			&j.OrchAddress, &j.OrchURL, &j.OrchURLNorm,
+			&j.WorkerURL, &j.ChargedCompute,
+			&j.CompletedAt, &j.Success,
+			&j.DurationMS, &j.HTTPStatus, &j.Error,
+		); err != nil {
+			return nil, fmt.Errorf("scan byoc job candidate: %w", err)
+		}
+		j.CompletedAt = j.CompletedAt.UTC()
+		out = append(out, j)
+	}
+	return out, rows.Err()
+}
+
+// fetchWorkerLifecycleSnapshots returns worker_lifecycle events for the given
+// orchestrator addresses, looking back workerLifecycleLookback before the
+// window start. This covers BYOC workers that registered well before the
+// current attribution window.
+func (r *repo) fetchWorkerLifecycleSnapshots(ctx context.Context, spec WindowSpec, orchAddresses []string) ([]workerLifecycleSnapshot, error) {
+	if len(orchAddresses) == 0 {
+		return nil, nil
+	}
+	if spec.Start == nil || spec.End == nil {
+		return nil, fmt.Errorf("fetch worker lifecycle snapshots requires bounded window")
+	}
+	queryID, err := r.stageIdentities(ctx, orchAddresses)
+	if err != nil {
+		return nil, fmt.Errorf("stage identities for worker lifecycle: %w", err)
+	}
+	orgClause, orgArgs := orgPredicate("w.org", spec.Org, spec.ExcludedOrgPrefixes)
+	lookbackStart := spec.Start.UTC().Add(-workerLifecycleLookback)
+	args := []any{queryID, lookbackStart, spec.End.UTC()}
+	args = append(args, orgArgs...)
+	rows, err := r.conn.Query(ctx, `
+		SELECT
+			w.org,
+			ifNull(w.capability, '') AS capability,
+			ifNull(lowerUTF8(w.orch_address), '') AS orch_address,
+			w.event_ts,
+			ifNull(w.model, '') AS model,
+			ifNull(w.price_per_unit, 0.0) AS price_per_unit,
+			ifNull(w.worker_url, '') AS worker_url
+		FROM naap.normalized_worker_lifecycle AS w FINAL
+		INNER JOIN naap.resolver_query_identities i
+			ON i.query_id = ?
+		   AND i.identity = lowerUTF8(ifNull(w.orch_address, ''))
+		WHERE w.event_ts >= ? AND w.event_ts < ?
+		  AND `+orgClause+`
+		ORDER BY w.org, w.capability, w.orch_address, w.event_ts
+	`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("fetch worker lifecycle snapshots: %w", err)
+	}
+	defer rows.Close()
+
+	var out []workerLifecycleSnapshot
+	for rows.Next() {
+		var s workerLifecycleSnapshot
+		if err := rows.Scan(
+			&s.Org, &s.Capability, &s.OrchAddress,
+			&s.EventTS, &s.Model, &s.PricePerUnit, &s.WorkerURL,
+		); err != nil {
+			return nil, fmt.Errorf("scan worker lifecycle snapshot: %w", err)
+		}
+		s.EventTS = s.EventTS.UTC()
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+// insertHourlyRequestDemand aggregates canonical_ai_batch_job_store and
+// canonical_byoc_job_store into the pre-rolled hourly store the request
+// serving endpoints read. Scoped to owned_windows so a replay / partial
+// refresh only republishes the rows it actually touched; the store is
+// MergeTree (not Replacing) with refresh_run_id + refreshed_at in the
+// ORDER BY, so the latest-slice argMax pattern in api_hourly_request_demand
+// naturally picks the most recent run's row per grain.
+//
+// Dedup against ReplacingMergeTree on the upstream job stores is applied
+// inline via argMax(..., materialized_at) by (org, request_id) / (org,
+// event_id); running SELECT FINAL on those stores would be equivalent but
+// materialized_at is already the dedup key so the explicit argMax keeps
+// the plan readable.
+//
+// LLM supplementary fields are joined from canonical_ai_llm_requests (dbt
+// dedup view over stg_ai_llm_requests); canonical BYOC jobs have no LLM
+// metrics so those columns are zero for the byoc branch.
+func (r *repo) insertHourlyRequestDemand(ctx context.Context, runID string, now time.Time, queryID string) error {
+	return r.conn.Exec(ctx, `
+		INSERT INTO naap.api_hourly_request_demand_store
+		(
+			window_start, org, gateway, execution_mode, capability_family, capability_name, capability_id,
+			canonical_pipeline, pipeline_id, canonical_model, orchestrator_address, orchestrator_uri,
+			job_count, selected_count, no_orch_count, success_count, duration_ms_sum, price_sum,
+			llm_request_count, llm_success_count, llm_total_tokens_sum, llm_total_tokens_sample_count,
+			llm_tokens_per_second_sum, llm_tokens_per_second_sample_count, llm_ttft_ms_sum, llm_ttft_ms_sample_count,
+			refresh_run_id, artifact_checksum, refreshed_at
+		)
+		WITH owned_windows AS (
+			SELECT DISTINCT window_start
+			FROM naap.resolver_query_window_slices
+			WHERE query_id = ?
+		),
+		ai_batch_latest AS (
+			SELECT
+				org,
+				request_id,
+				argMax(pipeline,            materialized_at) AS pipeline,
+				argMax(model_id,            materialized_at) AS model_id,
+				argMax(gateway,             materialized_at) AS gateway,
+				argMax(completed_at,        materialized_at) AS completed_at,
+				argMax(received_at,         materialized_at) AS received_at,
+				argMax(success,             materialized_at) AS success,
+				argMax(selection_outcome,   materialized_at) AS selection_outcome,
+				argMax(duration_ms,         materialized_at) AS duration_ms,
+				argMax(price_per_unit,      materialized_at) AS price_per_unit,
+				argMax(orch_url_norm,       materialized_at) AS orch_url_norm
+			FROM naap.canonical_ai_batch_job_store
+			GROUP BY org, request_id
+		),
+		ai_batch AS (
+			SELECT
+				toStartOfHour(coalesce(j.completed_at, j.received_at)) AS window_start,
+				j.org                                                   AS org,
+				ifNull(j.gateway, '')                                   AS gateway,
+				'request'                                               AS execution_mode,
+				'builtin'                                               AS capability_family,
+				j.pipeline                                              AS capability_name,
+				cast(NULL, 'Nullable(UInt16)')                          AS capability_id,
+				cast(j.pipeline, 'Nullable(String)')                    AS canonical_pipeline,
+				j.pipeline                                              AS pipeline_id,
+				cast(j.model_id, 'Nullable(String)')                    AS canonical_model,
+				cast('', 'String')                                      AS orchestrator_address,
+				ifNull(j.orch_url_norm, '')                             AS orchestrator_uri,
+				toUInt64(count())                                       AS job_count,
+				toUInt64(countIf(j.selection_outcome = 'selected'))     AS selected_count,
+				toUInt64(countIf(j.selection_outcome = 'no_orch'))      AS no_orch_count,
+				toUInt64(countIf(j.success = 1))                        AS success_count,
+				toInt64(sum(toInt64(coalesce(j.duration_ms, 0))))       AS duration_ms_sum,
+				toFloat64(sum(toFloat64(coalesce(j.price_per_unit, 0))))AS price_sum,
+				toUInt64(countIf(j.pipeline = 'llm' AND ifNull(l.model, '') != ''))                                          AS llm_request_count,
+				toUInt64(countIf(j.pipeline = 'llm' AND ifNull(l.model, '') != '' AND j.success = 1))                        AS llm_success_count,
+				toInt64(sumIf(toInt64(coalesce(l.total_tokens, 0)),     j.pipeline = 'llm' AND ifNull(l.model, '') != ''))   AS llm_total_tokens_sum,
+				toUInt64(countIf(j.pipeline = 'llm' AND ifNull(l.model, '') != '' AND l.total_tokens IS NOT NULL))           AS llm_total_tokens_sample_count,
+				toFloat64(sumIf(toFloat64(coalesce(l.tokens_per_second, 0)), j.pipeline = 'llm' AND ifNull(l.model, '') != ''))   AS llm_tokens_per_second_sum,
+				toUInt64(countIf(j.pipeline = 'llm' AND ifNull(l.model, '') != '' AND l.tokens_per_second IS NOT NULL))      AS llm_tokens_per_second_sample_count,
+				toFloat64(sumIf(toFloat64(coalesce(l.ttft_ms, 0)),      j.pipeline = 'llm' AND ifNull(l.model, '') != ''))   AS llm_ttft_ms_sum,
+				toUInt64(countIf(j.pipeline = 'llm' AND ifNull(l.model, '') != '' AND l.ttft_ms IS NOT NULL))                AS llm_ttft_ms_sample_count
+			FROM ai_batch_latest j
+			INNER JOIN owned_windows w
+				ON w.window_start = toStartOfHour(coalesce(j.completed_at, j.received_at))
+			LEFT JOIN naap.canonical_ai_llm_requests l
+				ON l.org = j.org AND l.request_id = j.request_id
+			WHERE j.request_id != '' AND j.pipeline != ''
+			GROUP BY window_start, org, gateway, execution_mode, capability_family, capability_name,
+				canonical_pipeline, pipeline_id, canonical_model, orchestrator_address, orchestrator_uri
+		),
+		byoc_latest AS (
+			SELECT
+				org,
+				event_id,
+				argMax(capability,        materialized_at) AS capability,
+				argMax(model,             materialized_at) AS model,
+				argMax(gateway,           materialized_at) AS gateway,
+				argMax(completed_at,      materialized_at) AS completed_at,
+				argMax(success,           materialized_at) AS success,
+				argMax(selection_outcome, materialized_at) AS selection_outcome,
+				argMax(duration_ms,       materialized_at) AS duration_ms,
+				argMax(price_per_unit,    materialized_at) AS price_per_unit,
+				argMax(orch_address,      materialized_at) AS orch_address,
+				argMax(orch_url_norm,     materialized_at) AS orch_url_norm
+			FROM naap.canonical_byoc_job_store
+			GROUP BY org, event_id
+		),
+		byoc AS (
+			SELECT
+				toStartOfHour(j.completed_at)                           AS window_start,
+				j.org                                                   AS org,
+				ifNull(j.gateway, '')                                   AS gateway,
+				'request'                                               AS execution_mode,
+				'byoc'                                                  AS capability_family,
+				j.capability                                            AS capability_name,
+				cast(37, 'Nullable(UInt16)')                            AS capability_id,
+				cast(NULL, 'Nullable(String)')                          AS canonical_pipeline,
+				j.capability                                            AS pipeline_id,
+				cast(j.model, 'Nullable(String)')                       AS canonical_model,
+				ifNull(j.orch_address, '')                              AS orchestrator_address,
+				ifNull(j.orch_url_norm, '')                             AS orchestrator_uri,
+				toUInt64(count())                                       AS job_count,
+				toUInt64(countIf(j.selection_outcome = 'selected'))     AS selected_count,
+				toUInt64(countIf(j.selection_outcome = 'no_orch'))      AS no_orch_count,
+				toUInt64(countIf(j.success = 1))                        AS success_count,
+				toInt64(sum(toInt64(coalesce(j.duration_ms, 0))))       AS duration_ms_sum,
+				toFloat64(sum(toFloat64(coalesce(j.price_per_unit, 0))))AS price_sum,
+				toUInt64(0)                                             AS llm_request_count,
+				toUInt64(0)                                             AS llm_success_count,
+				toInt64(0)                                              AS llm_total_tokens_sum,
+				toUInt64(0)                                             AS llm_total_tokens_sample_count,
+				toFloat64(0)                                            AS llm_tokens_per_second_sum,
+				toUInt64(0)                                             AS llm_tokens_per_second_sample_count,
+				toFloat64(0)                                            AS llm_ttft_ms_sum,
+				toUInt64(0)                                             AS llm_ttft_ms_sample_count
+			FROM byoc_latest j
+			INNER JOIN owned_windows w
+				ON w.window_start = toStartOfHour(j.completed_at)
+			WHERE j.event_id != '' AND j.capability != ''
+			GROUP BY window_start, org, gateway, execution_mode, capability_family, capability_name, capability_id,
+				canonical_pipeline, pipeline_id, canonical_model, orchestrator_address, orchestrator_uri
+		)
+		SELECT
+			window_start, org, gateway, execution_mode, capability_family, capability_name, capability_id,
+			canonical_pipeline, pipeline_id, canonical_model, orchestrator_address, orchestrator_uri,
+			job_count, selected_count, no_orch_count, success_count, duration_ms_sum, price_sum,
+			llm_request_count, llm_success_count, llm_total_tokens_sum, llm_total_tokens_sample_count,
+			llm_tokens_per_second_sum, llm_tokens_per_second_sample_count, llm_ttft_ms_sum, llm_ttft_ms_sample_count,
+			?, ?, ?
+		FROM (
+			SELECT * FROM ai_batch
+			UNION ALL
+			SELECT * FROM byoc
+		)
+	`, queryID, runID, r.cfg.ResolverVersion, now)
+}
+
+// insertCurrentOrchestratorState composes a denormalized org-agnostic snapshot
+// per orch_address with identity, capability membership, observed GPU UUID
+// count, and the latest 24h of SLA/reliability. Three handlers — streaming,
+// requests, and dashboard orchestrator listings — now read this store
+// with a single MergeTree scan each instead of the prior 3–4 query
+// fan-out that rejoined in Go.
+//
+// Runs once per resolver backfill (no owned_windows scoping) because it
+// represents "current activity in the last 24h" anchored to RunRequest.Now.
+//
+// Data sources:
+//   - canonical_capability_offer_inventory (builtin + byoc offers,
+//     hardware_present=1 rows are the primary source of GPU identity)
+//   - canonical_byoc_workers (byoc capability membership for workers
+//     that registered without a matching offer)
+//   - canonical_capability_orchestrator_identity_latest (uri, name, label)
+//   - api_hourly_streaming_sla_store (latest SLA score + windowed
+//     aggregate reliability metrics)
+//
+// currentOrchestratorRefreshInterval is the minimum gap between
+// insertCurrentOrchestratorState executions. The store is a "last 24h"
+// rolling snapshot whose output is deterministic across successive runs,
+// so cranking it once per resolver window-slice (every ~2 min in tail
+// mode) is wasted work — each write scans ~2 GiB of capability inventory
+// to produce near-identical rows that the view's argMax then discards.
+//
+// 5 minutes is the worst-case staleness an operator cares about for the
+// orchestrator-listing endpoints; 24h data doesn't shift materially
+// faster than that.
+const currentOrchestratorRefreshInterval = 5 * time.Minute
+
+func (r *repo) insertCurrentOrchestratorState(ctx context.Context, runID string, now time.Time) error {
+	// Skip if a recent write already captured essentially the same snapshot.
+	var lastRefreshedAt time.Time
+	if err := r.conn.QueryRow(ctx, `
+		SELECT ifNull(max(refreshed_at), toDateTime64('1970-01-01 00:00:00', 3, 'UTC'))
+		FROM naap.api_current_orchestrator_store
+	`).Scan(&lastRefreshedAt); err != nil {
+		// Failure to probe is not fatal; fall through and attempt the write.
+		lastRefreshedAt = time.Time{}
+	} else if !lastRefreshedAt.IsZero() && now.Sub(lastRefreshedAt) < currentOrchestratorRefreshInterval {
+		return nil
+	}
+
+	return r.conn.Exec(ctx, `
+		INSERT INTO naap.api_current_orchestrator_store
+		(
+			orch_address, orchestrator_uri, orch_name, orch_label,
+			last_seen, gpu_count,
+			streaming_models, request_capability_pairs, pipelines, pipeline_model_pairs,
+			known_sessions_count, success_sessions, requested_sessions,
+			effective_success_rate, no_swap_rate,
+			latest_sla_score, latest_sla_window_start,
+			refresh_run_id, artifact_checksum, refreshed_at
+		)
+		WITH
+		offers_24h AS (
+			SELECT
+				o.orch_address,
+				o.orchestrator_uri,
+				o.pipeline_id,
+				ifNull(o.model_id, '')        AS model_id_key,
+				ifNull(o.gpu_id, '')          AS gpu_id_key,
+				o.canonical_pipeline,
+				o.capability_family,
+				o.supports_stream,
+				o.supports_request,
+				o.last_seen
+			FROM naap.canonical_capability_offer_inventory o
+			WHERE o.last_seen >= toDateTime(?, 'UTC') - INTERVAL 24 HOUR
+			  AND o.orch_address != ''
+		),
+		offers_rollup AS (
+			SELECT
+				orch_address,
+				anyLast(orchestrator_uri)                                               AS orchestrator_uri,
+				max(last_seen)                                                          AS last_seen,
+				toUInt64(countDistinctIf(concat(orch_address, '|', gpu_id_key), gpu_id_key != '')) AS gpu_count,
+				arrayDistinct(groupArrayIf(model_id_key,
+					capability_family = 'builtin'
+					AND supports_stream = 1
+					AND canonical_pipeline = 'live-video-to-video'
+					AND model_id_key != ''))                                            AS streaming_models,
+				arrayDistinct(groupArrayIf((pipeline_id, model_id_key),
+					pipeline_id != ''
+					AND model_id_key != ''
+					AND (capability_family = 'byoc' OR supports_request = 1)
+					AND ifNull(canonical_pipeline, '') != 'live-video-to-video'))       AS request_capability_pairs,
+				arrayDistinct(groupArrayIf(pipeline_id, pipeline_id != ''))             AS pipelines,
+				arrayDistinct(groupArrayIf((pipeline_id, model_id_key),
+					pipeline_id != '' AND model_id_key != ''))                          AS pipeline_model_pairs
+			FROM offers_24h
+			GROUP BY orch_address
+		),
+		-- BYOC workers that registered without a matching capability offer
+		-- still surface as request capabilities — matches the UNION semantics
+		-- in the pre-6.3 handler queries.
+		byoc_workers_24h AS (
+			SELECT
+				w.orch_address,
+				max(w.event_ts)                                                         AS last_seen,
+				anyLast(w.orch_url_norm)                                                AS orchestrator_uri,
+				arrayDistinct(groupArrayIf((w.capability, ifNull(w.model, '')),
+					w.capability != ''
+					AND ifNull(w.model, '') != ''))                                     AS request_capability_pairs
+			FROM naap.canonical_byoc_workers w
+			WHERE w.event_ts >= toDateTime(?, 'UTC') - INTERVAL 24 HOUR
+			  AND w.orch_address != ''
+			  AND w.capability != ''
+			GROUP BY w.orch_address
+		),
+		combined AS (
+			SELECT
+				o.orch_address                                                          AS orch_address,
+				coalesce(nullIf(o.orchestrator_uri, ''),
+				         ifNull(w.orchestrator_uri, ''))                                AS orchestrator_uri,
+				greatest(o.last_seen, ifNull(w.last_seen, toDateTime64(0, 3, 'UTC')))   AS last_seen,
+				o.gpu_count                                                             AS gpu_count,
+				o.streaming_models                                                      AS streaming_models,
+				arrayDistinct(arrayConcat(
+					o.request_capability_pairs,
+					ifNull(w.request_capability_pairs, CAST([], 'Array(Tuple(String, String))'))
+				))                                                                      AS request_capability_pairs,
+				o.pipelines                                                             AS pipelines,
+				o.pipeline_model_pairs                                                  AS pipeline_model_pairs
+			FROM offers_rollup o
+			LEFT JOIN byoc_workers_24h w
+				ON w.orch_address = o.orch_address
+			UNION ALL
+			SELECT
+				w.orch_address                                                          AS orch_address,
+				w.orchestrator_uri                                                      AS orchestrator_uri,
+				w.last_seen                                                             AS last_seen,
+				toUInt64(0)                                                             AS gpu_count,
+				CAST([] AS Array(String))                                               AS streaming_models,
+				w.request_capability_pairs                                              AS request_capability_pairs,
+				arrayDistinct(arrayMap(p -> tupleElement(p, 1), w.request_capability_pairs)) AS pipelines,
+				w.request_capability_pairs                                              AS pipeline_model_pairs
+			FROM byoc_workers_24h w
+			LEFT ANTI JOIN offers_rollup o
+				ON o.orch_address = w.orch_address
+		),
+		identity AS (
+			SELECT
+				orch_address,
+				ifNull(orchestrator_uri, '') AS orchestrator_uri,
+				coalesce(nullIf(orch_name, ''), orch_address) AS orch_name,
+				ifNull(orch_label, '') AS orch_label
+			FROM naap.canonical_capability_orchestrator_identity_latest
+		),
+		sla_24h AS (
+			SELECT
+				orchestrator_address                                                    AS orch_address,
+				toUInt64(sum(known_sessions_count))                                     AS known_sessions_total,
+				toUInt64(sum(startup_success_sessions))                                 AS success_sessions_total,
+				toUInt64(sum(requested_sessions))                                       AS requested_sessions_total,
+				sum(ifNull(effective_success_rate, 0) * requested_sessions)
+					/ nullIf(toFloat64(sum(requested_sessions)), 0)                     AS effective_success_rate_weighted,
+				sum(ifNull(no_swap_rate, 0) * requested_sessions)
+					/ nullIf(toFloat64(sum(requested_sessions)), 0)                     AS no_swap_rate_weighted
+			FROM naap.api_hourly_streaming_sla
+			WHERE window_start >= toDateTime(?, 'UTC') - INTERVAL 24 HOUR
+			  AND orchestrator_address != ''
+			GROUP BY orch_address
+		),
+		sla_latest AS (
+			SELECT
+				orchestrator_address AS orch_address,
+				argMax(sla_score, window_start) AS latest_sla_score,
+				max(window_start)               AS latest_sla_window_start
+			FROM naap.api_hourly_streaming_sla
+			WHERE window_start >= toDateTime(?, 'UTC') - INTERVAL 24 HOUR
+			  AND orchestrator_address != ''
+			  AND sla_score IS NOT NULL
+			GROUP BY orch_address
+		)
+		SELECT
+			c.orch_address,
+			coalesce(nullIf(c.orchestrator_uri, ''), ifNull(i.orchestrator_uri, ''))    AS orchestrator_uri,
+			ifNull(i.orch_name, c.orch_address)                                         AS orch_name,
+			ifNull(i.orch_label, '')                                                    AS orch_label,
+			c.last_seen,
+			c.gpu_count,
+			c.streaming_models,
+			c.request_capability_pairs,
+			c.pipelines,
+			c.pipeline_model_pairs,
+			ifNull(s24.known_sessions_total, toUInt64(0))                               AS known_sessions_count,
+			ifNull(s24.success_sessions_total, toUInt64(0))                             AS success_sessions,
+			ifNull(s24.requested_sessions_total, toUInt64(0))                           AS requested_sessions,
+			s24.effective_success_rate_weighted                                         AS effective_success_rate,
+			s24.no_swap_rate_weighted                                                   AS no_swap_rate,
+			sl.latest_sla_score                                                         AS latest_sla_score,
+			sl.latest_sla_window_start                                                  AS latest_sla_window_start,
+			?, ?, ?
+		FROM combined c
+		LEFT JOIN identity  i  ON i.orch_address  = c.orch_address
+		LEFT JOIN sla_24h   s24 ON s24.orch_address = c.orch_address
+		LEFT JOIN sla_latest sl ON sl.orch_address  = c.orch_address
+	`, now.UTC(), now.UTC(), now.UTC(), now.UTC(), runID, r.cfg.ResolverVersion, now)
+}
+
+// insertCurrentGPUInventory snapshots the latest 24h of GPU observations
+// from canonical_capability_offer_inventory into one row per (orch_address,
+// gpu_id). Replaces full-scan dashboard queries that cost ~37 GiB/request
+// with a primary-key lookup over ~hundreds of rows.
+//
+// Throttled on the same 5-minute interval as the other current_* writers.
+func (r *repo) insertCurrentGPUInventory(ctx context.Context, runID string, now time.Time) error {
+	var lastRefreshedAt time.Time
+	if err := r.conn.QueryRow(ctx, `
+		SELECT ifNull(max(refreshed_at), toDateTime64('1970-01-01 00:00:00', 3, 'UTC'))
+		FROM naap.api_current_gpu_inventory_store
+	`).Scan(&lastRefreshedAt); err != nil {
+		lastRefreshedAt = time.Time{}
+	} else if !lastRefreshedAt.IsZero() && now.Sub(lastRefreshedAt) < currentOrchestratorRefreshInterval {
+		return nil
+	}
+	return r.conn.Exec(ctx, `
+		INSERT INTO naap.api_current_gpu_inventory_store
+		(
+			org, orch_address, gpu_id, gpu_model_name, gpu_memory_bytes_total,
+			canonical_pipeline, model_id, last_seen,
+			refresh_run_id, artifact_checksum, refreshed_at
+		)
+		SELECT
+			o.org                                                          AS org,
+			o.orch_address                                                 AS orch_address,
+			ifNull(o.gpu_id, '')                                           AS gpu_id,
+			argMax(ifNull(o.gpu_model_name, ''), o.last_seen)              AS gpu_model_name,
+			argMax(ifNull(o.gpu_memory_bytes_total, toUInt64(0)), o.last_seen) AS gpu_memory_bytes_total,
+			argMax(ifNull(o.canonical_pipeline, ''), o.last_seen)          AS canonical_pipeline,
+			argMax(ifNull(o.model_id, ''), o.last_seen)                    AS model_id,
+			max(o.last_seen)                                               AS latest_last_seen,
+			?, ?, ?
+		FROM naap.canonical_capability_offer_inventory o
+		WHERE o.last_seen >= toDateTime(?, 'UTC') - INTERVAL 24 HOUR
+		  AND o.hardware_present = 1
+		  AND ifNull(o.gpu_id, '') != ''
+		  AND o.orch_address != ''
+		GROUP BY o.org, o.orch_address, o.gpu_id
+	`, runID, r.cfg.ResolverVersion, now, now.UTC())
+}
+
+// insertCurrentCapability composes the unified capability spine from
+// canonical_capability_offer_inventory (builtin + byoc offers), canonical_byoc_workers
+// (byoc workers that registered without a matching offer), canonical_capability_pricing_inventory
+// (pricing), and canonical_capability_orchestrator_identity_latest (orchestrator
+// name/uri). One row per (org, orch_address, capability_id, canonical_pipeline,
+// model_id, gpu_id) denormalizes everything the three serving endpoints need
+// so /v1/requests/*, /v1/streaming/*, and /v1/dashboard/pipeline-catalog stop
+// rescanning api_observed_capability_offer on every request.
+//
+// Throttled on the same 5-minute refresh interval as the other current_*
+// writers — this is a "last 24h" snapshot that doesn't shift meaningfully
+// faster than that.
+func (r *repo) insertCurrentCapability(ctx context.Context, runID string, now time.Time) error {
+	var lastRefreshedAt time.Time
+	if err := r.conn.QueryRow(ctx, `
+		SELECT ifNull(max(refreshed_at), toDateTime64('1970-01-01 00:00:00', 3, 'UTC'))
+		FROM naap.api_current_capability_store
+	`).Scan(&lastRefreshedAt); err != nil {
+		lastRefreshedAt = time.Time{}
+	} else if !lastRefreshedAt.IsZero() && now.Sub(lastRefreshedAt) < currentOrchestratorRefreshInterval {
+		return nil
+	}
+
+	return r.conn.Exec(ctx, `
+		INSERT INTO naap.api_current_capability_store
+		(
+			org, orch_address, orchestrator_uri, orchestrator_name,
+			capability_id, capability_name, capability_family,
+			canonical_pipeline, model_id, gpu_id,
+			advertised_capacity, hardware_present,
+			supports_request, supports_stream,
+			price_per_unit, price_currency,
+			last_seen,
+			refresh_run_id, artifact_checksum, refreshed_at
+		)
+		WITH offers_24h AS (
+			SELECT
+				o.org                                                       AS org,
+				o.orch_address                                              AS orch_address,
+				ifNull(o.orchestrator_uri, '')                              AS orchestrator_uri,
+				toUInt16(ifNull(o.capability_id, toUInt16(0)))              AS capability_id,
+				ifNull(o.capability_name, '')                               AS capability_name,
+				ifNull(o.capability_family, '')                             AS capability_family,
+				ifNull(o.canonical_pipeline, '')                            AS canonical_pipeline,
+				ifNull(o.model_id, '')                                      AS model_id,
+				ifNull(o.gpu_id, '')                                        AS gpu_id,
+				toInt32(ifNull(o.advertised_capacity, toInt32(0)))          AS advertised_capacity,
+				o.hardware_present                                          AS hardware_present,
+				toUInt8(ifNull(o.supports_request, toUInt8(0)))             AS supports_request,
+				toUInt8(ifNull(o.supports_stream, toUInt8(0)))              AS supports_stream,
+				o.last_seen                                                 AS raw_last_seen
+			FROM naap.canonical_capability_offer_inventory o
+			WHERE o.last_seen >= toDateTime(?, 'UTC') - INTERVAL 24 HOUR
+			  AND o.orch_address != ''
+		),
+		offers_rollup AS (
+			SELECT
+				org, orch_address, capability_id, canonical_pipeline, model_id, gpu_id,
+				argMax(orchestrator_uri, (raw_last_seen, orchestrator_uri)) AS orchestrator_uri,
+				argMax(capability_name, (raw_last_seen, capability_name))   AS capability_name,
+				argMax(capability_family, (raw_last_seen, capability_family)) AS capability_family,
+				toUInt32(greatest(max(advertised_capacity), 0))             AS advertised_capacity,
+				max(hardware_present)                                       AS hardware_present,
+				max(supports_request)                                       AS supports_request,
+				max(supports_stream)                                        AS supports_stream,
+				max(raw_last_seen)                                          AS last_seen
+			FROM offers_24h
+			GROUP BY org, orch_address, capability_id, canonical_pipeline, model_id, gpu_id
+		),
+		byoc_workers_24h AS (
+			SELECT
+				w.org                                                       AS org,
+				w.orch_address                                              AS orch_address,
+				argMax(ifNull(w.orch_url_norm, ''), (w.event_ts, w.event_id))   AS orchestrator_uri,
+				toUInt16(0)                                                 AS capability_id,
+				w.capability                                                AS capability_name,
+				toLowCardinality('byoc')                                    AS capability_family,
+				''                                                          AS canonical_pipeline,
+				ifNull(w.model, '')                                         AS model_id,
+				''                                                          AS gpu_id,
+				toUInt32(0)                                                 AS advertised_capacity,
+				toUInt8(0)                                                  AS hardware_present,
+				toUInt8(1)                                                  AS supports_request,
+				toUInt8(0)                                                  AS supports_stream,
+				max(w.event_ts)                                             AS last_seen
+			FROM naap.canonical_byoc_workers w
+			WHERE w.event_ts >= toDateTime(?, 'UTC') - INTERVAL 24 HOUR
+			  AND w.orch_address != ''
+			  AND w.capability != ''
+			GROUP BY w.org, w.orch_address, w.capability, ifNull(w.model, '')
+		),
+		combined AS (
+			SELECT
+				org, orch_address, orchestrator_uri,
+				capability_id, capability_name, capability_family,
+				canonical_pipeline, model_id, gpu_id,
+				advertised_capacity, hardware_present, supports_request, supports_stream,
+				last_seen
+			FROM offers_rollup
+			UNION ALL
+			SELECT
+				b.org, b.orch_address, b.orchestrator_uri,
+				b.capability_id, b.capability_name, b.capability_family,
+				b.canonical_pipeline, b.model_id, b.gpu_id,
+				b.advertised_capacity, b.hardware_present, b.supports_request, b.supports_stream,
+				b.last_seen
+			FROM byoc_workers_24h b
+			LEFT ANTI JOIN offers_rollup o
+				ON  o.org          = b.org
+				AND o.orch_address = b.orch_address
+				AND lower(o.capability_name) = lower(b.capability_name)
+				AND o.model_id     = b.model_id
+		),
+		pricing AS (
+			SELECT
+				p.org                                                                AS org,
+				p.orch_address                                                       AS orch_address,
+				toUInt16(ifNull(p.capability_id, toUInt16(0)))                       AS capability_id,
+				ifNull(p.model_id, '')                                               AS model_id,
+				toFloat64(argMax(p.price_per_unit, (p.last_seen, p.snapshot_event_id)))
+					/ nullIf(toFloat64(argMax(p.pixels_per_unit, (p.last_seen, p.snapshot_event_id))), 0)
+					AS price_per_unit
+			FROM naap.canonical_capability_pricing_inventory p
+			WHERE p.last_seen >= toDateTime(?, 'UTC') - INTERVAL 24 HOUR
+			  AND p.orch_address != ''
+			GROUP BY p.org, p.orch_address, p.capability_id, ifNull(p.model_id, '')
+		),
+		identity AS (
+			SELECT
+				orch_address,
+				coalesce(nullIf(orch_name, ''), orch_address) AS orchestrator_name
+			FROM naap.canonical_capability_orchestrator_identity_latest
+		)
+		SELECT
+			c.org,
+			c.orch_address,
+			c.orchestrator_uri,
+			ifNull(i.orchestrator_name, c.orch_address)                 AS orchestrator_name,
+			c.capability_id,
+			c.capability_name,
+			c.capability_family,
+			c.canonical_pipeline,
+			c.model_id,
+			c.gpu_id,
+			c.advertised_capacity,
+			c.hardware_present,
+			c.supports_request,
+			c.supports_stream,
+			ifNull(p.price_per_unit, 0.0)                               AS price_per_unit,
+			''                                                          AS price_currency,
+			c.last_seen,
+			?, ?, ?
+		FROM combined c
+		LEFT JOIN pricing p
+			ON  p.org          = c.org
+			AND p.orch_address = c.orch_address
+			AND p.capability_id = c.capability_id
+			AND p.model_id     = c.model_id
+		LEFT JOIN identity i
+			ON i.orch_address = c.orch_address
+	`, now.UTC(), now.UTC(), now.UTC(), runID, r.cfg.ResolverVersion, now)
+}
+
+// insertOrchestratorIdentity flattens canonical_capability_orchestrator_identity_latest
+// (a multi-CTE argMaxIfMerge view over canonical_capability_snapshot_latest + ENS
+// metadata) into a resolver-written store. Every downstream identity lookup
+// then reads a primary-key lookup instead of re-expanding the view.
+//
+// Throttled on the same refreshed_at interval as insertCurrentOrchestratorState
+// — identity snapshots don't shift meaningfully under 5 min.
+func (r *repo) insertOrchestratorIdentity(ctx context.Context, runID string, now time.Time) error {
+	var lastRefreshedAt time.Time
+	if err := r.conn.QueryRow(ctx, `
+		SELECT ifNull(max(refreshed_at), toDateTime64('1970-01-01 00:00:00', 3, 'UTC'))
+		FROM naap.api_orchestrator_identity_store
+	`).Scan(&lastRefreshedAt); err != nil {
+		lastRefreshedAt = time.Time{}
+	} else if !lastRefreshedAt.IsZero() && now.Sub(lastRefreshedAt) < currentOrchestratorRefreshInterval {
+		return nil
+	}
+	return r.conn.Exec(ctx, `
+		INSERT INTO naap.api_orchestrator_identity_store
+		(
+			orch_address, name, orch_name, orch_label, orchestrator_uri, orch_uri_norm,
+			version, org, capability_version_id, snapshot_event_id, last_seen,
+			refresh_run_id, artifact_checksum, refreshed_at
+		)
+		SELECT
+			orch_address,
+			coalesce(nullIf(name, ''), orch_address)              AS name,
+			coalesce(nullIf(orch_name, ''), orch_address)         AS orch_name,
+			ifNull(orch_label, '')                                AS orch_label,
+			ifNull(orchestrator_uri, '')                          AS orchestrator_uri,
+			ifNull(orch_uri_norm, '')                             AS orch_uri_norm,
+			ifNull(version, '')                                   AS version,
+			org,
+			ifNull(capability_version_id, '')                     AS capability_version_id,
+			ifNull(snapshot_event_id, '')                         AS snapshot_event_id,
+			last_seen,
+			?, ?, ?
+		FROM naap.canonical_capability_orchestrator_identity_latest
+	`, runID, r.cfg.ResolverVersion, now)
+}
+
+// insertHourlyBYOCAuth aggregates normalized_byoc_auth (one row per auth
+// event) into the pre-rolled hourly store the /v1/requests/byoc/auth
+// endpoint reads. Scoped to owned_windows so only the current run's
+// (org, window_start) slices are republished; latest-slice argMax at read
+// time picks the freshest refresh_run_id.
+func (r *repo) insertHourlyBYOCAuth(ctx context.Context, runID string, now time.Time, queryID string) error {
+	return r.conn.Exec(ctx, `
+		INSERT INTO naap.api_hourly_byoc_auth_store
+		(
+			window_start, org, capability_name, total_events, success_count, failure_count,
+			refresh_run_id, artifact_checksum, refreshed_at
+		)
+		WITH owned_windows AS (
+			SELECT DISTINCT org, window_start
+			FROM naap.resolver_query_window_slices
+			WHERE query_id = ?
+		)
+		SELECT
+			toStartOfHour(a.event_ts)       AS window_start,
+			a.org                           AS org,
+			a.capability                    AS capability_name,
+			toUInt64(count())               AS total_events,
+			toUInt64(countIf(a.success = 1)) AS success_count,
+			toUInt64(countIf(a.success = 0)) AS failure_count,
+			?, ?, ?
+		FROM naap.normalized_byoc_auth a
+		INNER JOIN owned_windows w
+			ON  w.org = a.org
+			AND w.window_start = toStartOfHour(a.event_ts)
+		WHERE a.capability != ''
+		GROUP BY window_start, org, capability_name
+	`, queryID, runID, r.cfg.ResolverVersion, now)
+}
+
+// insertHourlyBYOCPayments aggregates canonical_byoc_payments (one row per
+// job_payment event) into the pre-rolled hourly store the public Jobs
+// dashboard reads. Replaces the price-derived proxy from
+// api_fact_byoc_job.price_per_unit with exact settled-payment totals.
+// Scoped to owned_windows so only the current run's (org, window_start)
+// slices are republished; latest-slice argMax at read time picks the
+// freshest refresh_run_id.
+func (r *repo) insertHourlyBYOCPayments(ctx context.Context, runID string, now time.Time, queryID string) error {
+	return r.conn.Exec(ctx, `
+		INSERT INTO naap.api_hourly_byoc_payments_store
+		(
+			window_start, org, capability, payment_type,
+			payment_count, total_amount, currency, unique_orchs,
+			refresh_run_id, artifact_checksum, refreshed_at
+		)
+		WITH owned_windows AS (
+			SELECT DISTINCT org, window_start
+			FROM naap.resolver_query_window_slices
+			WHERE query_id = ?
+		)
+		SELECT
+			toStartOfHour(p.event_ts)                                        AS window_start,
+			p.org                                                            AS org,
+			p.capability                                                     AS capability,
+			p.payment_type                                                   AS payment_type,
+			toUInt64(count())                                                AS payment_count,
+			toFloat64(sum(p.amount))                                         AS total_amount,
+			argMax(p.currency, (p.event_ts, p.event_id))                     AS currency,
+			toUInt64(uniqExact(p.orch_address))                              AS unique_orchs,
+			?, ?, ?
+		FROM naap.canonical_byoc_payments p
+		INNER JOIN owned_windows w
+			ON  w.org = p.org
+			AND w.window_start = toStartOfHour(p.event_ts)
+		WHERE p.capability != ''
+		GROUP BY window_start, org, capability, payment_type
+	`, queryID, runID, r.cfg.ResolverVersion, now)
+}
+
+// insertAIBatchJobRows upserts AI batch job attribution rows into
+// canonical_ai_batch_job_store. The input must already be one row per logical
+// job key `(org, request_id)` for the window being processed; downstream SQL
+// relies on that invariant when it projects the latest attributed job row.
+// The ReplacingMergeTree on materialized_at means a later write for the same
+// (org, request_id, completed_at) supersedes the previous one.
+func (r *repo) insertAIBatchJobRows(ctx context.Context, runID string, now time.Time, rows []AIBatchJobRow) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	batch, err := r.conn.PrepareBatch(ctx, `
+		INSERT INTO naap.canonical_ai_batch_job_store
+		(
+			request_id, org, gateway, pipeline, model_id,
+			received_at, completed_at,
+			success, tries, duration_ms,
+			orch_url, orch_url_norm,
+			selection_outcome,
+			latency_score, price_per_unit, error_type, error,
+			attribution_status, attribution_reason, attribution_method, attribution_confidence,
+			attributed_orch_uri, capability_version_id, attribution_snapshot_ts,
+			gpu_id, gpu_model_name, gpu_memory_bytes_total, attributed_model,
+			resolver_run_id, materialized_at
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("prepare ai batch job row batch: %w", err)
+	}
+	for _, row := range rows {
+		if err := batch.Append(
+			row.RequestID, row.Org, row.Gateway, row.Pipeline, row.ModelID,
+			nullableTimeValue(row.ReceivedAt), row.CompletedAt.UTC(),
+			row.Success, row.Tries, row.DurationMS,
+			row.OrchURL, row.OrchURLNorm,
+			row.SelectionOutcome,
+			row.LatencyScore, row.PricePerUnit, row.ErrorType, row.Error,
+			row.AttributionStatus, row.AttributionReason, row.AttributionMethod, row.AttributionConfidence,
+			nullableStringValue(row.AttributedOrchURI), nullableStringValue(row.CapabilityVersionID),
+			nullableTimeValue(row.AttributionSnapshotTS),
+			nullableStringValue(row.GPUID), nullableStringValue(row.GPUModelName),
+			row.GPUMemoryBytesTotal,
+			nullableStringValue(row.AttributedModel),
+			runID, now,
+		); err != nil {
+			return fmt.Errorf("append ai batch job row: %w", err)
+		}
+	}
+	return batch.Send()
+}
+
+// insertBYOCJobRows upserts BYOC job attribution rows into
+// canonical_byoc_job_store. The input must already be one row per BYOC job key
+// `(org, event_id)` for the window being processed. The ReplacingMergeTree on
+// materialized_at means a later write for the same (org, event_id,
+// completed_at) supersedes the previous one.
+func (r *repo) insertBYOCJobRows(ctx context.Context, runID string, now time.Time, rows []BYOCJobRow) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	batch, err := r.conn.PrepareBatch(ctx, `
+		INSERT INTO naap.canonical_byoc_job_store
+		(
+			event_id, org, gateway, capability, completed_at,
+			success, duration_ms, http_status,
+			orch_address, orch_url, orch_url_norm,
+			selection_outcome,
+			worker_url, charged_compute, error,
+			model, price_per_unit,
+			attribution_status, attribution_reason, attribution_method, attribution_confidence,
+			attributed_orch_uri, capability_version_id, attribution_snapshot_ts,
+			gpu_id, gpu_model_name, gpu_memory_bytes_total,
+			resolver_run_id, materialized_at
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("prepare byoc job row batch: %w", err)
+	}
+	for _, row := range rows {
+		if err := batch.Append(
+			row.EventID, row.Org, row.Gateway, row.Capability, row.CompletedAt.UTC(),
+			row.Success, row.DurationMS, row.HTTPStatus,
+			row.OrchAddress, row.OrchURL, row.OrchURLNorm,
+			row.SelectionOutcome,
+			row.WorkerURL, row.ChargedCompute, row.Error,
+			nullableStringValue(row.Model), row.PricePerUnit,
+			row.AttributionStatus, row.AttributionReason, row.AttributionMethod, row.AttributionConfidence,
+			nullableStringValue(row.AttributedOrchURI), nullableStringValue(row.CapabilityVersionID),
+			nullableTimeValue(row.AttributionSnapshotTS),
+			nullableStringValue(row.GPUID), nullableStringValue(row.GPUModelName),
+			row.GPUMemoryBytesTotal,
+			runID, now,
+		); err != nil {
+			return fmt.Errorf("append byoc job row: %w", err)
+		}
+	}
+	return batch.Send()
 }

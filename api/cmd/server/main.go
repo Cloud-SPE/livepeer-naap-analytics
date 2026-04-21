@@ -37,7 +37,7 @@ func main() {
 	if cfg.EnrichmentEnabled {
 		w, err := enrichment.New(cfg, p.Logger)
 		if err != nil {
-			p.Logger.Sugar().Warnf("enrichment worker init failed (continuing without enrichment): %v", err)
+			p.Logger.Sugar().Warnf("metadata enrichment worker init failed (continuing without metadata sync): %v", err)
 		} else {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()

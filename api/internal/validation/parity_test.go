@@ -64,11 +64,11 @@ func TestRuleParity001_RawReplayPropagatesThroughFinalOutputs(t *testing.T) {
 	if got := h.queryInt(t, `SELECT count() FROM naap.canonical_status_hours WHERE canonical_session_key = ? AND is_terminal_tail_artifact = 0`, key); got != 1 {
 		t.Fatalf("canonical_status_hours did not produce one active hour for %s", key)
 	}
-	if got := h.queryInt(t, `SELECT count() FROM naap.api_status_samples WHERE canonical_session_key = ?`, key); got != 1 {
-		t.Fatalf("api_status_samples did not expose one row for %s", key)
+	if got := h.queryInt(t, `SELECT count() FROM naap.canonical_status_samples_recent WHERE canonical_session_key = ?`, key); got != 1 {
+		t.Fatalf("canonical_status_samples_recent did not expose one row for %s", key)
 	}
-	if got := h.queryInt(t, `SELECT count() FROM naap.api_stream_sessions WHERE canonical_session_key = ?`, key); got != 1 {
-		t.Fatalf("api_stream_sessions did not expose one row for %s", key)
+	if got := h.queryInt(t, `SELECT count() FROM naap.canonical_session_current WHERE canonical_session_key = ?`, key); got != 1 {
+		t.Fatalf("canonical_session_current did not expose one row for %s", key)
 	}
 }
 
@@ -114,10 +114,10 @@ func TestRuleParity002_ReplaySliceCoversAllSemanticLayers(t *testing.T) {
 	if got := h.queryInt(t, `SELECT count() FROM naap.canonical_status_hours WHERE canonical_session_key = ? AND status_samples = 1 AND is_terminal_tail_artifact = 0`, key); got != 1 {
 		t.Fatalf("canonical_status_hours did not preserve aggregate semantics for %s", key)
 	}
-	if got := h.queryInt(t, `SELECT count() FROM naap.api_network_demand_by_org WHERE org = ? AND window_start = ? AND gateway = 'gw-parity' AND pipeline_id = 'text-to-image' AND requested_sessions = 1 AND startup_success_sessions = 1`, h.org, windowStart); got != 1 {
-		t.Fatalf("api_network_demand_by_org did not preserve serving parity for %s", key)
+	if got := h.queryInt(t, `SELECT count() FROM naap.api_hourly_streaming_demand WHERE org = ? AND window_start = ? AND gateway = 'gw-parity' AND pipeline_id = 'text-to-image' AND requested_sessions = 1 AND startup_success_sessions = 1`, h.org, windowStart); got != 1 {
+		t.Fatalf("api_hourly_streaming_demand did not preserve serving parity for %s", key)
 	}
-	if got := h.queryInt(t, `SELECT count() FROM naap.api_sla_compliance_by_org WHERE org = ? AND window_start = ? AND orchestrator_address = ? AND startup_success_sessions = 1`, h.org, windowStart, orchAddr); got != 1 {
-		t.Fatalf("api_sla_compliance_by_org did not preserve serving parity for %s", key)
+	if got := h.queryInt(t, `SELECT count() FROM naap.api_hourly_streaming_sla WHERE org = ? AND window_start = ? AND orchestrator_address = ? AND startup_success_sessions = 1`, h.org, windowStart, orchAddr); got != 1 {
+		t.Fatalf("api_hourly_streaming_sla did not preserve serving parity for %s", key)
 	}
 }

@@ -6,12 +6,13 @@ For per-service Compose responsibilities, see [`compose-services.md`](compose-se
 
 ## Standard Deployment Summary
 
-A standard deployment runs ClickHouse, the resolver, the API, and the Grafana/Prometheus stack continuously. Kafka is the event source, ClickHouse owns physical ingest/runtime state, the resolver owns freshness and publication into current/serving stores, `dbt` owns the semantic `canonical_*` and `api_*` views, and the API only reads published `api_*` relations.
+A standard deployment runs ClickHouse, the resolver, the API, and the Grafana/Prometheus stack continuously. Kafka is the event source, ClickHouse owns physical ingest/runtime state, the resolver owns freshness and publication into current/serving stores, `dbt` owns the semantic `canonical_*` and public `api_*` views, and the API only reads published `api_*` relations.
 
 That split matters because it keeps responsibilities clear:
 
 - ClickHouse handles ingestion, storage, and materialized-view fanout.
-- The resolver handles bounded repair, dirty partition ownership, and current-store publication.
+- The resolver handles bounded repair, historical dirty-day ownership,
+  same-day dirty-hour ownership, and current-store publication.
 - `dbt` publishes semantic read models after SQL changes or during scheduled warehouse refresh runs.
 - The API stays read-only against serving contracts.
 
@@ -41,14 +42,19 @@ make bootstrap-extract
 The Portainer deployment keeps stack files in [`../../deploy`](../../deploy).
 Use [`../../deploy/README.md`](../../deploy/README.md) for the general stack layout and [`../../deploy/infra2/README.md`](../../deploy/infra2/README.md) for the split-stack `infra2` deployment.
 
-Use the warehouse stack in [`../../deploy/infra2/warehouse/stack.yml`](../../deploy/infra2/warehouse/stack.yml) when you need scheduled or one-shot `dbt` publication. It is part of the supported solution, but it is not the freshness engine. Resolver state publication still belongs to the resolver service.
+Use the `infra2` deployment guide in [`../../deploy/infra2/README.md`](../../deploy/infra2/README.md) when you need scheduled or one-shot `dbt` publication. It is part of the supported solution, but it is not the freshness engine. Resolver state publication still belongs to the resolver service.
 
 ## Resolver Modes
 
 `auto`
 
 - Standard always-on production mode.
-- Bootstraps visible backlog, repairs dirty historical partitions, then tails continuously.
+- Tails first, then heals the latest eligible same-day dirty hours, executes
+  queued repair requests, repairs dirty historical partitions, and finally
+  works visible bootstrap backlog.
+- Alert-backed health gates for this mode live on `infra/naap-system-health`:
+  `NaapResolverTailStale`, `NaapResolverSameDayRepairStalled`,
+  `NaapDirtyHistoricalQueueBacklog`, and `NaapResolverHistoricalRepairAgeHigh`.
 
 `bootstrap`
 
@@ -74,6 +80,8 @@ Use the warehouse stack in [`../../deploy/infra2/warehouse/stack.yml`](../../dep
 
 - Read-only parity/verification pass.
 - Use after backfill or repair to confirm the expected state is published.
+- Executes the full resolver compute graph, including AI-batch and BYOC
+  attribution, but skips inserts and publication.
 
 Examples:
 
@@ -94,7 +102,7 @@ make warehouse-compile
 make warehouse-test
 ```
 
-Use the deployment stack in [`../../deploy/infra2/warehouse/stack.yml`](../../deploy/infra2/warehouse/stack.yml) for scheduled or operator-invoked publication in `infra2`.
+Use the deployment guide in [`../../deploy/infra2/README.md`](../../deploy/infra2/README.md) for scheduled or operator-invoked publication in `infra2`.
 
 Run `dbt` publication when:
 
@@ -104,15 +112,21 @@ Run `dbt` publication when:
 
 ## Fresh Bootstrap And Baseline Extraction
 
-Generate the v1 bootstrap baseline from a clean validation database:
+Refresh the generated schema inventory from the checked-in bootstrap baseline:
 
 ```bash
-docker compose --profile validation up -d validation-clickhouse
-docker compose --profile validation run --rm warehouse-validation
 make bootstrap-extract
 ```
 
-The extracted bootstrap is written to [`../../infra/clickhouse/bootstrap/v1.sql`](../../infra/clickhouse/bootstrap/v1.sql), and the corresponding inventory doc is written to [`../generated/schema.md`](../generated/schema.md).
+The generator refreshes [`../generated/schema.md`](../generated/schema.md) from
+[`../../infra/clickhouse/bootstrap/v1.sql`](../../infra/clickhouse/bootstrap/v1.sql).
+Refreshing the checked-in bootstrap SQL itself from a clean migrated
+ClickHouse instance remains a separate operator step.
+
+If the change introduced or modified resolver-owned job stores, do not stop at
+bootstrap extraction. Fresh and existing environments both still need a
+resolver bootstrap or bounded backfill so those stores contain historical job
+rows before `/v1/requests/*` and the jobs dashboard are treated as healthy.
 
 ## Failure Recovery
 
@@ -127,7 +141,7 @@ make resolver-logs
 Inspect recent run state:
 
 ```sql
-SELECT run_id, mode, status, owner_id, org, started_at, completed_at, last_error_summary
+SELECT run_id, mode, status, owner_id, org, started_at, finished_at, error_summary
 FROM naap.resolver_runs
 ORDER BY started_at DESC
 LIMIT 20;
@@ -164,6 +178,43 @@ If partitions remain dirty after the quiet period:
 2. check resolver logs for repeated claim or publish errors
 3. run `make resolver-repair-window` for the affected org/date window
 
+### Same-Day Dirty Windows Blocking Progress
+
+Inspect the same-day queue:
+
+```sql
+SELECT org, window_start, window_end, claim_owner, lease_expires_at, attempt_count, updated_at
+FROM naap.resolver_dirty_windows FINAL
+ORDER BY updated_at DESC;
+```
+
+If current-day hours remain dirty after the lateness window and quiet period:
+
+1. confirm accepted raw data is still arriving late for those hours
+2. check resolver logs for repeated claim or publish errors
+3. if needed, submit a bounded repair request through the resolver admin API or run `make resolver-repair-window`
+
+If Grafana fires `NaapResolverSameDayRepairStalled`, treat that as a freshness
+incident even if historical backlog is still draining. Tail plus latest
+eligible same-day repair are the highest-priority lanes now.
+
+### Explicit Repair Requests
+
+Inspect the async request queue:
+
+```sql
+SELECT request_id, ifNull(org, 'all') AS org, window_start, window_end, status, requested_by, attempt_count, updated_at
+FROM naap.resolver_repair_requests FINAL
+ORDER BY updated_at DESC;
+```
+
+Policy:
+
+1. all-org repair requests are limited to `1h`
+2. org-scoped repair requests are limited to `6h`
+3. queued repair requests run with a fixed `5m` timeout
+4. larger or slower windows should use `make resolver-repair-window` or `make resolver-backfill`
+
 ### Warehouse Publication Drift
 
 If semantic views are stale or missing after a fresh volume or SQL change:
@@ -184,7 +235,55 @@ Use this when the volume is disposable or the safest path is a clean rebuild:
 2. start ClickHouse with the extracted bootstrap
 3. republish semantic views with `dbt`
 4. run resolver bootstrap or bounded backfill
-5. verify with validation and parity checks
+5. verify that AI-batch/BYOC canonical job stores are populated, not just that
+   the views exist
+6. verify with validation and parity checks
+
+### Rebuild From Retained Raw
+
+Use this when Kafka is unavailable or you want to republish supported
+downstream state from retained ClickHouse raw history instead of replaying the
+upstream transport.
+
+Dry-run first:
+
+```bash
+make rebuild-from-retained-raw
+```
+
+Execute the destructive rebuild:
+
+```bash
+APPLY=1 make rebuild-from-retained-raw
+```
+
+Optional overrides:
+
+```bash
+APPLY=1 FROM=2026-04-01T00:00:00Z TO=2026-04-08T00:00:00Z \
+EXCLUDE_ORG_PREFIXES=vtest_ CLICKHOUSE_TIMEOUT=300s \
+make rebuild-from-retained-raw
+```
+
+This workflow preserves:
+
+- `accepted_raw_events` and `ignored_raw_events`
+- external metadata tables such as `orch_metadata` and `gateway_metadata`
+
+This workflow rebuilds:
+
+- raw-derived normalized event-family tables
+- raw-derived AI batch / BYOC normalized tables
+- raw-derived aggregate tables
+- normalized session and capability rollups from retained normalized history
+- resolver-owned canonical/current/serving stores
+- legacy `canonical_session_attribution_*` compatibility tables from the
+  selection-centered attribution outputs
+- dbt semantic views after the resolver replay
+
+It is intentionally not a wildcard purge of every non-raw table. External
+metadata tables remain preserved because they are not part of the retained-raw
+replay spine.
 
 ## Validation And Post-Recovery Checks
 
@@ -197,6 +296,6 @@ Recommended SQL spot checks:
 
 ```sql
 SELECT count() FROM naap.canonical_session_current;
-SELECT count() FROM naap.api_network_demand_by_org;
-SELECT count() FROM naap.api_active_stream_state WHERE last_seen > now() - INTERVAL 120 SECOND;
+SELECT count() FROM naap.api_hourly_streaming_demand;
+SELECT count() FROM naap.api_current_active_stream_state WHERE last_seen > now() - INTERVAL 120 SECOND;
 ```

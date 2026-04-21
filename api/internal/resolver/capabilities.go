@@ -12,6 +12,24 @@ import (
 type capabilityPayload struct {
 	LocalAddress string                    `json:"local_address"`
 	Hardware     []capabilityHardwareEntry `json:"hardware"`
+	Capabilities *rawCapabilityBlock       `json:"capabilities"`
+}
+
+type rawCapabilityBlock struct {
+	Constraints *rawCapabilityConstraints `json:"constraints"`
+}
+
+type rawCapabilityConstraints struct {
+	PerCapability map[string]perCapabilityEntry `json:"PerCapability"`
+}
+
+type perCapabilityEntry struct {
+	Models map[string]perCapabilityModel `json:"models"`
+}
+
+type perCapabilityModel struct {
+	Warm     bool `json:"warm"`
+	Capacity int  `json:"capacity"`
 }
 
 type capabilityHardwareEntry struct {
@@ -174,38 +192,133 @@ func buildCapabilityIntervalTemplates(raw string) []capabilityIntervalTemplate {
 			HashSuffix:      stableHash("hardware-less", err.Error()),
 		}}
 	}
-	if len(payload.Hardware) == 0 {
+
+	// Path 1: hardware entries present (live V2V and BYOC orchestrators).
+	if len(payload.Hardware) > 0 {
+		out := make([]capabilityIntervalTemplate, 0, len(payload.Hardware))
+		for _, hw := range payload.Hardware {
+			pipeline := strings.TrimSpace(hw.Pipeline)
+			model := strings.TrimSpace(hw.ModelID)
+			if len(hw.GPUInfo) == 0 {
+				out = append(out, capabilityIntervalTemplate{
+					Pipeline:        pipeline,
+					Model:           model,
+					HardwarePresent: false,
+					HashSuffix:      stableHash(pipeline, model, "hardware-less"),
+				})
+				continue
+			}
+			for _, gpu := range hw.GPUInfo {
+				mem := gpu.MemoryTotal
+				out = append(out, capabilityIntervalTemplate{
+					Pipeline:        pipeline,
+					Model:           model,
+					GPUID:           strings.TrimSpace(gpu.ID),
+					GPUModelName:    strings.TrimSpace(gpu.Name),
+					GPUMemoryTotal:  &mem,
+					HardwarePresent: true,
+					HashSuffix:      stableHash(pipeline, model, gpu.ID, fmt.Sprintf("%d", gpu.MemoryTotal)),
+				})
+			}
+		}
+		return out
+	}
+
+	// Path 2: no hardware but PerCapability present (built-in request
+	// orchestrators). Creates hardware-less intervals with pipeline+model derived
+	// from the repo-owned capability catalog. Non-built-in ids, including BYOC 37,
+	// are intentionally skipped because BYOC offers must come from hardware[].
+	if payload.Capabilities != nil && payload.Capabilities.Constraints != nil &&
+		len(payload.Capabilities.Constraints.PerCapability) > 0 {
+		return buildPerCapabilityTemplates(payload.Capabilities.Constraints.PerCapability)
+	}
+
+	// Path 3: neither hardware nor PerCapability — single hardware-less placeholder.
+	return []capabilityIntervalTemplate{{
+		HardwarePresent: false,
+		HashSuffix:      stableHash("hardware-less"),
+	}}
+}
+
+// buildPerCapabilityTemplates constructs hardware-less interval templates from
+// the PerCapability block reported by AI batch orchestrators. One template per
+// (pipeline, model) pair is emitted; the best (warmest, highest-capacity) model
+// for each capability number is chosen via pickBestModel.
+func buildPerCapabilityTemplates(perCap map[string]perCapabilityEntry) []capabilityIntervalTemplate {
+	// Collect keys and sort for deterministic output.
+	capNums := make([]string, 0, len(perCap))
+	for k := range perCap {
+		capNums = append(capNums, k)
+	}
+	sort.Strings(capNums)
+
+	out := make([]capabilityIntervalTemplate, 0, len(capNums))
+	seen := make(map[string]struct{})
+	for _, capNum := range capNums {
+		catalogEntry, ok := builtinCapabilityByNumber(capNum)
+		if !ok {
+			continue
+		}
+		pipeline := catalogEntry.CanonicalPipeline
+		perCapEntry := perCap[capNum]
+		models := pickAllModels(perCapEntry.Models)
+		for _, model := range models {
+			key := pipeline + "\x00" + model
+			if _, dup := seen[key]; dup {
+				continue
+			}
+			seen[key] = struct{}{}
+			out = append(out, capabilityIntervalTemplate{
+				Pipeline:        pipeline,
+				Model:           model,
+				HardwarePresent: false,
+				HashSuffix:      stableHash(pipeline, model, "per-capability"),
+			})
+		}
+	}
+	if len(out) == 0 {
 		return []capabilityIntervalTemplate{{
 			HardwarePresent: false,
 			HashSuffix:      stableHash("hardware-less"),
 		}}
 	}
+	return out
+}
 
-	out := make([]capabilityIntervalTemplate, 0, len(payload.Hardware))
-	for _, hw := range payload.Hardware {
-		pipeline := strings.TrimSpace(hw.Pipeline)
-		model := strings.TrimSpace(hw.ModelID)
-		if len(hw.GPUInfo) == 0 {
-			out = append(out, capabilityIntervalTemplate{
-				Pipeline:        pipeline,
-				Model:           model,
-				HardwarePresent: false,
-				HashSuffix:      stableHash(pipeline, model, "hardware-less"),
-			})
+// pickAllModels returns a sorted list of model IDs from a PerCapability models
+// map, preferring warm models first, then by capacity descending, then by name.
+func pickAllModels(models map[string]perCapabilityModel) []string {
+	if len(models) == 0 {
+		return nil
+	}
+	type ranked struct {
+		name string
+		m    perCapabilityModel
+	}
+	list := make([]ranked, 0, len(models))
+	for name, m := range models {
+		name = strings.TrimSpace(name)
+		if name == "" {
 			continue
 		}
-		for _, gpu := range hw.GPUInfo {
-			mem := gpu.MemoryTotal
-			out = append(out, capabilityIntervalTemplate{
-				Pipeline:        pipeline,
-				Model:           model,
-				GPUID:           strings.TrimSpace(gpu.ID),
-				GPUModelName:    strings.TrimSpace(gpu.Name),
-				GPUMemoryTotal:  &mem,
-				HardwarePresent: true,
-				HashSuffix:      stableHash(pipeline, model, gpu.ID, fmt.Sprintf("%d", gpu.MemoryTotal)),
-			})
+		list = append(list, ranked{name: name, m: m})
+	}
+	sort.Slice(list, func(i, j int) bool {
+		a, b := list[i], list[j]
+		switch {
+		case a.m.Warm && !b.m.Warm:
+			return true
+		case !a.m.Warm && b.m.Warm:
+			return false
+		case a.m.Capacity != b.m.Capacity:
+			return a.m.Capacity > b.m.Capacity
+		default:
+			return a.name < b.name
 		}
+	})
+	out := make([]string, 0, len(list))
+	for _, r := range list {
+		out = append(out, r.name)
 	}
 	return out
 }

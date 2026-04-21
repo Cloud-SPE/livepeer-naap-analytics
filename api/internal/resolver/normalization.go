@@ -26,7 +26,11 @@ func normalizeObservedHints(pipelineHint, modelHint string) (string, string) {
 
 func normalizeCanonicalPipeline(v string) string {
 	switch strings.ToLower(strings.TrimSpace(v)) {
-	case "live-video-to-video", "text-to-image", "image-to-image", "text-to-video", "audio-to-text", "text-to-speech", "noop", "upscale", "llm", "image-to-text":
+	case "live-video-to-video",
+		"text-to-image", "image-to-image", "image-to-video", "text-to-video",
+		"audio-to-text", "text-to-speech",
+		"upscale", "llm", "image-to-text", "segment-anything-2",
+		"noop":
 		return strings.ToLower(strings.TrimSpace(v))
 	default:
 		return ""

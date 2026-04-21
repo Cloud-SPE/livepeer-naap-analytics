@@ -24,8 +24,8 @@ var (
 )
 
 // metricsMiddleware records Prometheus metrics for each HTTP request.
-// It uses the chi route pattern (e.g. /v1/leaderboard/{address}) as the label
-// so high-cardinality path parameters don't explode the metric cardinality.
+// It uses the chi route pattern (for example /v1/streaming/orchestrators) as
+// the label so high-cardinality path parameters don't explode metric labels.
 func metricsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()

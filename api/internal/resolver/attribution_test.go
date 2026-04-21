@@ -84,6 +84,35 @@ func TestIsCompatible_RecognizedPipelineMismatchReturnsFalse(t *testing.T) {
 	}
 }
 
+func TestIsCompatible_BYOCModelHintMustMatchWhenPresent(t *testing.T) {
+	selection := SelectionEvent{
+		ID:                   "sel-byoc-model",
+		Org:                  "acme",
+		SessionKey:           "evt-1",
+		SelectionTS:          time.Date(2026, 4, 1, 12, 0, 0, 0, time.UTC),
+		ObservedAddress:      "0xabc",
+		ObservedPipeline:     "openai-chat-completions",
+		ObservedModelHint:    "Qwen/Qwen2.5-14B-Instruct-AWQ",
+		PipelineHintVerbatim: true,
+		InputHash:            "input-byoc-model",
+	}
+
+	if isCompatible(selection, CapabilityInterval{
+		Org:      "acme",
+		Pipeline: "openai-chat-completions",
+		Model:    "Llama-3-8B",
+	}) {
+		t.Fatalf("expected BYOC model mismatch to be incompatible")
+	}
+	if !isCompatible(selection, CapabilityInterval{
+		Org:      "acme",
+		Pipeline: "openai-chat-completions",
+		Model:    "Qwen/Qwen2.5-14B-Instruct-AWQ",
+	}) {
+		t.Fatalf("expected BYOC model match to be compatible")
+	}
+}
+
 func TestResolveSelectionDecision_StaleOnlyCandidateIsStale(t *testing.T) {
 	selection := SelectionEvent{
 		ID:              "sel-stale",
@@ -457,6 +486,63 @@ func TestResolveSelectionDecision_URIPresentWithoutURIMatchDoesNotFallbackToAlia
 	}
 	if decision.Reason != "missing_uri_snapshot_local_alias_present" {
 		t.Fatalf("reason = %q, want missing_uri_snapshot_local_alias_present", decision.Reason)
+	}
+}
+
+func TestIsCompatible_VerbatimPipelineMatchesCaseInsensitive(t *testing.T) {
+	selection := SelectionEvent{
+		ObservedPipeline:     "openai-chat-completions",
+		PipelineHintVerbatim: true,
+	}
+	if !isCompatible(selection, CapabilityInterval{Pipeline: "openai-chat-completions"}) {
+		t.Fatalf("expected verbatim match to be compatible")
+	}
+	if !isCompatible(selection, CapabilityInterval{Pipeline: "OpenAI-Chat-Completions"}) {
+		t.Fatalf("expected case-insensitive verbatim match to be compatible")
+	}
+}
+
+func TestIsCompatible_VerbatimPipelineMismatchReturnsFalse(t *testing.T) {
+	selection := SelectionEvent{
+		ObservedPipeline:     "openai-chat-completions",
+		PipelineHintVerbatim: true,
+	}
+	if isCompatible(selection, CapabilityInterval{Pipeline: "openai-image-generation"}) {
+		t.Fatalf("expected verbatim mismatch to be incompatible")
+	}
+}
+
+func TestIsCompatible_VerbatimEmptyObservedPipelineReturnsFalse(t *testing.T) {
+	selection := SelectionEvent{
+		ObservedPipeline:     "",
+		PipelineHintVerbatim: true,
+	}
+	if isCompatible(selection, CapabilityInterval{Pipeline: "openai-chat-completions"}) {
+		t.Fatalf("expected empty verbatim pipeline to be incompatible")
+	}
+}
+
+func TestIsCompatible_VerbatimEmptyIntervalPipelineReturnsFalse(t *testing.T) {
+	selection := SelectionEvent{
+		ObservedPipeline:     "openai-chat-completions",
+		PipelineHintVerbatim: true,
+	}
+	if isCompatible(selection, CapabilityInterval{Pipeline: ""}) {
+		t.Fatalf("expected empty interval pipeline to be incompatible with verbatim match")
+	}
+}
+
+func TestIsCompatible_AIBatchPipelineUsesCanonicalAllowList(t *testing.T) {
+	// AI batch uses PipelineHintVerbatim = false; pipeline must be in allow-list.
+	selection := SelectionEvent{
+		ObservedPipeline:     "segment-anything-2",
+		PipelineHintVerbatim: false,
+	}
+	if !isCompatible(selection, CapabilityInterval{Pipeline: "segment-anything-2"}) {
+		t.Fatalf("expected segment-anything-2 to be compatible via canonical allow-list")
+	}
+	if isCompatible(selection, CapabilityInterval{Pipeline: "text-to-image"}) {
+		t.Fatalf("expected pipeline mismatch to be incompatible")
 	}
 }
 

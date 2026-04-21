@@ -1,0 +1,43 @@
+# Core-logic signatures forbidden at the API layer.
+#
+# Each line is an extended-regex (grep -E) pattern the lint searches for in:
+#   api/internal/service/
+#   api/internal/repo/
+#   warehouse/models/api/
+#
+# A hit means someone re-implemented a formula/classification the resolver
+# already owns. Fix by moving the derivation into the resolver and reading
+# the result from canonical_* (see docs/design-docs/api-table-contract.md).
+#
+# Lines starting with # or blank lines are ignored.
+
+# --- SLA scoring coefficients (warehouse + serving-layer-v2 §api_hourly_streaming_sla) ---
+# Reliability weights: 0.4 * startup_success + 0.2 * no_swap + 0.4 * output_viability
+0\.4[[:space:]]*\*[[:space:]]*(startup_success|startup_success_rate)
+0\.2[[:space:]]*\*[[:space:]]*(no_swap|no_swap_rate)
+0\.6[[:space:]]*\*[[:space:]]*(ptff_score|latency_score)
+0\.7[[:space:]]*\*[[:space:]]*reliability_score
+0\.3[[:space:]]*\*[[:space:]]*(quality_score|latency_score)
+
+# --- Attribution status / excusal classifier branches ---
+# Matches `multiIf(...excusal_reason..., 'excused', ...)` — redefining
+# what counts as a particular status. `countIf(excusal_reason = 'x')` is
+# aggregation and allowed, so this pattern requires the branching form.
+multiIf[^)]*(excusal_reason|attribution_status|startup_outcome)[^)]*,[[:space:]]*'
+case[[:space:]]+when[[:space:]]+(excusal_reason|attribution_status|startup_outcome)
+
+# --- Selection outcome re-mapping (forbidden) ---
+# Mapping selection_outcome to a different label string at the API
+# layer. countIf/filter by value is fine; rewriting the label is not.
+multiIf[^)]*selection_outcome[^)]*,[[:space:]]*'
+case[[:space:]]+when[[:space:]]+selection_outcome
+
+# --- Capability family branching at the API layer ---
+# if(capability_family = 'byoc', X, Y) — the handler is deciding what
+# the pipeline_id is based on capability_family instead of reading a
+# canonical column. Phase 4 (unified capability spine) retires this.
+if[[:space:]]*\([[:space:]]*capability_family[[:space:]]*=[[:space:]]*'(builtin|byoc)'
+case[[:space:]]+when[[:space:]]+capability_family
+
+# --- Hardcoded SLA semantics version string (should be a column read, not a literal) ---
+'quality-benchmark-v1'

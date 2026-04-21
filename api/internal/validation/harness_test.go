@@ -372,6 +372,10 @@ func routeInboundEvent(eventType, eventSubtype string) (ignoreReason string, acc
 }
 
 func (h *harness) resolveSelectionCentered(t *testing.T, start, end time.Time) resolver.RunStats {
+	return h.resolveSelectionCenteredForOrg(t, h.org, start, end)
+}
+
+func (h *harness) resolveSelectionCenteredForOrg(t *testing.T, org string, start, end time.Time) resolver.RunStats {
 	t.Helper()
 	if h.resolverInitErr != nil {
 		t.Fatalf("resolver init failed: %v", h.resolverInitErr)
@@ -382,7 +386,7 @@ func (h *harness) resolveSelectionCentered(t *testing.T, start, end time.Time) r
 	h.waitForResolverWarehouseReady(t)
 	stats, err := h.resolverEngine.Execute(context.Background(), resolver.RunRequest{
 		Mode:  resolver.ModeRepairWindow,
-		Org:   h.org,
+		Org:   org,
 		Start: timePointer(start.UTC()),
 		End:   timePointer(end.UTC()),
 	})
@@ -418,8 +422,10 @@ func (h *harness) waitForWarehouseReady(t *testing.T) {
 		"stg_ai_stream_status",
 		"stg_ai_stream_events",
 		"canonical_capability_snapshots",
-		"canonical_capability_hardware_inventory",
-		"canonical_latest_orchestrator_pipeline_inventory_agg",
+		"canonical_capability_orchestrator_inventory",
+		"canonical_capability_offer_inventory",
+		"api_orchestrator_identity",
+		"api_observed_capability_hardware",
 		"canonical_session_attribution_latest",
 		"canonical_session_current",
 		"canonical_status_hours",
@@ -542,5 +548,18 @@ func (h *harness) resolveInsertedBatch(t *testing.T, events []rawEvent) {
 	// same repair semantics as bounded repair-window runs.
 	start := minTS.Add(-10 * time.Minute)
 	end := maxTS.Add(time.Minute)
-	h.resolveSelectionCentered(t, start, end)
+	orgs := map[string]struct{}{}
+	for _, event := range events {
+		if event.Org == "" {
+			continue
+		}
+		orgs[event.Org] = struct{}{}
+	}
+	if len(orgs) == 0 {
+		h.resolveSelectionCentered(t, start, end)
+		return
+	}
+	for org := range orgs {
+		h.resolveSelectionCenteredForOrg(t, org, start, end)
+	}
 }

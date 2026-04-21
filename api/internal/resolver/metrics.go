@@ -44,6 +44,18 @@ var (
 		Name: "resolver_dirty_partitions_repaired_total",
 		Help: "Total historical dirty partitions repaired successfully.",
 	})
+	resolverDirtyWindowsEnqueued = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "resolver_dirty_windows_enqueued_total",
+		Help: "Total same-day dirty windows enqueued from accepted raw ingest.",
+	})
+	resolverDirtyWindowsRepaired = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "resolver_dirty_windows_repaired_total",
+		Help: "Total same-day dirty windows repaired successfully.",
+	})
+	resolverRepairRequestsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "resolver_repair_requests_total",
+		Help: "Total resolver repair requests by status transition.",
+	}, []string{"status"})
 	resolverClaimConflicts = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "resolver_claim_conflicts_total",
 		Help: "Total resolver window-claim conflicts by mode.",
@@ -59,7 +71,7 @@ var (
 )
 
 func setResolverSchedulerPhase(active string) {
-	for _, phase := range []string{"bootstrap_backlog", "historical_repair", "historical_repair_wait", "tail", "idle"} {
+	for _, phase := range []string{"bootstrap_backlog", "historical_repair", "historical_repair_wait", "repair_request", "same_day_repair", "same_day_repair_wait", "tail", "idle"} {
 		value := 0.0
 		if phase == active {
 			value = 1
@@ -68,7 +80,7 @@ func setResolverSchedulerPhase(active string) {
 	}
 }
 
-func newMetricsServer(port string, state func() schedulerHealthState) *http.Server {
+func newMetricsServer(port string, state func() schedulerHealthState, configure func(*http.ServeMux)) *http.Server {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -83,6 +95,9 @@ func newMetricsServer(port string, state func() schedulerHealthState) *http.Serv
 		}
 		_ = json.NewEncoder(w).Encode(payload)
 	})
+	if configure != nil {
+		configure(mux)
+	}
 	return &http.Server{
 		Addr:         ":" + port,
 		Handler:      mux,

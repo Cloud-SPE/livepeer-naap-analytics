@@ -60,7 +60,7 @@ v3 defects:
 - No segment fact family in this phase.
 - No generic edge warehouse in this phase.
 - No correctness-critical dependency on the Go enrichment worker.
-- No business-semantic Go query may read raw `naap.events`.
+- No business-semantic Go query may read raw accepted-event history directly from `accepted_raw_events`.
 
 ## Acceptance Gates
 

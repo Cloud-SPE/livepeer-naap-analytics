@@ -1,0 +1,16 @@
+# Known core-logic recalc violations with a scheduled fix.
+#
+# Each entry is:  <repo-relative-path>:<line-number>	<phase-reference>
+# The tab separator matters — the lint splits on it.
+#
+# Phase references map to docs/exec-plans/completed/serving-layer-v2.md.
+# When the referenced phase lands, the violation must be removed and
+# the allowlist entry deleted in the same PR.
+#
+# New violations with no entry here cause the lint to fail. An entry
+# here with no corresponding violation is fine (tolerated as
+# harmless) but should be cleaned up when noticed.
+
+# phase-4-unified-capability-spine entries retired: pipeline_id is now
+# denormalized onto naap.api_observed_capability_offer,
+# naap.api_observed_byoc_worker, and naap.api_hourly_request_demand.

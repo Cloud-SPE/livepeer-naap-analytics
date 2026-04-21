@@ -1,5 +1,5 @@
 /**
- * k6 load test script for the NAAP Analytics API.
+ * k6 load test script for the NaaP Analytics API.
  *
  * Usage:
  *   k6 run tests/load/script.js
@@ -13,7 +13,7 @@
 
 import http from 'k6/http';
 import { check, sleep } from 'k6';
-import { Counter, Rate, Trend } from 'k6/metrics';
+import { Counter } from 'k6/metrics';
 
 // ── Configuration ─────────────────────────────────────────────────────────────
 
@@ -30,35 +30,54 @@ export const options = {
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:8000';
 
-// ── Endpoints ─────────────────────────────────────────────────────────────────
+// ── Active endpoints (in sync with server.go routes) ──────────────────────────
 
 const ENDPOINTS = [
-  // Network
-  '/v1/net/summary',
+  // Network / supply
   '/v1/net/orchestrators',
-  '/v1/net/gpu',
   '/v1/net/models',
-  // Streams
-  '/v1/streams/active',
-  '/v1/streams/summary',
-  '/v1/streams/history',
-  // Performance
-  '/v1/perf/fps',
-  '/v1/perf/fps/history',
-  '/v1/perf/latency',
-  '/v1/perf/webrtc',
-  // Payments
-  '/v1/payments/summary',
-  '/v1/payments/history',
-  '/v1/payments/by-pipeline',
-  '/v1/payments/by-orch',
-  // Reliability
-  '/v1/reliability/summary',
-  '/v1/reliability/history',
-  '/v1/reliability/orchs',
-  '/v1/failures',
-  // Leaderboard
-  '/v1/leaderboard',
+  '/v1/net/capacity',
+
+  // Performance (streaming)
+  '/v1/perf/stream/by-model',
+
+  // SLA / demand
+  '/v1/sla/compliance',
+  '/v1/network/demand',
+
+  // GPU
+  '/v1/gpu/network-demand',
+  '/v1/gpu/metrics',
+
+  // Jobs — request/response aggregates (R19)
+  '/v1/jobs/demand',
+  '/v1/jobs/sla',
+  '/v1/jobs/by-model',
+
+  // AI Batch (R17)
+  '/v1/ai-batch/summary',
+  '/v1/ai-batch/jobs',
+  '/v1/ai-batch/llm/summary',
+
+  // BYOC (R18)
+  '/v1/byoc/summary',
+  '/v1/byoc/jobs',
+  '/v1/byoc/workers',
+  '/v1/byoc/auth',
+
+  // Dashboard — streaming / supply (R16)
+  '/v1/dashboard/kpi',
+  '/v1/dashboard/pipelines',
+  '/v1/dashboard/orchestrators',
+  '/v1/dashboard/gpu-capacity',
+  '/v1/dashboard/pipeline-catalog',
+  '/v1/dashboard/pricing',
+  '/v1/dashboard/job-feed',
+
+  // Dashboard — request-job (R17/R18)
+  '/v1/dashboard/jobs/overview',
+  '/v1/dashboard/jobs/by-pipeline',
+  '/v1/dashboard/jobs/by-capability',
 ];
 
 // ── Custom metrics ────────────────────────────────────────────────────────────

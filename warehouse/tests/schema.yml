@@ -42,3 +42,88 @@ models:
           - accepted_values:
               arguments:
                 values: ['resolved', 'unresolved']
+  - name: canonical_ai_batch_jobs
+    columns:
+      - name: request_id
+        tests:
+          - not_null
+      - name: org
+        tests:
+          - not_null
+      - name: pipeline
+        tests:
+          - not_null
+      - name: attribution_status
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['resolved', 'hardware_less', 'stale', 'ambiguous', 'unresolved']
+      - name: selection_outcome
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['selected', 'no_orch', 'unknown']
+  - name: canonical_byoc_jobs
+    columns:
+      - name: request_id
+        tests:
+          - not_null
+      - name: capability
+        tests:
+          - not_null
+      - name: completed_at
+        tests:
+          - not_null
+      - name: attribution_status
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['resolved', 'hardware_less', 'stale', 'ambiguous', 'unresolved']
+      - name: selection_outcome
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['selected', 'no_orch', 'unknown']
+  - name: canonical_byoc_payments
+    columns:
+      - name: event_id
+        tests:
+          - unique
+          - not_null
+      - name: org
+        tests:
+          - not_null
+      - name: capability
+        tests:
+          - not_null
+  - name: canonical_byoc_workers
+    columns:
+      - name: event_id
+        tests:
+          - not_null
+      - name: capability
+        tests:
+          - not_null
+  - name: canonical_byoc_auth
+    columns:
+      - name: event_id
+        tests:
+          - not_null
+      - name: capability
+        tests:
+          - not_null
+  - name: canonical_ai_llm_requests
+    columns:
+      - name: request_id
+        tests:
+          - not_null
+      - name: org
+        tests:
+          - not_null
+      - name: model
+        tests:
+          - not_null

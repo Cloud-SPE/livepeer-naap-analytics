@@ -3,24 +3,24 @@
 | Field | Value |
 |---|---|
 | **Status** | Active |
-| **Effective date** | 2026-04-02 |
+| **Effective date** | 2026-04-15 |
 | **Ticket** | TASK 7.7 / [#274](https://github.com/livepeer/livepeer-naap-analytics-deployment/issues/274) |
 | **Audience** | External developers, partners, integrators |
 
-This document is the community-facing reference for all metrics, scoring formulas, SLA targets, and terminology used in the NAAP analytics platform. For the internal behavioral contract governing data validation, see [`docs/design-docs/data-validation-rules.md`](design-docs/data-validation-rules.md).
+This document is the community-facing reference for all metrics, scoring formulas, SLA targets, and terminology used in the NaaP analytics platform. For the internal behavioral contract governing data validation, see [`docs/design-docs/data-validation-rules.md`](design-docs/data-validation-rules.md).
 
 ---
 
 ## 1. Overview
 
-The NAAP analytics platform collects telemetry from AI inference streams on the Livepeer network and exposes it through a REST API. It tracks how well each **orchestrator** (an AI compute node) is performing across the streams it handles.
+The NaaP analytics platform collects telemetry from AI inference streams on the Livepeer network and exposes it through a REST API. It tracks how well each **orchestrator** (an AI compute node) is performing across the streams it handles.
 
 Two distinct scoring models are used:
 
 | Model | Purpose | Range | API endpoint |
 |---|---|---|---|
-| **SLA Score** | Per-orchestrator reliability score for a given time window. Used for compliance reporting and alerting. | 0–100 | `GET /v1/sla/compliance` |
-| **Leaderboard Score** | Competitive ranking across all orchestrators. Used for the public leaderboard. | 0–100 | _(endpoint removed; score data available via `/v1/sla/compliance`)_ |
+| **SLA Score** | Per-orchestrator composite reliability and quality score for a given time window. Used for compliance reporting and alerting. | 0–100 | `GET /v1/streaming/sla` |
+| **Leaderboard Score** | Competitive ranking logic retained for internal reference only. It is not a public API surface. | 0–100 | _(no public endpoint)_ |
 
 These two scores use different formulas and different inputs — a high leaderboard score does not imply SLA compliance, and vice versa. See §3 for both formulas.
 
@@ -28,14 +28,14 @@ These two scores use different formulas and different inputs — a high leaderbo
 
 | Metric | Primary API endpoint |
 |---|---|
-| Output FPS | `GET /v1/perf/by-model` |
+| Output FPS | `GET /v1/streaming/models` |
 | Jitter Coefficient | _(endpoint removed; metric tracked internally)_ |
 | E2E Latency | _(endpoint removed; metric tracked internally)_ |
-| Failure Rate / Output Viability | `GET /v1/sla/compliance` |
-| Swap Rate | `GET /v1/sla/compliance` |
-| Prompt-to-First-Frame (PTFF) | `GET /v1/gpu/metrics` |
-| SLA Score | `GET /v1/sla/compliance` |
-| Leaderboard Score | _(endpoint removed; score data available via `/v1/sla/compliance`)_ |
+| Failure Rate / Output Viability | `GET /v1/streaming/sla` |
+| Swap Rate | `GET /v1/streaming/sla` |
+| Prompt-to-First-Frame (PTFF) | `GET /v1/streaming/gpu-metrics` |
+| SLA Score | `GET /v1/streaming/sla` |
+| Leaderboard Score | _(no public endpoint)_ |
 
 ---
 
@@ -57,7 +57,7 @@ Samples where `fps = 0` are excluded (they indicate the stream has not yet start
 
 **Degradation flag:** If the average FPS for a window drops ≥ 20% relative to the prior hour bucket for the same orchestrator/pipeline combination, the window is flagged as degraded.
 
-**API endpoint:** `GET /v1/perf/by-model` — FPS broken down by model
+**API endpoint:** `GET /v1/streaming/models` — FPS broken down by model
 
 ---
 
@@ -108,7 +108,7 @@ p95_e2e_latency_ms = p95(e2e_latency_ms) per orchestrator/pipeline/window
 
 **Formula:**
 ```
-failure_rate = (loading_only_sessions + zero_output_fps_sessions) / requested_sessions
+failure_rate = output_failed_sessions / requested_sessions
 
 output_viability_rate = 1 − failure_rate
 ```
@@ -116,6 +116,7 @@ output_viability_rate = 1 − failure_rate
 Session classification (see §6 for full taxonomy):
 - `loading_only_sessions` — inference ran but zero output frames were produced
 - `zero_output_fps_sessions` — frames were received but at 0 FPS (unplayable)
+- `output_failed_sessions` — union count of sessions that were loading-only or zero-output; one session contributes at most once
 - `requested_sessions` — all sessions attempted against this orchestrator
 
 **SLA target: failure_rate < 0.01 (i.e. output_viability_rate > 0.99).** Less than 1% failure rate is the production-grade availability standard for inference services, ensuring > 99% of stream requests produce usable output.
@@ -124,7 +125,7 @@ Session classification (see §6 for full taxonomy):
 
 **Data source:** `canonical_session_current` session outcome fields
 
-**API endpoint:** `GET /v1/sla/compliance`
+**API endpoint:** `GET /v1/streaming/sla`
 
 ---
 
@@ -148,7 +149,7 @@ Where:
 
 **Data source:** `stream_trace` events with `data.type = "orchestrator_swap"`
 
-**API endpoint:** `GET /v1/sla/compliance`
+**API endpoint:** `GET /v1/streaming/sla`
 
 ---
 
@@ -169,7 +170,7 @@ p95_prompt_to_first_frame_ms = p95(prompt_to_playable_latency_ms) per window
 
 **Distinction from startup latency:** `startup_latency_ms` covers orchestrator selection to first output only. PTFF includes all gateway processing time before orchestrator selection, making it the user-perceived latency.
 
-**API endpoint:** `GET /v1/gpu/metrics`
+**API endpoint:** `GET /v1/streaming/gpu-metrics`
 
 ---
 
@@ -183,33 +184,55 @@ p95_prompt_to_first_frame_ms = p95(prompt_to_playable_latency_ms) per window
 
 ### 3.1 SLA Score
 
-**Purpose:** A single 0–100 reliability score per orchestrator per hourly window. Used for compliance reporting and alerting. Null when `requested_sessions = 0`.
+**Purpose:** A single 0–100 composite reliability and quality score per orchestrator per hourly window. Used for compliance reporting and alerting. Null when `requested_sessions = 0`.
 
 **Formula:**
 ```
 sla_score = 100
           × health_signal_coverage_ratio
-          × (  0.4 × startup_success_rate
-             + 0.2 × no_swap_rate
-             + 0.4 × output_viability_rate  )
+          × (  0.7 × reliability_score
+             + 0.3 × quality_score )
+
+reliability_score = (0.4 × startup_success_rate)
+                  + (0.2 × no_swap_rate)
+                  + (0.4 × output_viability_rate)
+
+latency_score = (0.6 × ptff_score) + (0.4 × e2e_score)
+
+quality_score = (0.6 × latency_score) + (0.4 × fps_score)
 ```
 
 **Component breakdown:**
 
 | Component | Weight | Formula | What it measures |
 |---|---|---|---|
-| `startup_success_rate` | 40% | `startup_success_sessions / requested_sessions` | Sessions that started successfully (orch selected, first output received) |
-| `no_swap_rate` | 20% | `1 − total_swapped_sessions / requested_sessions` | Sessions completed without mid-stream orchestrator swap |
-| `output_viability_rate` | 40% | `1 − (loading_only + zero_fps) / requested_sessions` | Sessions that produced usable output |
-| `health_signal_coverage_ratio` | multiplier | `health_signal_count / health_expected_signal_count` | Data completeness; defaults to 1.0 when no health signals expected |
+| `reliability_score` | 70% | `0.4×startup_success_rate + 0.2×no_swap_rate + 0.4×output_viability_rate` | Startup reliability, stability, and output viability |
+| `quality_score` | 30% | `0.6×latency_score + 0.4×fps_score` | Relative user-visible quality inside the active benchmark cohort |
+| `health_signal_coverage_ratio` | multiplier | `min(health_signal_count / health_expected_signal_count, 1.0)` | Data completeness; defaults to 1.0 when no health signals expected and is capped at 1.0 |
 
-The coverage ratio multiplier penalises scores where telemetry data was sparse or missing. A ratio of 1.0 means all expected health signals were received.
+**Quality scoring details**
+
+- `ptff_score` compares `avg_prompt_to_first_frame_ms` to the prior 7 full UTC days of the network-wide `(pipeline_id, model_id)` benchmark; lower latency scores higher
+- `e2e_score` compares `avg_e2e_latency_ms` to the prior 7 full UTC days of the network-wide `(pipeline_id, model_id)` benchmark; lower latency scores higher
+- `fps_score` compares `avg_output_fps` to the prior 7 full UTC days of the network-wide `(pipeline_id, model_id)` benchmark; higher FPS scores higher
+- benchmark thresholds use PTFF/E2E `p50 → p90` and FPS `p10 → p50`
+- rows at or better than the favorable benchmark edge score `1.0`; rows at or beyond the unfavorable edge score `0.0`; values in between interpolate linearly
+- quality components shrink toward neutral `0.5` on sparse current-window evidence
+- if the prior 7 full UTC days do not have enough benchmark rows, quality components default to neutral `0.5`
+- hardware is intentionally not part of cohort normalization; `gpu_model_name` is exposed separately for drilldown
+- the contracted API field remains `sla_score`; there is no parallel legacy or `v2` score surface
+
+The coverage ratio multiplier penalises scores where telemetry data was sparse or missing. A ratio of `1.0` means all expected health signals were received.
 
 **Recommended threshold: ≥ 95.** A score below 95 indicates meaningful reliability gaps in one or more components that warrant investigation.
 
-**Source:** `warehouse/models/api/api_sla_compliance.sql`
+**Source:** final SLA serving rows are published directly from the
+resolver-owned additive SLA input surface into
+`naap.api_hourly_streaming_sla_store`, then exposed through
+`warehouse/models/api/api_hourly_streaming_sla.sql` as the contracted read
+model.
 
-**API endpoint:** `GET /v1/sla/compliance`
+**API endpoint:** `GET /v1/streaming/sla`
 
 ---
 
@@ -240,7 +263,7 @@ All four inputs are **min-max normalised** across all orchestrators competing in
 
 **Source:** `api/internal/service/service.go` (`scoreLeaderboard`)
 
-**API endpoint:** _(leaderboard endpoints removed; score data available via `GET /v1/sla/compliance`)_
+**API endpoint:** _(leaderboard endpoints removed; no public endpoint)_
 
 ---
 
@@ -254,11 +277,14 @@ All metrics can be filtered and grouped by the following dimensions via API quer
 | Orchestrator address | `orch_address` | `0x1a2b3c…` | Ethereum address identifying the compute node |
 | Pipeline | `pipeline` | `streamdiffusion-sdxl` | AI pipeline type |
 | Model | _(via pipeline)_ | `stabilityai/sdxl-turbo` | Specific model within a pipeline |
-| GPU hardware | _(in response)_ | `A100`, `H100` | GPU model name; available in `/v1/gpu/metrics` |
+| GPU hardware | _(in response)_ | `A100`, `H100` | GPU model name; available in `/v1/streaming/gpu-metrics` |
 | Time window start | `start` / `end` | `2026-03-01T00:00:00Z` | ISO 8601 UTC; windows are hourly |
 | Granularity | `granularity` | `5m`, `1h`, `1d` | Time bucket size; not all endpoints support all granularities |
 
-**Standard pagination parameters:** `limit` (default 100), `offset` (default 0).
+**Standard pagination parameters for cursor-paginated list endpoints:** `limit`
+(default 50) and `cursor` (opaque continuation token from the previous page).
+Responses use the shared `{data, pagination, meta}` envelope with
+`pagination.next_cursor`, `pagination.has_more`, and `pagination.page_size`.
 
 ---
 

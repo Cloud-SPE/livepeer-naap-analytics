@@ -1,4 +1,4 @@
-"""Entry point for the NAAP Kafka inspector.
+"""Entry point for the NaaP Kafka inspector.
 
 Usage:
     uv run naap-inspect [OPTIONS]
@@ -39,7 +39,7 @@ _DEFAULT_REPORTS_DIR = _CWD / "reports"
 
 
 def _parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="NAAP Kafka Inspector")
+    p = argparse.ArgumentParser(description="NaaP Kafka Inspector")
     p.add_argument("--broker", default=BROKER, help=f"Kafka broker (default: {BROKER})")
     p.add_argument("--topics", default=",".join(TOPICS), help="Comma-separated topic names")
     p.add_argument("--lookback", type=float, default=3.0, help="Hours to look back")
@@ -55,7 +55,7 @@ def main() -> None:
     args = _parse_args()
     topics = [t.strip() for t in args.topics.split(",") if t.strip()]
 
-    console.print(f"[bold cyan]NAAP Kafka Inspector[/]")
+    console.print(f"[bold cyan]NaaP Kafka Inspector[/]")
     console.print(f"Broker : [yellow]{args.broker}[/]")
     console.print(f"Topics : [yellow]{', '.join(topics)}[/]")
     console.print(f"Lookback: [yellow]{args.lookback}h[/]  Max msgs: [yellow]{args.max_messages:,}[/]")

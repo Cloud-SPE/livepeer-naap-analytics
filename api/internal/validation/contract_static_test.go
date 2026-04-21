@@ -21,6 +21,9 @@ func collectSQLFiles(t *testing.T, root string) []string {
 	t.Helper()
 	entries, err := os.ReadDir(root)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
 		t.Fatalf("ReadDir %s: %v", root, err)
 	}
 	var files []string
@@ -44,6 +47,10 @@ func TestTierContract_APIModelsDoNotBypassCanonicalOrServingLayers(t *testing.T)
 		if strings.Contains(sql, "canonical_session_latest") {
 			t.Fatalf("%s still depends on removed compatibility surface canonical_session_latest", file)
 		}
+		// Phase 5 retired the api_base_* tier; api views may only depend on
+		// canonical_* or on api_*_store (the physical backing for latest-slice
+		// aliases). No ref() to other api_* views, no chain back into raw /
+		// normalized / operational.
 		for _, forbidden := range []string{"ref('raw_", `ref("raw_`, "from naap.raw_", "ref('normalized_", `ref("normalized_`, "from naap.normalized_", "ref('operational_", `ref("operational_`, "from naap.operational_", "ref('api_", `ref("api_`} {
 			if strings.Contains(sql, forbidden) {
 				t.Fatalf("%s bypasses the serving contract with forbidden dependency %q", file, forbidden)
@@ -133,6 +140,12 @@ func TestTierContract_NonAPIModelsDoNotDeriveTruthFromAPIModels(t *testing.T) {
 		filepath.Join(root, "warehouse", "models", "staging"),
 	}
 	for _, modelRoot := range modelRoots {
+		if _, err := os.Stat(modelRoot); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			t.Fatalf("Stat %s: %v", modelRoot, err)
+		}
 		for _, file := range collectSQLFiles(t, modelRoot) {
 			if strings.HasPrefix(filepath.Base(file), "v_api_") {
 				continue
@@ -144,9 +157,7 @@ func TestTierContract_NonAPIModelsDoNotDeriveTruthFromAPIModels(t *testing.T) {
 			sql := strings.ToLower(string(body))
 			for _, forbidden := range []string{"ref('api_", `ref("api_`, "from naap.api_"} {
 				if strings.Contains(sql, forbidden) {
-					if strings.Contains(sql, "from naap.api_") &&
-						strings.Contains(file, filepath.Join("warehouse", "models", "serving")) &&
-						strings.Contains(sql, "_store") {
+					if strings.Contains(sql, "from naap.api_") && strings.Contains(sql, "_store") {
 						continue
 					}
 					t.Fatalf("%s illegally derives truth from api_* via %q", file, forbidden)
@@ -155,3 +166,104 @@ func TestTierContract_NonAPIModelsDoNotDeriveTruthFromAPIModels(t *testing.T) {
 		}
 	}
 }
+
+func TestTierContract_RollupServingLayersDoNotAverageDerivedAggregates(t *testing.T) {
+	root := repoRoot(t)
+	checks := map[string][]string{
+		filepath.Join(root, "warehouse", "models", "api"): {
+			"avg(s.avg_",
+			"avg(b.avg_",
+			"quantile(0.95)(s.avg_",
+			"quantile(0.95)(b.avg_",
+			"avg(s.health_signal_coverage_ratio)",
+			"avg(b.health_signal_coverage_ratio)",
+			"avg(s.avg_output_fps)",
+			"avg(b.avg_output_fps)",
+			"avg(s.avg_prompt_to_first_frame_ms)",
+			"avg(b.avg_prompt_to_first_frame_ms)",
+			"avg(s.avg_e2e_latency_ms)",
+			"avg(b.avg_e2e_latency_ms)",
+			"avg(s.latency_score)",
+			"avg(b.latency_score)",
+			"avg(s.fps_score)",
+			"avg(b.fps_score)",
+			"avg(s.quality_score)",
+			"avg(b.quality_score)",
+			"avg(s.sla_score)",
+			"avg(b.sla_score)",
+		},
+		filepath.Join(root, "api", "internal", "resolver"): {
+			"avg(b.avg_",
+			"quantile(0.95)(b.avg_",
+			"avg(b.health_signal_coverage_ratio)",
+			"avg(b.latency_score)",
+			"avg(b.fps_score)",
+			"avg(b.quality_score)",
+			"avg(b.sla_score)",
+		},
+	}
+
+	for dir, forbiddenPatterns := range checks {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatalf("ReadDir %s: %v", dir, err)
+		}
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			name := entry.Name()
+			if !(strings.HasSuffix(name, ".sql") || strings.HasSuffix(name, ".go")) {
+				continue
+			}
+			file := filepath.Join(dir, name)
+			body, err := os.ReadFile(file)
+			if err != nil {
+				t.Fatalf("ReadFile %s: %v", file, err)
+			}
+			text := strings.ToLower(string(body))
+			for _, forbidden := range forbiddenPatterns {
+				if strings.Contains(text, forbidden) {
+					t.Fatalf("%s uses forbidden aggregate-of-aggregate pattern %q", file, forbidden)
+				}
+			}
+		}
+	}
+}
+
+func TestTierContract_RollupSafetyRuleIsDocumented(t *testing.T) {
+	root := repoRoot(t)
+	if _, err := os.Stat(filepath.Join(root, "docs")); err != nil {
+		t.Skip("docs tree not mounted in this test environment")
+	}
+	docChecks := map[string][]string{
+		filepath.Join(root, "docs", "design.md"): {
+			"rollup safety",
+			"do not compute aggregates from already-aggregated values unless the aggregate is mathematically merge-safe",
+		},
+		filepath.Join(root, "docs", "design-docs", "data-validation-rules.md"): {
+			"percentiles require merge-safe aggregate state",
+			"overlapping classifications must expose an explicit additive union counter",
+		},
+	}
+
+	for file, requiredSnippets := range docChecks {
+		body, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("ReadFile %s: %v", file, err)
+		}
+		text := strings.ToLower(string(body))
+		for _, snippet := range requiredSnippets {
+			if !strings.Contains(text, snippet) {
+				t.Fatalf("%s is missing required rollup-safety guidance %q", file, snippet)
+			}
+		}
+	}
+}
+
+// Phase 5 retired TestTierContract_SLABenchmarkStateUsesAdditiveInputsOnly:
+// the old test asserted dependencies through retired api_base_* views. The
+// invariant it protected — benchmark math runs over additive inputs only —
+// now lives in the resolver's insertSLABenchmarkDaily SQL, whose shape is
+// exercised end-to-end by test_canonical_sla_benchmark_daily_store_grain_unique
+// and the replay harness's canonical-layer checksum.

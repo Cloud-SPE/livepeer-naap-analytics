@@ -1,0 +1,12 @@
+# Known Grafana panels that query non-api relations.
+#
+# Each entry is: <dashboard.json> / <panel title>\t<phase-reference>
+# (the separator between location and phase is a literal tab.)
+#
+# Phase references map to docs/exec-plans/completed/serving-layer-v2.md.
+# Keep this file empty unless a temporary dashboard exception is intentional
+# and linked to a specific cleanup phase.
+#
+# New violations with no entry here cause the lint to fail. An entry
+# here with no matching violation is tolerated but should be cleaned
+# up when noticed.
