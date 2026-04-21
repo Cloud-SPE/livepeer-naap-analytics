@@ -17,9 +17,10 @@ type DBTConfig struct {
 	// directory if unset.
 	RepoRoot string
 
-	// Selector is the dbt --select expression. Defaults to `api api_base`
-	// so the harness rebuilds every model that publishes a serving-layer
-	// relation. Pass `--exclude` via Extra if needed.
+	// Selector is the dbt --select expression. Defaults to
+	// `+api staging.* canonical.*` so the harness rebuilds every model
+	// that publishes or supports a serving-layer relation. Pass
+	// `--exclude` via Extra if needed.
 	Selector string
 
 	// Extra are additional dbt arguments appended after --select, e.g.
@@ -28,11 +29,11 @@ type DBTConfig struct {
 }
 
 // RunDBT invokes dbt via the docker-compose warehouse service to rebuild
-// the api + api_base view definitions against the current ClickHouse
-// state. The models are views, so this step does not write row-level
-// data — it only refreshes the CREATE OR REPLACE VIEW statements and
-// catches schema-drift errors the replay would otherwise surface as a
-// confusing checksum mismatch.
+// the api-layer view definitions (plus their canonical dependencies)
+// against the current ClickHouse state. The models are views, so this
+// step does not write row-level data — it only refreshes the CREATE OR
+// REPLACE VIEW statements and catches schema-drift errors the replay
+// would otherwise surface as a confusing checksum mismatch.
 //
 // Streams stdout / stderr through the harness logger so the output is
 // visible but does not land in the run report JSON.

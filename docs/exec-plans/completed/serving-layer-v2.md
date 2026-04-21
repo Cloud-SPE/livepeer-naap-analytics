@@ -226,15 +226,15 @@ Kills the 7-day `arrayJoin` plus `quantileTDigest*Merge` work at request time.
    - `api_hourly_streaming_{sla,demand,gpu_metrics}_store` — add `orchestrator_name String`, `orchestrator_uri_norm String`, `orchestrator_version Nullable(String)`.
    - `api_current_capability_offer_store`, `api_current_byoc_worker_store`, `api_current_active_stream_state_store` — same three columns.
 
-3. **Handler cleanup** in `api/internal/service/service.go` — delete every `LEFT JOIN naap.api_orchestrator_identity` clause. `api_orchestrator_identity` remains as a lookup for the one endpoint that returns the full identity object.
+3. **Handler cleanup** in `api/internal/service/service.go` — delete request-path `LEFT JOIN naap.api_orchestrator_identity` clauses. `api_orchestrator_identity` remains available for explicit identity lookups and display-label enrichment.
 
-4. **Grafana:** replace `LEFT JOIN api_orchestrator_identity` in five dashboard JSONs with the inline column. `grafana-lint` catches any leftovers.
+4. **Grafana:** remove identity joins from panels where the serving table already carries the needed service fields. Panels may still join `api_orchestrator_identity` for labels; `grafana-lint` requires those panels to declare the identity backing table.
 
 5. **Tests:**
    - `assert_orchestrator_name_present` — dbt test that `orchestrator_name != ''` on every row of every affected table.
    - Parity test — joined-result vs. denormalized-result row-equal on fixture.
 
-**Exit criteria:** zero `api_orchestrator_identity` joins in `api/` and `infra/grafana/`; query plans lose one JOIN node per touched endpoint; `make replay-phase-3` green (canonical + api) — the denormalized columns carry deterministic values across runs.
+**Exit criteria:** zero request-path identity joins in `api/`; Grafana identity joins are label-only and declared through panel metadata; query plans lose one JOIN node per touched endpoint; `make replay-phase-3` green (canonical + api) — the denormalized columns carry deterministic values across runs.
 
 ---
 
@@ -286,7 +286,7 @@ Kills the 7-day `arrayJoin` plus `quantileTDigest*Merge` work at request time.
 
 2. **Promote `api_hourly_byoc_auth`** from view → resolver-written store.
 
-3. **New `api_current_orchestrator_store`** — denormalizes identity plus latest reliability plus capability counts into one row per `(org, orch_address)`. Serves `/v1/streaming/orchestrators`, `/v1/requests/orchestrators`, and dashboard-orchestrators in one scan.
+3. **New `api_current_orchestrator_store`** — denormalizes identity plus latest reliability plus capability counts into one org-agnostic row per `orch_address`. Serves `/v1/streaming/orchestrators`, `/v1/requests/orchestrators`, and dashboard-orchestrators in one scan.
 
 4. **`api_fact_*` tables** — already append-only event logs; enforce consistent sort key `(window_start, entity_key)` and `capability_family` column presence.
 

@@ -64,7 +64,7 @@ this repo. There is no separate Kafka quarantine topic in the active design.
 - accepted contract events land in `accepted_raw_events`
 - ingest materialized views populate `normalized_*` tables
 - the resolver publishes corrected current and serving state into `canonical_*_store` and `api_*_store`
-- dbt publishes `canonical_*`, `api_base_*`, and `api_*` views
+- dbt publishes `canonical_*` and `api_*` views
 - unsupported or ignored contract misses stay queryable in `ignored_raw_events`
 
 ## Notes

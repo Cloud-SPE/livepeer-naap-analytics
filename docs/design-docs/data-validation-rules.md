@@ -790,7 +790,7 @@ Avoid fragmenting sessions and segments when only attributes changed.
 **Raw data scope**
 - `ai_stream_events` with parameter update semantics
 - model changes
-- GPU changes
+- GPU identity changes
 - worker changes
 
 **Requirement**

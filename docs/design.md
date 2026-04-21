@@ -11,7 +11,7 @@ Top-level architecture map for Livepeer NaaP Analytics.
   streaming_events  ──Engine──► tables                    │         │
                                                            │         ├──► normalized_*
                                                            │         ├──► canonical_*
-                                                           │         ├──► api_base_*
+                                                           │         ├──► api_*_store
                                                            │         ├──► api_*
                                                            │         └──► ignored_raw_events
                                                            └──────────────────► HTTP :8000
@@ -51,13 +51,13 @@ All enrichment tables can be JOINed from any aggregate query.
 - **MV-populated** (event-driven): accepted Kafka events are routed into `naap.accepted_raw_events`, then normalized/core materialized views populate the downstream event-driven tables.
 - **Worker-populated** (polled): `orch_metadata`, `gateway_metadata` — written by the enrichment worker on a 5-minute interval.
 
-**Serving path:** The Go API reads published `api_*` relations only. The
-semantic serving layer may use internal `api_base_*` helper views to compute
-contracted read models, but those helpers are not public contracts.
-Downstream derivations must read `canonical_*`, never `api_base_*` or `api_*`.
-For SLA specifically, the resolver now publishes additive org-hour inputs and
-then materializes final SLA serving rows into physical `api_*_store` tables so
-the API does not score benchmark cohorts on the request hot path.
+**Serving path:** The Go API reads published `api_*` relations only.
+Resolver-owned `*_store` tables carry the physical hourly/current slices, and
+dbt publishes the thin `api_*` views over those stores. Downstream derivations
+must read `canonical_*`, never `api_*`. For SLA specifically, the resolver now
+publishes additive org-hour inputs and then materializes final serving rows into
+physical `api_*_store` tables so the API does not score benchmark cohorts on
+the request hot path.
 
 **Resolver runtime path:** The long-lived resolver service is now intended to
 run in `auto` mode. One service instance:
@@ -76,7 +76,6 @@ exact write ownership and bounded padded reads.
 - `normalized_*` — normalized event-family records
 - `canonical_*` — authoritative corrected facts/latest-state tables
 - `operational_*` — low-latency live ops tables
-- `api_base_*` — internal semantic helper views for API/dashboard rollups
 - `api_*` — service/dashboard read models only
 
 This tier contract is documentation for semantic derivation flow. The physical

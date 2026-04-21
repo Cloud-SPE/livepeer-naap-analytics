@@ -1,6 +1,6 @@
 # GPU ID semantics — why `gpu_id` churns and how to interpret it
 
-Investigation record: 2026-04-18. Triggered by the
+Investigation record: 2026-04-18. Triggered by the now-removed
 `Orchestrator GPU Changes (7d vs prior 7d)` panel on `naap-supply-inventory`
 showing 76 "GPUs Added" for orchestrator
 `0x9727b492c4af6c4a8caf4cc1ba6fbb332206d794`, when the orchestrator operator
@@ -22,10 +22,9 @@ reported running ~10 physical GPUs.
      likely because the underlying GPUs are rented dynamically from a cloud
      pool or the NVIDIA Container Toolkit is configured to synthesize
      per-container device identity.
-- The panel description correctly hedges on this: "GPU IDs can fluctuate on
-  virtualized or re-enumerated systems". The number is faithful, its
-  *meaning* at the `orch_address` level is just not "distinct physical
-  GPUs".
+- The current Supply and Overview dashboards label these values as reported GPU
+  UUID counts. The number is faithful, but its *meaning* at the `orch_address`
+  level is not "distinct physical GPUs".
 
 ## Data flow (end to end)
 
@@ -283,8 +282,10 @@ in the medallion-v2 promotion plan).
 
 ## References
 
-- Panel SQL: `infra/grafana/dashboards/naap-supply-inventory.json` panel
-  id 3, "Orchestrator GPU Changes (7d vs prior 7d)".
+- Dashboard usage: `infra/grafana/dashboards/naap-supply-inventory.json`
+  reports "GPU UUIDs by Type (Seen in 24h)" and "Latest GPU UUID Inventory
+  Seen in 24h". The former GPU change-comparison panels were removed because
+  reported UUID churn made physical-add/remove interpretation invalid.
 - Canonical MVs: `infra/clickhouse/bootstrap/v1.sql` (`mv_canonical_capability_hardware_inventory`,
   `mv_canonical_capability_offer_inventory_store_hardware`).
 - ai-runner NVML call: `ai-runner/runner/src/runner/utils/hardware.py:86`.

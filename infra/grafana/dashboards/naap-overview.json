@@ -15,7 +15,7 @@
       }
     ]
   },
-  "description": "Overview dashboard for live state, network state over the last 24 hours, and live-video usage. Live panels are freshness-bounded; 24h network-state panels are windowed inventory views rather than authoritative current state. The prompt panel reads normalized live-video status directly to trial prompt visibility.",
+  "description": "Overview dashboard for live state, network state over the last 24 hours, and live-video usage. Live panels are freshness-bounded; 24h inventory views report observed GPU UUIDs rather than authoritative physical-device counts.",
   "editable": true,
   "graphTooltip": 0,
   "id": null,
@@ -501,11 +501,12 @@
           "refId": "A"
         }
       ],
-      "title": "GPUs Seen in 24h",
+      "title": "GPU UUIDs Seen in 24h",
       "type": "stat",
       "meta": {
         "backing_table": "naap.api_observed_capability_offer"
-      }
+      },
+      "description": "Distinct reported GPU UUIDs observed in the last 24 hours. UUIDs can churn on cloud or virtualized orchestrators, so this is not an authoritative physical-device count."
     },
     {
       "datasource": {
@@ -955,15 +956,16 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "WITH labels AS (\n    SELECT orch_address AS addr, orch_label, org\n    FROM naap.api_orchestrator_identity\n),\neligible_orch AS (\n    SELECT orch_address\n    FROM naap.api_orchestrator_identity\n    WHERE orch_address != ''\n      AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n      AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address))\n),\nwindowed_sla AS (\n    SELECT s.orchestrator_address,\n        s.window_start,\n        s.requested_sessions,\n        s.pipeline_id,\n        ifNull(s.model_id, '') AS model_id_key,\n        ifNull(s.gpu_id, '') AS gpu_id_key,\n        s.sla_score\n    FROM naap.api_hourly_streaming_sla s\n    INNER JOIN eligible_orch eo ON eo.orch_address = s.orchestrator_address\n    WHERE $__timeFilter(s.window_start)\n      AND s.orchestrator_address != ''\n      AND s.sla_score IS NOT NULL\n      AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(s.model_id, '')))\n),\nranked AS (\n    SELECT orchestrator_address,\n        argMax(sla_score, tuple(window_start, requested_sessions, pipeline_id, model_id_key, gpu_id_key)) AS latest_sla_score\n    FROM windowed_sla\n    GROUP BY orchestrator_address\n)\nSELECT ifNull(labels.orch_label, concat(left(ranked.orchestrator_address, 8), '...', right(ranked.orchestrator_address, 4))) AS \"Orchestrator\",\n    toFloat64(round(assumeNotNull(ranked.latest_sla_score), 2)) AS \"SLA Score\"\nFROM ranked\nLEFT JOIN labels ON labels.addr = ranked.orchestrator_address\nORDER BY \"SLA Score\" DESC, \"Orchestrator\" ASC\nLIMIT 20",
+          "rawSql": "WITH labels AS (\n    SELECT orch_address AS addr, orch_label, org\n    FROM naap.api_orchestrator_identity\n),\neligible_orch AS (\n    SELECT orch_address\n    FROM naap.api_orchestrator_identity\n    WHERE orch_address != ''\n      AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n      AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address))\n),\nwindowed_sla AS (\n    SELECT s.orchestrator_address,\n        s.window_start,\n        s.requested_sessions,\n        s.pipeline_id,\n        ifNull(s.model_id, '') AS model_id_key,\n        ifNull(s.gpu_id, '') AS gpu_id_key,\n        s.sla_score\n    FROM naap.api_hourly_streaming_sla s\n    INNER JOIN eligible_orch eo ON eo.orch_address = s.orchestrator_address\n    WHERE $__timeFilter(s.window_start)\n      AND s.window_start < toStartOfHour(now('UTC') - INTERVAL 15 MINUTE)\n      AND s.orchestrator_address != ''\n      AND s.sla_score IS NOT NULL\n      AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(s.model_id, '')))\n),\nranked AS (\n    SELECT orchestrator_address,\n        argMax(sla_score, tuple(window_start, requested_sessions, pipeline_id, model_id_key, gpu_id_key)) AS latest_sla_score\n    FROM windowed_sla\n    GROUP BY orchestrator_address\n)\nSELECT ifNull(labels.orch_label, concat(left(ranked.orchestrator_address, 8), '...', right(ranked.orchestrator_address, 4))) AS \"Orchestrator\",\n    toFloat64(round(assumeNotNull(ranked.latest_sla_score), 2)) AS \"SLA Score\"\nFROM ranked\nLEFT JOIN labels ON labels.addr = ranked.orchestrator_address\nORDER BY \"SLA Score\" DESC, \"Orchestrator\" ASC\nLIMIT 20",
           "refId": "A"
         }
       ],
-      "title": "Top 20 Orchestrators by SLA Score (selected range)",
+      "title": "Top 20 Orchestrators by SLA Score (settled hours)",
       "type": "barchart",
       "meta": {
         "backing_table": "naap.api_orchestrator_identity"
-      }
+      },
+      "description": "Ranks orchestrators by the latest settled hourly SLA score in the selected range. Settled means the panel excludes the current/open hour and also excludes the most recently closed hour until it is at least 15 minutes old. This avoids tail activity and resolver lateness reshuffling SLA ranks while the latest hourly data is still changing."
     },
     {
       "datasource": {
@@ -1021,13 +1023,13 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "WITH labels AS (\n    SELECT orch_address AS addr, orch_label\n    FROM naap.api_orchestrator_identity\n),\nagg AS (\n    SELECT orchestrator_address AS orch_address,\n        sum(known_sessions_count) AS active_streams,\n        sum(avg_output_fps * status_samples) / nullIf(sum(status_samples), 0) AS avg_fps,\n        ifNull(sum(avg_e2e_latency_ms * status_samples) / nullIf(sum(status_samples), 0), 0) / 1000.0 AS avg_e2e_latency_s,\n        arrayStringConcat(arraySort(groupUniqArray(ifNull(nullIf(model_id, ''), 'unknown'))), ', ') AS model_ids\n    FROM naap.api_hourly_streaming_sla\n    WHERE $__timeFilter(window_start)\n      AND orchestrator_address != ''\n      AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n      AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(model_id, '')))\n      AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orchestrator_address))\n    GROUP BY orchestrator_address\n),\norch_latest_sla AS (\n    SELECT s.orchestrator_address,\n        argMax(s.sla_score, tuple(s.window_start, s.requested_sessions, ifNull(s.pipeline_id, ''), ifNull(s.model_id, ''), ifNull(s.gpu_id, ''))) AS latest_sla_score\n    FROM naap.api_hourly_streaming_sla s\n    INNER JOIN agg a ON a.orch_address = s.orchestrator_address\n    WHERE $__timeFilter(s.window_start)\n      AND s.orchestrator_address != ''\n      AND s.sla_score IS NOT NULL\n      AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(s.model_id, '')))\n    GROUP BY s.orchestrator_address\n),\norch_sla_rank AS (\n    SELECT orchestrator_address,\n        latest_sla_score,\n        row_number() OVER (ORDER BY latest_sla_score DESC, orchestrator_address ASC) AS sla_rank\n    FROM orch_latest_sla\n)\nSELECT orch_sla_rank.sla_rank AS \"SLA Rank\",\n    ifNull(labels.orch_label, concat(left(a.orch_address, 8), '...', right(a.orch_address, 4))) AS \"Orchestrator\",\n    a.model_ids AS \"Models Seen In Range\",\n    a.active_streams AS \"Active Streams\",\n    round(a.avg_fps, 2) AS \"Avg FPS\",\n    round(a.avg_e2e_latency_s, 3) AS \"Avg E2E Latency (s)\",\n    round(orch_sla_rank.latest_sla_score, 2) AS \"SLA Score\"\nFROM agg a\nLEFT JOIN orch_sla_rank ON orch_sla_rank.orchestrator_address = a.orch_address\nLEFT JOIN labels ON labels.addr = a.orch_address\nORDER BY isNull(orch_sla_rank.latest_sla_score) ASC, orch_sla_rank.latest_sla_score DESC, a.active_streams DESC, a.avg_fps DESC\nLIMIT 50",
+          "rawSql": "WITH labels AS (\n    SELECT orch_address AS addr, orch_label\n    FROM naap.api_orchestrator_identity\n),\nagg AS (\n    SELECT orchestrator_address AS orch_address,\n        sum(known_sessions_count) AS active_streams,\n        sum(avg_output_fps * status_samples) / nullIf(sum(status_samples), 0) AS avg_fps,\n        ifNull(sum(avg_e2e_latency_ms * status_samples) / nullIf(sum(status_samples), 0), 0) / 1000.0 AS avg_e2e_latency_s,\n        arrayStringConcat(arraySort(groupUniqArray(ifNull(nullIf(model_id, ''), 'unknown'))), ', ') AS model_ids\n    FROM naap.api_hourly_streaming_sla\n    WHERE $__timeFilter(window_start)\n      AND window_start < toStartOfHour(now('UTC') - INTERVAL 15 MINUTE)\n      AND orchestrator_address != ''\n      AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n      AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(model_id, '')))\n      AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orchestrator_address))\n    GROUP BY orchestrator_address\n),\norch_latest_sla AS (\n    SELECT s.orchestrator_address,\n        argMax(s.sla_score, tuple(s.window_start, s.requested_sessions, ifNull(s.pipeline_id, ''), ifNull(s.model_id, ''), ifNull(s.gpu_id, ''))) AS latest_sla_score\n    FROM naap.api_hourly_streaming_sla s\n    INNER JOIN agg a ON a.orch_address = s.orchestrator_address\n    WHERE $__timeFilter(s.window_start)\n      AND s.window_start < toStartOfHour(now('UTC') - INTERVAL 15 MINUTE)\n      AND s.orchestrator_address != ''\n      AND s.sla_score IS NOT NULL\n      AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(s.model_id, '')))\n    GROUP BY s.orchestrator_address\n),\norch_sla_rank AS (\n    SELECT orchestrator_address,\n        latest_sla_score,\n        row_number() OVER (ORDER BY latest_sla_score DESC, orchestrator_address ASC) AS sla_rank\n    FROM orch_latest_sla\n)\nSELECT orch_sla_rank.sla_rank AS \"SLA Rank\",\n    ifNull(labels.orch_label, concat(left(a.orch_address, 8), '...', right(a.orch_address, 4))) AS \"Orchestrator\",\n    a.model_ids AS \"Models Seen In Range\",\n    a.active_streams AS \"Active Streams\",\n    round(a.avg_fps, 2) AS \"Avg FPS\",\n    round(a.avg_e2e_latency_s, 3) AS \"Avg E2E Latency (s)\",\n    round(orch_sla_rank.latest_sla_score, 2) AS \"SLA Score\"\nFROM agg a\nLEFT JOIN orch_sla_rank ON orch_sla_rank.orchestrator_address = a.orch_address\nLEFT JOIN labels ON labels.addr = a.orch_address\nORDER BY isNull(orch_sla_rank.latest_sla_score) ASC, orch_sla_rank.latest_sla_score DESC, a.active_streams DESC, a.avg_fps DESC\nLIMIT 50",
           "refId": "A"
         }
       ],
-      "title": "Top Orchestrators (selected range summary)",
+      "title": "Top Orchestrators (settled range summary)",
       "type": "table",
-      "description": "One row per orchestrator address. SLA rank is the latest orchestrator-level score in range; the model column is a distinct list of models seen for that orchestrator during the selected range, not a per-model SLA row.",
+      "description": "One row per orchestrator address, using only settled hourly rows. SLA rank is the latest orchestrator-level score in range; the model column is a distinct list of models seen for that orchestrator during the selected settled range, not a per-model SLA row. Settled means the panel excludes the current/open hour and also excludes the most recently closed hour until it is at least 15 minutes old. This avoids tail activity and resolver lateness reshuffling SLA ranks while the latest hourly data is still changing.",
       "meta": {
         "backing_table": "naap.api_orchestrator_identity"
       }
@@ -1201,7 +1203,7 @@
           "text": "All",
           "value": "__all"
         },
-        "definition": "SELECT DISTINCT org FROM (SELECT org FROM naap.api_hourly_streaming_demand WHERE org != '' AND pipeline_id = 'live-video-to-video' UNION ALL SELECT org FROM naap.canonical_status_hours WHERE org != '' AND canonical_pipeline = 'live-video-to-video' UNION ALL SELECT org FROM naap.api_current_active_stream_state WHERE org != '' AND ifNull(pipeline, '') = 'live-video-to-video' UNION ALL SELECT org FROM naap.api_hourly_streaming_sla WHERE org != '' AND pipeline_id = 'live-video-to-video' UNION ALL SELECT org FROM naap.api_observed_capability_offer WHERE org != '' AND canonical_pipeline = 'live-video-to-video') AS orgs WHERE org != '' ORDER BY org",
+        "definition": "SELECT org FROM naap.api_variable_orgs",
         "hide": 0,
         "includeAll": true,
         "label": "Org",
@@ -1222,7 +1224,7 @@
           "text": "All",
           "value": "__all"
         },
-        "definition": "SELECT DISTINCT model_id FROM (SELECT model_id FROM naap.api_observed_capability_offer WHERE model_id != '' AND hardware_present = 1 AND last_seen >= now() - INTERVAL 24 HOUR AND canonical_pipeline = 'live-video-to-video' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) UNION ALL SELECT canonical_model AS model_id FROM naap.canonical_status_hours WHERE canonical_model != '' AND canonical_pipeline = 'live-video-to-video' AND hour >= now() - INTERVAL 24 HOUR AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) UNION ALL SELECT model_id FROM naap.api_current_active_stream_state WHERE model_id != '' AND last_seen > now() - INTERVAL 24 HOUR AND ifNull(pipeline, '') = 'live-video-to-video' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) UNION ALL SELECT model_id FROM naap.api_hourly_streaming_sla WHERE model_id != '' AND window_start >= now() - INTERVAL 24 HOUR AND pipeline_id = 'live-video-to-video' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))) AS models WHERE model_id != '' ORDER BY model_id",
+        "definition": "SELECT model_id FROM naap.api_variable_models",
         "hide": 0,
         "includeAll": true,
         "label": "Model",
@@ -1243,7 +1245,7 @@
           "text": "All",
           "value": "__all"
         },
-        "definition": "WITH live_orch AS (SELECT DISTINCT orch_address FROM naap.api_observed_capability_offer WHERE orch_address != '' AND last_seen >= now() - INTERVAL 24 HOUR AND canonical_pipeline = 'live-video-to-video' AND hardware_present = 1 AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(model_id, ''))) UNION ALL SELECT DISTINCT orchestrator_address AS orch_address FROM naap.api_hourly_streaming_sla WHERE orchestrator_address != '' AND window_start >= now() - INTERVAL 24 HOUR AND pipeline_id = 'live-video-to-video' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(model_id, ''))) UNION ALL SELECT DISTINCT orch_address FROM naap.canonical_status_hours WHERE orch_address != '' AND hour >= now() - INTERVAL 24 HOUR AND canonical_pipeline = 'live-video-to-video' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(canonical_model, ''))) UNION ALL SELECT DISTINCT orch_address FROM naap.api_current_active_stream_state WHERE orch_address != '' AND last_seen > now() - INTERVAL 24 HOUR AND ifNull(pipeline, '') = 'live-video-to-video' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(model_id, '')))) SELECT i.orch_address AS __value, i.orch_label AS __text FROM naap.api_orchestrator_identity i INNER JOIN (SELECT DISTINCT orch_address FROM live_orch) l ON l.orch_address = i.orch_address WHERE ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), i.org)) ORDER BY __text",
+        "definition": "SELECT concat(coalesce(nullIf(orch_label, ''), orch_address), ':',  orch_address) FROM naap.api_variable_orchestrators",
         "hide": 0,
         "includeAll": true,
         "label": "Orchestrator (ENS)",

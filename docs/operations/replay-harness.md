@@ -26,13 +26,20 @@ invokes the resolver in-process with `RunRequest.Mode = ModeBackfill` and
 a pinned Now, and checksums the 17 canonical tables the resolver writes.
 
 **PR 4 (current):** API layer. When `--layers` includes `api` the
-harness invokes `dbt run --select api api_base` via the compose-based
-`warehouse` service (view refresh; a no-op for row content but catches
-schema-drift vs. the branch's view definitions), then checksums all 22
-api/api_base view outputs. AggregateFunction columns (cohort-state
-percentile sketches on `api_base_sla_quality_cohort_daily_state`) are
-excluded from the tuple since sipHash64 cannot hash the opaque binary
-state; scalar sibling columns preserve the signal.
+harness invokes `dbt run --select "+api staging.* canonical.*"` via the
+compose-based `warehouse` service (view refresh; a no-op for row content
+but catches schema drift vs. the branch's view definitions), then
+checksums the published `api_*` surfaces. The selector rebuilds every
+canonical view the serving layer depends on, not just the `api_*` models
+themselves.
+
+The harness assumes the physical `_store` tables already exist. dbt is
+only responsible for the semantic views layered on top of those tables;
+it does not create resolver-owned storage. Fresh replay CI therefore
+applies the checked-in bootstrap and then `scripts/apply-store-ddl.sh`
+before `dbt run`, so newly added store tables such as
+`api_hourly_byoc_payments_store` are present even if the bootstrap was
+not yet refreshed when the harness was first wired.
 
 ### Why HTTP, not the native protocol
 
@@ -107,12 +114,20 @@ done
 
 ### API-phase caveats
 
-The harness runs `dbt run --select api api_base` via
+The harness runs `dbt run --select "+api staging.* canonical.*"` via
 `docker compose --profile tooling run --rm warehouse ...`. This requires
 the `warehouse` service image to be built (`make up` or
 `docker compose --profile tooling up --build -d warehouse`) and
 ClickHouse to be healthy. The `warehouse` service depends on
 ClickHouse's healthcheck, so it waits for readiness automatically.
+
+If a local long-lived ClickHouse volume predates a newly introduced
+resolver-owned store table, `dbt run` can fail with `UNKNOWN_TABLE` on
+the backing `_store` relation even though the model SQL itself is
+correct. In that case the fix is schema/bootstrap work, not dbt order:
+run `make migrate-up` or `make apply-store-ddl`, then rerun the resolver
+or an appropriate bounded backfill so the new store is populated before
+expecting parity tests to pass.
 
 Determinism of api views depends on the canonical layer being stable.
 Running `--layers api --skip-load --skip-resolver --skip-dbt` twice
@@ -273,7 +288,7 @@ table's rollup drifts, naming the first-divergent layer and table.
 # Disable ingest pause on ephemeral CI (no Kafka producer to contaminate).
 ./bin/replay --pause-ingestion=false ...
 
-# Override the dbt selector (defaults to "api api_base").
+# Override the dbt selector (defaults to `+api staging.* canonical.*`).
 ./bin/replay --dbt-selector "api_hourly_streaming_sla" ...
 ```
 

@@ -1,9 +1,9 @@
 -- Phase 3 of serving-layer-v2: denormalize orchestrator_uri onto the two
 -- serving stores whose handler callers previously had to LEFT JOIN
 -- naap.api_orchestrator_identity on every request. Carrying the URI on
--- each row lets the resolver stamp it at write time from
--- canonical_capability_orchestrator_identity_latest, and the API layer
--- reads a pre-joined column rather than rejoining identity per request.
+-- each row lets the resolver stamp it at write time from session attribution
+-- or canonical_capability_orchestrator_identity_latest, and the API layer
+-- reads the serving view column rather than rejoining identity per request.
 --
 -- Safe to run on fresh stacks (bootstrap has these columns too); safe to
 -- re-run (IF NOT EXISTS guards the column adds).

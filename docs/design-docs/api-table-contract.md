@@ -1,17 +1,17 @@
 # API Table Contract — Three-Families Serving Layer
 
-**Status:** current — implemented by serving-layer-v2 phases 0–8 (shipped 2026-04-18)
-**Date:** 2026-04-17 (verified 2026-04-18)
+**Status:** current
+**Date:** 2026-04-17 (verified 2026-04-20)
 **Related:** [`../exec-plans/completed/serving-layer-v2.md`](../exec-plans/completed/serving-layer-v2.md), [ADR-003](adr-003-tiered-serving-contract.md) (amended)
 
 ## Summary
 
-Every object in the `api_*` layer belongs to exactly one of three physical families. Every user-facing endpoint and every Grafana panel maps to exactly one `api_*` table (or an alias view over one). No runtime JOINs of heavy tables; no view chains; no recomputation of already-materialized rollups.
+Every object in the `api_*` layer belongs to exactly one of three physical families. User-facing endpoints and Grafana panels must anchor on published `api_*` contracts rather than raw, normalized, or canonical tables. Some routes combine a current surface with an hourly surface, but the read boundary remains `api_*`.
 
 | Family | Shape | Purpose |
 |---|---|---|
 | `api_hourly_*` | wide hourly rollup, append-only with `refresh_run_id` slicing | time-series analytics |
-| `api_current_*` | latest-per-entity, ReplacingMergeTree | entity lookups and live state |
+| `api_current_*` | latest-per-entity snapshot over a MergeTree store | entity lookups and live state |
 | `api_fact_*` | append-only event log | paginated per-event lists |
 
 ## Required columns (every `api_*_store` table)
@@ -41,24 +41,35 @@ Tables in this family (post-Phase-8):
 - `api_hourly_streaming_gpu_metrics`
 - `api_hourly_request_demand`
 - `api_hourly_byoc_auth`
-- `api_hourly_payment`
+- `api_hourly_byoc_payments`
 
 ## Family 2: `api_current_*`
 
-- **Engine:** `ReplacingMergeTree(refreshed_at)`
+- **Engine:** `MergeTree`
 - **Partition by:** none (or a coarse partition like `org` if cardinality is extreme)
 - **Sort key:** `(entity_key)` or `(org, entity_key)` — never starts with a time column
 - **Entity key rules:**
   - One row per entity, period. No duplication across dimensions.
-  - Version column is `refreshed_at` for `FINAL`-cheap latest-row semantics.
-- **Serving pattern:** reader uses `FINAL` or `argMax`; because cardinality is small and ReplacingMergeTree collapses at merge, `FINAL` is cheap.
-- **Alias view:** `api_current_<name>` is a view that issues `SELECT … FROM <store> FINAL` and projects public columns.
+  - Latest-slice selection is keyed by `(refreshed_at, refresh_run_id)` in the alias view.
+- **Serving pattern:** reader uses an `argMax(refresh_run_id, (refreshed_at, refresh_run_id))` latest-slice CTE over the entity key.
+- **Alias view:** `api_current_<name>` is a view that joins the store against that latest-slice selection and projects public columns.
 
 Tables in this family:
 
 - `api_current_capability` — one row per `(org, orch_address, capability_id, canonical_pipeline, model_id, gpu_id)`
 - `api_current_active_stream_state` — one row per `(org, canonical_session_key)`; only uncompleted rows
-- `api_current_orchestrator` — one row per `(org, orch_address)` denormalizing identity + latest reliability + capability counts
+- `api_current_orchestrator` — one org-agnostic row per `orch_address` denormalizing identity + latest reliability + capability counts
+- `api_current_gpu_inventory` — one row per `(org, orch_address, gpu_id)` for hot dashboard inventory reads
+
+`api_current_orchestrator` is intentionally org-agnostic because it is an
+entity summary used by orchestrator-listing endpoints. Repeating the same
+orchestrator once per observing org would make list endpoints and global
+counts easy to overcount. Org-scoped provenance stays on observed and
+activity surfaces such as `api_observed_orchestrator`,
+`api_observed_capability_offer`, `api_current_gpu_inventory`, and hourly
+SLA/request tables. If an API needs current org provenance at orchestrator
+grain, add an explicit org-observation surface or provenance columns rather
+than changing the entity-summary grain implicitly.
 
 ## Family 3: `api_fact_*`
 
@@ -73,13 +84,12 @@ Tables in this family:
 - `api_fact_ai_batch_job`
 - `api_fact_ai_batch_llm_request`
 - `api_fact_byoc_job`
-- `api_fact_byoc_payment`
 
 ## Denormalization rules
 
 Two pieces of entity data are denormalized into every `api_*` row that references them:
 
-1. **Orchestrator identity** — `orchestrator_name`, `orchestrator_uri_norm`, `orchestrator_version` are written directly into every `api_hourly_*` and `api_current_*` row. Handlers and Grafana panels never `LEFT JOIN api_orchestrator_identity` at read time.
+1. **Orchestrator identity** — service-facing URI fields are written directly into the `api_hourly_*` and `api_current_*` rows that need them. API handlers do not `LEFT JOIN api_orchestrator_identity` to serve request paths. Grafana panels may still use `api_orchestrator_identity` for display labels when the backing fact table only carries an address.
 2. **Capability family flag** — `capability_family ∈ {builtin, byoc}` is carried on every row that touches capabilities. Handlers never branch on `if capability_family = 'byoc' then ...` at read time; they filter.
 
 Other dimensions (pipeline, model, GPU) are already naturally present as columns and stay as dimension keys.
@@ -101,7 +111,7 @@ Example — `api_hourly_streaming_sla` keeps `sla_score` **and** keeps `requeste
 
 This rule is lifted from ADR-003's warehouse rollup rule into the API contract so every downstream consumer (API client, Grafana panel, future analytical pipeline) inherits the safety property.
 
-Enforced by dbt test `assert_additive_primitives_present` — every `api_hourly_*` model's `schema.yml` declares the primitive-to-derived mapping, and the test verifies the primitives are non-nullable.
+Enforced by dbt test `assert_additive_primitives_present` — the required primitive list is declared in `warehouse/tests/test_api_hourly_additive_primitives.sql`, and the test verifies those columns are present and non-nullable.
 
 ## Core-logic ownership rule
 
@@ -129,7 +139,7 @@ This mapping is canonical. Adding an endpoint means adding or extending a table 
 
 | Endpoint | Backing table |
 |---|---|
-| `/v1/dashboard/kpi` | `api_hourly_streaming_demand`, `api_current_capability`, `api_current_orchestrator` |
+| `/v1/dashboard/kpi` | `api_hourly_streaming_demand`, `api_observed_orchestrator`, `api_observed_capability_offer` |
 | `/v1/dashboard/pipelines` | `api_hourly_streaming_demand` |
 | `/v1/dashboard/orchestrators` | `api_current_orchestrator` |
 | `/v1/dashboard/gpu-capacity` | `api_current_capability`, `api_current_active_stream_state` |
@@ -150,7 +160,7 @@ This mapping is canonical. Adding an endpoint means adding or extending a table 
 | `/v1/requests/byoc/jobs` | `api_fact_byoc_job` |
 | `/v1/requests/byoc/workers` | `api_current_capability` (filter `capability_family = 'byoc'`) |
 | `/v1/requests/byoc/auth` | `api_hourly_byoc_auth` |
-| `/v1/discover/orchestrators` | `api_current_orchestrator` |
+| `/v1/discover/orchestrators` | `api_observed_capability_offer`, `api_observed_byoc_worker`, `api_hourly_streaming_sla`, `api_hourly_request_demand` |
 
 ## Enforcement
 
@@ -168,7 +178,7 @@ Five machine-checked rules:
 
 3. **Replay determinism** — the layer-by-layer replay harness in `tools/replay/` drives raw events through every boundary (raw → normalized → canonical → api) and asserts byte-identical `artifact_checksum` across two runs at each boundary. Per-layer granularity means divergence is localized to the layer that introduced it.
 
-4. **Additive primitives present** — dbt test `assert_additive_primitives_present` walks each `api_hourly_*` model's `schema.yml` primitive-to-derived declaration and verifies every declared primitive column is non-nullable and present.
+4. **Additive primitives present** — dbt test `assert_additive_primitives_present` checks the required primitive list declared in `warehouse/tests/test_api_hourly_additive_primitives.sql` and verifies every listed column is non-nullable and present.
 
 5. **No core-logic recalc** — CI grep check against `scripts/core-logic-signatures.txt` fails if any SQL in `api/internal/service/` or `warehouse/models/api/` contains a formula signature matching known definitional logic (scoring coefficients, classification branches, attribution predicates).
 
@@ -181,5 +191,5 @@ Five machine-checked rules:
 
 ## Open questions
 
-- Should `api_hourly_payment` be merged into `api_fact_byoc_payment` given the low event rate? Decide during Phase 6.
+- Should `/v1/discover/orchestrators` eventually collapse onto `api_current_orchestrator` plus `api_current_capability` so discovery no longer rescans observed inventory on the read path?
 - Does `api_current_active_stream_state` need a separate `api_hourly_active_stream_state` for retention, or is 30-min TTL sufficient? Decide based on the live-operations dashboard requirements.

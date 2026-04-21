@@ -1,6 +1,6 @@
 -- Phase 6.3 of serving-layer-v2: new denormalized store carrying one
 -- row per orch_address (org-agnostic; orchestrators are physical nodes
--- shared across orgs) with identity + capability membership + GPU count +
+-- shared across orgs) with identity + capability membership + observed GPU UUID count +
 -- latest 24h of SLA/reliability, so the three orchestrator-listing
 -- endpoints (/v1/streaming/orchestrators, /v1/requests/orchestrators,
 -- dashboard-orchestrators) can each do a single MergeTree scan instead

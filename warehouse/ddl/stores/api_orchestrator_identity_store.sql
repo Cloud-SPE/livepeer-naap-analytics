@@ -1,7 +1,7 @@
 -- Canonical DDL for naap.api_orchestrator_identity_store.
 -- Source of truth: this file. The resolver writes rows; this declaration
 -- governs the physical schema. Apply with scripts/apply-store-ddl.sh; drift
--- is caught by warehouse/tests/test_store_ddl_drift.sql.
+-- is caught by `make lint-store-ddl`.
 --
 -- Perf-pass promotion of api_orchestrator_identity. The prior view
 -- expanded into a multi-CTE argMaxIfMerge scan of canonical_capability_snapshot_latest

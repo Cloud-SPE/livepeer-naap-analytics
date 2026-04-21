@@ -263,7 +263,7 @@ func (r *Repo) GetDashboardPipelines(ctx context.Context, limit int, windowHours
 
 // GetDashboardOrchestrators serves GET /v1/dashboard/orchestrators.
 //
-// Identity, capability membership, and GPU count come from the
+// Identity, capability membership, and observed GPU UUID count come from the
 // resolver-written api_current_orchestrator snapshot (grain: one row per
 // orch_address). Reliability and SLA metrics are aggregated live over
 // the caller's requested window from api_hourly_streaming_sla, so
@@ -544,7 +544,7 @@ func (r *Repo) GetDashboardGPUCapacity(ctx context.Context) (*types.DashboardGPU
 	}
 	sort.Slice(models, func(i, j int) bool { return models[i].Count > models[j].Count })
 
-	// PipelineGPUs[]: one entry per pipeline; Models[] is per-AI-model GPU count
+	// PipelineGPUs[]: one entry per pipeline; Models[] is per-AI-model GPU UUID count.
 	pipelineGPUs := make([]types.DashboardGPUCapacityPipeline, 0, len(pipelineAIModelGPUs))
 	for pipeline, aiModels := range pipelineAIModelGPUs {
 		pModels := make([]types.DashboardGPUCapacityPipelineModel, 0, len(aiModels))
@@ -731,9 +731,9 @@ func (r *Repo) GetDashboardPricing(ctx context.Context) ([]types.DashboardPipeli
 
 // GetDashboardJobFeed serves GET /v1/dashboard/job-feed.
 func (r *Repo) GetDashboardJobFeed(ctx context.Context, limit int) ([]types.DashboardJobFeedItem, error) {
-	// Phase 3: orchestrator_uri is denormalized onto the active stream state
-	// store — the resolver stamps it at write time from identity_latest — so
-	// the API layer reads a pre-joined column instead of a second lookup.
+	// Phase 3: api_current_active_stream_state exposes orchestrator_uri
+	// without an identity lookup. The resolver writes it when available, and
+	// the API view falls back to the session-current attributed URI.
 	rows, err := r.conn.Query(ctx, `
 		SELECT event_id, pipeline, ifNull(model_id, '') AS model_id,
 		       gateway, ifNull(orch_address, '') AS orch_address,

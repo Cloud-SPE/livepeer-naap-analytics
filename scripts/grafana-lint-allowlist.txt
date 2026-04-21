@@ -4,26 +4,9 @@
 # (the separator between location and phase is a literal tab.)
 #
 # Phase references map to docs/exec-plans/completed/serving-layer-v2.md.
-# When Phase 7 (Grafana cleanup) lands, every entry here must be
-# removed in the same PR that retires the last violation.
+# Keep this file empty unless a temporary dashboard exception is intentional
+# and linked to a specific cleanup phase.
 #
 # New violations with no entry here cause the lint to fail. An entry
 # here with no matching violation is tolerated but should be cleaned
 # up when noticed.
-
-naap-economics.json / Gateway Ticket Face Value (ETH, selected range)	phase-7-grafana-cleanup
-naap-jobs.json / AI Batch Duplicate Rows	phase-7-grafana-cleanup
-naap-jobs.json / BYOC Duplicate Rows	phase-7-grafana-cleanup
-naap-jobs.json / Canonical Coverage vs Source	phase-7-grafana-cleanup
-naap-jobs.json / Payments by Capability	phase-7-grafana-cleanup
-naap-live-operations.json / Live Status/Trace/Capability Event Tape (30m)	phase-7-grafana-cleanup
-naap-live-operations.json / Stage Throughput (selected range)	phase-7-grafana-cleanup
-naap-overview.json / E2E Latency (1h avg)	phase-7-grafana-cleanup
-naap-overview.json / Network FPS (15m avg)	phase-7-grafana-cleanup
-naap-overview.json / Top Live Video Prompts (selected range)	phase-7-grafana-cleanup
-naap-overview.json / Top Orchestrators (selected range summary)	phase-7-grafana-cleanup
-naap-performance-drilldown.json / End-to-End Stream Latency (selected range)	phase-7-grafana-cleanup
-naap-performance-drilldown.json / FPS Average by Orchestrator (1h intervals)	phase-7-grafana-cleanup
-naap-performance-drilldown.json / Jitter by Orchestrator (selected range)	phase-7-grafana-cleanup
-naap-performance-drilldown.json / Network FPS by Pipeline (1h avg)	phase-7-grafana-cleanup
-naap-performance-drilldown.json / Top Orchestrators (selected range: Streams, FPS, Latency)	phase-7-grafana-cleanup

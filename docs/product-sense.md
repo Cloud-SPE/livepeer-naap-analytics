@@ -45,5 +45,5 @@ principles. The short version is:
 
 - ClickHouse owns physical ingest and storage.
 - The resolver owns corrected current state and serving-store publication.
-- dbt owns semantic `canonical_*`, `api_base_*`, and `api_*` views.
+- dbt owns semantic `canonical_*` and `api_*` views.
 - The Go API serves published read contracts, not ad hoc raw-table queries.

@@ -9,7 +9,9 @@ The resolver owns the **data** in these tables (every INSERT is a
 resolver run). This repo owns the **shape**. `warehouse/ddl/stores/`
 is the authoritative declaration; `infra/clickhouse/migrations/` is
 the historical record of how the shape has evolved and is applied to
-fresh stacks at bootstrap.
+fresh stacks at bootstrap. dbt is downstream of this contract: it may
+publish views over `_store` tables, but it must never be the thing that
+creates them.
 
 ## Why not a dbt materialization
 
@@ -25,6 +27,14 @@ ever owning the data.
 
 ```
 warehouse/ddl/stores/
+  api_current_capability_store.sql
+  api_current_gpu_inventory_store.sql
+  api_current_orchestrator_store.sql
+  api_hourly_byoc_auth_store.sql
+  api_hourly_byoc_payments_store.sql
+  api_hourly_request_demand_store.sql
+  api_hourly_streaming_sla_store.sql
+  api_orchestrator_identity_store.sql
   canonical_active_stream_state_latest_store.sql
   canonical_ai_batch_job_store.sql
   canonical_byoc_job_store.sql
@@ -33,11 +43,11 @@ warehouse/ddl/stores/
   canonical_capability_snapshots_store.sql
   canonical_payment_links_store.sql
   canonical_session_current_store.sql
+  canonical_sla_benchmark_daily_store.sql
   canonical_status_hours_store.sql
   canonical_status_samples_recent_store.sql
   canonical_streaming_demand_hourly_store.sql
   canonical_streaming_gpu_metrics_hourly_store.sql
-  canonical_streaming_sla_hourly_store.sql
   canonical_streaming_sla_input_hourly_store.sql
   normalized_session_attribution_input_latest_store.sql
 ```
@@ -51,10 +61,17 @@ ENGINE = ... PARTITION BY ... ORDER BY ... TTL ... SETTINGS ...`.
 2. Add an `infra/clickhouse/migrations/<NNN>_create_<name>.sql` that
    the bootstrap / migration runner will apply on fresh stacks. The
    migration and the declaration must produce the same schema.
-3. `make apply-store-ddl` to ensure the table exists locally.
-4. `make lint-store-ddl` to verify the live schema matches the file.
-5. If the resolver needs to INSERT into it, add the writer in
+3. Refresh `infra/clickhouse/bootstrap/v1.sql` if the supported fresh
+   bootstrap schema has changed.
+4. `make apply-store-ddl` to ensure the table exists locally.
+5. `make lint-store-ddl` to verify the live schema matches the file.
+6. If the resolver needs to INSERT into it, add the writer in
    `api/internal/resolver/repo.go`.
+
+Fresh ephemeral environments that do not run the ClickHouse init path
+the same way as local Compose should still apply the checked-in store
+DDL after bootstrap. Replay CI does this explicitly because dbt view
+builds cannot recover from a missing `_store` table.
 
 ## Workflow — changing an existing store table
 

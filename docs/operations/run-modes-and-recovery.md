@@ -6,7 +6,7 @@ For per-service Compose responsibilities, see [`compose-services.md`](compose-se
 
 ## Standard Deployment Summary
 
-A standard deployment runs ClickHouse, the resolver, the API, and the Grafana/Prometheus stack continuously. Kafka is the event source, ClickHouse owns physical ingest/runtime state, the resolver owns freshness and publication into current/serving stores, `dbt` owns the semantic `canonical_*`, internal `api_base_*`, and public `api_*` views, and the API only reads published `api_*` relations.
+A standard deployment runs ClickHouse, the resolver, the API, and the Grafana/Prometheus stack continuously. Kafka is the event source, ClickHouse owns physical ingest/runtime state, the resolver owns freshness and publication into current/serving stores, `dbt` owns the semantic `canonical_*` and public `api_*` views, and the API only reads published `api_*` relations.
 
 That split matters because it keeps responsibilities clear:
 

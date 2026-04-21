@@ -343,19 +343,19 @@ func TestAffectedDashboardPanelsDeduplicateOrchestratorStateLookups(t *testing.T
 	}
 
 	affectedTitles := map[string]struct{}{
-		"Gateway -> Orchestrator -> Pipeline Paths (15m)":        {},
-		"Top 20 Orchestrators by SLA Score (selected range)":     {},
-		"Top 10 Orchestrators by SLA Score (selected range)":     {},
-		"Top Orchestrators (selected range summary)":             {},
-		"Top Orchestrators (selected range: Streams, FPS, Latency)": {},
-		"Current Active Streams":                                 {},
-		"Current Known Live Streams":                             {},
-		"Current Streams by Orchestrator (includes zero-active)": {},
+		"Gateway -> Orchestrator -> Pipeline Paths (15m)":                    {},
+		"Top 20 Orchestrators by SLA Score (settled hours)":                  {},
+		"Top 10 Orchestrators by SLA Score (settled hours)":                  {},
+		"Top Orchestrators (settled range summary)":                          {},
+		"Top Orchestrators (settled range: Streams, FPS, Latency)":           {},
+		"Current Active Streams":                                             {},
+		"Current Known Live Streams":                                         {},
+		"Current Streams by Orchestrator (includes zero-active)":             {},
 		"Current Gateway -> Orchestrator -> Pipeline Paths (120s freshness)": {},
-		"FPS Average by Orchestrator (1h intervals)":             {},
-		"Jitter Coefficient by Orchestrator":                     {},
-		"Latest GPU Inventory Seen in 24h":                       {},
-		"Latest Pricing Seen in 24h by Orchestrator":             {},
+		"FPS Average by Orchestrator (1h intervals)":                         {},
+		"Jitter Coefficient by Orchestrator":                                 {},
+		"Latest GPU UUID Inventory Seen in 24h":                              {},
+		"Latest Pricing Seen in 24h by Orchestrator":                         {},
 	}
 
 	unsafeSnippets := []string{
@@ -408,19 +408,19 @@ func TestAffectedDashboardPanelsUseCollisionAwareLabelsAndStreamingSLA(t *testin
 	}
 
 	labelTitles := map[string]struct{}{
-		"Gateway -> Orchestrator -> Pipeline Paths (15m)":        {},
-		"Top 20 Orchestrators by SLA Score (selected range)":     {},
-		"Top 10 Orchestrators by SLA Score (selected range)":     {},
-		"Top Orchestrators (selected range summary)":             {},
-		"Top Orchestrators (selected range: Streams, FPS, Latency)": {},
-		"Current Active Streams":                                 {},
-		"Current Known Live Streams":                             {},
-		"Current Streams by Orchestrator (includes zero-active)": {},
+		"Gateway -> Orchestrator -> Pipeline Paths (15m)":                    {},
+		"Top 20 Orchestrators by SLA Score (settled hours)":                  {},
+		"Top 10 Orchestrators by SLA Score (settled hours)":                  {},
+		"Top Orchestrators (settled range summary)":                          {},
+		"Top Orchestrators (settled range: Streams, FPS, Latency)":           {},
+		"Current Active Streams":                                             {},
+		"Current Known Live Streams":                                         {},
+		"Current Streams by Orchestrator (includes zero-active)":             {},
 		"Current Gateway -> Orchestrator -> Pipeline Paths (120s freshness)": {},
-		"FPS Average by Orchestrator (1h intervals)":             {},
-		"Jitter Coefficient by Orchestrator":                     {},
-		"Latest GPU Inventory Seen in 24h":                       {},
-		"Latest Pricing Seen in 24h by Orchestrator":             {},
+		"FPS Average by Orchestrator (1h intervals)":                         {},
+		"Jitter Coefficient by Orchestrator":                                 {},
+		"Latest GPU UUID Inventory Seen in 24h":                              {},
+		"Latest Pricing Seen in 24h by Orchestrator":                         {},
 	}
 
 	var slaChartCount int
@@ -457,7 +457,7 @@ func TestAffectedDashboardPanelsUseCollisionAwareLabelsAndStreamingSLA(t *testin
 					}
 				}
 				switch panel.Title {
-				case "Top 20 Orchestrators by SLA Score (selected range)", "Top 10 Orchestrators by SLA Score (selected range)":
+				case "Top 20 Orchestrators by SLA Score (settled hours)", "Top 10 Orchestrators by SLA Score (settled hours)":
 					slaChartCount++
 					if !strings.Contains(sql, "FROM naap.api_hourly_streaming_sla") {
 						t.Fatalf("panel %q in %s should read from streaming SLA source", panel.Title, path)
@@ -471,7 +471,10 @@ func TestAffectedDashboardPanelsUseCollisionAwareLabelsAndStreamingSLA(t *testin
 					if !strings.Contains(sql, "eligible_orch AS (") || !strings.Contains(sql, "INNER JOIN eligible_orch") {
 						t.Fatalf("panel %q in %s should filter SLA rows through eligible orchestrators", panel.Title, path)
 					}
-				case "Top Orchestrators (selected range: Streams, FPS, Latency)":
+					if !strings.Contains(sql, "s.window_start < toStartOfHour(now('UTC') - INTERVAL 15 MINUTE)") {
+						t.Fatalf("panel %q in %s should rank settled SLA hours only", panel.Title, path)
+					}
+				case "Top Orchestrators (settled range summary)", "Top Orchestrators (settled range: Streams, FPS, Latency)":
 					if !strings.Contains(sql, "FROM naap.api_hourly_streaming_sla") {
 						t.Fatalf("panel %q in %s should join streaming SLA data", panel.Title, path)
 					}
@@ -481,8 +484,16 @@ func TestAffectedDashboardPanelsUseCollisionAwareLabelsAndStreamingSLA(t *testin
 					if !strings.Contains(sql, "\"SLA Score\"") {
 						t.Fatalf("panel %q in %s should expose an SLA Score column", panel.Title, path)
 					}
-					if !strings.Contains(sql, "eligible_pairs AS (") || !strings.Contains(sql, "INNER JOIN eligible_pairs") {
+					if panel.Title == "Top Orchestrators (settled range: Streams, FPS, Latency)" && (!strings.Contains(sql, "eligible_pairs AS (") || !strings.Contains(sql, "INNER JOIN eligible_pairs")) {
 						t.Fatalf("panel %q in %s should filter SLA rows through eligible address/pipeline pairs", panel.Title, path)
+					}
+					for _, cutoff := range []string{
+						"window_start < toStartOfHour(now('UTC') - INTERVAL 15 MINUTE)",
+						"s.window_start < toStartOfHour(now('UTC') - INTERVAL 15 MINUTE)",
+					} {
+						if !strings.Contains(sql, cutoff) {
+							t.Fatalf("panel %q in %s should filter settled SLA hours with %q", panel.Title, path, cutoff)
+						}
 					}
 				}
 			}
@@ -494,18 +505,32 @@ func TestAffectedDashboardPanelsUseCollisionAwareLabelsAndStreamingSLA(t *testin
 	}
 }
 
-func TestNaapJobsDashboardOrgVariableUsesHourlyRequestDemand(t *testing.T) {
+func TestNaapDashboardsUseGenericVariableHelperViews(t *testing.T) {
 	root := repoRoot(t)
-	path := filepath.Join(root, "infra", "grafana", "dashboards", "naap-jobs.json")
-	body, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("ReadFile %s: %v", path, err)
+	paths := []string{
+		filepath.Join(root, "infra", "grafana", "dashboards", "naap-overview.json"),
+		filepath.Join(root, "infra", "grafana", "dashboards", "naap-live-operations.json"),
+		filepath.Join(root, "infra", "grafana", "dashboards", "naap-performance-drilldown.json"),
+		filepath.Join(root, "infra", "grafana", "dashboards", "naap-supply-inventory.json"),
+		filepath.Join(root, "infra", "grafana", "dashboards", "naap-economics.json"),
+		filepath.Join(root, "infra", "grafana", "dashboards", "naap-jobs.json"),
+		filepath.Join(root, "infra", "grafana", "dashboards", "internal", "naap-internal-debug.json"),
 	}
 
-	if !strings.Contains(string(body), "SELECT DISTINCT org FROM naap.api_hourly_request_demand") {
-		t.Fatalf("%s should source the org variable from naap.api_hourly_request_demand", path)
-	}
-	if strings.Contains(string(body), "SELECT DISTINCT org FROM (SELECT org FROM naap.api_fact_ai_batch_job") {
-		t.Fatalf("%s still sources the org variable from request job facts", path)
+	for _, path := range paths {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("ReadFile %s: %v", path, err)
+		}
+		text := string(body)
+		if !strings.Contains(text, "SELECT org FROM naap.api_variable_orgs") {
+			t.Fatalf("%s should source the org variable from naap.api_variable_orgs", path)
+		}
+		if strings.Contains(text, "SELECT DISTINCT org FROM naap.") || strings.Contains(text, "SELECT DISTINCT org FROM (SELECT org FROM") {
+			t.Fatalf("%s still contains an ad hoc org variable query", path)
+		}
+		if strings.Contains(text, "SELECT DISTINCT capability FROM") {
+			t.Fatalf("%s still contains an ad hoc capability variable query", path)
+		}
 	}
 }

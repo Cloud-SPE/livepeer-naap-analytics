@@ -2,11 +2,11 @@
 -- Source of truth: this file. The resolver writes rows;
 -- this declaration governs the physical schema.
 -- Apply with scripts/apply-store-ddl.sh; drift is caught by
--- warehouse/tests/test_store_ddl_drift.sql.
+-- `make lint-store-ddl`.
 --
 -- Phase 6.3 of serving-layer-v2: one denormalized row per orch_address
 -- (org-agnostic; orchestrators are physical nodes shared across orgs)
--- carrying identity + capability membership + GPU count + latest 24h of
+-- carrying identity + capability membership + observed GPU UUID count + latest 24h of
 -- SLA/reliability. Serves /v1/streaming/orchestrators,
 -- /v1/requests/orchestrators, and dashboard-orchestrators in a single
 -- MergeTree scan each, replacing the 3–4 query fan-out + in-Go rejoin

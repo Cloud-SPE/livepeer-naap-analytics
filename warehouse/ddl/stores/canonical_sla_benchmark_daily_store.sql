@@ -2,7 +2,7 @@
 -- Source of truth: this file. The resolver writes rows;
 -- this declaration governs the physical schema.
 -- Apply with scripts/apply-store-ddl.sh; drift is caught by
--- warehouse/tests/test_store_ddl_drift.sql.
+-- `make lint-store-ddl`.
 --
 -- Pre-computed daily SLA benchmark cohort: one row per (pipeline_id,
 -- model_id, cohort_date, refresh_run_id) with scalar p50/p90/p10

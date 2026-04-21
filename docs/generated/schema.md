@@ -4,7 +4,7 @@ This reference is generated from the checked-in bootstrap baseline in [`v1.sql`]
 
 Regenerate this inventory with `make bootstrap-extract`. If the physical bootstrap changes, update [`v1.sql`](../../infra/clickhouse/bootstrap/v1.sql) first and rerun the generator in the same change.
 
-The documented `raw_*`, `normalized_*`, `canonical_*`, `operational_*`, `api_base_*`, and `api_*` tiers are semantic/modeling guidance. This inventory is the supported physical schema, so it also includes infrastructure/runtime objects such as `accepted_raw_events`, `ignored_raw_events`, `kafka_*`, `resolver_*`, `agg_*`, metadata tables, and change/audit tables.
+The documented `raw_*`, `normalized_*`, `canonical_*`, `operational_*`, and `api_*` tiers are semantic/modeling guidance. This inventory is the supported physical schema, so it also includes infrastructure/runtime objects such as `accepted_raw_events`, `ignored_raw_events`, `kafka_*`, `resolver_*`, `agg_*`, metadata tables, and change/audit tables.
 
 ## Included Objects
 
@@ -21,6 +21,7 @@ The documented `raw_*`, `normalized_*`, `canonical_*`, `operational_*`, `api_bas
 | `api_orchestrator_identity_store` | `MergeTree` |
 | `api_current_orchestrator_store` | `MergeTree` |
 | `api_hourly_byoc_auth_store` | `MergeTree` |
+| `api_hourly_byoc_payments_store` | `MergeTree` |
 | `api_hourly_request_demand_store` | `MergeTree` |
 | `api_hourly_streaming_sla_store` | `MergeTree` |
 | `canonical_active_stream_state_latest_store` | `MergeTree` |

@@ -9,7 +9,7 @@ select
     a.pipeline,
     a.model_id,
     a.orch_address,
-    a.orchestrator_uri,
+    coalesce(nullIf(a.orchestrator_uri, ''), nullIf(s.attributed_orch_uri, ''), '') as orchestrator_uri,
     a.attribution_status,
     a.attribution_reason,
     a.state,

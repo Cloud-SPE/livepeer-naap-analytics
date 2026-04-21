@@ -70,6 +70,18 @@ func TestRuleServing001_APIOutputsExposeStableRequiredFields(t *testing.T) {
 				"llm_ttft_ms_sum", "llm_ttft_ms_sample_count",
 			},
 		},
+		{
+			table: "api_hourly_byoc_auth",
+			fields: []string{
+				"window_start", "org", "capability_name", "total_events", "success_count", "failure_count",
+			},
+		},
+		{
+			table: "api_hourly_byoc_payments",
+			fields: []string{
+				"window_start", "org", "capability", "payment_type", "payment_count", "total_amount", "currency", "unique_orchs",
+			},
+		},
 	}
 
 	for _, check := range checks {

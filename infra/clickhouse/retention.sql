@@ -15,11 +15,11 @@
 -- ============================================================
 
 -- ------------------------------------------------------------
--- Tier 1: Raw ingest (365 days)
--- Rationale: authoritative event archive; Kafka replay window
--- is only 30 days, so ClickHouse is the sole source of truth
--- for events older than 30 days. 365 days covers one full
--- fiscal year for billing and compliance review.
+-- Tier 1: Raw ingest (90 days)
+-- Rationale: authoritative event archive inside the bounded
+-- replay/audit window. ClickHouse is the sole source of truth
+-- once Kafka retention has elapsed, but current production keeps
+-- this layer aligned to a 90-day audit window rather than 365 days.
 -- ------------------------------------------------------------
 
 ALTER TABLE naap.accepted_raw_events
@@ -115,10 +115,13 @@ ALTER TABLE naap.normalized_byoc_payment
 -- to align with raw event retention. File a follow-up ticket
 -- before applying any ALTER to these tables in production.
 --
--- ALTER TABLE naap.orch_current_store             MODIFY TTL ...;
--- ALTER TABLE naap.session_current_store          MODIFY TTL ...;
--- ALTER TABLE naap.canonical_orch_state           MODIFY TTL ...;
--- ALTER TABLE naap.canonical_stream_state         MODIFY TTL ...;
--- ALTER TABLE naap.api_orch_state_store           MODIFY TTL ...;
--- ALTER TABLE naap.api_stream_state_store         MODIFY TTL ...;
+-- ALTER TABLE naap.api_current_capability_store         MODIFY TTL ...;
+-- ALTER TABLE naap.api_current_gpu_inventory_store      MODIFY TTL ...;
+-- ALTER TABLE naap.api_current_orchestrator_store       MODIFY TTL ...;
+-- ALTER TABLE naap.api_hourly_request_demand_store      MODIFY TTL ...;
+-- ALTER TABLE naap.api_hourly_byoc_auth_store           MODIFY TTL ...;
+-- ALTER TABLE naap.api_hourly_byoc_payments_store       MODIFY TTL ...;
+-- ALTER TABLE naap.canonical_payment_links_store        MODIFY TTL ...;
+-- ALTER TABLE naap.canonical_session_current_store      MODIFY TTL ...;
+-- ALTER TABLE naap.canonical_sla_benchmark_daily_store  MODIFY TTL ...;
 -- ------------------------------------------------------------

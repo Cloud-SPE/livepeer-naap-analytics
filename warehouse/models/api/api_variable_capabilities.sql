@@ -1,4 +1,8 @@
--- Perf-pass: tiny template-variable source for the $capability dropdown.
+-- Perf-pass: tiny global template-variable source for the $capability
+-- dropdown. This is an unscoped base list. Jobs/dashboard capability
+-- filters that need org context should keep that predicate in Grafana's
+-- query instead of depending on this view alone.
+--
 -- Reads from the unified capability spine (api_current_capability_store,
 -- written by the resolver on a 5-min throttle) so the dropdown list is a
 -- primary-key scan over ~hundreds of rows instead of a distinct scan of

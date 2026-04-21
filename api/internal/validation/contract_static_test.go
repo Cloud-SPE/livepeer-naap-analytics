@@ -133,7 +133,6 @@ func TestTierContract_CanonicalModelsDoNotUseCanonicalSessionLatest(t *testing.T
 func TestTierContract_NonAPIModelsDoNotDeriveTruthFromAPIModels(t *testing.T) {
 	root := repoRoot(t)
 	modelRoots := []string{
-		filepath.Join(root, "warehouse", "models", "api_base"),
 		filepath.Join(root, "warehouse", "models", "canonical"),
 		filepath.Join(root, "warehouse", "models", "facts"),
 		filepath.Join(root, "warehouse", "models", "refresh"),
@@ -263,7 +262,7 @@ func TestTierContract_RollupSafetyRuleIsDocumented(t *testing.T) {
 }
 
 // Phase 5 retired TestTierContract_SLABenchmarkStateUsesAdditiveInputsOnly:
-// the test asserted api_base_* view dependencies that no longer exist. The
+// the old test asserted dependencies through retired api_base_* views. The
 // invariant it protected — benchmark math runs over additive inputs only —
 // now lives in the resolver's insertSLABenchmarkDaily SQL, whose shape is
 // exercised end-to-end by test_canonical_sla_benchmark_daily_store_grain_unique

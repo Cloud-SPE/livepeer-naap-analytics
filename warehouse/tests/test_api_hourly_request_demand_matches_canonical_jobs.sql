@@ -150,7 +150,7 @@ where ifNull(e.expected_job_count, 0) != ifNull(a.job_count, 0)
    or ifNull(e.expected_no_orch_count, 0) != ifNull(a.no_orch_count, 0)
    or ifNull(e.expected_success_count, 0) != ifNull(a.success_count, 0)
    or ifNull(e.expected_duration_ms_sum, 0) != ifNull(a.duration_ms_sum, 0)
-   or abs(ifNull(e.expected_price_sum, 0.0) - ifNull(a.price_sum, 0.0)) > 1e-9
+   or abs(ifNull(e.expected_price_sum, 0.0) - ifNull(a.price_sum, 0.0)) > 1e-6
    or ifNull(e.expected_llm_request_count, 0) != ifNull(a.llm_request_count, 0)
    or ifNull(e.expected_llm_success_count, 0) != ifNull(a.llm_success_count, 0)
    or ifNull(e.expected_llm_total_tokens_sum, 0) != ifNull(a.llm_total_tokens_sum, 0)

@@ -59,6 +59,11 @@
         'success_count',
         'failure_count',
     ],
+    'api_hourly_byoc_payments': [
+        'payment_count',
+        'total_amount',
+        'unique_orchs',
+    ],
 } -%}
 
 {%- set parts = [] -%}

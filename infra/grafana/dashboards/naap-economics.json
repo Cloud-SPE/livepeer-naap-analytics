@@ -261,7 +261,7 @@
           "text": "All",
           "value": "__all"
         },
-        "definition": "SELECT DISTINCT org FROM naap.api_observed_capability_pricing WHERE org != '' AND last_seen >= now() - INTERVAL 24 HOUR ORDER BY org",
+        "definition": "SELECT org FROM naap.api_variable_orgs",
         "hide": 0,
         "includeAll": true,
         "label": "Org",
@@ -282,7 +282,7 @@
           "text": "All",
           "value": "__all"
         },
-        "definition": "SELECT DISTINCT model_id FROM naap.api_observed_capability_pricing WHERE model_id != '' AND last_seen >= now() - INTERVAL 24 HOUR AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) ORDER BY model_id",
+        "definition": "SELECT model_id FROM naap.api_variable_models",
         "hide": 0,
         "includeAll": true,
         "label": "Model",
@@ -303,7 +303,7 @@
           "text": "All",
           "value": "__all"
         },
-        "definition": "SELECT i.orch_address AS __value, i.orch_label AS __text FROM naap.api_orchestrator_identity i INNER JOIN (SELECT DISTINCT orch_address FROM naap.api_observed_capability_pricing WHERE last_seen >= now() - INTERVAL 24 HOUR AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(model_id, '')))) p ON p.orch_address = i.orch_address ORDER BY __text",
+        "definition": "SELECT concat(coalesce(nullIf(orch_label, ''), orch_address), ':',  orch_address) FROM naap.api_variable_orchestrators",
         "hide": 0,
         "includeAll": true,
         "label": "Orchestrator (ENS)",

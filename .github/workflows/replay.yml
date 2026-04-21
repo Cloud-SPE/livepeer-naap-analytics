@@ -103,6 +103,19 @@ jobs:
           cat infra/clickhouse/bootstrap/v1.sql | \
             curl -sS -u 'naap_admin:changeme' 'http://localhost:8123/?database=naap' --data-binary @-
 
+      # Fresh replay CI still applies the checked-in store DDL after
+      # bootstrap. dbt only publishes views over resolver-owned _store
+      # tables; it does not create those physical tables. This catches
+      # bootstrap omissions early and keeps replay aligned with the
+      # repo's canonical store declarations.
+      - name: Apply store-table DDL
+        run: |
+          CLICKHOUSE_HTTP_URL=http://localhost:8123 \
+          CLICKHOUSE_ADMIN_USER=naap_admin \
+          CLICKHOUSE_ADMIN_PASSWORD=changeme \
+          CLICKHOUSE_DATABASE=naap \
+          bash scripts/apply-store-ddl.sh
+
       # No Kafka producer on ephemeral CI, so --pause-ingestion=false
       # is safe and slightly faster than the default pause/resume.
       - name: Run replay determinism gate

@@ -99,9 +99,11 @@ paths:
       description: |
         One row per orchestrator for the Orchestrators table, with SLA metrics
         (effective success rate, no-swap rate, SLA score), known session count,
-        observed pipelines/models, and GPU count. Capability inventory fields
+        observed pipelines/models, and observed GPU UUID count. Capability inventory fields
         reflect orchestrators observed in the selected window rather than an
-        authoritative live network state. Sorted by session volume.
+        authoritative live network state; GPU UUID counts should not be read as
+        stable physical-device counts on cloud or virtualized orchestrators.
+        Sorted by session volume.
         Default window is 24 hours.
       parameters:
         - name: window
@@ -125,11 +127,11 @@ paths:
       summary: GPU inventory summary
       description: |
         GPU inventory summary for the dashboard capacity widget. Returns the
-        total unique GPU count, a breakdown by GPU model (RTX 4090, 5090, etc.),
-        and a per-pipeline breakdown showing which GPU models serve which pipelines.
+        total observed GPU UUID count, a breakdown by GPU model (RTX 4090, 5090,
+        etc.), and a per-pipeline breakdown showing which GPU models serve which pipelines.
         A GPU shared across multiple pipelines appears in each pipeline's breakdown
-        but is counted once in the total. Reflects GPUs observed in the last
-        24 hours.
+        but is counted once in the total. Reflects reported GPU UUIDs observed in
+        the last 24 hours, not authoritative physical-device identity.
       responses:
         "200":
           description: GPU capacity payload
@@ -235,8 +237,8 @@ paths:
       summary: Streaming orchestrator inventory
       description: |
         Orchestrators observed serving `live-video-to-video` in the last 24 hours, with
-        their service URI, observed models, and GPU count. Each orchestrator
-        address appears at most once. Sorted by GPU count descending.
+        their service URI, observed models, and observed GPU UUID count. Each orchestrator
+        address appears at most once. Sorted by GPU UUID count descending.
       responses:
         "200":
           description: Streaming orchestrator rows
@@ -349,8 +351,8 @@ paths:
       description: |
         Orchestrators observed serving non-streaming pipelines in the last 24 hours,
         with their service URI, observed capabilities (as `pipeline:model`
-        strings), and GPU count. Each orchestrator address appears at most once.
-        Sorted by GPU count descending.
+        strings), and observed GPU UUID count. Each orchestrator address appears
+        at most once. Sorted by GPU UUID count descending.
       responses:
         "200":
           description: Request orchestrator rows

@@ -20,7 +20,6 @@ api/
 warehouse/
   models/staging/       Thin views over normalized tables
   models/canonical/     Canonical semantic derivations
-  models/api_base/      Internal semantic helper views
   models/api/           Published API and dashboard read models
 
 infra/

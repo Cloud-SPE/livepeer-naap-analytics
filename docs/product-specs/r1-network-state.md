@@ -29,14 +29,16 @@ Expose observed-window network-state surfaces from the published `api_*` layer:
 `GET /v1/dashboard/orchestrators`
 
 Returns one row per orchestrator with SLA rollups, observed pipeline/model
-inventory, and GPU count. The default window is `7d`.
+inventory, and observed GPU UUID count. The default window is `7d`.
 
 Required behavior:
 
 - one row per orchestrator address
 - SLA metrics are weighted by requested session volume
 - pipeline and model inventory comes from the published observed inventory layer for the selected window
-- GPU count is deduped on orchestrator plus GPU identity
+- GPU UUID count is deduped on orchestrator plus reported GPU identity; it is
+  not an authoritative physical-device count because cloud and virtualized
+  orchestrators can report changing UUIDs
 
 ### NET-002: Streaming model availability
 

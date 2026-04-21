@@ -14,7 +14,7 @@
 # conflict rather than altering the live table, because an automated
 # rewrite of a live schema is a bigger change than this script is
 # entitled to. When a declaration drifts, run
-# `test_store_ddl_drift.sql`, read the mismatch, and apply an explicit
+# `make lint-store-ddl`, read the mismatch, and apply an explicit
 # `ALTER TABLE` migration that covers it.
 set -euo pipefail
 

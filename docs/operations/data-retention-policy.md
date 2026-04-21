@@ -5,7 +5,7 @@
 | **Status** | Active |
 | **Effective date** | 2026-04-02 |
 | **Ticket** | TASK-06 / [#285](https://github.com/livepeer/livepeer-naap-analytics-deployment/issues/285) |
-| **Last reviewed** | 2026-04-09 |
+| **Last reviewed** | 2026-04-20 |
 
 ---
 
@@ -114,20 +114,25 @@ Ephemeral per-query scratch tables. Short TTLs prevent accumulation of stale wor
 
 ### No TTL — Unbounded growth (known gap)
 
-The following tables currently have no TTL and will grow indefinitely:
+The current no-TTL gap is the resolver-published serving and canonical store
+family, not the retired pre-refactor tables.
 
-| Table | Notes |
-|---|---|
-| `naap.agg_orch_state_hourly` | Hourly orchestrator aggregates |
-| `naap.agg_stream_state_hourly` | Hourly stream aggregates |
-| `naap.orch_current_store` | Resolver-published orchestrator current state |
-| `naap.session_current_store` | Resolver-published session current state |
-| `naap.canonical_orch_state` | dbt-published semantic view |
-| `naap.canonical_stream_state` | dbt-published semantic view |
-| `naap.api_orch_state_store` | API serving table |
-| `naap.api_stream_state_store` | API serving table |
+Representative examples:
 
-A TTL of 90 days (aligning with raw event retention) is the candidate for hourly aggregates and current-store tables. Applying a TTL to `api_*_store` and `canonical_*_store` tables requires a separate decision based on API consumer requirements and the downstream query window. See [Known Gaps](#known-gaps-and-future-work).
+- `naap.api_current_capability_store`
+- `naap.api_current_gpu_inventory_store`
+- `naap.api_current_orchestrator_store`
+- `naap.api_hourly_byoc_auth_store`
+- `naap.api_hourly_byoc_payments_store`
+- `naap.api_hourly_request_demand_store`
+- `naap.api_hourly_streaming_sla_store`
+- `naap.canonical_payment_links_store`
+- `naap.canonical_session_current_store`
+- `naap.canonical_sla_benchmark_daily_store`
+
+Applying TTL to these stores requires an explicit decision on replay,
+dashboard/API query windows, and how much historical state the resolver needs
+to republish safely. See [Known Gaps](#known-gaps-and-future-work).
 
 ---
 
@@ -190,9 +195,9 @@ No container restart is required. See `infra/clickhouse/README.md` for the full 
 
 ## Known Gaps and Future Work
 
-1. **Hourly aggregate tables have no TTL** (`agg_*_hourly`). These tables grow unbounded. Candidate fix: apply a 90-day TTL matching raw event retention. Requires a forward migration in `infra/clickhouse/migrations/`.
+1. **Resolver-published serving and canonical stores have no TTL** (`api_*_store`, several `canonical_*_store` tables, and the latest-state helper stores). TTL for these tables depends on replay requirements, downstream query windows, and how much historical state the resolver must retain to republish safely.
 
-2. **Current-store and API-serving tables have no TTL** (`*_current_store`, `api_*_store`, `canonical_*_store`). TTL for serving tables depends on the downstream API query window and consumer SLA. This requires a separate decision.
+2. **The known-gap list must stay synchronized with `infra/clickhouse/retention.sql` and the checked-in store DDL.** This document used to enumerate retired pre-refactor tables, which created review noise and operator confusion.
 
 3. **Prometheus retention is out of scope for this document.** It is governed by the Prometheus stack configs:
    - infra1 Prometheus: 180-day retention (`deploy/infra1/prometheus/stack.yml`)

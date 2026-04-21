@@ -393,7 +393,7 @@
           "text": "All",
           "value": "__all"
         },
-        "definition": "SELECT DISTINCT org FROM (SELECT org FROM naap.api_hourly_streaming_demand WHERE org != '' AND pipeline_id = 'live-video-to-video' UNION ALL SELECT org FROM naap.canonical_status_hours WHERE org != '' AND canonical_pipeline = 'live-video-to-video' UNION ALL SELECT org FROM naap.api_current_active_stream_state WHERE org != '' AND ifNull(pipeline, '') = 'live-video-to-video' UNION ALL SELECT org FROM naap.api_hourly_streaming_sla WHERE org != '' AND pipeline_id = 'live-video-to-video' UNION ALL SELECT org FROM naap.api_observed_capability_offer WHERE org != '' AND canonical_pipeline = 'live-video-to-video') AS orgs WHERE org != '' ORDER BY org",
+        "definition": "SELECT org FROM naap.api_variable_orgs",
         "hide": 0,
         "includeAll": true,
         "label": "Org",
@@ -414,7 +414,7 @@
           "text": "All",
           "value": "__all"
         },
-        "definition": "SELECT DISTINCT model_id FROM (SELECT model_id FROM naap.api_observed_capability_offer WHERE model_id != '' AND hardware_present = 1 AND last_seen >= now() - INTERVAL 24 HOUR AND canonical_pipeline = 'live-video-to-video' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) UNION ALL SELECT canonical_model AS model_id FROM naap.canonical_status_hours WHERE canonical_model != '' AND canonical_pipeline = 'live-video-to-video' AND hour >= now() - INTERVAL 24 HOUR AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) UNION ALL SELECT model_id FROM naap.api_current_active_stream_state WHERE model_id != '' AND last_seen > now() - INTERVAL 24 HOUR AND ifNull(pipeline, '') = 'live-video-to-video' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) UNION ALL SELECT model_id FROM naap.api_hourly_streaming_sla WHERE model_id != '' AND window_start >= now() - INTERVAL 24 HOUR AND pipeline_id = 'live-video-to-video' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))) AS models WHERE model_id != '' ORDER BY model_id",
+        "definition": "SELECT model_id FROM naap.api_variable_models",
         "hide": 0,
         "includeAll": true,
         "label": "Model",
@@ -435,7 +435,7 @@
           "text": "All",
           "value": "__all"
         },
-        "definition": "WITH live_orch AS (SELECT DISTINCT orch_address FROM naap.api_observed_capability_offer WHERE orch_address != '' AND last_seen >= now() - INTERVAL 24 HOUR AND canonical_pipeline = 'live-video-to-video' AND hardware_present = 1 AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(model_id, ''))) UNION ALL SELECT DISTINCT orchestrator_address AS orch_address FROM naap.api_hourly_streaming_sla WHERE orchestrator_address != '' AND window_start >= now() - INTERVAL 24 HOUR AND pipeline_id = 'live-video-to-video' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(model_id, ''))) UNION ALL SELECT DISTINCT orch_address FROM naap.canonical_status_hours WHERE orch_address != '' AND hour >= now() - INTERVAL 24 HOUR AND canonical_pipeline = 'live-video-to-video' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(canonical_model, ''))) UNION ALL SELECT DISTINCT orch_address FROM naap.api_current_active_stream_state WHERE orch_address != '' AND last_seen > now() - INTERVAL 24 HOUR AND ifNull(pipeline, '') = 'live-video-to-video' AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(model_id, '')))) SELECT i.orch_address AS __value, i.orch_label AS __text FROM naap.api_orchestrator_identity i INNER JOIN (SELECT DISTINCT orch_address FROM live_orch) l ON l.orch_address = i.orch_address WHERE ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), i.org)) ORDER BY __text",
+        "definition": "SELECT concat(coalesce(nullIf(orch_label, ''), orch_address), ':',  orch_address) FROM naap.api_variable_orchestrators",
         "hide": 0,
         "includeAll": true,
         "label": "Orchestrator (ENS)",

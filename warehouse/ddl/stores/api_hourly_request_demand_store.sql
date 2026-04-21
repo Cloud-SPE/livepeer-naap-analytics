@@ -2,7 +2,7 @@
 -- Source of truth: this file. The resolver writes rows;
 -- this declaration governs the physical schema.
 -- Apply with scripts/apply-store-ddl.sh; drift is caught by
--- warehouse/tests/test_store_ddl_drift.sql.
+-- `make lint-store-ddl`.
 --
 -- Phase 6.1 of serving-layer-v2: promotes api_hourly_request_demand from
 -- an on-demand view that rescanned canonical_ai_batch_jobs +

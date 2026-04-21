@@ -1,7 +1,7 @@
--- Perf-pass: tiny template-variable source for the $org dropdown.
--- Unions the two hourly demand surfaces so orgs that only run streaming
--- (e.g. daydream) AND orgs that only run request-response (e.g. cloudspe)
--- both appear in the dropdown.
+-- Perf-pass: tiny global template-variable source for the $org dropdown.
+-- This is an unscoped base list only. Dashboards that need contextual
+-- cascading filters should embed parent-variable predicates in the
+-- Grafana query itself rather than reading this view directly.
 --
 -- Reads canonical-layer stores directly (rather than the api_hourly_*
 -- views) to satisfy the serving contract rule that api_* views only

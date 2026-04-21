@@ -33,7 +33,8 @@ requirements, not suggestions.
 - Dashboards and APIs must use weighted/additive math over aggregated views.
 - Never average averages or ratios when additive support exists.
 - Inflation-sensitive rollups must have explicit tests comparing published
-  counts to canonical unique-job counts.
+  counts to the canonical unique-event or unique-job source for the same
+  window and grain.
 
 ## Naming rules
 
@@ -46,7 +47,8 @@ requirements, not suggestions.
 
 - uniqueness on canonical job and enrichment keys
 - accepted-values coverage for attribution statuses
-- inflation guards on downstream rollups
+- inflation guards on downstream rollups, using canonical unique-job counts
+  for job surfaces and canonical event counts for auth/payment surfaces
 - regression tests for verify/dry-run behavior on new compute phases
 - regression tests for BYOC worker-url/model-hint precedence
 

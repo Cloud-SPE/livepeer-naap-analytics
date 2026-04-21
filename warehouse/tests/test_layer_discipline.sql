@@ -2,8 +2,7 @@
 -- walking the dbt graph at compile time and refusing cross-layer skips.
 --
 -- Contract (docs/design-docs/api-table-contract.md §Enforcement rule 1):
---   api        -> canonical, api_base
---   api_base   -> canonical
+--   api        -> canonical
 --   canonical  -> canonical, staging
 --   staging    -> sources only
 --   operational -> canonical, operational (live-ops spine)
@@ -21,8 +20,7 @@
 {%- set layer_rank = {
     'staging':     1,
     'canonical':   2,
-    'api_base':    3,
-    'api':         4,
+    'api':         3,
     'operational': 3,
 } -%}
 
@@ -47,10 +45,8 @@
           {%- if dep_layer -%}
             {%- set valid = false -%}
 
-            {# api may ref canonical or api_base, not staging or raw. #}
-            {%- if node_layer == 'api' and dep_layer in ['canonical', 'api_base'] -%}
-              {%- set valid = true -%}
-            {%- elif node_layer == 'api_base' and dep_layer == 'canonical' -%}
+            {# api may ref canonical only, not staging or raw. #}
+            {%- if node_layer == 'api' and dep_layer == 'canonical' -%}
               {%- set valid = true -%}
             {%- elif node_layer == 'canonical' and dep_layer in ['canonical', 'staging'] -%}
               {%- set valid = true -%}

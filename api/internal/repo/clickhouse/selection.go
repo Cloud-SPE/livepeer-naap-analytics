@@ -79,7 +79,10 @@ func (r *Repo) DiscoverOrchestrators(ctx context.Context, p types.DiscoverOrches
 		  observed_orchestrators AS (
 		    SELECT
 		      o.orch_address,
-		      anyLast(o.orchestrator_uri) AS orchestrator_uri,
+		      argMax(
+		        o.orchestrator_uri,
+		        tuple(o.last_seen, length(o.orchestrator_uri), o.orchestrator_uri)
+		      ) AS orchestrator_uri,
 		      max(o.last_seen) AS last_seen
 		    FROM offers o
 		    GROUP BY o.orch_address
@@ -107,7 +110,7 @@ func (r *Repo) DiscoverOrchestrators(ctx context.Context, p types.DiscoverOrches
 		    GROUP BY orchestrator_uri, pipeline_id
 		  )
 		SELECT
-		  anyLast(o.orchestrator_uri) AS address,
+		  o.orchestrator_uri AS address,
 		  round(coalesce(s.score, a.score, 0.0), 3) AS score,
 		  arrayDistinct(groupArrayIf(
 		      p.pipeline_id || '/' || ifNull(p.model_id, ''),
@@ -129,7 +132,7 @@ func (r *Repo) DiscoverOrchestrators(ctx context.Context, p types.DiscoverOrches
 		 AND a.pipeline_id = p.pipeline_id
 		WHERE p.pipeline_id != ''
 		  ` + capsFilter + `
-		GROUP BY o.orch_address, p.pipeline_id, s.score, a.score
+		GROUP BY o.orch_address, o.orchestrator_uri, p.pipeline_id, s.score, a.score
 		ORDER BY score DESC, length(capabilities) DESC, address ASC
 	`
 

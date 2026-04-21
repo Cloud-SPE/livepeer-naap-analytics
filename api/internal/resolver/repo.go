@@ -2716,6 +2716,7 @@ func (r *repo) insertCanonicalActiveStreamState(ctx context.Context, runID strin
 				cast(nullIf(fs.canonical_model, ''), 'Nullable(String)') AS model_id,
 				cast(nullIf(fs.attributed_orch_address, ''), 'Nullable(String)') AS orch_address,
 				fs.attributed_orch_address AS attributed_orch_address_key,
+				fs.attributed_orch_uri AS attributed_orch_uri,
 				fs.attribution_status AS attribution_status,
 				fs.attribution_reason AS attribution_reason,
 				s.state AS state,
@@ -2748,7 +2749,7 @@ func (r *repo) insertCanonicalActiveStreamState(ctx context.Context, runID strin
 			se.pipeline,
 			se.model_id,
 			se.orch_address,
-			ifNull(oi.orchestrator_uri, '') AS orchestrator_uri,
+			coalesce(nullIf(se.attributed_orch_uri, ''), ifNull(oi.orchestrator_uri, '')) AS orchestrator_uri,
 			se.attribution_status,
 			se.attribution_reason,
 			se.state,
@@ -4652,9 +4653,9 @@ func (r *repo) insertHourlyRequestDemand(ctx context.Context, runID string, now 
 	`, queryID, runID, r.cfg.ResolverVersion, now)
 }
 
-// insertCurrentOrchestratorState composes a denormalized snapshot per
-// (org, orch_address) with identity, capability membership, GPU count,
-// and the latest 24h of SLA/reliability. Three handlers — streaming,
+// insertCurrentOrchestratorState composes a denormalized org-agnostic snapshot
+// per orch_address with identity, capability membership, observed GPU UUID
+// count, and the latest 24h of SLA/reliability. Three handlers — streaming,
 // requests, and dashboard orchestrator listings — now read this store
 // with a single MergeTree scan each instead of the prior 3–4 query
 // fan-out that rejoined in Go.
@@ -4670,6 +4671,7 @@ func (r *repo) insertHourlyRequestDemand(ctx context.Context, runID string, now 
 //   - canonical_capability_orchestrator_identity_latest (uri, name, label)
 //   - api_hourly_streaming_sla_store (latest SLA score + windowed
 //     aggregate reliability metrics)
+//
 // currentOrchestratorRefreshInterval is the minimum gap between
 // insertCurrentOrchestratorState executions. The store is a "last 24h"
 // rolling snapshot whose output is deterministic across successive runs,

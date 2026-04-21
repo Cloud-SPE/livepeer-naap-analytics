@@ -1,7 +1,8 @@
--- Perf-pass: tiny template-variable source. Dashboards that used to
--- scan api_observed_capability_offer for DISTINCT orch_address (~1 GiB
--- per refresh) read this view instead — one row per orch_address from
--- the resolver-written api_orchestrator_identity_store.
+-- Perf-pass: tiny global template-variable source. This is a base list,
+-- not a contextual cascading filter. Dashboards that need org/model
+-- scoping should express those predicates in the Grafana variable query.
+-- One row per orch_address from the resolver-written
+-- api_orchestrator_identity_store.
 
 {{ config(materialized='view') }}
 

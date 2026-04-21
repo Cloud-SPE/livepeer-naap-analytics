@@ -1,6 +1,6 @@
 # Medallion Lints
 
-Four machine-checked rules that enforce the serving-layer contract
+Five machine-checked rules that enforce the serving-layer contract
 described in [`../design-docs/api-table-contract.md`](../design-docs/api-table-contract.md).
 Every rule supports a known-violation allowlist so the project can
 enforce discipline on new drift without demanding every legacy panel
@@ -44,8 +44,7 @@ workflow around adding / changing a store table.
 ```
 staging    -> sources only
 canonical  -> canonical, staging
-api_base   -> canonical
-api        -> canonical, api_base
+api        -> canonical
 operational -> canonical, operational
 ```
 
@@ -100,19 +99,11 @@ API-serving boundary.
 
 **Run:** `make lint-core-logic`
 
-## Current state (Phase 0 closed)
+## Current Enforcement Model
 
-| Lint | unexpected | allowlisted | notes |
-|---|---|---|---|
-| Layer discipline | 0 | 0 | the dbt model graph is already clean |
-| Grafana | 0 | 22 | 22 panels query canonical/normalized/agg — cleared in Phase 7 |
-| Additive primitives | 0 | 0 | all 44 primitives across 5 api_hourly_* models present + non-null |
-| Core-logic recalc | 0 | 4 | 4 `capability_family = 'byoc'` branches — cleared in Phase 4 |
-| Store-DDL drift | 0 | 0 | all 15 `_store` tables match their checked-in declarations |
-
-A failure under "unexpected" fails CI. A failure under "allowlisted"
-means a known-scheduled violation is still there and the plan's
-corresponding phase has not yet landed.
+- Layer discipline, additive primitives, and store-DDL drift are hard-fail checks.
+- Grafana and core-logic lints still support allowlists for explicitly tracked migration debt.
+- `make lint-medallion` is the canonical local entrypoint; CI runs the same rule set.
 
 ## Adding an allowlist entry
 

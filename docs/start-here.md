@@ -17,7 +17,7 @@ The main runtime owners are:
 
 - ClickHouse for physical ingest and storage
 - the resolver for corrected current state and serving-store publication
-- dbt for semantic `canonical_*`, `api_base_*`, and `api_*` views
+- dbt for semantic `canonical_*` and `api_*` views over published stores
 - the Go API for public HTTP serving
 
 ## 5-Minute Local Start

@@ -84,7 +84,7 @@
             "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
-            "axisLabel": "GPU count",
+            "axisLabel": "GPU UUID count",
             "axisPlacement": "auto",
             "fillOpacity": 80,
             "gradientMode": "none",
@@ -158,11 +158,12 @@
           "refId": "A"
         }
       ],
-      "title": "GPU Count by Type (Seen in 24h)",
+      "title": "GPU UUIDs by Type (Seen in 24h)",
       "type": "barchart",
       "meta": {
         "backing_table": "naap.api_current_gpu_inventory"
-      }
+      },
+      "description": "Counts distinct reported GPU UUIDs by model over the current inventory window. GPU UUIDs can churn on cloud or virtualized orchestrators, so this is an observed UUID count rather than an authoritative physical-device count."
     },
     {
       "datasource": {
@@ -220,82 +221,16 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "WITH labels AS (\n    SELECT orch_address AS addr, orch_label FROM naap.api_orchestrator_identity\n)\nSELECT g.last_seen AS \"Latest Observation\",\n       g.canonical_pipeline AS \"Pipeline\",\n       ifNull(labels.orch_label, concat(left(g.orch_address, 8), '...', right(g.orch_address, 4))) AS \"Orchestrator\",\n       g.orch_address AS \"Orchestrator Address\",\n       g.model_id AS \"Model\",\n       g.gpu_id AS \"GPU ID\",\n       ifNull(g.gpu_model_name, '') AS \"GPU Type\",\n       round(toFloat64(g.gpu_memory_bytes_total) / 1073741824.0, 1) AS \"GPU Memory (GB)\"\nFROM naap.api_current_gpu_inventory g\nLEFT JOIN labels ON labels.addr = g.orch_address\nWHERE ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), g.org))\n  AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), g.model_id))\n  AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), g.orch_address))\nORDER BY \"Latest Observation\" DESC\nLIMIT 50",
+          "rawSql": "WITH labels AS (\n    SELECT orch_address AS addr, orch_label FROM naap.api_orchestrator_identity\n)\nSELECT g.last_seen AS \"Latest Observation\",\n       g.canonical_pipeline AS \"Pipeline\",\n       ifNull(labels.orch_label, concat(left(g.orch_address, 8), '...', right(g.orch_address, 4))) AS \"Orchestrator\",\n       g.orch_address AS \"Orchestrator Address\",\n       g.model_id AS \"Model\",\n       g.gpu_id AS \"GPU UUID\",\n       ifNull(g.gpu_model_name, '') AS \"GPU Type\",\n       round(toFloat64(g.gpu_memory_bytes_total) / 1073741824.0, 1) AS \"GPU Memory (GB)\"\nFROM naap.api_current_gpu_inventory g\nLEFT JOIN labels ON labels.addr = g.orch_address\nWHERE ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), g.org))\n  AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), g.model_id))\n  AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), g.orch_address))\nORDER BY \"Latest Observation\" DESC\nLIMIT 50",
           "refId": "A"
         }
       ],
-      "title": "Latest GPU Inventory Seen in 24h",
+      "title": "Latest GPU UUID Inventory Seen in 24h",
       "type": "table",
       "meta": {
         "backing_table": "naap.api_current_gpu_inventory"
-      }
-    },
-    {
-      "datasource": {
-        "type": "grafana-clickhouse-datasource",
-        "uid": "${clickhouse_ds}"
       },
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            },
-            "footer": {
-              "reducers": []
-            },
-            "inspect": false
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": 0
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 22
-      },
-      "id": 3,
-      "options": {
-        "cellHeight": "sm",
-        "showHeader": true,
-        "sortBy": [
-          {
-            "desc": true,
-            "displayName": "GPUs Added"
-          }
-        ]
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "grafana-clickhouse-datasource",
-            "uid": "${clickhouse_ds}"
-          },
-          "editorType": "sql",
-          "format": 1,
-          "queryType": "table",
-          "rawSql": "WITH labels AS (\n    SELECT orch_address AS addr, orch_label\n    FROM naap.api_orchestrator_identity\n),\ncurrent_inventory AS (\n    SELECT orch_address,\n        gpu_id,\n        argMax(ifNull(gpu_model_name, 'unknown'), last_seen) AS gpu_model_name\n    FROM naap.api_observed_capability_offer\n    WHERE last_seen >= now() - INTERVAL 7 DAY\n      AND hardware_present = 1\n      AND gpu_id != ''\n      AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n      AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), model_id))\n      AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address))\n    GROUP BY orch_address, gpu_id\n),\nprior_inventory AS (\n    SELECT orch_address,\n        gpu_id,\n        argMax(ifNull(gpu_model_name, 'unknown'), last_seen) AS gpu_model_name\n    FROM naap.api_observed_capability_offer\n    WHERE last_seen >= now() - INTERVAL 14 DAY\n      AND last_seen < now() - INTERVAL 7 DAY\n      AND hardware_present = 1\n      AND gpu_id != ''\n      AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n      AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), model_id))\n      AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address))\n    GROUP BY orch_address, gpu_id\n),\ncurrent_window AS (\n    SELECT orch_address, groupUniqArray(gpu_id) AS current_gpu_ids\n    FROM current_inventory\n    GROUP BY orch_address\n),\nprior_window AS (\n    SELECT orch_address, groupUniqArray(gpu_id) AS prior_gpu_ids\n    FROM prior_inventory\n    GROUP BY orch_address\n),\ndiffs AS (\n    SELECT coalesce(c.orch_address, p.orch_address) AS orch_address,\n        arrayFilter(x -> NOT has(ifNull(p.prior_gpu_ids, CAST([], 'Array(String)')), x), ifNull(c.current_gpu_ids, CAST([], 'Array(String)'))) AS added_gpu_ids,\n        arrayFilter(x -> NOT has(ifNull(c.current_gpu_ids, CAST([], 'Array(String)')), x), ifNull(p.prior_gpu_ids, CAST([], 'Array(String)'))) AS removed_gpu_ids\n    FROM current_window c\n    FULL OUTER JOIN prior_window p\n        ON c.orch_address = p.orch_address\n),\nadded_models AS (\n    SELECT orch_address,\n        arraySort(groupUniqArray(concat(gpu_model_name, ' (', left(matched_gpu_id, 8), '...', right(matched_gpu_id, 4), ')'))) AS added_gpu_models\n    FROM (\n        SELECT d.orch_address, ci.gpu_id AS matched_gpu_id, ci.gpu_model_name\n        FROM diffs d\n        ARRAY JOIN d.added_gpu_ids AS gpu_id\n        INNER JOIN current_inventory ci\n            ON ci.orch_address = d.orch_address\n           AND ci.gpu_id = gpu_id\n    )\n    GROUP BY orch_address\n),\nremoved_models AS (\n    SELECT orch_address,\n        arraySort(groupUniqArray(concat(gpu_model_name, ' (', left(matched_gpu_id, 8), '...', right(matched_gpu_id, 4), ')'))) AS removed_gpu_models\n    FROM (\n        SELECT d.orch_address, pi.gpu_id AS matched_gpu_id, pi.gpu_model_name\n        FROM diffs d\n        ARRAY JOIN d.removed_gpu_ids AS gpu_id\n        INNER JOIN prior_inventory pi\n            ON pi.orch_address = d.orch_address\n           AND pi.gpu_id = gpu_id\n    )\n    GROUP BY orch_address\n),\nrow_data AS (\n    SELECT ifNull(labels.orch_label, concat(left(d.orch_address, 8), '...', right(d.orch_address, 4))) AS orchestrator,\n        d.orch_address AS orchestrator_address,\n        length(d.added_gpu_ids) AS gpus_added,\n        length(d.removed_gpu_ids) AS gpus_removed,\n        arrayStringConcat(ifNull(am.added_gpu_models, []), ', ') AS added_gpus,\n        arrayStringConcat(ifNull(rm.removed_gpu_models, []), ', ') AS removed_gpus,\n        1 AS sort_group\n    FROM diffs d\n    LEFT JOIN labels ON labels.addr = d.orch_address\n    LEFT JOIN added_models am ON am.orch_address = d.orch_address\n    LEFT JOIN removed_models rm ON rm.orch_address = d.orch_address\n    WHERE d.orch_address != ''\n      AND (length(d.added_gpu_ids) > 0 OR length(d.removed_gpu_ids) > 0)\n),\ntotal_row AS (\n    SELECT 'TOTAL' AS orchestrator,\n        '' AS orchestrator_address,\n        sum(gpus_added) AS gpus_added,\n        sum(gpus_removed) AS gpus_removed,\n        '' AS added_gpus,\n        '' AS removed_gpus,\n        0 AS sort_group\n    FROM row_data\n)\nSELECT orchestrator AS \"Orchestrator\",\n    orchestrator_address AS \"Orchestrator Address\",\n    gpus_added AS \"GPUs Added\",\n    gpus_removed AS \"GPUs Removed\",\n    added_gpus AS \"Added GPUs\",\n    removed_gpus AS \"Removed GPUs\"\nFROM (\n    SELECT * FROM total_row\n    UNION ALL\n    SELECT * FROM row_data\n)\nORDER BY sort_group ASC, \"GPUs Added\" DESC, \"GPUs Removed\" DESC, \"Orchestrator\" ASC\nLIMIT 51",
-          "refId": "A"
-        }
-      ],
-      "title": "Orchestrator GPU Changes (7d vs prior 7d)",
-      "type": "table",
-      "description": "Compares orchestrator GPU inventory seen in the latest 7 days versus the prior 7 days. GPU IDs can fluctuate on virtualized or re-enumerated systems, so a UUID change may appear as one GPU removed and a new GPU added even when the underlying hardware did not change.",
-      "meta": {
-        "backing_table": "naap.api_orchestrator_identity"
-      }
+      "description": "Latest reported GPU UUID rows from the current inventory window. GPU UUIDs are retained for audit and debugging, but they may not represent stable physical devices on cloud or virtualized orchestrators."
     },
     {
       "datasource": {
@@ -332,9 +267,9 @@
       },
       "gridPos": {
         "h": 5,
-        "w": 12,
+        "w": 24,
         "x": 0,
-        "y": 17
+        "y": 9
       },
       "id": 14,
       "options": {
@@ -373,83 +308,6 @@
       "meta": {
         "backing_table": "naap.api_hourly_request_demand"
       }
-    },
-    {
-      "datasource": {
-        "type": "grafana-clickhouse-datasource",
-        "uid": "${clickhouse_ds}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "decimals": 1,
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": -0.01
-              },
-              {
-                "color": "green",
-                "value": 0.01
-              }
-            ]
-          },
-          "unit": "percentunit"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 12,
-        "x": 12,
-        "y": 17
-      },
-      "id": 16,
-      "options": {
-        "colorMode": "background",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "percentChangeColorMode": "standard",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "grafana-clickhouse-datasource",
-            "uid": "${clickhouse_ds}"
-          },
-          "editorType": "sql",
-          "format": 1,
-          "queryType": "sql",
-          "rawSql": "WITH current_window AS (\n    SELECT uniqExact(gpu_id) AS current_value\n    FROM naap.api_observed_capability_offer\n    WHERE last_seen >= now() - INTERVAL 7 DAY\n      AND hardware_present = 1\n      AND gpu_id != ''\n      AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n      AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), model_id))\n      AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address))\n), baseline_window AS (\n    SELECT uniqExact(gpu_id) AS baseline_value\n    FROM naap.api_observed_capability_offer\n    WHERE last_seen >= now() - INTERVAL 14 DAY\n      AND last_seen < now() - INTERVAL 7 DAY\n      AND hardware_present = 1\n      AND gpu_id != ''\n      AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org))\n      AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), model_id))\n      AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address))\n)\nSELECT if(\n    ifNull(baseline_value, 0) = 0,\n    0.0,\n    (toFloat64(ifNull(current_value, 0)) - toFloat64(baseline_value)) / toFloat64(baseline_value)\n) AS value\nFROM current_window\nCROSS JOIN baseline_window",
-          "refId": "A"
-        }
-      ],
-      "title": "Supply Change (7d)",
-      "type": "stat",
-      "description": "Percent change in unique GPUs seen across the latest 7 days versus the prior 7-day window. This is a network-level unique-GPU comparison, so it will not necessarily equal the per-orchestrator add/remove totals when GPUs move between orchestrators or GPU UUIDs are reissued.",
-      "meta": {
-        "backing_table": "naap.api_observed_capability_offer"
-      }
     }
   ],
   "refresh": "15m",
@@ -480,7 +338,7 @@
           "text": "All",
           "value": "__all"
         },
-        "definition": "SELECT DISTINCT org FROM naap.api_orchestrator_identity WHERE org != '' ORDER BY org",
+        "definition": "SELECT org FROM naap.api_variable_orgs",
         "allValue": "__all",
         "hide": 0,
         "includeAll": true,
@@ -502,7 +360,7 @@
           "text": "All",
           "value": "__all"
         },
-        "definition": "SELECT DISTINCT model_id FROM naap.api_observed_capability_offer WHERE model_id != '' AND hardware_present = 1 AND last_seen >= now() - INTERVAL 24 HOUR AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), orch_address)) ORDER BY model_id",
+        "definition": "SELECT model_id FROM naap.api_variable_models",
         "allValue": "__all",
         "hide": 0,
         "includeAll": true,
@@ -524,7 +382,7 @@
           "text": "All",
           "value": "__all"
         },
-        "definition": "SELECT orch_address AS __value, orch_label AS __text FROM naap.api_orchestrator_identity WHERE ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), org)) ORDER BY __text",
+        "definition": "SELECT concat(coalesce(nullIf(orch_label, ''), orch_address), ':',  orch_address) FROM naap.api_variable_orchestrators",
         "hide": 0,
         "includeAll": true,
         "label": "Orchestrator (ENS)",
@@ -552,5 +410,5 @@
   "title": "NaaP: Supply & Inventory",
   "uid": "naap-supply-inventory",
   "version": 1,
-  "description": "Supply dashboard showing network state over the last 24 hours. Inventory panels are windowed views of GPUs and pricing seen in 24h, not authoritative current network state."
+  "description": "Supply dashboard showing observed network inventory over the last 24 hours. GPU panels count reported GPU UUIDs, which can churn on cloud or virtualized orchestrators and are not authoritative physical-device counts."
 }
