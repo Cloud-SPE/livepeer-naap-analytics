@@ -48,9 +48,11 @@ paths:
         Success rate, active orchestrator count, session count, and usage minutes
         for the dashboard header, with hourly timeseries and period-over-period deltas.
         Returns two sections: `streaming` (live-video-to-video metrics over the
-        requested window) and `requests` (AI Batch + BYOC job totals). The
-        orchestrator count reflects the last 10-minute heartbeat window regardless
-        of the time window parameter.
+        requested window) and `requests` (AI Batch + BYOC job totals).
+        `orchestratorsObserved` counts distinct orchestrators seen advertising
+        streaming-capable offers (`supports_stream = 1`) within the selected
+        window; the delta compares against the same measure over the prior
+        equal-length window.
       parameters:
         - $ref: "#/components/parameters/DashboardWindow"
         - name: pipeline
@@ -660,7 +662,7 @@ components:
       type: object
       properties:
         successRate: { $ref: "#/components/schemas/MetricDelta" }
-        orchestratorsOnline: { $ref: "#/components/schemas/MetricDelta" }
+        orchestratorsObserved: { $ref: "#/components/schemas/MetricDelta" }
         dailyUsageMins: { $ref: "#/components/schemas/MetricDelta" }
         dailySessionCount: { $ref: "#/components/schemas/MetricDelta" }
         dailyNetworkFeesEth: { $ref: "#/components/schemas/MetricDelta" }

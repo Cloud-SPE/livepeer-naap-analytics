@@ -20,7 +20,7 @@ type HourlyBucket struct {
 
 type DashboardKPI struct {
 	SuccessRate         MetricDelta    `json:"successRate"`
-	OrchestratorsOnline MetricDelta    `json:"orchestratorsOnline"`
+	OrchestratorsObserved MetricDelta  `json:"orchestratorsObserved"`
 	DailyUsageMins      MetricDelta    `json:"dailyUsageMins"`
 	DailySessionCount   MetricDelta    `json:"dailySessionCount"`
 	DailyNetworkFeesEth MetricDelta    `json:"dailyNetworkFeesEth"`
