@@ -3139,18 +3139,31 @@ func (r *repo) insertSLAComplianceRollups(ctx context.Context, runID string, now
 			   AND h.hour = sh.window_start
 			WHERE h.is_terminal_tail_artifact = 0
 		),
-		inventory AS (
-			SELECT
-				snapshot_row_id AS attribution_snapshot_row_id,
-				org,
-				orch_address AS orchestrator_address,
-				pipeline_id,
-				model_id,
-				gpu_id,
-				any(gpu_model_name) AS gpu_model_name
-			FROM naap.canonical_capability_hardware_inventory_by_snapshot
-			GROUP BY attribution_snapshot_row_id, org, orchestrator_address, pipeline_id, model_id, gpu_id
-		)
+			-- Perf-pass: prefilter to only the snapshot_row_ids referenced by
+			-- the current run's base set. Without this the inventory CTE
+			-- scans the full canonical_capability_hardware_inventory_by_snapshot
+			-- history even though the SLA publish only needs the current
+			-- window's attribution snapshots.
+			needed_snapshots AS (
+				SELECT DISTINCT attribution_snapshot_row_id
+				FROM base
+				WHERE attribution_snapshot_row_id IS NOT NULL
+				  AND attribution_snapshot_row_id != ''
+			),
+			inventory AS (
+				SELECT
+					inv.snapshot_row_id AS attribution_snapshot_row_id,
+					inv.org,
+					inv.orch_address AS orchestrator_address,
+					inv.pipeline_id,
+					inv.model_id,
+					inv.gpu_id,
+					any(inv.gpu_model_name) AS gpu_model_name
+				FROM naap.canonical_capability_hardware_inventory_by_snapshot inv
+				INNER JOIN needed_snapshots ns
+					ON ns.attribution_snapshot_row_id = inv.snapshot_row_id
+				GROUP BY attribution_snapshot_row_id, inv.org, orchestrator_address, inv.pipeline_id, inv.model_id, inv.gpu_id
+			)
 		SELECT
 			b.window_start,
 			b.org,

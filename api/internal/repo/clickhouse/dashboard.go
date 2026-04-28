@@ -81,7 +81,7 @@ func (r *Repo) GetDashboardKPI(ctx context.Context, windowHours int, pipeline, m
 
 	kpi := &types.DashboardKPI{
 		SuccessRate:         types.MetricDelta{Value: successRate, Delta: successRateDelta},
-		OrchestratorsOnline: types.MetricDelta{Value: float64(activeOrch), Delta: orchDelta},
+		OrchestratorsObserved: types.MetricDelta{Value: float64(activeOrch), Delta: orchDelta},
 		DailyUsageMins:      types.MetricDelta{Value: totalMins, Delta: usageDelta},
 		DailySessionCount:   types.MetricDelta{Value: float64(totalSessions), Delta: sessionDelta},
 		DailyNetworkFeesEth: types.MetricDelta{Value: 0, Delta: 0}, // Phase 4
@@ -95,46 +95,27 @@ func (r *Repo) GetDashboardKPI(ctx context.Context, windowHours int, pipeline, m
 
 // countActiveAndPrevious returns the distinct orch_address counts for the
 // current [windowStart, now] and prior [previousWindowStart, windowStart]
-// windows in a single pass. Phase 6.5 consolidated this from two
-// countObservedDashboardOrchestrators calls.
-//
-// When pipeline/model filters are set, scanning
-// api_observed_capability_offer is cheaper than api_observed_orchestrator
-// (offer rows can be pruned by capability_family + canonical_pipeline
-// predicates before the distinct-count); the unfiltered path stays on
-// api_observed_orchestrator which has one row per orch per observation.
+// windows in a single pass. Scope is streaming-capable offers only
+// (supports_stream = 1) so the count is coherent with the rest of the
+// streaming KPI panel, which sources from api_hourly_streaming_demand.
+// Pipeline/model filters apply as optional predicates; empty strings
+// disable them.
 func (r *Repo) countActiveAndPrevious(ctx context.Context, windowStart, now, previousWindowStart time.Time, pipeline, modelID string) (uint64, uint64, error) {
 	var current, previous uint64
-	if pipeline != "" || modelID != "" {
-		if err := r.conn.QueryRow(ctx, `
-			SELECT
-				countDistinctIf(orch_address, last_seen >= ? AND last_seen < ?) AS current_count,
-				countDistinctIf(orch_address, last_seen >= ? AND last_seen < ?) AS previous_count
-			FROM naap.api_observed_capability_offer
-			WHERE last_seen >= ? AND last_seen < ?
-			  AND capability_family = 'builtin'
-			  AND (? = '' OR canonical_pipeline = ?)
-			  AND (? = '' OR model_id = ?)
-		`,
-			windowStart, now,
-			previousWindowStart, windowStart,
-			previousWindowStart, now,
-			pipeline, pipeline, modelID, modelID,
-		).Scan(&current, &previous); err != nil {
-			return 0, 0, fmt.Errorf("dashboard kpi orch counts: %w", err)
-		}
-		return current, previous, nil
-	}
 	if err := r.conn.QueryRow(ctx, `
 		SELECT
 			countDistinctIf(orch_address, last_seen >= ? AND last_seen < ?) AS current_count,
 			countDistinctIf(orch_address, last_seen >= ? AND last_seen < ?) AS previous_count
-		FROM naap.api_observed_orchestrator
+		FROM naap.api_observed_capability_offer
 		WHERE last_seen >= ? AND last_seen < ?
+		  AND supports_stream = 1
+		  AND (? = '' OR canonical_pipeline = ?)
+		  AND (? = '' OR model_id = ?)
 	`,
 		windowStart, now,
 		previousWindowStart, windowStart,
 		previousWindowStart, now,
+		pipeline, pipeline, modelID, modelID,
 	).Scan(&current, &previous); err != nil {
 		return 0, 0, fmt.Errorf("dashboard kpi orch counts: %w", err)
 	}
@@ -778,45 +759,52 @@ func (r *Repo) GetDashboardJobFeed(ctx context.Context, limit int) ([]types.Dash
 }
 
 // GetDashboardJobsOverview serves the requests portion of dashboard KPI.
+// Reads pre-aggregated rows from api_hourly_request_demand split by
+// capability_family ('builtin' = AI Batch, 'byoc' = BYOC), replacing
+// per-request scans over api_fact_ai_batch_job and api_fact_byoc_job.
+// AvgDurationMs treats NULL source durations as 0ms (duration_ms_sum /
+// job_count); the legacy per-fact query ignored NULLs via CH's avg().
 func (r *Repo) GetDashboardJobsOverview(ctx context.Context, windowHours int) (*types.DashboardJobsOverview, error) {
 	windowStart := time.Now().UTC().Add(-time.Duration(windowHours) * time.Hour)
 
-	var aiTotal, aiSelected, aiNoOrch uint64
-	var aiSuccessRate, aiAvgDur float64
-	err := r.conn.QueryRow(ctx, `
-		SELECT count() AS total,
-		       countIf(selection_outcome = 'selected') AS selected,
-		       countIf(selection_outcome = 'no_orch') AS no_orch,
-		       if(count() > 0, countIf(ifNull(success, 0) = 1) / toFloat64(count()), 0.0) AS success_rate,
-		       if(count() > 0, avg(toFloat64(duration_ms)), 0.0) AS avg_duration_ms
-		FROM naap.api_fact_ai_batch_job
-		WHERE completed_at >= ?
-	`, windowStart).Scan(&aiTotal, &aiSelected, &aiNoOrch, &aiSuccessRate, &aiAvgDur)
+	rows, err := r.conn.Query(ctx, `
+		SELECT capability_family,
+		       sum(job_count)       AS total,
+		       sum(selected_count)  AS selected,
+		       sum(no_orch_count)   AS no_orch,
+		       sum(success_count)   AS success,
+		       sum(duration_ms_sum) AS duration_sum
+		FROM naap.api_hourly_request_demand
+		WHERE window_start >= toStartOfHour(?)
+		  AND capability_family IN ('builtin', 'byoc')
+		GROUP BY capability_family
+	`, windowStart)
 	if err != nil {
-		return nil, fmt.Errorf("dashboard jobs overview ai-batch: %w", err)
+		return nil, fmt.Errorf("dashboard jobs overview: %w", err)
 	}
-	aiBatch := types.DashboardJobsStats{
-		TotalJobs: int64(aiTotal), SelectedJobs: int64(aiSelected), NoOrchJobs: int64(aiNoOrch),
-		SuccessRate: aiSuccessRate, AvgDurationMs: aiAvgDur,
-	}
+	defer rows.Close()
 
-	var byocTotal, byocSelected, byocNoOrch uint64
-	var byocSuccessRate, byocAvgDur float64
-	err = r.conn.QueryRow(ctx, `
-		SELECT count() AS total,
-		       countIf(selection_outcome = 'selected') AS selected,
-		       countIf(selection_outcome = 'no_orch') AS no_orch,
-		       if(count() > 0, countIf(ifNull(success, 0) = 1) / toFloat64(count()), 0.0) AS success_rate,
-		       if(count() > 0, avg(toFloat64(duration_ms)), 0.0) AS avg_duration_ms
-		FROM naap.api_fact_byoc_job
-		WHERE completed_at >= ?
-	`, windowStart).Scan(&byocTotal, &byocSelected, &byocNoOrch, &byocSuccessRate, &byocAvgDur)
-	byoc := types.DashboardJobsStats{
-		TotalJobs: int64(byocTotal), SelectedJobs: int64(byocSelected), NoOrchJobs: int64(byocNoOrch),
-		SuccessRate: byocSuccessRate, AvgDurationMs: byocAvgDur,
-	}
-	if err != nil {
-		return nil, fmt.Errorf("dashboard jobs overview byoc: %w", err)
+	var aiBatch, byoc types.DashboardJobsStats
+	for rows.Next() {
+		var family string
+		var total, selected, noOrch, success uint64
+		var durationSum int64
+		if err := rows.Scan(&family, &total, &selected, &noOrch, &success, &durationSum); err != nil {
+			return nil, fmt.Errorf("dashboard jobs overview scan: %w", err)
+		}
+		stats := types.DashboardJobsStats{
+			TotalJobs:     int64(total),
+			SelectedJobs:  int64(selected),
+			NoOrchJobs:    int64(noOrch),
+			SuccessRate:   divSafe(float64(success), float64(total)),
+			AvgDurationMs: divSafe(float64(durationSum), float64(total)),
+		}
+		switch family {
+		case "builtin":
+			aiBatch = stats
+		case "byoc":
+			byoc = stats
+		}
 	}
 
 	return &types.DashboardJobsOverview{AIBatch: aiBatch, BYOC: byoc}, nil

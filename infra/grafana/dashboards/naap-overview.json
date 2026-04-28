@@ -264,11 +264,11 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "sql",
-          "rawSql": "SELECT toFloat64(ifNull(avg(s.avg_output_fps), 0)) AS value\nFROM naap.api_hourly_streaming_sla AS s\nWHERE s.window_start >= now() - INTERVAL 1 HOUR\n  AND s.orchestrator_address != ''\n  AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), s.org))\n  AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(s.model_id, '')))\n  AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), s.orchestrator_address))",
+          "rawSql": "SELECT if(countIf(s.avg_output_fps IS NOT NULL) = 0, cast(null, 'Nullable(Float64)'), avg(s.avg_output_fps)) AS value\nFROM naap.api_hourly_streaming_sla AS s\nWHERE s.window_start >= now() - INTERVAL 1 HOUR\n  AND s.orchestrator_address != ''\n  AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), s.org))\n  AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(s.model_id, '')))\n  AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), s.orchestrator_address))",
           "refId": "A"
         }
       ],
-      "title": "Network FPS (15m avg)",
+      "title": "Network FPS (1h avg)",
       "type": "stat",
       "meta": {
         "backing_table": "naap.api_hourly_streaming_sla"
@@ -334,7 +334,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "sql",
-          "rawSql": "SELECT toFloat64(ifNull(avgIf(s.avg_e2e_latency_ms, s.avg_e2e_latency_ms > 0), 0)) / 1000.0 AS value\nFROM naap.api_hourly_streaming_sla AS s\nWHERE s.window_start >= now() - INTERVAL 1 HOUR\n  AND s.orchestrator_address != ''\n  AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), s.org))\n  AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(s.model_id, '')))\n  AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), s.orchestrator_address))",
+          "rawSql": "SELECT if(countIf(s.avg_e2e_latency_ms > 0) = 0, cast(null, 'Nullable(Float64)'), avgIf(s.avg_e2e_latency_ms, s.avg_e2e_latency_ms > 0) / 1000.0) AS value\nFROM naap.api_hourly_streaming_sla AS s\nWHERE s.window_start >= now() - INTERVAL 1 HOUR\n  AND s.orchestrator_address != ''\n  AND ('${org:csv}' = '__all' OR '${org:csv}' = '' OR has(splitByChar(',', '${org:csv}'), s.org))\n  AND ('${model:csv}' = '__all' OR '${model:csv}' = '' OR has(splitByChar(',', '${model:csv}'), ifNull(s.model_id, '')))\n  AND ('${orchestrator:csv}' = '__all' OR '${orchestrator:csv}' = '' OR has(splitByChar(',', '${orchestrator:csv}'), s.orchestrator_address))",
           "refId": "A"
         }
       ],
