@@ -66,6 +66,34 @@ services:
         daydream->infra2.replication.factor = 1
         daydream->infra2.topics.exclude = .*[\-\.]internal, .*\.replica, __.*, heartbeats, .*\.heartbeats
 
+        # ── Large-record handling ─────────────────────────────────────────────
+        # Daydream emits network_events records larger than the 1 MiB Kafka client
+        # default (observed: 1,333,211 bytes). max.request.size is checked client-side
+        # on the UNCOMPRESSED record, so compression does not help here — the producer
+        # rejects the record before it ever reaches the broker, the source task dies
+        # with RecordTooLargeException, and ALL replication stops until manually
+        # restarted (Connect does not auto-restart failed tasks). Confluent Cloud caps
+        # producer records at 8 MiB, so 10 MiB is above anything Daydream can emit.
+        #
+        # The infra2 broker side must match — see deploy/infra2/kafka/stack.yml
+        # (KAFKA_MESSAGE_MAX_BYTES) and the per-topic max.message.bytes override.
+        infra2.producer.max.request.size = 10485760
+        infra2.producer.buffer.memory = 67108864
+        daydream->infra2.producer.override.max.request.size = 10485760
+        daydream->infra2.producer.override.buffer.memory = 67108864
+
+        # Fetch a full oversized record in one go rather than one-record-per-fetch.
+        daydream->infra2.consumer.max.partition.fetch.bytes = 10485760
+        daydream->infra2.consumer.fetch.max.bytes = 52428800
+
+        # Safety net: if a record still exceeds the limits above, skip it and log it
+        # instead of killing the task and stalling every partition. Kafka 3.4+
+        # (KIP-779) applies errors.tolerance to source-task producer send failures.
+        # Trade-off: non-retriable produce errors drop the record silently-but-logged.
+        daydream->infra2.errors.tolerance = all
+        daydream->infra2.errors.log.enable = true
+        daydream->infra2.errors.log.include.messages = false
+
         # Reverse flow disabled. emit flags also disabled to prevent the inactive reverse-flow
         # worker from writing event data to Confluent Cloud via data-plane mechanisms.
         infra2->daydream.enabled = false
