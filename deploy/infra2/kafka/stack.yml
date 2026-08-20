@@ -72,6 +72,17 @@ services:
       KAFKA_SASL_ENABLED_MECHANISMS: SCRAM-SHA-512
       KAFKA_OPTS: "-Djava.security.auth.login.config=/etc/kafka/kafka_server_jaas.conf"
 
+      # Record size ceiling. The Kafka default (~1 MiB) is below what Daydream
+      # emits on network_events (observed 1.33 MiB), which stalls MM2 replication.
+      # Broker-level value is the DEFAULT for newly created topics; topics that
+      # already exist need an explicit per-topic override:
+      #   docker exec naap-kafka /opt/kafka/bin/kafka-configs.sh \
+      #     --bootstrap-server naap-kafka:29092 --alter \
+      #     --entity-type topics --entity-name network_events \
+      #     --add-config max.message.bytes=10485760
+      KAFKA_MESSAGE_MAX_BYTES: 10485760
+      KAFKA_REPLICA_FETCH_MAX_BYTES: 10485760
+
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_DEFAULT_REPLICATION_FACTOR: 1
